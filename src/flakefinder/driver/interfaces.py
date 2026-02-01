@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 
 from .enums import (
-    EMetricsId,
     IID,
     IMAGE_ORIENTATION,
     PIXEL_FORMAT,
+    EMetricsId,
 )
 
 

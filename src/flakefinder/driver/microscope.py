@@ -4,7 +4,6 @@ from typing import Literal
 import clr
 import numpy as np
 
-from .helpers import find_unit_by_type
 from .enums import (
     IID,
     TID,
@@ -13,17 +12,16 @@ from .enums import (
     UCAPI_UNIT_TYPE,
     EMetricsId,
 )
-
+from .helpers import find_unit_by_type
 from .interfaces import (
+    AutoCalibration,
     CancellableImageAcquisitionContext,
     Image,
     ImageAcquisition,
     MetricsConverter,
     Properties,
     Unit,
-    AutoCalibration,
 )
-
 
 clr.AddReference(os.path.join(os.path.dirname(__file__), "dlls", "hwmodel2.dll"))
 clr.AddReference(os.path.join(os.path.dirname(__file__), "dlls", "hwmodel2exucapi.dll"))
@@ -375,9 +373,8 @@ class Nosepiece(MicroscopeSubunit):
             value = self.objectives.get(value)
 
         if value not in self.objectives.values():
-            raise ValueError(
-                f"Invalid objective value: {value}. Must be one of {list(self.objectives.values())}."
-            )
+            valid = list(self.objectives.values())
+            raise ValueError(f"Invalid objective value: {value}. Must be one of {valid}.")
 
         self.basic_control_value.SetControlValue(value)
 

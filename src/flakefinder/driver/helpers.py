@@ -1,5 +1,5 @@
-from .interfaces import Unit
 from .enums import TID
+from .interfaces import Unit
 
 
 def find_unit_by_type(unit: Unit, tid: TID) -> Unit | None:
@@ -8,7 +8,8 @@ def find_unit_by_type(unit: Unit, tid: TID) -> Unit | None:
         microscope_unit (Unit): The root unit to start the search from.
         tid (TID): The type ID of the unit to find.
     Returns:
-        Unit: The first unit found that matches the specified type ID, or None if no such unit is found.
+        Unit: The first unit found that matches the specified type ID,
+            or None if no such unit is found.
     """
 
     def search_recursively(current_parent_unit: Unit) -> Unit | None:
