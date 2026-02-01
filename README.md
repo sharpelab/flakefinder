@@ -2,16 +2,21 @@
 
 Automated 2D material flake detection system for the Leica DM6M microscope.
 
-## Status: Phase 0 (Bootstrap)
+## Status: Phase 0 Complete
 
-This is a rewrite of the [2DMatGMM-System](https://github.com/dgglab/2DMatGMM-System). Currently contains only the microscope driver copied from the original codebase.
+This is a rewrite of the [2DMatGMM-System](https://github.com/dgglab/2DMatGMM-System). Hardware connection validated 2026-02-01.
+
+**Confirmed hardware:**
+- Stage: STAGE (Märzhäuser SCAN 100x100)
+- Camera: K5C
+- Nosepiece: 6-position
+- Lamp, Z-Drive, Shutter, Aperture
 
 **What works:**
 - Microscope driver classes (Stage, Camera, Lamp, Nosepiece, etc.)
-- Basic CLI with connection test
+- Basic CLI with connection test (`flakefinder connect`)
 
-**What doesn't work yet:**
-- Everything else (scanning, detection, upload)
+**Next up:** Phase 1 (Continuous Overview)
 
 ## Installation
 
@@ -40,7 +45,7 @@ See [docs/setup.md](docs/setup.md) for detailed setup instructions.
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| 0 | Bootstrap - minimal driver, validate hardware connection | **Current** |
+| 0 | Bootstrap - minimal driver, validate hardware connection | Done |
 | 1 | Continuous Overview - fast wafer overview scanning | Planned |
 | 2 | Chip Scan - detect chips, scan chips, Google Maps-style viewer | Planned |
 | 2.5 | Evaluate SDK rewrite - modernize driver if needed | Planned |
