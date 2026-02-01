@@ -24,13 +24,17 @@ Build SDK features incrementally as needed, rather than patching the existing dr
 
 ### Step 1: Safety First
 
-Chat with Aaron about microscope no-nos:
-- [ ] Stage limits - how to avoid ramming endstops
-- [ ] Z-drive limits - objective collision risks
-- [ ] Command behavior while moving - queue? abort? error?
-- [ ] Objective switching clearance - position restrictions?
-- [ ] Power-on calibration/homing requirements
-- [ ] Anything else that can damage hardware or samples
+**Primary concern:** Crashing the objective into the sample (Z-drive too low).
+
+Higher magnification objectives have shorter working distances = higher risk.
+
+**Future work:**
+- Figure out safe Z floor using focus tricks (find surface, add margin)
+- Check objective change behavior - does the SDK auto-adjust Z, or do we need to retract manually before switching?
+
+Other concerns (less critical):
+- Stage limits / endstops
+- Command behavior while moving
 
 ### Step 2: SDK - Velocity Control
 
