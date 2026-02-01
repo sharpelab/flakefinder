@@ -42,7 +42,8 @@ See [docs/setup.md](docs/setup.md) for detailed setup instructions.
 |-------|-------------|--------|
 | 0 | Bootstrap - minimal driver, validate hardware connection | **Current** |
 | 1 | Continuous Overview - fast wafer overview scanning | Planned |
-| 2 | Chip Scan - detect chip boundaries, plan scan path | Planned |
+| 2 | Chip Scan - detect chips, scan chips, Google Maps-style viewer | Planned |
+| 2.5 | Evaluate SDK rewrite - modernize driver if needed | Planned |
 | 3 | Processing Pipeline - async queue architecture | Planned |
 | 4 | Deep Scan - multi-magnification flake imaging | Planned |
 | 5 | Real Processors - GMM detector, Maskterial integration | Planned |

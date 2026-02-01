@@ -94,10 +94,10 @@ class Axis(MicroscopeSubunit):
     def current_native_position(self, value: int):
         self.axis_basic_control_value.SetControlValue(value)
 
-    def move_abs(self, metric_value: float) -> int:
+    def move_abs(self, metric_value: float) -> None:
         self.current_position = metric_value
 
-    def move_rel(self, metric_value: float) -> int:
+    def move_rel(self, metric_value: float) -> None:
         native_value = self.metric_to_native(metric_value)
         self.current_native_position = self.current_native_position + native_value
 
@@ -156,23 +156,23 @@ class Camera(MicroscopeSubunit):
     ):
         super().__init__(microscope_unit, camera_tid)
 
-        self.current_image: np.ndarray = None
+        self.current_image: np.ndarray | None = None
 
         # We need to initialize the camera unit so it can be used
         # The other units dont need this
         self.unit.Init()
 
         # Set up the image acquisition contexts and handlers
-        self.aquisition: ImageAcquisition = (
+        self.acquisition: ImageAcquisition = (
             self.unit.GetInterfaces()
             .FindInterface(UCAPI_IID.IID_IMAGE_ACQUISITION)
             .GetObject()
         )
 
-        self.aquisition_context: CancellableImageAcquisitionContext = (
+        self.acquisition_context: CancellableImageAcquisitionContext = (
             Extensions.UCAPI.CancellableImageAcquisitionContext.SystemMemoryFactory
         )
-        self.aquisition_context.ImageAcquiredHandler = (
+        self.acquisition_context.ImageAcquiredHandler = (
             Extensions.UCAPI.DelegateOnImageAcquired(self._on_image_acquired)
         )
 
@@ -318,7 +318,7 @@ class Camera(MicroscopeSubunit):
         return numpy_image
 
     def take_image(self) -> np.ndarray:
-        self.aquisition.Acquire(self.aquisition_context, None)
+        self.acquisition.Acquire(self.acquisition_context, None)
         return self.current_image
 
     def _on_image_acquired(self, image: Image):
@@ -332,15 +332,15 @@ class Camera(MicroscopeSubunit):
         self.gain_blue = 1
         self.gain_green = 1
         self.gain_red = 1
-        self.colour_saturation = 100
+        self.color_saturation = 100
         self.gamma_level = 1
         self.binning_level = 2
 
     def __del__(self):
         if self.unit:
             self.unit.Dispose()
-            self.aquisition_context.IsCancelled = True
-            self.aquisition_context.Dispose()
+            self.acquisition_context.IsCancelled = True
+            self.acquisition_context.Dispose()
 
 
 class Nosepiece(MicroscopeSubunit):

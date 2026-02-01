@@ -90,6 +90,26 @@ FlakeFinder is a microscope automation system for detecting 2D material flakes (
 - Zoomable/pannable overview
 - Click to explore regions
 
+### Phase 2.5: Evaluate SDK Rewrite
+
+Decision point: evaluate whether the current driver needs modernization before proceeding.
+
+**Consider rewriting if:**
+- Driver bugs are causing real problems
+- Need features the current structure doesn't support well (e.g., async, context managers)
+- Code is actively blocking development
+
+**Keep as-is if:**
+- It works and we're not touching it much
+- Time is better spent on scanning/detection logic
+
+If rewriting, target:
+- Thin SDK wrapper (just exposes .NET objects)
+- Higher-level `Microscope` facade
+- Context manager for connection lifecycle
+- Proper `enum.IntEnum` types
+- Error handling and logging
+
 ### Phase 3: Processing Pipeline
 
 - Async queue architecture
