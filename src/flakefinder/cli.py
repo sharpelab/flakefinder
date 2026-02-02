@@ -689,10 +689,10 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
                                 last_frame = (frame.image.copy(), frame.timestamp)
                             else:
                                 # Save every frame
-                                path = os.path.join(args.output, f"frame_{total_frames:05d}.jpg")
+                                path = os.path.join(args.output, f"row_{row:03d}_frame_{row_frames:05d}.jpg")
                                 PILImage.fromarray(frame.image).save(path, quality=95)
                                 row_meta["frames"].append({
-                                    "n": total_frames,
+                                    "n": row_frames,
                                     "t": frame.timestamp - scan_start,
                                 })
                                 total_saved += 1
