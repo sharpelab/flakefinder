@@ -305,6 +305,20 @@ class Camera:
         """
         return FrameStream(self, stage)
 
+    def deferred_stream(self, max_frames: int = 1000) -> "DeferredFrameStream":
+        """Start deferred frame acquisition (keeps images in .NET memory).
+
+        Higher fps by avoiding per-frame numpy conversion. Convert all frames
+        after acquisition stops with get_all_frames().
+
+        Args:
+            max_frames: Maximum frames to buffer.
+
+        Returns:
+            DeferredFrameStream context manager.
+        """
+        return DeferredFrameStream(self, max_frames)
+
     def dispose(self) -> None:
         """Release camera resources."""
         if self._context is not None:
@@ -534,3 +548,162 @@ class FrameStream:
 
     def __repr__(self) -> str:
         return f"FrameStream(captured={self.frames_captured}, rate={self.frame_rate:.1f}fps)"
+
+
+class DeferredFrameStream:
+    """Deferred frame acquisition - keeps images in .NET memory until retrieval.
+
+    This avoids the Marshal.Copy overhead during acquisition, potentially
+    achieving higher frame rates. Images are converted to numpy only when
+    get_all_frames() is called after acquisition stops.
+
+    Usage:
+        with camera.deferred_stream() as stream:
+            # Do scanning - images accumulate in .NET memory
+            stage.move_async(...)
+            handle.wait()
+
+        # After context exits, convert and process
+        for timestamp, image in stream.get_all_frames():
+            save(image)
+    """
+
+    def __init__(self, camera: Camera, max_frames: int = 1000):
+        """Initialize deferred stream.
+
+        Args:
+            camera: Camera to stream from.
+            max_frames: Maximum frames to buffer (older dropped if exceeded).
+        """
+        self._camera = camera
+        self._max_frames = max_frames
+
+        # Thread management
+        self._thread: threading.Thread | None = None
+        self._running = False
+        self._context = None
+
+        # Store raw .NET images with timestamps
+        self._raw_frames: list[tuple[float, object]] = []  # (timestamp, .NET Image)
+        self._lock = threading.Lock()
+
+        # Stats
+        self._frames_captured = 0
+        self._frames_dropped = 0
+        self._start_time: float | None = None
+
+    def start(self) -> None:
+        """Start background acquisition thread."""
+        if self._running:
+            return
+
+        self._running = True
+        self._frames_captured = 0
+        self._frames_dropped = 0
+        self._raw_frames = []
+        self._start_time = time.monotonic()
+
+        self._thread = threading.Thread(target=self._acquire_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self, timeout: float = 5.0) -> None:
+        """Stop acquisition."""
+        if not self._running:
+            return
+
+        self._running = False
+
+        if self._context is not None:
+            self._context.IsCancelled = True
+
+        if self._thread is not None:
+            self._thread.join(timeout=timeout)
+            self._thread = None
+
+    def _acquire_loop(self) -> None:
+        """Background thread: run continuous acquisition."""
+        from LeicaMicrosystems.HardwareModel import Extensions
+
+        self._context = Extensions.UCAPI.CancellableImageAcquisitionContext.SystemMemoryFactory
+        self._context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(
+            self._on_frame
+        )
+
+        try:
+            self._camera._acquisition.AcquireContinuous(self._context, None)
+        except Exception:
+            pass
+        finally:
+            try:
+                self._context.Dispose()
+            except Exception:
+                pass
+            self._context = None
+
+    def _on_frame(self, image) -> None:
+        """Callback for each frame - keep in .NET memory."""
+        timestamp = time.monotonic()
+
+        with self._lock:
+            if len(self._raw_frames) >= self._max_frames:
+                # Drop oldest
+                old_ts, old_img = self._raw_frames.pop(0)
+                try:
+                    old_img.Dispose()
+                except Exception:
+                    pass
+                self._frames_dropped += 1
+
+            # Keep reference to .NET image (don't dispose yet)
+            self._raw_frames.append((timestamp, image))
+            self._frames_captured += 1
+
+    def get_all_frames(self) -> list[tuple[float, np.ndarray]]:
+        """Convert all captured frames to numpy arrays.
+
+        Call this after stopping acquisition. Disposes .NET images after conversion.
+
+        Returns:
+            List of (timestamp, numpy_array) tuples.
+        """
+        results = []
+        with self._lock:
+            for timestamp, image in self._raw_frames:
+                try:
+                    arr = Camera._image_to_numpy(image)
+                    results.append((timestamp, arr))
+                finally:
+                    try:
+                        image.Dispose()
+                    except Exception:
+                        pass
+            self._raw_frames = []
+        return results
+
+    @property
+    def frames_captured(self) -> int:
+        """Total frames captured since start."""
+        with self._lock:
+            return self._frames_captured
+
+    @property
+    def frames_dropped(self) -> int:
+        """Frames dropped due to buffer full."""
+        with self._lock:
+            return self._frames_dropped
+
+    @property
+    def frame_rate(self) -> float:
+        """Average frame rate (fps) since start."""
+        with self._lock:
+            if self._start_time is None or self._frames_captured == 0:
+                return 0.0
+            elapsed = time.monotonic() - self._start_time
+            return self._frames_captured / elapsed if elapsed > 0 else 0.0
+
+    def __enter__(self) -> "DeferredFrameStream":
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.stop()

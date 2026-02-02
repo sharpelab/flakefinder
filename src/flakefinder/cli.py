@@ -382,6 +382,7 @@ def cmd_scan_line(args: argparse.Namespace) -> int:
     try:
         from PIL import Image as PILImage
         from .leica import LeicaConnection, Camera, Stage, Lamp, Shutter
+        from .leica.camera import DeferredFrameStream
 
         print("FlakeFinder - Line Scan")
         print("=" * 40)
@@ -436,30 +437,39 @@ def cmd_scan_line(args: argparse.Namespace) -> int:
                 "frames": [],
             }
 
-            # Start streaming (no position tagging - too slow)
+            # Start deferred streaming (keeps images in .NET memory)
             print(f"\nScanning to {x_max:.0f} µm...")
-            frame_count = 0
             scan_start = time.monotonic()
             meta["start_time"] = scan_start
 
-            with camera.stream() as stream:
+            with camera.deferred_stream() as stream:
                 # Start async move
                 handle = stage.x.move_to_async(x_max)
 
-                # Capture frames until move completes
-                while not handle.is_complete:
-                    frame = stream.get_frame(timeout=0.1)
-                    if frame:
-                        # Save frame
-                        path = os.path.join(args.output, f"frame_{frame_count:04d}.jpg")
-                        PILImage.fromarray(frame.image).save(path, quality=95)
-                        meta["frames"].append({
-                            "n": frame_count,
-                            "t": frame.timestamp - scan_start,
-                        })
-                        frame_count += 1
+                # Wait for move to complete (images accumulate in .NET memory)
+                handle.wait()
 
             scan_end = time.monotonic()
+            frame_count = stream.frames_captured
+
+            print(f"  Captured {frame_count} frames in {scan_end - scan_start:.2f}s")
+            print(f"  Acquisition FPS: {stream.frame_rate:.1f}")
+            print(f"\nConverting and saving frames...")
+
+            # Now bulk convert and save
+            save_start = time.monotonic()
+            for i, (timestamp, image) in enumerate(stream.get_all_frames()):
+                path = os.path.join(args.output, f"frame_{i:04d}.jpg")
+                PILImage.fromarray(image).save(path, quality=95)
+                meta["frames"].append({
+                    "n": i,
+                    "t": timestamp - scan_start,
+                })
+                if (i + 1) % 20 == 0:
+                    print(f"  Saved {i + 1}/{frame_count}...")
+
+            save_end = time.monotonic()
+
             meta["end_time"] = scan_end
             meta["end_pos_actual_um"] = stage.x.position_um
             meta["duration_s"] = scan_end - scan_start
@@ -473,8 +483,9 @@ def cmd_scan_line(args: argparse.Namespace) -> int:
 
             print(f"\nScan complete:")
             print(f"  Frames: {frame_count}")
-            print(f"  Duration: {meta['duration_s']:.1f}s")
-            print(f"  FPS: {meta['fps']:.1f}")
+            print(f"  Scan duration: {meta['duration_s']:.1f}s")
+            print(f"  Acquisition FPS: {meta['fps']:.1f}")
+            print(f"  Save time: {save_end - save_start:.1f}s")
             print(f"  Output: {args.output}/")
 
             # Return to start
@@ -488,6 +499,32 @@ def cmd_scan_line(args: argparse.Namespace) -> int:
         import traceback
         print(f"Error: {e}")
         traceback.print_exc()
+        return 1
+
+
+def cmd_center(args: argparse.Namespace) -> int:
+    """Center the stage X/Y."""
+    try:
+        from .leica import LeicaConnection, Stage
+
+        with LeicaConnection(args.config_dir) as conn:
+            stage = Stage.from_connection(conn)
+
+            x_center = (stage.x.min_um + stage.x.max_um) / 2
+            y_center = (stage.y.min_um + stage.y.max_um) / 2
+
+            print(f"Centering stage to ({x_center:.0f}, {y_center:.0f}) µm...")
+
+            # Move both axes
+            stage.x.move_to(x_center)
+            stage.y.move_to(y_center)
+
+            print(f"Done: ({stage.x.position_um:.0f}, {stage.y.position_um:.0f}) µm")
+
+        return 0
+
+    except Exception as e:
+        print(f"Error: {e}")
         return 1
 
 
@@ -632,6 +669,19 @@ def main() -> int:
         help="Return to starting position after scan",
     )
     scan_parser.set_defaults(func=cmd_scan_line)
+
+    # center command
+    center_parser = subparsers.add_parser(
+        "center",
+        help="Center the stage X/Y",
+    )
+    center_parser.add_argument(
+        "--config-dir",
+        type=str,
+        default=None,
+        help="Path to Leica hardware model config directory",
+    )
+    center_parser.set_defaults(func=cmd_center)
 
     args = parser.parse_args()
 
