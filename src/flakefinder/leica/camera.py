@@ -107,7 +107,7 @@ class Camera:
         self.exposure_time = 0.1  # 100ms
         self.gain = 1.0
         self.gain_rgb = (1.0, 1.0, 1.0)
-        self.saturation = 100.0
+        self.saturation = 100  # int, not float
         self.gamma = 1.0
         self.binning = 2  # 2x2 binning for speed
 
@@ -190,16 +190,16 @@ class Camera:
             prop.SetValue(value)
 
     @property
-    def saturation(self) -> float:
+    def saturation(self) -> int:
         """Color saturation (0-100+)."""
         prop = self._get_property(UCAPI_PROP.PROP_COLOUR_SATURATION)
-        return prop.GetValue() if prop else 100.0
+        return prop.GetValue() if prop else 100
 
     @saturation.setter
-    def saturation(self, value: float) -> None:
+    def saturation(self, value: int) -> None:
         prop = self._get_property(UCAPI_PROP.PROP_COLOUR_SATURATION)
         if prop:
-            prop.SetValue(value)
+            prop.SetValue(int(value))
 
     @property
     def gamma(self) -> float:
