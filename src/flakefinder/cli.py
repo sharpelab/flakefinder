@@ -528,6 +528,57 @@ def cmd_center(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_stitch(args: argparse.Namespace) -> int:
+    """Stitch raster scan frames with rolling shutter correction."""
+    from pathlib import Path
+
+    try:
+        from .stitcher import stitch_scan, MIN_CRUISE_VELOCITY
+
+        scan_dir = Path(args.scan_dir)
+        if not scan_dir.exists():
+            print(f"Error: Scan directory not found: {scan_dir}")
+            return 1
+
+        output_path = Path(args.output) if args.output else scan_dir / "stitched.jpg"
+
+        min_velocity = args.min_velocity * 1000  # Convert mm/s to µm/s
+
+        print(f"Stitching scan: {scan_dir}")
+        print(f"  Min cruise velocity: {args.min_velocity} mm/s")
+        print(f"  Blend width: {args.blend_width} px")
+        print()
+
+        def progress(row, total):
+            print(f"  Processing row {row}/{total}...", end="\r", flush=True)
+
+        result, report = stitch_scan(
+            scan_dir,
+            output_path,
+            min_velocity=min_velocity,
+            blend_width_px=args.blend_width,
+            progress_callback=progress,
+        )
+
+        print()  # Clear progress line
+        print(f"\nStitch complete:")
+        print(f"  Total frames: {report.total_frames}")
+        print(f"  Cruise frames: {report.cruise_frames} ({100*report.cruise_frames/max(1,report.total_frames):.1f}%)")
+        print(f"  Acceleration padding: {report.padding_left} left, {report.padding_right} right frames")
+        print(f"  Rows processed: {report.rows_processed}")
+        print(f"  Output size: {report.output_width} x {report.output_height} px")
+        print(f"  Scale: {report.um_per_px:.2f} µm/px")
+        print(f"  Output: {output_path}")
+
+        return 0
+
+    except Exception as e:
+        import traceback
+        print(f"Error: {e}")
+        traceback.print_exc()
+        return 1
+
+
 def cmd_raster_scan(args: argparse.Namespace) -> int:
     """Full snake raster scan of the stage area."""
     import json
@@ -677,8 +728,8 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
                 first_frame = None
                 last_frame = None
 
-                # Stream while moving X
-                with camera.stream() as stream:
+                # Stream while moving X (pass stage for position tagging if needed)
+                with camera.stream(stage if args.record_positions else None) as stream:
                     handle = stage.x.move_to_async(x_end)
 
                     while not handle.is_complete and not interrupted[0]:
@@ -687,9 +738,9 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
                             if args.endpoints_only:
                                 # Keep first and update last
                                 if first_frame is None:
-                                    pos = (stage.x.position_um, stage.y.position_um) if args.record_positions else None
+                                    pos = frame.position if args.record_positions else None
                                     first_frame = (frame.image.copy(), frame.timestamp, pos)
-                                pos = (stage.x.position_um, stage.y.position_um) if args.record_positions else None
+                                pos = frame.position if args.record_positions else None
                                 last_frame = (frame.image.copy(), frame.timestamp, pos)
                             else:
                                 # Save every frame
@@ -703,9 +754,9 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
                                     "n": row_frames,
                                     "t": frame.timestamp - scan_start,
                                 }
-                                if args.record_positions:
-                                    frame_meta["x"] = stage.x.position_um
-                                    frame_meta["y"] = stage.y.position_um
+                                if args.record_positions and frame.position:
+                                    frame_meta["x"] = frame.position[0]
+                                    frame_meta["y"] = frame.position[1]
                                 row_meta["frames"].append(frame_meta)
                                 total_saved += 1
                             total_frames += 1
@@ -1013,6 +1064,37 @@ def main() -> int:
         help="JPEG quality 1-100 (default: 85)",
     )
     raster_parser.set_defaults(func=cmd_raster_scan)
+
+    # stitch command
+    stitch_parser = subparsers.add_parser(
+        "stitch",
+        help="Stitch raster scan frames with rolling shutter correction",
+    )
+    stitch_parser.add_argument(
+        "scan_dir",
+        type=str,
+        help="Directory containing scan data (row_NNN_frame_YYYYY.jpg and scan_meta.json)",
+    )
+    stitch_parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        default=None,
+        help="Output file path (default: <scan_dir>/stitched.jpg)",
+    )
+    stitch_parser.add_argument(
+        "--min-velocity",
+        type=float,
+        default=35.0,
+        help="Minimum velocity in mm/s to consider cruise region (default: 35)",
+    )
+    stitch_parser.add_argument(
+        "--blend-width",
+        type=int,
+        default=50,
+        help="Blend width in pixels for overlapping frames (default: 50)",
+    )
+    stitch_parser.set_defaults(func=cmd_stitch)
 
     args = parser.parse_args()
 
