@@ -314,20 +314,25 @@ def cmd_test_camera(args: argparse.Namespace) -> int:
                     print(f"  Saving frames to {base}_NNN{ext}")
 
                 saved_count = 0
+                first_shape = None
                 with camera.stream(stage) as stream:
                     start = time.monotonic()
                     while (time.monotonic() - start) < duration:
                         frame = stream.get_frame(timeout=0.5)
                         if frame:
-                            pos_str = (
-                                f"({frame.position[0]:.0f}, {frame.position[1]:.0f})"
-                                if frame.position
-                                else "None"
-                            )
-                            print(
-                                f"  Frame {frame.frame_number}: "
-                                f"{frame.image.shape} @ {pos_str}"
-                            )
+                            # Only log first frame and every 10th unless quiet
+                            if not args.quiet and (frame.frame_number == 0 or frame.frame_number % 10 == 0):
+                                pos_str = (
+                                    f"({frame.position[0]:.0f}, {frame.position[1]:.0f})"
+                                    if frame.position
+                                    else "None"
+                                )
+                                print(
+                                    f"  Frame {frame.frame_number}: "
+                                    f"{frame.image.shape} @ {pos_str}"
+                                )
+                            if first_shape is None:
+                                first_shape = frame.image.shape
                             # Save frame if output specified
                             if save_frames:
                                 frame_path = f"{base}_{frame.frame_number:03d}{ext}"
@@ -335,6 +340,8 @@ def cmd_test_camera(args: argparse.Namespace) -> int:
                                 saved_count += 1
 
                 print()
+                if first_shape:
+                    print(f"  Frame size: {first_shape}")
                 print(f"  Captured: {stream.frames_captured} frames")
                 print(f"  Dropped: {stream.frames_dropped} frames")
                 print(f"  Rate: {stream.frame_rate:.1f} fps")
@@ -468,6 +475,12 @@ def main() -> int:
         type=int,
         default=None,
         help="Lamp intensity (default: max)",
+    )
+    camera_parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Suppress per-frame logging during streaming (for fps testing)",
     )
     camera_parser.set_defaults(func=cmd_test_camera)
 
