@@ -193,23 +193,23 @@ def cmd_test_axis(args: argparse.Namespace) -> int:
                 # Move to left edge
                 print("  Moving to left edge (async)...", end="", flush=True)
                 handle = stage.x.move_to_async(x_left)
+                print(f" [raw state: {handle.state_raw}]")
                 while not handle.is_complete:
-                    print(".", end="", flush=True)
+                    print(f"    pos={stage.x.position_um:.0f} state={handle.state_raw}", flush=True)
                     time.sleep(0.1)
-                print()
                 print(f"  Position: {stage.x.position_um:.2f} µm")
-                print(f"  State: {handle.state.name}")
+                print(f"  State: {handle.state.name} (raw={handle.state_raw})")
                 print()
 
                 # Move to right edge
                 print("  Moving to right edge (async)...", end="", flush=True)
                 handle = stage.x.move_to_async(x_right)
+                print(f" [raw state: {handle.state_raw}]")
                 while not handle.is_complete:
-                    print(".", end="", flush=True)
+                    print(f"    pos={stage.x.position_um:.0f} state={handle.state_raw}", flush=True)
                     time.sleep(0.1)
-                print()
                 print(f"  Position: {stage.x.position_um:.2f} µm")
-                print(f"  State: {handle.state.name}")
+                print(f"  State: {handle.state.name} (raw={handle.state_raw})")
                 print()
 
                 # Return to start

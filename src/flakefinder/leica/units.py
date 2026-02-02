@@ -45,10 +45,12 @@ class MoveHandle:
         handle.cancel()
     """
 
-    # SDK AsyncResult.EState values
-    _SDK_INPROGRESS = 1
-    _SDK_COMPLETE = 2
-    _SDK_CANCELLED = 3
+    # SDK AsyncResult.EState values (from ahwbasic.h)
+    # enum eState { INPROGRESS, COMPLETED, STOPPED, OVERRIDDEN }
+    _SDK_INPROGRESS = 0
+    _SDK_COMPLETED = 1
+    _SDK_STOPPED = 2
+    _SDK_OVERRIDDEN = 3
 
     def __init__(
         self,
@@ -74,12 +76,21 @@ class MoveHandle:
         sdk_state = self._result.GetState()
         if sdk_state == self._SDK_INPROGRESS:
             return MoveState.IN_PROGRESS
-        elif sdk_state == self._SDK_COMPLETE:
+        elif sdk_state == self._SDK_COMPLETED:
             return MoveState.COMPLETE
-        elif sdk_state == self._SDK_CANCELLED:
+        elif sdk_state == self._SDK_STOPPED:
             return MoveState.CANCELLED
+        elif sdk_state == self._SDK_OVERRIDDEN:
+            return MoveState.CANCELLED  # Treat overridden as cancelled
         else:
             return MoveState.ERROR
+
+    @property
+    def state_raw(self) -> int:
+        """Get raw SDK state value (for debugging)."""
+        if self._disposed:
+            return -1
+        return self._result.GetState()
 
     @property
     def is_complete(self) -> bool:
