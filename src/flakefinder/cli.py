@@ -659,18 +659,24 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
                 # Move to X start
                 stage.x.move_to(x_start)
 
+                # Record actual positions for velocity calculation
+                x_actual_start = stage.x.position_um
+                y_actual = stage.y.position_um
+
                 row_meta = {
                     "row": row,
-                    "y_pos": y_pos,
-                    "x_start": x_start,
-                    "x_end": x_end,
+                    "y_target": y_pos,
+                    "y_actual": y_actual,
+                    "x_start_target": x_start,
+                    "x_end_target": x_end,
+                    "x_actual_start": x_actual_start,
                     "direction": direction,
                     "frames": [],
                 }
 
                 print(f"Row {row + 1}/{num_rows}: Y={y_pos:.0f}µm, {direction}...", end=" ", flush=True)
 
-                row_start = time.monotonic()
+                row_start_time = time.monotonic()
                 row_frames = 0
                 first_frame = None
                 last_frame = None
@@ -699,6 +705,10 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
                             total_frames += 1
                             row_frames += 1
 
+                # Record actual end position and time
+                row_end_time = time.monotonic()
+                x_actual_end = stage.x.position_um
+
                 # Save endpoints if in that mode
                 if args.endpoints_only and first_frame and last_frame:
                     # Save first
@@ -719,13 +729,20 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
                     })
                     total_saved += 1
 
-                row_elapsed = time.monotonic() - row_start
+                row_elapsed = row_end_time - row_start_time
                 row_fps = row_frames / row_elapsed if row_elapsed > 0 else 0
                 print(f"{row_frames} frames, {row_fps:.1f} fps")
 
+                # Calculate velocity for this row
+                row_velocity = abs(x_actual_end - x_actual_start) / row_elapsed if row_elapsed > 0 else 0
+
+                row_meta["x_actual_end"] = x_actual_end
+                row_meta["t_start"] = row_start_time - scan_start
+                row_meta["t_end"] = row_end_time - scan_start
                 row_meta["frame_count"] = row_frames
                 row_meta["duration_s"] = row_elapsed
                 row_meta["fps"] = row_fps
+                row_meta["velocity_um_per_s"] = row_velocity
                 meta["rows"].append(row_meta)
 
             scan_end = time.monotonic()
