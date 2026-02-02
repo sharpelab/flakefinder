@@ -44,9 +44,9 @@ htmlcov/
 .mypy_cache/
 
 # Leica DLLs (large binaries, not committed)
-src/flakefinder/driver/dlls/*.dll
-src/flakefinder/driver/dlls/*.cti
-src/flakefinder/driver/dlls/*.xml
+src/flakefinder/dlls/*.dll
+src/flakefinder/dlls/*.cti
+src/flakefinder/dlls/*.xml
 
 # OS
 .DS_Store

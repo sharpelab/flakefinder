@@ -24,15 +24,14 @@ uv sync
 
 ### 3. Install Leica SDK DLLs
 
-Copy the DLLs from the original 2DMatGMM-System installation or the microscope PC:
+Copy the required DLLs to the shared DLLs directory. On the microscope PC, they're already in place. For a fresh setup, copy from the Leica SDK installation:
 
 ```bash
-# From the original repo
-cp -r /path/to/2DMatGMM-System/Drivers/Full_Microscope_Driver/dlls/* \
-    src/flakefinder/driver/dlls/
+# Copy DLLs to the shared location
+cp /path/to/leica-sdk-dlls/* src/flakefinder/dlls/
 ```
 
-See `src/flakefinder/driver/dlls/README.md` for the full list of required files.
+See `src/flakefinder/dlls/README.md` for the full list of required files.
 
 ### 4. Verify Installation
 
@@ -67,7 +66,7 @@ uv pip install pythonnet --force-reinstall
 
 ### "Failed to load hwmodel2.dll"
 
-The Leica DLLs are missing. Copy them to `src/flakefinder/driver/dlls/`.
+The Leica DLLs are missing. Copy them to `src/flakefinder/dlls/`.
 
 ### "Connection failed: ..."
 

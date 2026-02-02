@@ -23,8 +23,10 @@ from .interfaces import (
     Unit,
 )
 
-clr.AddReference(os.path.join(os.path.dirname(__file__), "dlls", "hwmodel2.dll"))
-clr.AddReference(os.path.join(os.path.dirname(__file__), "dlls", "hwmodel2exucapi.dll"))
+# DLLs are in shared location: flakefinder/dlls/
+_DLL_DIR = os.path.join(os.path.dirname(__file__), "..", "dlls")
+clr.AddReference(os.path.join(_DLL_DIR, "hwmodel2.dll"))
+clr.AddReference(os.path.join(_DLL_DIR, "hwmodel2exucapi.dll"))
 clr.AddReference("System")  # Added for System.Runtime.InteropServices.Marshal
 
 import System  # type: ignore # noqa

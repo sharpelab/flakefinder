@@ -49,9 +49,9 @@ def cmd_info(args: argparse.Namespace) -> int:
     """Show FlakeFinder version and configuration info."""
     print("FlakeFinder v0.1.0")
     print()
-    print("Phase 0: Bootstrap")
-    print("  - Minimal microscope driver (from 2DMatGMM-System)")
-    print("  - Connection test only")
+    print("APIs:")
+    print("  - flakefinder.driver: Legacy microscope driver")
+    print("  - flakefinder.leica: New async-capable API (in progress)")
     print()
     print("See: https://github.com/sharpelab/flakefinder")
     return 0
