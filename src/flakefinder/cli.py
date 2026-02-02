@@ -697,10 +697,13 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
                                 # Save every frame
                                 path = os.path.join(args.output, f"row_{row:03d}_frame_{row_frames:05d}.jpg")
                                 PILImage.fromarray(frame.image).save(path, quality=95)
-                                row_meta["frames"].append({
+                                frame_meta = {
                                     "n": row_frames,
                                     "t": frame.timestamp - scan_start,
-                                })
+                                }
+                                if args.record_positions:
+                                    frame_meta["x"] = stage.x.position_um
+                                row_meta["frames"].append(frame_meta)
                                 total_saved += 1
                             total_frames += 1
                             row_frames += 1
@@ -978,6 +981,11 @@ def main() -> int:
         "--endpoints-only",
         action="store_true",
         help="Only save first and last frame from each row",
+    )
+    raster_parser.add_argument(
+        "--record-positions",
+        action="store_true",
+        help="Record X position for each frame (reduces fps from ~20 to ~12)",
     )
     raster_parser.set_defaults(func=cmd_raster_scan)
 
