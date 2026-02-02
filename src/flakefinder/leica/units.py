@@ -340,7 +340,7 @@ class Axis:
         """Current velocity in native units, or None if not supported."""
         if self._velocity is None:
             return None
-        return self._velocity.GetVelocity()
+        return self._velocity.GetControlValue()
 
     def set_velocity_native(self, velocity: int) -> None:
         """Set velocity in native units.
@@ -353,21 +353,21 @@ class Axis:
         """
         if self._velocity is None:
             raise RuntimeError(f"Axis {self._name} doesn't support velocity control")
-        self._velocity.SetVelocity(velocity)
+        self._velocity.SetControlValue(velocity)
 
     @property
     def min_velocity_native(self) -> int | None:
         """Minimum velocity in native units."""
         if self._velocity is None:
             return None
-        return self._velocity.MinVelocity()
+        return self._velocity.MinControlValue()
 
     @property
     def max_velocity_native(self) -> int | None:
         """Maximum velocity in native units."""
         if self._velocity is None:
             return None
-        return self._velocity.MaxVelocity()
+        return self._velocity.MaxControlValue()
 
     # --- Calibration ---
 
