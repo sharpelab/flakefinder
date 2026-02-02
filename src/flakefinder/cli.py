@@ -236,6 +236,89 @@ def cmd_test_axis(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_test_camera(args: argparse.Namespace) -> int:
+    """Test Camera class with single-shot and optional streaming."""
+    import time
+
+    try:
+        from .leica import LeicaConnection, Camera, Stage
+
+        print("FlakeFinder - Camera Test")
+        print("=" * 40)
+
+        with LeicaConnection(args.config_dir) as conn:
+            camera = Camera.from_connection(conn)
+            print(f"Camera: {camera.name}")
+            print(f"  Exposure: {camera.exposure_time:.3f}s")
+            print(f"  Gain: {camera.gain}")
+            print(f"  Binning: {camera.binning}")
+            print()
+
+            # Single-shot test
+            print("Taking single image...")
+            start = time.monotonic()
+            image = camera.capture()
+            elapsed = time.monotonic() - start
+            print(f"  Captured: {image.shape} in {elapsed:.3f}s")
+            print()
+
+            # Streaming test
+            if args.stream:
+                duration = args.stream_duration
+                print(f"Streaming for {duration}s...")
+
+                # Get stage for position tagging if available
+                try:
+                    stage = Stage.from_connection(conn)
+                    print(f"  Position tagging enabled (stage found)")
+                except LookupError:
+                    stage = None
+                    print(f"  No stage found, positions will be None")
+
+                with camera.stream(stage) as stream:
+                    start = time.monotonic()
+                    while (time.monotonic() - start) < duration:
+                        frame = stream.get_frame(timeout=0.5)
+                        if frame:
+                            pos_str = (
+                                f"({frame.position[0]:.0f}, {frame.position[1]:.0f})"
+                                if frame.position
+                                else "None"
+                            )
+                            print(
+                                f"  Frame {frame.frame_number}: "
+                                f"{frame.image.shape} @ {pos_str}"
+                            )
+
+                print()
+                print(f"  Captured: {stream.frames_captured} frames")
+                print(f"  Dropped: {stream.frames_dropped} frames")
+                print(f"  Rate: {stream.frame_rate:.1f} fps")
+
+            # Save image if requested
+            if args.output:
+                try:
+                    from PIL import Image as PILImage
+
+                    pil_image = PILImage.fromarray(image)
+                    pil_image.save(args.output)
+                    print(f"Saved to: {args.output}")
+                except ImportError:
+                    print("Install PIL to save images: pip install Pillow")
+
+        return 0
+
+    except ImportError as e:
+        print(f"Import error: {e}")
+        return 1
+    except Exception as e:
+        import traceback
+
+        print(f"Error: {e}")
+        traceback.print_exc()
+        return 1
+
+
 def main() -> int:
     """Main entry point for the FlakeFinder CLI."""
     parser = argparse.ArgumentParser(
@@ -291,6 +374,37 @@ def main() -> int:
         help="Use event-based position monitoring (requires --test-move)",
     )
     axis_parser.set_defaults(func=cmd_test_axis)
+
+    # test-camera command
+    camera_parser = subparsers.add_parser(
+        "test-camera",
+        help="Test Camera class (single-shot and streaming)",
+    )
+    camera_parser.add_argument(
+        "--config-dir",
+        type=str,
+        default=None,
+        help="Path to Leica hardware model config directory",
+    )
+    camera_parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Test continuous streaming",
+    )
+    camera_parser.add_argument(
+        "--stream-duration",
+        type=float,
+        default=3.0,
+        help="Streaming test duration in seconds (default: 3.0)",
+    )
+    camera_parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        default=None,
+        help="Save captured image to file (e.g., test.png)",
+    )
+    camera_parser.set_defaults(func=cmd_test_camera)
 
     args = parser.parse_args()
 

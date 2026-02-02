@@ -231,7 +231,7 @@ class EventBridge:
 2. **Integration tests on hardware** - require microscope connection
 3. **Continuous scanning smoke test** - verify frames come in at expected rate
 
-## Files Created (Phase 1) ✓
+## Files Created
 
 ```
 flakefinder/src/flakefinder/
@@ -240,13 +240,24 @@ flakefinder/src/flakefinder/
 ├── driver/
 │   ├── dlls/README.md       # Points to ../dlls/
 │   └── microscope.py        # Updated to use ../dlls/
-└── leica/                   # NEW: Phase 1 complete
+└── leica/                   # NEW API
     ├── __init__.py          # Package exports
     ├── core.py              # LeicaConnection, unit discovery
-    ├── enums.py             # TID, IID, EMetricsId, MoveState
+    ├── enums.py             # TID, IID, EMetricsId, MoveState, UCAPI_*
     ├── types.py             # Protocol classes for type hints
-    └── utils.py             # UnitConverter, helpers
+    ├── utils.py             # UnitConverter, helpers
+    ├── units.py             # Axis, Stage, MoveHandle (Phase 2)
+    ├── events.py            # AxisEvents, EventQueue, Subscription (Phase 3)
+    └── camera.py            # Camera, FrameStream, Frame (Phase 4)
 ```
+
+## Progress
+
+- [x] Phase 1: Core Infrastructure
+- [x] Phase 2: Async Axis Control (includes Stage)
+- [x] Phase 3: Event System
+- [x] Phase 4: Camera Integration
+- [ ] Phase 5: Continuous Scanning Orchestrator
 
 ## Questions to Resolve
 

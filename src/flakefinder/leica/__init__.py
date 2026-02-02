@@ -4,7 +4,7 @@ This package provides a clean Python interface to the Leica AHM SDK
 for controlling DM6M microscopes.
 
 Quick start:
-    from flakefinder.leica import LeicaConnection, TID, Axis, Stage
+    from flakefinder.leica import LeicaConnection, TID, Axis, Stage, Camera
 
     with LeicaConnection() as conn:
         # Low-level: find units directly
@@ -19,10 +19,20 @@ Quick start:
         stage = Stage.from_connection(conn)
         stage.move_to_async(5000, 5000)
 
+        # Camera capture
+        camera = Camera.from_connection(conn)
+        image = camera.capture()
+
+        # Continuous streaming
+        with camera.stream(stage) as stream:
+            frame = stream.get_frame(timeout=1.0)
+
 Modules:
     core: Connection management and unit discovery
     enums: TID, IID, and other SDK enumerations
     units: Axis, Stage, MoveHandle classes
+    camera: Camera, FrameStream classes
+    events: Event subscription system
     types: Protocol definitions for type hints
     utils: Conversion utilities and helpers
 """
@@ -36,8 +46,21 @@ from .core import (
     get_interface_required,
     has_interface,
 )
-from .enums import TID, IID, EMetricsId, MoveState
+from .enums import (
+    TID,
+    IID,
+    EMetricsId,
+    MoveState,
+    EState,
+    EErrorClass,
+    EErrorCode,
+    EEventType,
+    UCAPI_TID,
+    UCAPI_IID,
+    UCAPI_PROP,
+)
 from .units import Axis, Stage, MoveHandle
+from .camera import Camera, FrameStream, Frame
 from .events import Subscription, AxisEvents, PositionMonitor, EventQueue
 from .utils import (
     UnitConverter,
@@ -63,10 +86,21 @@ __all__ = [
     "IID",
     "EMetricsId",
     "MoveState",
+    "EState",
+    "EErrorClass",
+    "EErrorCode",
+    "EEventType",
+    "UCAPI_TID",
+    "UCAPI_IID",
+    "UCAPI_PROP",
     # Units
     "Axis",
     "Stage",
     "MoveHandle",
+    # Camera
+    "Camera",
+    "FrameStream",
+    "Frame",
     # Events
     "Subscription",
     "AxisEvents",
