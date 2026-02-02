@@ -532,7 +532,28 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
     """Full snake raster scan of the stage area."""
     import json
     import os
+    import signal
     import time
+
+    # Track stage for Ctrl+C cleanup
+    stage_ref = [None]
+    x_center_ref = [None]
+    y_center_ref = [None]
+    interrupted = [False]
+
+    def signal_handler(sig, frame):
+        interrupted[0] = True
+        print("\n\nInterrupted! Returning to center...")
+        if stage_ref[0] and x_center_ref[0] is not None:
+            try:
+                stage_ref[0].x.move_to(x_center_ref[0])
+                stage_ref[0].y.move_to(y_center_ref[0])
+                print(f"Returned to ({x_center_ref[0]:.0f}, {y_center_ref[0]:.0f}) µm")
+            except Exception as e:
+                print(f"Error returning to center: {e}")
+        raise SystemExit(1)
+
+    original_handler = signal.signal(signal.SIGINT, signal_handler)
 
     try:
         from PIL import Image as PILImage
@@ -544,6 +565,7 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
         with LeicaConnection(args.config_dir) as conn:
             # Set up hardware
             stage = Stage.from_connection(conn)
+            stage_ref[0] = stage
             camera = Camera.from_connection(conn)
 
             try:
@@ -564,6 +586,8 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
 
             print(f"Camera: {camera.name}")
             print(f"  Exposure: {args.exposure_ms}ms, Binning: 3x3")
+            if args.endpoints_only:
+                print("  Mode: endpoints only (first/last frame per row)")
 
             # Determine scan range
             margin = args.margin
@@ -580,9 +604,11 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
             print(f"Stage Y range: {y_min:.0f} - {y_max:.0f} µm")
             print(f"Y step: {y_step:.0f} µm, Rows: {num_rows}")
 
-            # Save starting position for return
+            # Save center position for return
             x_center = (stage.x.min_um + stage.x.max_um) / 2
             y_center = (stage.y.min_um + stage.y.max_um) / 2
+            x_center_ref[0] = x_center
+            y_center_ref[0] = y_center
 
             # Prepare output directory
             os.makedirs(args.output, exist_ok=True)
@@ -597,6 +623,7 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
                 "num_rows": num_rows,
                 "exposure_ms": args.exposure_ms,
                 "binning": 2,
+                "endpoints_only": args.endpoints_only,
                 "rows": [],
             }
 
@@ -606,10 +633,14 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
             stage.y.move_to(y_min)
 
             total_frames = 0
+            total_saved = 0
             scan_start = time.monotonic()
 
             # Snake raster scan
             for row in range(num_rows):
+                if interrupted[0]:
+                    break
+
                 y_pos = y_min + row * y_step
                 if y_pos > y_max:
                     break
@@ -641,23 +672,52 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
 
                 row_start = time.monotonic()
                 row_frames = 0
+                first_frame = None
+                last_frame = None
 
                 # Stream while moving X
                 with camera.stream() as stream:
                     handle = stage.x.move_to_async(x_end)
 
-                    while not handle.is_complete:
+                    while not handle.is_complete and not interrupted[0]:
                         frame = stream.get_frame(timeout=0.1)
                         if frame:
-                            # Save frame
-                            path = os.path.join(args.output, f"frame_{total_frames:05d}.jpg")
-                            PILImage.fromarray(frame.image).save(path, quality=95)
-                            row_meta["frames"].append({
-                                "n": total_frames,
-                                "t": frame.timestamp - scan_start,
-                            })
+                            if args.endpoints_only:
+                                # Keep first and update last
+                                if first_frame is None:
+                                    first_frame = (frame.image.copy(), frame.timestamp)
+                                last_frame = (frame.image.copy(), frame.timestamp)
+                            else:
+                                # Save every frame
+                                path = os.path.join(args.output, f"frame_{total_frames:05d}.jpg")
+                                PILImage.fromarray(frame.image).save(path, quality=95)
+                                row_meta["frames"].append({
+                                    "n": total_frames,
+                                    "t": frame.timestamp - scan_start,
+                                })
+                                total_saved += 1
                             total_frames += 1
                             row_frames += 1
+
+                # Save endpoints if in that mode
+                if args.endpoints_only and first_frame and last_frame:
+                    # Save first
+                    path = os.path.join(args.output, f"row_{row:03d}_first.jpg")
+                    PILImage.fromarray(first_frame[0]).save(path, quality=95)
+                    row_meta["frames"].append({
+                        "type": "first",
+                        "t": first_frame[1] - scan_start,
+                    })
+                    total_saved += 1
+
+                    # Save last
+                    path = os.path.join(args.output, f"row_{row:03d}_last.jpg")
+                    PILImage.fromarray(last_frame[0]).save(path, quality=95)
+                    row_meta["frames"].append({
+                        "type": "last",
+                        "t": last_frame[1] - scan_start,
+                    })
+                    total_saved += 1
 
                 row_elapsed = time.monotonic() - row_start
                 row_fps = row_frames / row_elapsed if row_elapsed > 0 else 0
@@ -673,6 +733,7 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
             avg_fps = total_frames / total_duration if total_duration > 0 else 0
 
             meta["total_frames"] = total_frames
+            meta["total_saved"] = total_saved
             meta["total_duration_s"] = total_duration
             meta["avg_fps"] = avg_fps
 
@@ -683,6 +744,7 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
 
             print(f"\nScan complete:")
             print(f"  Total frames: {total_frames}")
+            print(f"  Saved: {total_saved}")
             print(f"  Total duration: {total_duration:.1f}s")
             print(f"  Average FPS: {avg_fps:.1f}")
             print(f"  Output: {args.output}/")
@@ -700,6 +762,8 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
         print(f"Error: {e}")
         traceback.print_exc()
         return 1
+    finally:
+        signal.signal(signal.SIGINT, original_handler)
 
 
 def main() -> int:
@@ -892,6 +956,11 @@ def main() -> int:
         type=float,
         default=1000.0,
         help="Margin from stage edges in µm (default: 1000)",
+    )
+    raster_parser.add_argument(
+        "--endpoints-only",
+        action="store_true",
+        help="Only save first and last frame from each row",
     )
     raster_parser.set_defaults(func=cmd_raster_scan)
 
