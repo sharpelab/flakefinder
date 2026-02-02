@@ -528,6 +528,180 @@ def cmd_center(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_raster_scan(args: argparse.Namespace) -> int:
+    """Full snake raster scan of the stage area."""
+    import json
+    import os
+    import time
+
+    try:
+        from PIL import Image as PILImage
+        from .leica import LeicaConnection, Camera, Stage, Lamp, Shutter
+
+        print("FlakeFinder - Raster Scan")
+        print("=" * 40)
+
+        with LeicaConnection(args.config_dir) as conn:
+            # Set up hardware
+            stage = Stage.from_connection(conn)
+            camera = Camera.from_connection(conn)
+
+            try:
+                shutter = Shutter.from_connection(conn)
+                shutter.open()
+            except LookupError:
+                pass
+
+            try:
+                lamp = Lamp.from_connection(conn)
+                lamp.full()
+            except LookupError:
+                pass
+
+            # Configure camera
+            camera.exposure_time = args.exposure_ms / 1000.0
+            camera.binning = 2  # 3x3 for speed
+
+            print(f"Camera: {camera.name}")
+            print(f"  Exposure: {args.exposure_ms}ms, Binning: 3x3")
+
+            # Determine scan range
+            margin = args.margin
+            x_min = stage.x.min_um + margin
+            x_max = stage.x.max_um - margin
+            y_min = stage.y.min_um + margin
+            y_max = stage.y.max_um - margin
+
+            # Calculate rows based on step size
+            y_step = args.y_step
+            num_rows = int((y_max - y_min) / y_step) + 1
+
+            print(f"Stage X range: {x_min:.0f} - {x_max:.0f} µm")
+            print(f"Stage Y range: {y_min:.0f} - {y_max:.0f} µm")
+            print(f"Y step: {y_step:.0f} µm, Rows: {num_rows}")
+
+            # Save starting position for return
+            x_center = (stage.x.min_um + stage.x.max_um) / 2
+            y_center = (stage.y.min_um + stage.y.max_um) / 2
+
+            # Prepare output directory
+            os.makedirs(args.output, exist_ok=True)
+
+            # Metadata
+            meta = {
+                "x_min": x_min,
+                "x_max": x_max,
+                "y_min": y_min,
+                "y_max": y_max,
+                "y_step": y_step,
+                "num_rows": num_rows,
+                "exposure_ms": args.exposure_ms,
+                "binning": 2,
+                "rows": [],
+            }
+
+            # Move to starting position
+            print(f"\nMoving to start ({x_min:.0f}, {y_min:.0f}) µm...")
+            stage.x.move_to(x_min)
+            stage.y.move_to(y_min)
+
+            total_frames = 0
+            scan_start = time.monotonic()
+
+            # Snake raster scan
+            for row in range(num_rows):
+                y_pos = y_min + row * y_step
+                if y_pos > y_max:
+                    break
+
+                # Move to Y position
+                stage.y.move_to(y_pos)
+
+                # Determine X direction (snake pattern)
+                if row % 2 == 0:
+                    x_start, x_end = x_min, x_max
+                    direction = "forward"
+                else:
+                    x_start, x_end = x_max, x_min
+                    direction = "reverse"
+
+                # Move to X start
+                stage.x.move_to(x_start)
+
+                row_meta = {
+                    "row": row,
+                    "y_pos": y_pos,
+                    "x_start": x_start,
+                    "x_end": x_end,
+                    "direction": direction,
+                    "frames": [],
+                }
+
+                print(f"Row {row + 1}/{num_rows}: Y={y_pos:.0f}µm, {direction}...", end=" ", flush=True)
+
+                row_start = time.monotonic()
+                row_frames = 0
+
+                # Stream while moving X
+                with camera.stream() as stream:
+                    handle = stage.x.move_to_async(x_end)
+
+                    while not handle.is_complete:
+                        frame = stream.get_frame(timeout=0.1)
+                        if frame:
+                            # Save frame
+                            path = os.path.join(args.output, f"frame_{total_frames:05d}.jpg")
+                            PILImage.fromarray(frame.image).save(path, quality=95)
+                            row_meta["frames"].append({
+                                "n": total_frames,
+                                "t": frame.timestamp - scan_start,
+                            })
+                            total_frames += 1
+                            row_frames += 1
+
+                row_elapsed = time.monotonic() - row_start
+                row_fps = row_frames / row_elapsed if row_elapsed > 0 else 0
+                print(f"{row_frames} frames, {row_fps:.1f} fps")
+
+                row_meta["frame_count"] = row_frames
+                row_meta["duration_s"] = row_elapsed
+                row_meta["fps"] = row_fps
+                meta["rows"].append(row_meta)
+
+            scan_end = time.monotonic()
+            total_duration = scan_end - scan_start
+            avg_fps = total_frames / total_duration if total_duration > 0 else 0
+
+            meta["total_frames"] = total_frames
+            meta["total_duration_s"] = total_duration
+            meta["avg_fps"] = avg_fps
+
+            # Save metadata
+            meta_path = os.path.join(args.output, "scan_meta.json")
+            with open(meta_path, "w") as f:
+                json.dump(meta, f, indent=2)
+
+            print(f"\nScan complete:")
+            print(f"  Total frames: {total_frames}")
+            print(f"  Total duration: {total_duration:.1f}s")
+            print(f"  Average FPS: {avg_fps:.1f}")
+            print(f"  Output: {args.output}/")
+
+            # Return to center
+            print(f"\nReturning to center ({x_center:.0f}, {y_center:.0f}) µm...")
+            stage.x.move_to(x_center)
+            stage.y.move_to(y_center)
+            print("Done.")
+
+        return 0
+
+    except Exception as e:
+        import traceback
+        print(f"Error: {e}")
+        traceback.print_exc()
+        return 1
+
+
 def main() -> int:
     """Main entry point for the FlakeFinder CLI."""
     parser = argparse.ArgumentParser(
@@ -682,6 +856,44 @@ def main() -> int:
         help="Path to Leica hardware model config directory",
     )
     center_parser.set_defaults(func=cmd_center)
+
+    # raster-scan command
+    raster_parser = subparsers.add_parser(
+        "raster-scan",
+        help="Full snake raster scan of the stage",
+    )
+    raster_parser.add_argument(
+        "--config-dir",
+        type=str,
+        default=None,
+        help="Path to Leica hardware model config directory",
+    )
+    raster_parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        default="raster_output",
+        help="Output directory for frames (default: raster_output)",
+    )
+    raster_parser.add_argument(
+        "--exposure-ms",
+        type=float,
+        default=1.0,
+        help="Exposure time in milliseconds (default: 1.0)",
+    )
+    raster_parser.add_argument(
+        "--y-step",
+        type=float,
+        default=1000.0,
+        help="Y step between rows in µm (default: 1000)",
+    )
+    raster_parser.add_argument(
+        "--margin",
+        type=float,
+        default=1000.0,
+        help="Margin from stage edges in µm (default: 1000)",
+    )
+    raster_parser.set_defaults(func=cmd_raster_scan)
 
     args = parser.parse_args()
 
