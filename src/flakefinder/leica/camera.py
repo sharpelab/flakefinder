@@ -63,6 +63,13 @@ class Camera:
         self._unit = unit
         self._name = unit.GetName()
 
+        # Register UCAPI extensions (required for camera interfaces)
+        from LeicaMicrosystems.HardwareModel import Extensions
+        try:
+            Extensions.ExUCAPI.Register()
+        except Exception:
+            pass  # May already be registered
+
         # Camera requires initialization
         unit.Init()
 
