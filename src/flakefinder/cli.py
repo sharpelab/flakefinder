@@ -543,15 +543,7 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
 
     def signal_handler(sig, frame):
         interrupted[0] = True
-        print("\n\nInterrupted! Returning to center...")
-        if stage_ref[0] and x_center_ref[0] is not None:
-            try:
-                stage_ref[0].x.move_to(x_center_ref[0])
-                stage_ref[0].y.move_to(y_center_ref[0])
-                print(f"Returned to ({x_center_ref[0]:.0f}, {y_center_ref[0]:.0f}) µm")
-            except Exception as e:
-                print(f"Error returning to center: {e}")
-        raise SystemExit(1)
+        print("\n\nInterrupted! Finishing current row then saving metadata...")
 
     original_handler = signal.signal(signal.SIGINT, signal_handler)
 
@@ -586,6 +578,8 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
 
             print(f"Camera: {camera.name}")
             print(f"  Exposure: {args.exposure_ms}ms, Binning: 3x3")
+            if args.downsample > 1:
+                print(f"  Downsample: {args.downsample}x, JPEG quality: {args.jpeg_quality}")
             if args.endpoints_only:
                 print("  Mode: endpoints only (first/last frame per row)")
 
@@ -624,6 +618,8 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
                 "exposure_ms": args.exposure_ms,
                 "binning": 2,
                 "endpoints_only": args.endpoints_only,
+                "downsample": args.downsample,
+                "jpeg_quality": args.jpeg_quality,
                 "rows": [],
             }
 
@@ -698,7 +694,11 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
                             else:
                                 # Save every frame
                                 path = os.path.join(args.output, f"row_{row:03d}_frame_{row_frames:05d}.jpg")
-                                PILImage.fromarray(frame.image).save(path, quality=95)
+                                img = PILImage.fromarray(frame.image)
+                                if args.downsample > 1:
+                                    new_size = (img.width // args.downsample, img.height // args.downsample)
+                                    img = img.resize(new_size, PILImage.Resampling.LANCZOS)
+                                img.save(path, quality=args.jpeg_quality)
                                 frame_meta = {
                                     "n": row_frames,
                                     "t": frame.timestamp - scan_start,
@@ -719,7 +719,11 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
                 if args.endpoints_only and first_frame and last_frame:
                     # Save first
                     path = os.path.join(args.output, f"row_{row:03d}_first.jpg")
-                    PILImage.fromarray(first_frame[0]).save(path, quality=95)
+                    img = PILImage.fromarray(first_frame[0])
+                    if args.downsample > 1:
+                        new_size = (img.width // args.downsample, img.height // args.downsample)
+                        img = img.resize(new_size, PILImage.Resampling.LANCZOS)
+                    img.save(path, quality=args.jpeg_quality)
                     first_meta = {"type": "first", "t": first_frame[1] - scan_start}
                     if first_frame[2]:
                         first_meta["x"], first_meta["y"] = first_frame[2]
@@ -728,7 +732,11 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
 
                     # Save last
                     path = os.path.join(args.output, f"row_{row:03d}_last.jpg")
-                    PILImage.fromarray(last_frame[0]).save(path, quality=95)
+                    img = PILImage.fromarray(last_frame[0])
+                    if args.downsample > 1:
+                        new_size = (img.width // args.downsample, img.height // args.downsample)
+                        img = img.resize(new_size, PILImage.Resampling.LANCZOS)
+                    img.save(path, quality=args.jpeg_quality)
                     last_meta = {"type": "last", "t": last_frame[1] - scan_start}
                     if last_frame[2]:
                         last_meta["x"], last_meta["y"] = last_frame[2]
@@ -759,13 +767,15 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
             meta["total_saved"] = total_saved
             meta["total_duration_s"] = total_duration
             meta["avg_fps"] = avg_fps
+            meta["interrupted"] = interrupted[0]
 
             # Save metadata
             meta_path = os.path.join(args.output, "scan_meta.json")
             with open(meta_path, "w") as f:
                 json.dump(meta, f, indent=2)
 
-            print(f"\nScan complete:")
+            status = "interrupted" if interrupted[0] else "complete"
+            print(f"\nScan {status}:")
             print(f"  Total frames: {total_frames}")
             print(f"  Saved: {total_saved}")
             print(f"  Total duration: {total_duration:.1f}s")
@@ -989,6 +999,18 @@ def main() -> int:
         "--record-positions",
         action="store_true",
         help="Record X position for each frame (reduces fps from ~20 to ~12)",
+    )
+    raster_parser.add_argument(
+        "--downsample",
+        type=int,
+        default=1,
+        help="Downsample factor (e.g., 4 = quarter resolution, default: 1)",
+    )
+    raster_parser.add_argument(
+        "--jpeg-quality",
+        type=int,
+        default=85,
+        help="JPEG quality 1-100 (default: 85)",
     )
     raster_parser.set_defaults(func=cmd_raster_scan)
 

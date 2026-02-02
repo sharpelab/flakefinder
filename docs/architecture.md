@@ -51,7 +51,7 @@ FlakeFinder is a microscope automation system for detecting 2D material flakes (
 
 - Motorized stage: Märzhäuser SCAN 100x100
 - Objectives: 5x, 10x, 20x, 50x, 100x (on nosepiece)
-- Camera: DFK 33UX174 (162 fps, global shutter)
+- Camera: Leica K5C (rolling shutter, ~15ms readout, ~20fps at 3x3 binning)
 - Illumination: LED with adjustable intensity
 - Focus: Motorized Z-drive with autofocus capability
 

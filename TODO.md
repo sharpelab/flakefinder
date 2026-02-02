@@ -14,3 +14,11 @@
 - **Accel/decel time: ~690ms**
 
 Stage is already at max speed. Acceleration zones need to be discarded in post-processing.
+
+## Color Calibration
+
+Images appear green vs blue in LAS X. Need to:
+- Check LAS X white balance / color settings
+- Match gain_rgb values to LAS X defaults
+- Add CLI options: --gain-rgb "1.0,0.8,1.3" or --white-balance
+- Consider auto white balance option (PROP_AUTO_BRIGHTNESS_ENABLED or similar)
