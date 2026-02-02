@@ -248,10 +248,15 @@ def cmd_test_camera(args: argparse.Namespace) -> int:
 
         with LeicaConnection(args.config_dir) as conn:
             camera = Camera.from_connection(conn)
+
+            # Apply exposure from CLI if specified
+            if args.exposure_ms is not None:
+                camera.exposure_time = args.exposure_ms / 1000.0
+
             print(f"Camera: {camera.name}")
-            print(f"  Exposure: {camera.exposure_time:.3f}s")
+            print(f"  Exposure: {camera.exposure_time * 1000:.1f}ms")
             print(f"  Gain: {camera.gain}")
-            print(f"  Binning: {camera.binning}")
+            print(f"  Binning: {camera.binning} (0=1x1, 1=2x2, 2=4x4)")
             print()
 
             # Single-shot test
@@ -403,6 +408,12 @@ def main() -> int:
         type=str,
         default=None,
         help="Save captured image to file (e.g., test.png)",
+    )
+    camera_parser.add_argument(
+        "--exposure-ms",
+        type=float,
+        default=10.0,
+        help="Exposure time in milliseconds (default: 10)",
     )
     camera_parser.set_defaults(func=cmd_test_camera)
 

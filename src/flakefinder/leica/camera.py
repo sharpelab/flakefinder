@@ -111,12 +111,12 @@ class Camera:
     def _init_defaults(self) -> None:
         """Set default camera settings."""
         self.auto_brightness = False
-        self.exposure_time = 0.1  # 100ms
+        self.exposure_time = 0.01  # 10ms
         self.gain = 1.0
         self.gain_rgb = (1.0, 1.0, 1.0)
         self.saturation = 100  # int, not float
         self.gamma = 1.0
-        self.binning = 2  # 2x2 binning for speed
+        self.binning = 1  # 0=1x1, 1=2x2, 2=4x4
 
     def _get_property(self, prop_id: int):
         """Get a property value object, with caching."""
