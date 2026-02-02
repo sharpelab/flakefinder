@@ -397,6 +397,86 @@ class Axis:
         return f"Axis({self._name}, pos={self.position_um:.1f}µm)"
 
 
+class Lamp:
+    """Lamp intensity control.
+
+    Usage:
+        lamp = Lamp.from_connection(conn)
+        lamp.intensity = lamp.max_intensity  # Full brightness
+        lamp.intensity = 0  # Off
+    """
+
+    def __init__(self, unit: "Unit"):
+        """Initialize lamp from SDK unit.
+
+        Args:
+            unit: SDK Unit object (must support BasicControlValue).
+
+        Raises:
+            LookupError: If required interface not found.
+        """
+        self._unit = unit
+        self._name = unit.GetName()
+        self._bcv: "BasicControlValue" = get_interface_required(
+            unit, IID.IID_BASIC_CONTROL_VALUE
+        )
+        self._min = self._bcv.MinControlValue()
+        self._max = self._bcv.MaxControlValue()
+
+    @classmethod
+    def from_connection(cls, conn: "LeicaConnection") -> "Lamp":
+        """Create Lamp from a LeicaConnection.
+
+        Args:
+            conn: Active LeicaConnection.
+
+        Returns:
+            Lamp instance.
+
+        Raises:
+            LookupError: If lamp unit not found.
+        """
+        lamp_unit = find_unit(conn.root, TID.MICROSCOPE_LAMP)
+        if lamp_unit is None:
+            raise LookupError("Lamp unit not found")
+        return cls(lamp_unit)
+
+    @property
+    def name(self) -> str:
+        """Lamp name from SDK."""
+        return self._name
+
+    @property
+    def intensity(self) -> int:
+        """Current lamp intensity."""
+        return self._bcv.GetControlValue()
+
+    @intensity.setter
+    def intensity(self, value: int) -> None:
+        self._bcv.SetControlValue(value)
+
+    @property
+    def min_intensity(self) -> int:
+        """Minimum intensity value."""
+        return self._min
+
+    @property
+    def max_intensity(self) -> int:
+        """Maximum intensity value."""
+        return self._max
+
+    def off(self) -> None:
+        """Turn lamp off."""
+        self.intensity = self._min
+
+    def full(self) -> None:
+        """Set lamp to full brightness."""
+        self.intensity = self._max
+
+    def __repr__(self) -> str:
+        return f"Lamp({self._name}, intensity={self.intensity}/{self._max})"
+
+
 class Stage:
     """XY stage control combining X and Y axes.
 

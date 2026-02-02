@@ -241,7 +241,7 @@ def cmd_test_camera(args: argparse.Namespace) -> int:
     import time
 
     try:
-        from .leica import LeicaConnection, Camera, Stage
+        from .leica import LeicaConnection, Camera, Stage, Lamp
 
         print("FlakeFinder - Camera Test")
         print("=" * 40)
@@ -249,9 +249,23 @@ def cmd_test_camera(args: argparse.Namespace) -> int:
         with LeicaConnection(args.config_dir) as conn:
             camera = Camera.from_connection(conn)
 
-            # Apply exposure from CLI if specified
+            # Set up lamp
+            try:
+                lamp = Lamp.from_connection(conn)
+                if args.lamp is not None:
+                    lamp.intensity = args.lamp
+                else:
+                    lamp.full()  # Default to full
+                print(f"Lamp: {lamp.name}")
+                print(f"  Intensity: {lamp.intensity}/{lamp.max_intensity}")
+            except LookupError:
+                print("Lamp: (not found)")
+
+            # Apply settings from CLI
             if args.exposure_ms is not None:
                 camera.exposure_time = args.exposure_ms / 1000.0
+            if args.gain is not None:
+                camera.gain = args.gain
 
             print(f"Camera: {camera.name}")
             print(f"  Exposure: {camera.exposure_time * 1000:.1f}ms")
@@ -414,6 +428,18 @@ def main() -> int:
         type=float,
         default=10.0,
         help="Exposure time in milliseconds (default: 10)",
+    )
+    camera_parser.add_argument(
+        "--gain",
+        type=float,
+        default=1.0,
+        help="Camera gain (default: 1.0)",
+    )
+    camera_parser.add_argument(
+        "--lamp",
+        type=int,
+        default=None,
+        help="Lamp intensity (default: max)",
     )
     camera_parser.set_defaults(func=cmd_test_camera)
 
