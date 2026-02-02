@@ -373,6 +373,124 @@ def cmd_test_camera(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_scan_line(args: argparse.Namespace) -> int:
+    """Scan a line along X axis, capturing frames at max rate."""
+    import json
+    import os
+    import time
+
+    try:
+        from PIL import Image as PILImage
+        from .leica import LeicaConnection, Camera, Stage, Lamp, Shutter
+
+        print("FlakeFinder - Line Scan")
+        print("=" * 40)
+
+        with LeicaConnection(args.config_dir) as conn:
+            # Set up hardware
+            stage = Stage.from_connection(conn)
+            camera = Camera.from_connection(conn)
+
+            try:
+                shutter = Shutter.from_connection(conn)
+                shutter.open()
+            except LookupError:
+                pass
+
+            try:
+                lamp = Lamp.from_connection(conn)
+                lamp.full()
+            except LookupError:
+                pass
+
+            # Configure camera
+            camera.exposure_time = args.exposure_ms / 1000.0
+            camera.binning = 2  # 3x3 for speed
+
+            print(f"Camera: {camera.name}")
+            print(f"  Exposure: {args.exposure_ms}ms, Binning: 3x3")
+
+            # Determine scan range
+            margin = 1000  # µm from edges
+            x_min = stage.x.min_um + margin
+            x_max = stage.x.max_um - margin
+            x_start = stage.x.position_um
+
+            print(f"Stage X range: {x_min:.0f} - {x_max:.0f} µm")
+            print(f"  Current: {x_start:.0f} µm")
+
+            # Prepare output directory
+            os.makedirs(args.output, exist_ok=True)
+
+            # Move to start position (sync)
+            print(f"\nMoving to start ({x_min:.0f} µm)...")
+            stage.x.move_to(x_min)
+            print(f"  At: {stage.x.position_um:.0f} µm")
+
+            # Record metadata
+            meta = {
+                "start_pos_um": stage.x.position_um,
+                "end_pos_um": x_max,
+                "exposure_ms": args.exposure_ms,
+                "binning": 2,
+                "frames": [],
+            }
+
+            # Start streaming (no position tagging - too slow)
+            print(f"\nScanning to {x_max:.0f} µm...")
+            frame_count = 0
+            scan_start = time.monotonic()
+            meta["start_time"] = scan_start
+
+            with camera.stream() as stream:
+                # Start async move
+                handle = stage.x.move_to_async(x_max)
+
+                # Capture frames until move completes
+                while not handle.is_complete:
+                    frame = stream.get_frame(timeout=0.1)
+                    if frame:
+                        # Save frame
+                        path = os.path.join(args.output, f"frame_{frame_count:04d}.jpg")
+                        PILImage.fromarray(frame.image).save(path, quality=95)
+                        meta["frames"].append({
+                            "n": frame_count,
+                            "t": frame.timestamp - scan_start,
+                        })
+                        frame_count += 1
+
+            scan_end = time.monotonic()
+            meta["end_time"] = scan_end
+            meta["end_pos_actual_um"] = stage.x.position_um
+            meta["duration_s"] = scan_end - scan_start
+            meta["frame_count"] = frame_count
+            meta["fps"] = frame_count / (scan_end - scan_start) if scan_end > scan_start else 0
+
+            # Save metadata
+            meta_path = os.path.join(args.output, "scan_meta.json")
+            with open(meta_path, "w") as f:
+                json.dump(meta, f, indent=2)
+
+            print(f"\nScan complete:")
+            print(f"  Frames: {frame_count}")
+            print(f"  Duration: {meta['duration_s']:.1f}s")
+            print(f"  FPS: {meta['fps']:.1f}")
+            print(f"  Output: {args.output}/")
+
+            # Return to start
+            if args.return_home:
+                print(f"\nReturning to {x_start:.0f} µm...")
+                stage.x.move_to(x_start)
+
+        return 0
+
+    except Exception as e:
+        import traceback
+        print(f"Error: {e}")
+        traceback.print_exc()
+        return 1
+
+
 def main() -> int:
     """Main entry point for the FlakeFinder CLI."""
     parser = argparse.ArgumentParser(
@@ -483,6 +601,37 @@ def main() -> int:
         help="Suppress per-frame logging during streaming (for fps testing)",
     )
     camera_parser.set_defaults(func=cmd_test_camera)
+
+    # scan-line command
+    scan_parser = subparsers.add_parser(
+        "scan-line",
+        help="Scan a line along X axis, capturing frames",
+    )
+    scan_parser.add_argument(
+        "--config-dir",
+        type=str,
+        default=None,
+        help="Path to Leica hardware model config directory",
+    )
+    scan_parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        default="scan_output",
+        help="Output directory for frames (default: scan_output)",
+    )
+    scan_parser.add_argument(
+        "--exposure-ms",
+        type=float,
+        default=1.0,
+        help="Exposure time in milliseconds (default: 1.0)",
+    )
+    scan_parser.add_argument(
+        "--return-home",
+        action="store_true",
+        help="Return to starting position after scan",
+    )
+    scan_parser.set_defaults(func=cmd_scan_line)
 
     args = parser.parse_args()
 
