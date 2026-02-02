@@ -691,8 +691,10 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
                             if args.endpoints_only:
                                 # Keep first and update last
                                 if first_frame is None:
-                                    first_frame = (frame.image.copy(), frame.timestamp)
-                                last_frame = (frame.image.copy(), frame.timestamp)
+                                    pos = (stage.x.position_um, stage.y.position_um) if args.record_positions else None
+                                    first_frame = (frame.image.copy(), frame.timestamp, pos)
+                                pos = (stage.x.position_um, stage.y.position_um) if args.record_positions else None
+                                last_frame = (frame.image.copy(), frame.timestamp, pos)
                             else:
                                 # Save every frame
                                 path = os.path.join(args.output, f"row_{row:03d}_frame_{row_frames:05d}.jpg")
@@ -703,6 +705,7 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
                                 }
                                 if args.record_positions:
                                     frame_meta["x"] = stage.x.position_um
+                                    frame_meta["y"] = stage.y.position_um
                                 row_meta["frames"].append(frame_meta)
                                 total_saved += 1
                             total_frames += 1
@@ -717,19 +720,19 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
                     # Save first
                     path = os.path.join(args.output, f"row_{row:03d}_first.jpg")
                     PILImage.fromarray(first_frame[0]).save(path, quality=95)
-                    row_meta["frames"].append({
-                        "type": "first",
-                        "t": first_frame[1] - scan_start,
-                    })
+                    first_meta = {"type": "first", "t": first_frame[1] - scan_start}
+                    if first_frame[2]:
+                        first_meta["x"], first_meta["y"] = first_frame[2]
+                    row_meta["frames"].append(first_meta)
                     total_saved += 1
 
                     # Save last
                     path = os.path.join(args.output, f"row_{row:03d}_last.jpg")
                     PILImage.fromarray(last_frame[0]).save(path, quality=95)
-                    row_meta["frames"].append({
-                        "type": "last",
-                        "t": last_frame[1] - scan_start,
-                    })
+                    last_meta = {"type": "last", "t": last_frame[1] - scan_start}
+                    if last_frame[2]:
+                        last_meta["x"], last_meta["y"] = last_frame[2]
+                    row_meta["frames"].append(last_meta)
                     total_saved += 1
 
                 row_elapsed = row_end_time - row_start_time
