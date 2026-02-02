@@ -143,6 +143,9 @@ class AxisEvents:
         Returns:
             Subscription that can be used to unsubscribe.
         """
+        # Import the delegate type from .NET
+        from LeicaMicrosystems.HardwareModel import EventSource as ESType
+
         # Create wrapper that calls the Python callback
         def handler(sender: "Unit", iid: int, value: int) -> None:
             try:
@@ -150,13 +153,16 @@ class AxisEvents:
             except Exception:
                 pass  # Don't let exceptions propagate to .NET
 
-        # Keep reference to prevent GC
-        self._handlers.append(handler)
+        # Create .NET delegate explicitly (pythonnet requires this)
+        delegate = ESType.ValueChangedEventHandler(handler)
 
-        # Subscribe
-        self._event_source.Subscribe(handler)
+        # Keep references to prevent GC (both handler and delegate)
+        self._handlers.append((handler, delegate))
 
-        return Subscription(self._event_source, handler, "UnSubscribe")
+        # Subscribe with the delegate
+        self._event_source.Subscribe(delegate)
+
+        return Subscription(self._event_source, delegate, "UnSubscribe")
 
     def subscribe_position(self, callback: PositionCallback) -> Subscription:
         """Subscribe to position change events only.
