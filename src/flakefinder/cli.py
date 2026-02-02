@@ -291,6 +291,9 @@ def cmd_test_camera(args: argparse.Namespace) -> int:
 
             # Streaming test
             if args.stream:
+                import os
+                from PIL import Image as PILImage
+
                 duration = args.stream_duration
                 print(f"Streaming for {duration}s...")
 
@@ -302,6 +305,15 @@ def cmd_test_camera(args: argparse.Namespace) -> int:
                     stage = None
                     print(f"  No stage found, positions will be None")
 
+                # Prepare output directory if saving frames
+                save_frames = args.output is not None
+                if save_frames:
+                    base, ext = os.path.splitext(args.output)
+                    if not ext:
+                        ext = ".jpg"
+                    print(f"  Saving frames to {base}_NNN{ext}")
+
+                saved_count = 0
                 with camera.stream(stage) as stream:
                     start = time.monotonic()
                     while (time.monotonic() - start) < duration:
@@ -316,11 +328,19 @@ def cmd_test_camera(args: argparse.Namespace) -> int:
                                 f"  Frame {frame.frame_number}: "
                                 f"{frame.image.shape} @ {pos_str}"
                             )
+                            # Save frame if output specified
+                            if save_frames:
+                                frame_path = f"{base}_{frame.frame_number:03d}{ext}"
+                                PILImage.fromarray(frame.image).save(frame_path)
+                                saved_count += 1
 
                 print()
                 print(f"  Captured: {stream.frames_captured} frames")
                 print(f"  Dropped: {stream.frames_dropped} frames")
                 print(f"  Rate: {stream.frame_rate:.1f} fps")
+                if save_frames:
+                    print(f"  Saved: {saved_count} frames")
+                return 0  # Skip single-image save below
 
             # Save image if requested
             if args.output:
