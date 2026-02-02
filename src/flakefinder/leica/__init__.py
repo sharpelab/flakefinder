@@ -38,6 +38,7 @@ from .core import (
 )
 from .enums import TID, IID, EMetricsId, MoveState
 from .units import Axis, Stage, MoveHandle
+from .events import Subscription, AxisEvents, PositionMonitor, EventQueue
 from .utils import (
     UnitConverter,
     get_metrics_converter,
@@ -66,6 +67,11 @@ __all__ = [
     "Axis",
     "Stage",
     "MoveHandle",
+    # Events
+    "Subscription",
+    "AxisEvents",
+    "PositionMonitor",
+    "EventQueue",
     # Utils
     "UnitConverter",
     "get_metrics_converter",

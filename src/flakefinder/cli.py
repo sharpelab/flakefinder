@@ -124,7 +124,7 @@ def cmd_test_axis(args: argparse.Namespace) -> int:
     import time
 
     try:
-        from .leica import LeicaConnection, TID, Axis, Stage
+        from .leica import LeicaConnection, TID, Axis, Stage, PositionMonitor
 
         print("FlakeFinder - Axis Test")
         print("=" * 40)
@@ -190,33 +190,70 @@ def cmd_test_axis(args: argparse.Namespace) -> int:
                 print(f"  Right target: {x_right:.2f} µm")
                 print()
 
-                # Move to left edge
-                print("  Moving to left edge (async)...", end="", flush=True)
-                handle = stage.x.move_to_async(x_left)
-                print(f" [raw state: {handle.state_raw}]")
-                while not handle.is_complete:
-                    print(f"    pos={stage.x.position_um:.0f} state={handle.state_raw}", flush=True)
-                    time.sleep(0.1)
-                print(f"  Position: {stage.x.position_um:.2f} µm")
-                print(f"  State: {handle.state.name} (raw={handle.state_raw})")
-                print()
+                if args.events:
+                    # Use event-based position monitoring
+                    print("  Using EVENT-BASED position monitoring")
+                    print()
 
-                # Move to right edge
-                print("  Moving to right edge (async)...", end="", flush=True)
-                handle = stage.x.move_to_async(x_right)
-                print(f" [raw state: {handle.state_raw}]")
-                while not handle.is_complete:
-                    print(f"    pos={stage.x.position_um:.0f} state={handle.state_raw}", flush=True)
-                    time.sleep(0.1)
-                print(f"  Position: {stage.x.position_um:.2f} µm")
-                print(f"  State: {handle.state.name} (raw={handle.state_raw})")
-                print()
+                    with PositionMonitor(stage.x.unit) as monitor:
+                        # Move to left edge
+                        print("  Moving to left edge (async)...")
+                        handle = stage.x.move_to_async(x_left)
+                        while not handle.is_complete:
+                            pos_um = stage.x._converter.GetMetricsValue(monitor.position)
+                            print(f"    [event] pos={pos_um:.0f}µm updates={monitor.update_count}", flush=True)
+                            time.sleep(0.1)
+                        print(f"  Final: {stage.x.position_um:.2f} µm ({monitor.update_count} events)")
+                        print()
 
-                # Return to start
-                print(f"  Returning to start ({x_start:.2f} µm)...")
-                handle = stage.x.move_to_async(x_start)
-                handle.wait()
-                print(f"  Final: {stage.x.position_um:.2f} µm")
+                        # Move to right edge
+                        start_count = monitor.update_count
+                        print("  Moving to right edge (async)...")
+                        handle = stage.x.move_to_async(x_right)
+                        while not handle.is_complete:
+                            pos_um = stage.x._converter.GetMetricsValue(monitor.position)
+                            print(f"    [event] pos={pos_um:.0f}µm updates={monitor.update_count}", flush=True)
+                            time.sleep(0.1)
+                        print(f"  Final: {stage.x.position_um:.2f} µm ({monitor.update_count - start_count} events)")
+                        print()
+
+                        # Return to start
+                        print(f"  Returning to start ({x_start:.2f} µm)...")
+                        handle = stage.x.move_to_async(x_start)
+                        handle.wait()
+                        print(f"  Final: {stage.x.position_um:.2f} µm")
+                else:
+                    # Use polling-based position monitoring
+                    print("  Using POLLING-based position monitoring")
+                    print()
+
+                    # Move to left edge
+                    print("  Moving to left edge (async)...", end="", flush=True)
+                    handle = stage.x.move_to_async(x_left)
+                    print(f" [raw state: {handle.state_raw}]")
+                    while not handle.is_complete:
+                        print(f"    pos={stage.x.position_um:.0f} state={handle.state_raw}", flush=True)
+                        time.sleep(0.1)
+                    print(f"  Position: {stage.x.position_um:.2f} µm")
+                    print(f"  State: {handle.state.name} (raw={handle.state_raw})")
+                    print()
+
+                    # Move to right edge
+                    print("  Moving to right edge (async)...", end="", flush=True)
+                    handle = stage.x.move_to_async(x_right)
+                    print(f" [raw state: {handle.state_raw}]")
+                    while not handle.is_complete:
+                        print(f"    pos={stage.x.position_um:.0f} state={handle.state_raw}", flush=True)
+                        time.sleep(0.1)
+                    print(f"  Position: {stage.x.position_um:.2f} µm")
+                    print(f"  State: {handle.state.name} (raw={handle.state_raw})")
+                    print()
+
+                    # Return to start
+                    print(f"  Returning to start ({x_start:.2f} µm)...")
+                    handle = stage.x.move_to_async(x_start)
+                    handle.wait()
+                    print(f"  Final: {stage.x.position_um:.2f} µm")
 
         return 0
 
@@ -282,7 +319,12 @@ def main() -> int:
     axis_parser.add_argument(
         "--test-move",
         action="store_true",
-        help="Actually move the Z-drive to test async",
+        help="Actually move the X axis to test async",
+    )
+    axis_parser.add_argument(
+        "--events",
+        action="store_true",
+        help="Use event-based position monitoring (requires --test-move)",
     )
     axis_parser.set_defaults(func=cmd_test_axis)
 
