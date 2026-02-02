@@ -256,7 +256,7 @@ def cmd_test_camera(args: argparse.Namespace) -> int:
             print(f"Camera: {camera.name}")
             print(f"  Exposure: {camera.exposure_time * 1000:.1f}ms")
             print(f"  Gain: {camera.gain}")
-            print(f"  Binning: {camera.binning} (0=1x1, 1=2x2, 2=4x4)")
+            print(f"  Binning: {camera.binning} (0=1x1, 1=2x2, 2=3x3)")
             print()
 
             # Single-shot test

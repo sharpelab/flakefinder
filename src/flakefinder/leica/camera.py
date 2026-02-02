@@ -116,7 +116,7 @@ class Camera:
         self.gain_rgb = (1.0, 1.0, 1.0)
         self.saturation = 100  # int, not float
         self.gamma = 1.0
-        self.binning = 1  # 0=1x1, 1=2x2, 2=4x4
+        self.binning = 2  # 0=1x1, 1=2x2, 2=3x3
 
     def _get_property(self, prop_id: int):
         """Get a property value object, with caching."""
@@ -222,7 +222,7 @@ class Camera:
 
     @property
     def binning(self) -> int:
-        """Binning level (0=1x1, 1=2x2, 2=4x4)."""
+        """Binning level (0=1x1, 1=2x2, 2=3x3)."""
         prop = self._get_property(UCAPI_PROP.PROP_BINNING_LEVEL)
         return prop.GetIndex() if prop else 0
 
