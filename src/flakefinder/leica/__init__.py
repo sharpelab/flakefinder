@@ -59,7 +59,7 @@ from .enums import (
     UCAPI_IID,
     UCAPI_PROP,
 )
-from .units import Axis, Stage, MoveHandle, Lamp
+from .units import Axis, Stage, MoveHandle, Lamp, Shutter
 from .camera import Camera, FrameStream, Frame
 from .events import Subscription, AxisEvents, PositionMonitor, EventQueue
 from .utils import (
@@ -98,6 +98,7 @@ __all__ = [
     "Stage",
     "MoveHandle",
     "Lamp",
+    "Shutter",
     # Camera
     "Camera",
     "FrameStream",

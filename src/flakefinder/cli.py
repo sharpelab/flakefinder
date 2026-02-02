@@ -241,13 +241,21 @@ def cmd_test_camera(args: argparse.Namespace) -> int:
     import time
 
     try:
-        from .leica import LeicaConnection, Camera, Stage, Lamp
+        from .leica import LeicaConnection, Camera, Stage, Lamp, Shutter
 
         print("FlakeFinder - Camera Test")
         print("=" * 40)
 
         with LeicaConnection(args.config_dir) as conn:
             camera = Camera.from_connection(conn)
+
+            # Set up shutter (open by default)
+            try:
+                shutter = Shutter.from_connection(conn)
+                shutter.open()
+                print(f"Shutter: {shutter.name} ({'open' if shutter.is_open else 'closed'})")
+            except LookupError:
+                print("Shutter: (not found)")
 
             # Set up lamp
             try:

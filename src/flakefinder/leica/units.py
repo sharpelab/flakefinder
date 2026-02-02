@@ -397,6 +397,72 @@ class Axis:
         return f"Axis({self._name}, pos={self.position_um:.1f}µm)"
 
 
+class Shutter:
+    """Shutter control (open/close).
+
+    Usage:
+        shutter = Shutter.from_connection(conn)
+        shutter.open()
+        shutter.close()
+    """
+
+    def __init__(self, unit: "Unit"):
+        """Initialize shutter from SDK unit.
+
+        Args:
+            unit: SDK Unit object (must support BasicControlValue).
+
+        Raises:
+            LookupError: If required interface not found.
+        """
+        self._unit = unit
+        self._name = unit.GetName()
+        self._bcv: "BasicControlValue" = get_interface_required(
+            unit, IID.IID_BASIC_CONTROL_VALUE
+        )
+
+    @classmethod
+    def from_connection(cls, conn: "LeicaConnection", tid: TID = TID.MICROSCOPE_IL_SHUTTER) -> "Shutter":
+        """Create Shutter from a LeicaConnection.
+
+        Args:
+            conn: Active LeicaConnection.
+            tid: Shutter type ID (default: IL shutter).
+
+        Returns:
+            Shutter instance.
+
+        Raises:
+            LookupError: If shutter unit not found.
+        """
+        shutter_unit = find_unit(conn.root, tid)
+        if shutter_unit is None:
+            raise LookupError(f"Shutter unit not found: {tid.name}")
+        return cls(shutter_unit)
+
+    @property
+    def name(self) -> str:
+        """Shutter name from SDK."""
+        return self._name
+
+    @property
+    def is_open(self) -> bool:
+        """Check if shutter is open."""
+        return self._bcv.GetControlValue() == 1
+
+    def open(self) -> None:
+        """Open the shutter."""
+        self._bcv.SetControlValue(1)
+
+    def close(self) -> None:
+        """Close the shutter."""
+        self._bcv.SetControlValue(0)
+
+    def __repr__(self) -> str:
+        state = "open" if self.is_open else "closed"
+        return f"Shutter({self._name}, {state})"
+
+
 class Lamp:
     """Lamp intensity control.
 
