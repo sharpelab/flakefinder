@@ -79,7 +79,7 @@ def cmd_test_axis(args: argparse.Namespace) -> int:
     import time
 
     try:
-        from .leica import LeicaConnection, TID, Axis, Stage, PositionMonitor
+        from .leica import LeicaConnection, TID, Axis, Stage, PositionMonitor, AxisEvents, EventQueue
 
         print("FlakeFinder - Axis Test")
         print("=" * 40)
@@ -147,29 +147,43 @@ def cmd_test_axis(args: argparse.Namespace) -> int:
 
                 if args.events:
                     # Use event-based position monitoring
-                    print("  Using EVENT-BASED position monitoring")
+                    print("  Using EVENT-BASED position monitoring (blocking on events)")
                     print()
 
-                    with PositionMonitor(stage.x.unit) as monitor:
+                    events = AxisEvents(stage.x.unit)
+                    eq = EventQueue()
+                    converter = stage.x._converter
+
+                    with events.subscribe_position(eq.handler):
                         # Move to left edge
                         print("  Moving to left edge (async)...")
                         handle = stage.x.move_to_async(x_left)
+                        event_count = 0
                         while not handle.is_complete:
-                            pos_um = stage.x._converter.GetMetricsValue(monitor.position)
-                            print(f"    [event] pos={pos_um:.0f}µm updates={monitor.update_count}", flush=True)
-                            time.sleep(0.1)
-                        print(f"  Final: {stage.x.position_um:.2f} µm ({monitor.update_count} events)")
+                            pos = eq.get(timeout=0.2)  # Block until event or timeout
+                            if pos is not None:
+                                event_count += 1
+                                pos_um = converter.GetMetricsValue(pos)
+                                print(f"    [event {event_count}] pos={pos_um:.0f}µm", flush=True)
+                        # Drain any remaining events
+                        for pos in eq.drain():
+                            event_count += 1
+                        print(f"  Final: {stage.x.position_um:.2f} µm ({event_count} events)")
                         print()
 
                         # Move to right edge
-                        start_count = monitor.update_count
                         print("  Moving to right edge (async)...")
                         handle = stage.x.move_to_async(x_right)
+                        event_count = 0
                         while not handle.is_complete:
-                            pos_um = stage.x._converter.GetMetricsValue(monitor.position)
-                            print(f"    [event] pos={pos_um:.0f}µm updates={monitor.update_count}", flush=True)
-                            time.sleep(0.1)
-                        print(f"  Final: {stage.x.position_um:.2f} µm ({monitor.update_count - start_count} events)")
+                            pos = eq.get(timeout=0.2)
+                            if pos is not None:
+                                event_count += 1
+                                pos_um = converter.GetMetricsValue(pos)
+                                print(f"    [event {event_count}] pos={pos_um:.0f}µm", flush=True)
+                        for pos in eq.drain():
+                            event_count += 1
+                        print(f"  Final: {stage.x.position_um:.2f} µm ({event_count} events)")
                         print()
 
                         # Return to start
