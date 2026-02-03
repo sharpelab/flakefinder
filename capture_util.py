@@ -83,8 +83,8 @@ def main() -> int:
                         help="Binning level: 0=1x1, 1=2x2, 2=3x3 (default: 2)")
     parser.add_argument("--downsample", type=int, default=1,
                         help="Downsample factor after capture (default: 1)")
-    parser.add_argument("--exposure", type=float,
-                        help="Exposure time in seconds (e.g., 0.01 for 10ms)")
+    parser.add_argument("--exposure", type=float, default=0.001,
+                        help="Exposure time in seconds (default: 0.001 = 1ms)")
     parser.add_argument("--wb", type=str, default="1.41,1.02,2.51",
                         help="White balance as R,G,B (default: '1.41,1.02,2.51')")
     parser.add_argument("--wb-red", type=float, help="Red channel gain")
@@ -145,6 +145,32 @@ def main() -> int:
                 wb_g if wb_g is not None else current_g,
                 wb_b if wb_b is not None else current_b,
             )
+
+        # Report capture settings
+        stage = Stage.from_connection(conn)
+        x, y = stage.position_um
+        z = ZDrive.from_connection(conn)
+        print(f"Position: X={x:.1f} Y={y:.1f} Z={z.position_um:.1f} µm")
+
+        try:
+            lamp = Lamp.from_connection(conn)
+            print(f"Lamp: {lamp.intensity}/{lamp.max_intensity}")
+        except LookupError:
+            print("Lamp: N/A")
+
+        try:
+            shutter = Shutter.from_connection(conn)
+            print(f"Shutter: {'open' if shutter.is_open else 'closed'}")
+        except LookupError:
+            print("Shutter: N/A")
+
+        binning_map = {0: "1x1", 1: "2x2", 2: "3x3"}
+        binning_str = binning_map.get(camera.binning, str(camera.binning))
+        r, g, b = camera.gain_rgb
+        print(f"Exposure: {camera.exposure_time*1000:.2f} ms")
+        print(f"Binning: {binning_str}")
+        print(f"White balance: R={r:.2f} G={g:.2f} B={b:.2f}")
+        print()
 
         # Capture
         print(f"Capturing...")
