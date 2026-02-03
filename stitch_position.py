@@ -1,10 +1,58 @@
 """Position-based stitch with 50% alpha overlap and linear position smoothing."""
 
+import argparse
 import json
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 SCAN_DIR = Path(__file__).parent / "test_scan"
+
+
+def deskew_image(img, shear_px):
+    """
+    Apply horizontal shear to correct rolling shutter skew.
+
+    For +X scan with top-to-bottom readout:
+    - Bottom of image was captured later, so it's shifted right
+    - We need to shift bottom left to deskew (negative shear)
+
+    shear_px: pixels to shift bottom row (positive = shift right)
+    """
+    width, height = img.size
+
+    # Expand canvas to fit sheared image
+    new_width = width + abs(int(shear_px))
+
+    # PIL transform uses inverse mapping (output -> input)
+    # x_src = a*x_dst + b*y_dst + c
+    # y_src = d*x_dst + e*y_dst + f
+    #
+    # To shift bottom left by shear_px:
+    # At y=0: x_src = x_dst + offset
+    # At y=height: x_src = x_dst + offset + shear_px
+    # So: b = shear_px / height
+
+    # Offset to keep content in frame
+    if shear_px > 0:
+        # Bottom shifts right in source, so we offset to keep left edge
+        x_offset = 0
+    else:
+        # Bottom shifts left in source, need offset to not clip
+        x_offset = abs(shear_px)
+
+    # Affine coefficients: (a, b, c, d, e, f)
+    # x_src = a*x + b*y + c
+    # y_src = d*x + e*y + f
+    a, b, c = 1, shear_px / height, -x_offset
+    d, e, f = 0, 1, 0
+
+    return img.transform(
+        (new_width, height),
+        Image.AFFINE,
+        (a, b, c, d, e, f),
+        resample=Image.BICUBIC,
+        fillcolor=(255, 255, 255, 0) if img.mode == 'RGBA' else (255, 255, 255)
+    )
 
 
 def find_constant_velocity_frames(meta):
@@ -38,6 +86,10 @@ def find_constant_velocity_frames(meta):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Stitch scan frames with position smoothing")
+    parser.add_argument("--deskew", action="store_true", help="Apply rolling shutter deskew correction")
+    args = parser.parse_args()
+
     # Load metadata
     with open(SCAN_DIR / "scan_meta.json") as f:
         meta = json.load(f)
@@ -142,6 +194,21 @@ def main():
 
         if (i + 1) % 50 == 0:
             print(f"  {i + 1}/{len(cv_frames)}...")
+
+    # Apply deskew if requested
+    if args.deskew:
+        # Calculate shear from velocity and readout time
+        # For +X scan: bottom row captured later = shifted right = positive shear in image
+        # To correct: shift bottom left = negative shear_px
+        readout_time = meta["camera"]["readout_time_s"]
+        shear_um = fit_velocity * readout_time  # µm of travel during readout
+        shear_px = shear_um / um_per_px  # pixels of skew
+
+        print(f"\nDeskew: {shear_um:.1f} µm = {shear_px:.1f} px (v={fit_velocity/1000:.1f} mm/s, readout={readout_time*1000:.1f} ms)")
+
+        # Negative because we're correcting the skew (shifting bottom left)
+        canvas = deskew_image(canvas, -shear_px)
+        print(f"Deskewed canvas: {canvas.size[0]}x{canvas.size[1]} px")
 
     # Convert to RGB for saving
     # Use white background
