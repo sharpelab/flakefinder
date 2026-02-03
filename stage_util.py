@@ -10,15 +10,148 @@ Usage:
     python stage_util.py --shutter open       # Open shutter
     python stage_util.py --shutter close      # Close shutter
     python stage_util.py --lamp 50            # Set lamp intensity
+    python stage_util.py --objective 5x       # Switch to 5x objective (SDK handles z-hop)
+    python stage_util.py --objective 3        # Switch to position 3
 """
 
 import argparse
+import re
 import sys
 
 from flakefinder.leica import LeicaConnection, Stage, ZDrive, Lamp, Nosepiece, Shutter
 
 
-def report_status(conn: LeicaConnection) -> None:
+# =============================================================================
+# Axis Conventions
+# =============================================================================
+# Z AXIS: +Z = CLOSER to sample (higher values = more crash risk)
+#         To retract/safe: DECREASE Z
+#         To approach: INCREASE Z
+# =============================================================================
+
+# =============================================================================
+# Objective Safety Configuration
+# =============================================================================
+
+# Working distances in µm (conservative estimates for Sharpe Lab DM6M)
+# These are approximate - actual values depend on specific objective models.
+# Position -> working distance mapping (1-indexed positions)
+WORKING_DISTANCES_UM: dict[int, float] = {
+    1: 12700,  # 5x N PLAN - 12.7mm working distance
+    2: 11000,  # 10x - ~11mm (typical)
+    3: 1900,   # 20x - ~1.9mm (typical)
+    4: 380,    # 50x - ~0.38mm (typical long WD)
+    5: 210,    # 150x - ~0.21mm (short WD, highest risk)
+    6: 15000,  # 2.5x - ~15mm (very safe)
+}
+
+# Parfocal offsets in µm (to be calibrated)
+# Offset = Z_focused(this_obj) - Z_focused(reference_obj)
+# Positive means this objective focuses at higher Z than reference.
+# All zeros until calibrated - set reference objective to position 1 (5x).
+PARFOCAL_OFFSETS_UM: dict[int, float] = {
+    1: 0,    # 5x - reference
+    2: 0,    # 10x
+    3: 0,    # 20x
+    4: 0,    # 50x
+    5: 0,    # 150x
+    6: 0,    # 2.5x
+}
+
+# Safety margin added to Z retraction (µm)
+Z_SAFETY_MARGIN_UM = 500
+
+
+def parse_objective_arg(value: str, nosepiece: Nosepiece) -> int:
+    """Parse objective argument to position number.
+
+    Accepts:
+        - Position number: "1", "2", "3", etc.
+        - Magnification: "5x", "10x", "20X", "50", etc.
+
+    Returns:
+        Position number (1-indexed).
+
+    Raises:
+        ValueError: If value cannot be parsed or doesn't match known objectives.
+    """
+    # Try as position number first
+    try:
+        pos = int(value)
+        if nosepiece.min_position <= pos <= nosepiece.max_position:
+            return pos
+    except ValueError:
+        pass
+
+    # Try as magnification (e.g., "5x", "10X", "50")
+    match = re.match(r"^(\d+(?:\.\d+)?)[xX]?$", value.strip())
+    if match:
+        mag = float(match.group(1))
+        # Find position with this magnification
+        for pos, obj_mag in nosepiece.magnifications.items():
+            if obj_mag == mag:
+                return pos
+
+    # Build helpful error message
+    valid = []
+    for pos in range(nosepiece.min_position, nosepiece.max_position + 1):
+        mag = nosepiece.magnifications.get(pos)
+        if mag:
+            valid.append(f"{pos} ({mag}x)")
+        else:
+            valid.append(str(pos))
+
+    raise ValueError(
+        f"Invalid objective '{value}'. Valid options: {', '.join(valid)}"
+    )
+
+
+def change_objective(
+    nosepiece: Nosepiece,
+    z: ZDrive,
+    target_position: int,
+) -> None:
+    """Change objective, trusting SDK's built-in z-hop for safety.
+
+    The Leica SDK automatically performs a z-hop (retract, rotate, return)
+    when switching objectives. We just log the operation and let the SDK
+    handle safety.
+
+    Future: Add parfocal compensation once offsets are calibrated.
+
+    Args:
+        nosepiece: Nosepiece instance.
+        z: ZDrive instance.
+        target_position: Target objective position (1-indexed).
+    """
+    current_position = nosepiece.position
+    current_mag = nosepiece.magnification
+    target_mag = nosepiece.magnifications.get(target_position)
+
+    if current_position == target_position:
+        print(f"Objective: already at position {target_position} ({target_mag}x)")
+        return
+
+    z_before = z.position_um
+
+    print(f"Objective: {current_mag}x (pos {current_position}) -> {target_mag}x (pos {target_position})")
+    print(f"  Z before: {z_before:.1f} µm")
+    print(f"  Switching (SDK handles z-hop)...")
+
+    nosepiece.position = target_position
+
+    z_after = z.position_um
+    print(f"  Z after: {z_after:.1f} µm (delta: {z_after - z_before:+.1f} µm)")
+
+    # Future: parfocal compensation would go here once calibrated
+    # current_offset = PARFOCAL_OFFSETS_UM.get(current_position, 0)
+    # target_offset = PARFOCAL_OFFSETS_UM.get(target_position, 0)
+    # ...
+
+    print(f"Objective: done at {nosepiece.magnification}x")
+
+
+def report_status(conn: LeicaConnection, verbose: bool = False) -> None:
     """Print current microscope status."""
     # Stage XY
     stage = Stage.from_connection(conn)
@@ -29,6 +162,31 @@ def report_status(conn: LeicaConnection) -> None:
     # Z axis
     z = ZDrive.from_connection(conn)
     print(f"Stage Z: {z.position_um:.1f} µm ({z.min_um:.0f} - {z.max_um:.0f})")
+
+    # Velocity info (verbose mode)
+    if verbose:
+        print()
+        print("Velocity (from SDK converter):")
+        if stage.x.max_velocity_um_s:
+            print(f"  X: {stage.x.velocity_um_s/1000:.1f} mm/s (max: {stage.x.max_velocity_um_s/1000:.1f} mm/s)")
+        elif stage.x.supports_velocity:
+            print(f"  X: native {stage.x.velocity_native} (no converter)")
+        else:
+            print("  X: not supported")
+
+        if stage.y.max_velocity_um_s:
+            print(f"  Y: {stage.y.velocity_um_s/1000:.1f} mm/s (max: {stage.y.max_velocity_um_s/1000:.1f} mm/s)")
+        elif stage.y.supports_velocity:
+            print(f"  Y: native {stage.y.velocity_native} (no converter)")
+        else:
+            print("  Y: not supported")
+
+        if z.max_velocity_um_s:
+            print(f"  Z: {z.velocity_um_s/1000:.1f} mm/s (max: {z.max_velocity_um_s/1000:.1f} mm/s)")
+        elif z.supports_velocity:
+            print(f"  Z: native {z.velocity_native} (no converter)")
+        else:
+            print("  Z: not supported")
 
     # Nosepiece/objective
     try:
@@ -69,6 +227,8 @@ def main() -> int:
     parser.add_argument("--dz", type=float, help="Relative Z move (µm)")
     parser.add_argument("--shutter", choices=["open", "close"], help="Open or close shutter")
     parser.add_argument("--lamp", type=int, help="Set lamp intensity")
+    parser.add_argument("--objective", type=str, help="Switch objective (position number or magnification like '5x', '20x')")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Show velocity limits and conversion factors")
     args = parser.parse_args()
 
     with LeicaConnection() as conn:
@@ -140,9 +300,19 @@ def main() -> int:
             z.move_rel(args.dz)
             print(f"Z: done at {z.position_um:.1f} µm")
 
+        # Objective change
+        if args.objective is not None:
+            nosepiece = Nosepiece.from_connection(conn)
+            try:
+                target_pos = parse_objective_arg(args.objective, nosepiece)
+                change_objective(nosepiece, z, target_pos)
+            except ValueError as e:
+                print(f"Error: {e}")
+                return 1
+
         # Always report full status
         print()
-        report_status(conn)
+        report_status(conn, verbose=args.verbose)
 
     return 0
 

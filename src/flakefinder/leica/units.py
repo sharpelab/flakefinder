@@ -192,6 +192,16 @@ class Axis:
         self._velocity: "BasicControlValueVelocity | None" = get_interface(
             unit, IID.IID_BASIC_CONTROL_VALUE_VELOCITY
         )
+        self._velocity_converter: "MetricsConverter | None" = None
+        if self._velocity is not None:
+            try:
+                vel_converters = self._velocity.GetMetricsConverters()
+                self._velocity_converter = vel_converters.FindMetricsConverter(
+                    int(EMetricsId.METRICS_MICRONS_PER_SECOND)
+                )
+            except Exception:
+                pass  # No velocity converter available
+
         self._calibration: "AutoCalibration | None" = get_interface(
             unit, IID.IID_AUTO_CALIBRATION
         )
@@ -402,6 +412,46 @@ class Axis:
         if self._velocity is None:
             return None
         return self._velocity.MaxControlValue()
+
+    @property
+    def velocity_um_s(self) -> float | None:
+        """Current velocity in µm/s, or None if not supported."""
+        if self._velocity is None or self._velocity_converter is None:
+            return None
+        native = self._velocity.GetControlValue()
+        return self._velocity_converter.GetMetricsValue(native)
+
+    @property
+    def max_velocity_um_s(self) -> float | None:
+        """Maximum velocity in µm/s, or None if not supported."""
+        if self._velocity is None or self._velocity_converter is None:
+            return None
+        native = self._velocity.MaxControlValue()
+        return self._velocity_converter.GetMetricsValue(native)
+
+    @property
+    def min_velocity_um_s(self) -> float | None:
+        """Minimum velocity in µm/s, or None if not supported."""
+        if self._velocity is None or self._velocity_converter is None:
+            return None
+        native = self._velocity.MinControlValue()
+        return self._velocity_converter.GetMetricsValue(native)
+
+    def set_velocity_um_s(self, velocity_um_s: float) -> None:
+        """Set velocity in µm/s.
+
+        Args:
+            velocity_um_s: Velocity in microns per second.
+
+        Raises:
+            RuntimeError: If axis doesn't support velocity control or conversion.
+        """
+        if self._velocity is None:
+            raise RuntimeError(f"Axis {self._name} doesn't support velocity control")
+        if self._velocity_converter is None:
+            raise RuntimeError(f"Axis {self._name} doesn't have velocity converter")
+        native = self._velocity_converter.GetControlValue(velocity_um_s)
+        self._velocity.SetControlValue(native)
 
     # --- Calibration ---
 
