@@ -8,6 +8,37 @@ from PIL import Image, ImageDraw, ImageFont
 SCAN_DIR = Path(__file__).parent / "test_scan"
 
 
+def create_blend_alpha(width, height, blend_width, is_first=False, is_last=False):
+    """
+    Create alpha mask with linear gradient edges for blending.
+
+    - Left edge: ramp from 0 to 255 over blend_width (unless is_first)
+    - Center: 255 (fully opaque)
+    - Right edge: ramp from 255 to 0 over blend_width (unless is_last)
+    """
+    # Create a single row and tile it vertically
+    row = [255] * width
+
+    if blend_width > 0:
+        # Left ramp (0 -> 255)
+        if not is_first:
+            for x in range(min(blend_width, width)):
+                row[x] = int(255 * x / blend_width)
+
+        # Right ramp (255 -> 0)
+        if not is_last:
+            for x in range(max(0, width - blend_width), width):
+                row[x] = int(255 * (width - 1 - x) / blend_width)
+
+    # Create image from row data, tiled vertically
+    alpha = Image.new('L', (width, height))
+    row_bytes = bytes(row)
+    for y in range(height):
+        alpha.paste(Image.frombytes('L', (width, 1), row_bytes), (0, y))
+
+    return alpha
+
+
 def deskew_image(img, shear_px):
     """
     Apply horizontal shear to correct rolling shutter skew.
@@ -88,6 +119,7 @@ def find_constant_velocity_frames(meta):
 def main():
     parser = argparse.ArgumentParser(description="Stitch scan frames with position smoothing")
     parser.add_argument("--deskew", action="store_true", help="Apply rolling shutter deskew correction")
+    parser.add_argument("--blend", action="store_true", help="Use gradient blending instead of 50%% alpha")
     args = parser.parse_args()
 
     # Load metadata
@@ -151,8 +183,16 @@ def main():
     canvas_w = int(canvas_w_um / um_per_px)
     canvas_h = frame_h
 
+    # Calculate blend width (half the overlap)
+    frame_spacing_px = int((smoothed_positions[1] - smoothed_positions[0]) / um_per_px) if len(smoothed_positions) > 1 else frame_w
+    overlap_px = frame_w - frame_spacing_px
+    blend_width = overlap_px // 2
+
     print(f"Canvas: {canvas_w}x{canvas_h} px ({canvas_w_um:.0f} µm wide)")
-    print(f"Stitching {len(cv_frames)} frames with 50% alpha...")
+    if args.blend:
+        print(f"Stitching {len(cv_frames)} frames with gradient blending (blend width: {blend_width} px)...")
+    else:
+        print(f"Stitching {len(cv_frames)} frames with 50% alpha...")
 
     # Create RGBA canvas (transparent background)
     canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
@@ -163,13 +203,20 @@ def main():
     except:
         font = ImageFont.load_default()
 
+    num_frames = len(cv_frames)
     for i, (frame, x_um) in enumerate(zip(cv_frames, smoothed_positions)):
         frame_idx = cv_start + i
         img = Image.open(SCAN_DIR / f"frame_{frame_idx:04d}.jpg").convert("RGBA")
 
-        # Set 50% alpha
-        alpha = img.split()[3] if img.mode == 'RGBA' else Image.new('L', img.size, 255)
-        alpha = alpha.point(lambda x: 128)  # 50% alpha
+        if args.blend:
+            # Gradient alpha: ramp at edges, full in center
+            is_first = (i == 0)
+            is_last = (i == num_frames - 1)
+            alpha = create_blend_alpha(frame_w, frame_h, blend_width, is_first, is_last)
+        else:
+            # Flat 50% alpha
+            alpha = Image.new('L', img.size, 128)
+
         img.putalpha(alpha)
 
         # Calculate X offset from smoothed position
@@ -178,22 +225,23 @@ def main():
         # Composite onto canvas
         canvas.alpha_composite(img, (x_offset, 0))
 
-        # Draw frame number in center
-        draw = ImageDraw.Draw(canvas)
-        text = str(frame_idx)
-        bbox = draw.textbbox((0, 0), text, font=font)
-        tw = bbox[2] - bbox[0]
-        th = bbox[3] - bbox[1]
-        tx = x_offset + frame_w // 2 - tw // 2
-        ty = frame_h // 2 - th // 2
+        # Draw frame number in center (skip if blending for cleaner output)
+        if not args.blend:
+            draw = ImageDraw.Draw(canvas)
+            text = str(frame_idx)
+            bbox = draw.textbbox((0, 0), text, font=font)
+            tw = bbox[2] - bbox[0]
+            th = bbox[3] - bbox[1]
+            tx = x_offset + frame_w // 2 - tw // 2
+            ty = frame_h // 2 - th // 2
 
-        # White text with black outline
-        for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1), (-1, 0), (1, 0), (0, -1), (0, 1)]:
-            draw.text((tx + dx, ty + dy), text, fill=(0, 0, 0, 255), font=font)
-        draw.text((tx, ty), text, fill=(255, 255, 255, 255), font=font)
+            # White text with black outline
+            for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1), (-1, 0), (1, 0), (0, -1), (0, 1)]:
+                draw.text((tx + dx, ty + dy), text, fill=(0, 0, 0, 255), font=font)
+            draw.text((tx, ty), text, fill=(255, 255, 255, 255), font=font)
 
         if (i + 1) % 50 == 0:
-            print(f"  {i + 1}/{len(cv_frames)}...")
+            print(f"  {i + 1}/{num_frames}...")
 
     # Apply deskew if requested
     if args.deskew:
