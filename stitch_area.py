@@ -401,11 +401,38 @@ def main():
     background = Image.new("RGB", canvas.size, (255, 255, 255))
     background.paste(canvas, mask=canvas.split()[3])
 
-    # Save
+    # Save image
     out_path = scan_dir.parent / f"{scan_dir.name}_stitch.png"
     background.save(out_path)
     print(f"Saved to {out_path}")
     print(f"Final size: {background.width}x{background.height} px")
+
+    # Save stitch metadata for downstream processing (chip detection, etc.)
+    # Stage bounds: the actual area covered by the stitched image
+    # Note: reported positions are frame CENTERS, so coverage extends ±FOV/2
+    # - X: global_x_min - fov/2 to global_x_max + fov/2
+    # - Y: last row's y - fov/2 to first row's y + fov/2
+    stage_bounds_um = {
+        "x_min": global_x_min - fov_width_um / 2,
+        "x_max": global_x_max + fov_width_um / 2,
+        "y_min": rows[-1]["y_um"] - fov_height_um / 2,
+        "y_max": rows[0]["y_um"] + fov_height_um / 2,
+    }
+
+    stitch_meta = {
+        "image_file": out_path.name,
+        "image_size_px": [background.width, background.height],
+        "stage_bounds_um": stage_bounds_um,
+        "scale_um_per_px": um_per_px,
+        "source_scan": f"{scan_dir.name}/scan_meta.json",
+        "objective_mag": optics["objective_mag"],
+        "downsample": downsample * args.downsample,
+    }
+
+    meta_path = out_path.with_name(out_path.stem + "_meta.json")
+    with open(meta_path, 'w') as f:
+        json.dump(stitch_meta, f, indent=2)
+    print(f"Saved metadata to {meta_path}")
 
 
 if __name__ == "__main__":
