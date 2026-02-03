@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 import threading
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from .enums import TID, IID, EMetricsId, MoveState
 from .core import get_interface, get_interface_required, find_unit
@@ -221,6 +221,40 @@ class Axis:
     def position_um(self) -> float:
         """Current position in microns."""
         return self._converter.GetMetricsValue(self.position_native)
+
+    def read_position_timed(self) -> tuple[float, float, float]:
+        """Fast position read with high-precision timestamps.
+
+        Useful for position interpolation during scanning. The timestamps
+        bracket the actual SDK call, allowing sub-millisecond timing accuracy.
+
+        Returns:
+            (t_before, t_after, position_um) tuple where times are from
+            time.perf_counter().
+        """
+        t_before = time.perf_counter()
+        native = self._bcv.GetControlValue()
+        t_after = time.perf_counter()
+        return (t_before, t_after, self._converter.GetMetricsValue(native))
+
+    @property
+    def bcv(self) -> "BasicControlValue":
+        """Direct BasicControlValue interface for fast polling.
+
+        Use this for tight polling loops where you need maximum performance.
+        Call bcv.GetControlValue() directly and convert with self.converter.
+        """
+        return self._bcv
+
+    @property
+    def converter(self) -> "MetricsConverter":
+        """Microns converter for manual position conversion.
+
+        Use with bcv for fast polling:
+            native = axis.bcv.GetControlValue()
+            um = axis.converter.GetMetricsValue(native)
+        """
+        return self._converter
 
     @property
     def min_um(self) -> float:
@@ -541,6 +575,118 @@ class Lamp:
 
     def __repr__(self) -> str:
         return f"Lamp({self._name}, intensity={self.intensity}/{self._max})"
+
+
+class Nosepiece:
+    """Objective turret (nosepiece) control.
+
+    Usage:
+        nosepiece = Nosepiece.from_connection(conn)
+        print(f"Objective: {nosepiece.magnification}x")
+        nosepiece.position = 3  # Switch to position 3
+    """
+
+    # Default magnification lookup for Sharpe Lab DM6M configuration.
+    # Position 1-indexed. Override by setting magnifications property.
+    DEFAULT_MAGNIFICATIONS: dict[int, float] = {
+        1: 5,
+        2: 10,
+        3: 20,
+        4: 50,
+        5: 150,
+        6: 2.5,
+    }
+
+    def __init__(self, unit: "Unit", magnifications: dict[int, float] | None = None):
+        """Initialize nosepiece from SDK unit.
+
+        Args:
+            unit: SDK Unit object (must support BasicControlValue).
+            magnifications: Optional dict mapping position (1-indexed) to
+                magnification. If None, uses DEFAULT_MAGNIFICATIONS.
+
+        Raises:
+            LookupError: If required interface not found.
+        """
+        self._unit = unit
+        self._name = unit.GetName()
+        self._bcv: "BasicControlValue" = get_interface_required(
+            unit, IID.IID_BASIC_CONTROL_VALUE
+        )
+        self._magnifications = magnifications or self.DEFAULT_MAGNIFICATIONS.copy()
+
+    @classmethod
+    def from_connection(
+        cls,
+        conn: "LeicaConnection",
+        magnifications: dict[int, float] | None = None,
+    ) -> "Nosepiece":
+        """Create Nosepiece from a LeicaConnection.
+
+        Args:
+            conn: Active LeicaConnection.
+            magnifications: Optional magnification lookup table.
+
+        Returns:
+            Nosepiece instance.
+
+        Raises:
+            LookupError: If nosepiece unit not found.
+        """
+        nosepiece_unit = find_unit(conn.root, TID.MICROSCOPE_NOSEPIECE)
+        if nosepiece_unit is None:
+            raise LookupError("Nosepiece unit not found")
+        return cls(nosepiece_unit, magnifications)
+
+    @property
+    def name(self) -> str:
+        """Nosepiece name from SDK."""
+        return self._name
+
+    @property
+    def position(self) -> int:
+        """Current objective position (1-indexed)."""
+        return self._bcv.GetControlValue()
+
+    @position.setter
+    def position(self, value: int) -> None:
+        """Set objective position (1-indexed)."""
+        self._bcv.SetControlValue(value)
+
+    @property
+    def magnification(self) -> float | None:
+        """Current objective magnification from lookup table.
+
+        Returns:
+            Magnification value (e.g., 5, 10, 20), or None if position
+            not in magnifications table.
+        """
+        return self._magnifications.get(self.position)
+
+    @property
+    def magnifications(self) -> dict[int, float]:
+        """Position-to-magnification lookup table."""
+        return self._magnifications
+
+    @magnifications.setter
+    def magnifications(self, value: dict[int, float]) -> None:
+        """Set the magnification lookup table."""
+        self._magnifications = value
+
+    @property
+    def min_position(self) -> int:
+        """Minimum objective position."""
+        return self._bcv.MinControlValue()
+
+    @property
+    def max_position(self) -> int:
+        """Maximum objective position."""
+        return self._bcv.MaxControlValue()
+
+    def __repr__(self) -> str:
+        mag = self.magnification
+        mag_str = f"{mag}x" if mag else f"pos={self.position}"
+        return f"Nosepiece({self._name}, {mag_str})"
 
 
 class Stage:

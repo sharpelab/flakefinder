@@ -76,10 +76,10 @@ def main():
             return 1
     os.makedirs(args.output)
 
-    from flakefinder.leica import LeicaConnection, Stage, Lamp, Shutter, TID
-    from flakefinder.leica.enums import UCAPI_TID, UCAPI_IID, UCAPI_PROP, IID
-    from flakefinder.leica.core import find_unit, get_interface_required, get_interface
+    from flakefinder.leica import LeicaConnection, Stage, Lamp, Shutter, Nosepiece
     from flakefinder.leica.camera import Camera
+    from flakefinder.leica.enums import UCAPI_IID
+    from flakefinder.leica.core import get_interface_required
 
     print("Area Scan v1 (Snake Pattern)")
     print("=" * 50)
@@ -90,8 +90,8 @@ def main():
 
         # Set up stage
         stage = Stage.from_connection(conn)
-        x_bcv = stage.x._bcv  # Native position reader
-        x_converter = stage.x._converter  # For native -> um conversion
+        x_bcv = stage.x.bcv  # Native position reader
+        x_converter = stage.x.converter  # For native -> um conversion
 
         # Set up lighting
         shutter = None
@@ -109,97 +109,37 @@ def main():
             pass
 
         # Set up camera
-        camera_unit = find_unit(conn.root, UCAPI_TID.UCAPI_CAMERA)
-        if camera_unit is None:
+        try:
+            camera = Camera.from_connection(conn)
+        except LookupError:
             print("Camera not found!")
             return 1
 
-        camera_unit.Init()
-        acquisition = get_interface_required(camera_unit, UCAPI_IID.IID_IMAGE_ACQUISITION)
-        properties = get_interface_required(camera_unit, IID.IID_PROPERTIES)
+        # Get acquisition interface for raw capture loop
+        acquisition = get_interface_required(camera._unit, UCAPI_IID.IID_IMAGE_ACQUISITION)
 
         # Configure camera
-        # Set trigger mode to CONTINUOUS (index 0) for faster capture
-        trigger_prop = properties.FindProperty(UCAPI_PROP.PROP_IMAGE_TRIGGER_MODE)
-        if trigger_prop:
-            trigger_prop.GetValue().SetIndex(0)
-
-        binning_prop = properties.FindProperty(UCAPI_PROP.PROP_BINNING_LEVEL)
-        if binning_prop:
-            binning_prop.GetValue().SetIndex(2)
-        exposure_prop = properties.FindProperty(UCAPI_PROP.PROP_EXPOSURE_TIME)
-        if exposure_prop:
-            exposure_prop.GetValue().SetValue(0.001)
-
-        # Set white balance (per-channel gain)
-        gain_blue_prop = properties.FindProperty(UCAPI_PROP.PROP_GAIN_BLUE)
-        if gain_blue_prop:
-            gain_blue_prop.GetValue().SetValue(wb_blue)
-        gain_green_prop = properties.FindProperty(UCAPI_PROP.PROP_GAIN_GREEN)
-        if gain_green_prop:
-            gain_green_prop.GetValue().SetValue(wb_green)
-        gain_red_prop = properties.FindProperty(UCAPI_PROP.PROP_GAIN_RED)
-        if gain_red_prop:
-            gain_red_prop.GetValue().SetValue(wb_red)
-
-        # Set gamma
-        gamma_prop = properties.FindProperty(UCAPI_PROP.PROP_GAMMA_LEVEL)
-        if gamma_prop:
-            gamma_prop.GetValue().SetValue(args.gamma)
-
-        # Check readout time
-        readout_prop = properties.FindProperty(UCAPI_PROP.PROP_IMAGE_READOUT_TIME)
-        readout_fps = ""
-        if readout_prop:
-            readout_time = readout_prop.GetValue().GetValue()
-            readout_fps = f", Readout: {readout_time*1000:.1f}ms ({1/readout_time:.0f} fps)"
+        camera.trigger_mode = 0  # CONTINUOUS for faster capture
+        camera.binning = 2  # 3x3 binning
+        camera.exposure_time = 0.001
+        camera.gain_rgb = (wb_red, wb_green, wb_blue)
+        camera.gamma = args.gamma
 
         # Read camera properties for metadata
-        def get_prop_value(prop_id):
-            """Get a property value, returns None if not available."""
-            prop = properties.FindProperty(prop_id)
-            if prop:
-                return prop.GetValue().GetValue()
-            return None
-
-        def get_prop_index(prop_id):
-            """Get a property index value, returns None if not available."""
-            prop = properties.FindProperty(prop_id)
-            if prop:
-                return prop.GetValue().GetIndex()
-            return None
-
-        # Frame dimensions in pixels (after binning)
-        frame_width_px = get_prop_value(UCAPI_PROP.PROP_LOGICAL_XRESOLUTION)
-        frame_height_px = get_prop_value(UCAPI_PROP.PROP_LOGICAL_YRESOLUTION)
-
-        # Pixel size in µm (logical = already accounts for binning and objective)
-        # SDK returns meters, convert to µm
-        pixel_size_x_um = get_prop_value(UCAPI_PROP.PROP_LOGICAL_PIXEL_XSIZE)
-        pixel_size_y_um = get_prop_value(UCAPI_PROP.PROP_LOGICAL_PIXEL_YSIZE)
-        if pixel_size_x_um:
-            pixel_size_x_um *= 1e6
-        if pixel_size_y_um:
-            pixel_size_y_um *= 1e6
-
-        # Physical sensor properties (before binning)
-        sensor_width_px = get_prop_value(UCAPI_PROP.PROP_SENSOR_XRESOLUTION)
-        sensor_height_px = get_prop_value(UCAPI_PROP.PROP_SENSOR_YRESOLUTION)
-        physical_pixel_x_um = get_prop_value(UCAPI_PROP.PROP_PHYSICAL_PIXEL_XSIZE)
-        physical_pixel_y_um = get_prop_value(UCAPI_PROP.PROP_PHYSICAL_PIXEL_YSIZE)
-        if physical_pixel_x_um:
-            physical_pixel_x_um *= 1e6
-        if physical_pixel_y_um:
-            physical_pixel_y_um *= 1e6
-
-        # Exposure and binning
-        actual_exposure = get_prop_value(UCAPI_PROP.PROP_EXPOSURE_TIME)
-        actual_binning_idx = get_prop_index(UCAPI_PROP.PROP_BINNING_LEVEL)
+        frame_width_px, frame_height_px = camera.frame_size_px
+        sensor_width_px, sensor_height_px = camera.sensor_size_px
+        pixel_size_x_um, pixel_size_y_um = camera.pixel_size_um
+        physical_pixel_x_um, physical_pixel_y_um = camera.physical_pixel_size_um
+        readout_time = camera.readout_time_s
+        actual_exposure = camera.exposure_time
+        actual_binning_idx = camera.binning
         binning_map = {0: 1, 1: 2, 2: 3}
         actual_binning = binning_map.get(actual_binning_idx, actual_binning_idx)
 
-        # Readout time
-        readout_time = get_prop_value(UCAPI_PROP.PROP_IMAGE_READOUT_TIME)
+        # Build readout info string
+        readout_fps = ""
+        if readout_time:
+            readout_fps = f", Readout: {readout_time*1000:.1f}ms ({1/readout_time:.0f} fps)"
 
         # Compute frame size in µm
         # The SDK's "logical pixel size" doesn't account for objective magnification
@@ -212,14 +152,12 @@ def main():
         # Get current objective from nosepiece
         objective_mag = None
         objective_idx = None
-        nosepiece_unit = find_unit(conn.root, TID.MICROSCOPE_NOSEPIECE)
-        if nosepiece_unit:
-            bcv_iface = get_interface(nosepiece_unit, IID.IID_BASIC_CONTROL_VALUE)
-            if bcv_iface:
-                objective_idx = bcv_iface.GetControlValue()
-                # Map index to magnification
-                obj_map = {1: 5, 2: 10, 3: 20, 4: 50, 5: 150, 6: 2.5}
-                objective_mag = obj_map.get(objective_idx)
+        try:
+            nosepiece = Nosepiece.from_connection(conn)
+            objective_idx = nosepiece.position
+            objective_mag = nosepiece.magnification
+        except LookupError:
+            pass
 
         # Compute sample-plane pixel size and frame size in µm
         # sample_pixel = physical_pixel × binning / magnification
@@ -232,7 +170,7 @@ def main():
             if frame_height_px:
                 frame_height_um = frame_height_px * sample_pixel_y_um
 
-        print(f"Camera: {camera_unit.GetName()}")
+        print(f"Camera: {camera.name}")
         exp_str = f"{actual_exposure*1000:.1f}ms" if actual_exposure else "?"
         print(f"  Trigger: CONTINUOUS, Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}{readout_fps}")
         print(f"  White balance (B,G,R): {wb_blue}, {wb_green}, {wb_red}")
@@ -363,7 +301,7 @@ def main():
             "downsample": args.downsample,
             # Camera and optics metadata
             "camera": {
-                "name": camera_unit.GetName(),
+                "name": camera.name,
                 "exposure_s": actual_exposure,
                 "binning": actual_binning,
                 "readout_time_s": readout_time,

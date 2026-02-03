@@ -10,7 +10,7 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -233,6 +233,73 @@ class Camera:
         prop = self._get_property(UCAPI_PROP.PROP_BINNING_LEVEL)
         if prop:
             prop.SetIndex(value)
+
+    @property
+    def trigger_mode(self) -> int:
+        """Trigger mode index (0=CONTINUOUS, 1=SOFT, etc.)."""
+        prop = self._get_property(UCAPI_PROP.PROP_IMAGE_TRIGGER_MODE)
+        return prop.GetIndex() if prop else 0
+
+    @trigger_mode.setter
+    def trigger_mode(self, value: int) -> None:
+        prop = self._get_property(UCAPI_PROP.PROP_IMAGE_TRIGGER_MODE)
+        if prop:
+            prop.SetIndex(value)
+
+    # --- Read-only Metadata Properties ---
+
+    @property
+    def frame_size_px(self) -> tuple[int, int]:
+        """Frame (width, height) in pixels after binning."""
+        w = self._get_property(UCAPI_PROP.PROP_LOGICAL_XRESOLUTION)
+        h = self._get_property(UCAPI_PROP.PROP_LOGICAL_YRESOLUTION)
+        return (
+            int(w.GetValue()) if w else 0,
+            int(h.GetValue()) if h else 0,
+        )
+
+    @property
+    def sensor_size_px(self) -> tuple[int, int]:
+        """Physical sensor (width, height) in pixels."""
+        w = self._get_property(UCAPI_PROP.PROP_SENSOR_XRESOLUTION)
+        h = self._get_property(UCAPI_PROP.PROP_SENSOR_YRESOLUTION)
+        return (
+            int(w.GetValue()) if w else 0,
+            int(h.GetValue()) if h else 0,
+        )
+
+    @property
+    def pixel_size_um(self) -> tuple[float, float]:
+        """Logical (x, y) pixel size in µm (accounts for binning).
+
+        Note: This is the SDK's logical pixel size, which may not account
+        for objective magnification. For sample-plane pixel size, divide
+        by objective magnification.
+        """
+        x = self._get_property(UCAPI_PROP.PROP_LOGICAL_PIXEL_XSIZE)
+        y = self._get_property(UCAPI_PROP.PROP_LOGICAL_PIXEL_YSIZE)
+        # SDK returns meters, convert to µm
+        return (
+            x.GetValue() * 1e6 if x else 0.0,
+            y.GetValue() * 1e6 if y else 0.0,
+        )
+
+    @property
+    def physical_pixel_size_um(self) -> tuple[float, float]:
+        """Physical sensor (x, y) pixel size in µm (before binning)."""
+        x = self._get_property(UCAPI_PROP.PROP_PHYSICAL_PIXEL_XSIZE)
+        y = self._get_property(UCAPI_PROP.PROP_PHYSICAL_PIXEL_YSIZE)
+        # SDK returns meters, convert to µm
+        return (
+            x.GetValue() * 1e6 if x else 0.0,
+            y.GetValue() * 1e6 if y else 0.0,
+        )
+
+    @property
+    def readout_time_s(self) -> float | None:
+        """Image readout time in seconds, or None if unavailable."""
+        prop = self._get_property(UCAPI_PROP.PROP_IMAGE_READOUT_TIME)
+        return prop.GetValue() if prop else None
 
     # --- Acquisition ---
 

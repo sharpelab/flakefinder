@@ -4,7 +4,7 @@ This package provides a clean Python interface to the Leica AHM SDK
 for controlling DM6M microscopes.
 
 Quick start:
-    from flakefinder.leica import LeicaConnection, TID, Axis, Stage, Camera
+    from flakefinder.leica import LeicaConnection, TID, Axis, Stage, Camera, Nosepiece
 
     with LeicaConnection() as conn:
         # Low-level: find units directly
@@ -19,9 +19,18 @@ Quick start:
         stage = Stage.from_connection(conn)
         stage.move_to_async(5000, 5000)
 
+        # Fast position reading for scanning
+        t_before, t_after, pos_um = stage.x.read_position_timed()
+
         # Camera capture
         camera = Camera.from_connection(conn)
+        camera.trigger_mode = 0  # CONTINUOUS
+        print(f"Frame size: {camera.frame_size_px}")
         image = camera.capture()
+
+        # Objective info
+        nosepiece = Nosepiece.from_connection(conn)
+        print(f"Objective: {nosepiece.magnification}x")
 
         # Continuous streaming
         with camera.stream(stage) as stream:
@@ -30,7 +39,7 @@ Quick start:
 Modules:
     core: Connection management and unit discovery
     enums: TID, IID, and other SDK enumerations
-    units: Axis, Stage, MoveHandle classes
+    units: Axis, Stage, MoveHandle, Nosepiece classes
     camera: Camera, FrameStream classes
     events: Event subscription system
     types: Protocol definitions for type hints
@@ -59,7 +68,7 @@ from .enums import (
     UCAPI_IID,
     UCAPI_PROP,
 )
-from .units import Axis, Stage, MoveHandle, Lamp, Shutter
+from .units import Axis, Stage, MoveHandle, Lamp, Shutter, Nosepiece
 from .camera import Camera, FrameStream, Frame
 from .events import Subscription, AxisEvents, PositionMonitor, EventQueue
 from .utils import (
@@ -99,6 +108,7 @@ __all__ = [
     "MoveHandle",
     "Lamp",
     "Shutter",
+    "Nosepiece",
     # Camera
     "Camera",
     "FrameStream",
