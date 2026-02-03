@@ -48,7 +48,22 @@ def main():
     parser.add_argument("--downsample", type=int, default=1, help="Downsample factor (2 = half dims)")
     parser.add_argument("--compress", action="store_true", help="Create .zip of output directory")
     parser.add_argument("--clean", action="store_true", help="Wipe output directory if it exists")
+    parser.add_argument("--write-threads", type=int, default=2, help="Number of image writer threads (default: 2)")
+    parser.add_argument("--white-balance", type=str, default="2.51,1.02,1.41",
+                        help="White balance as B,G,R gains (default: 2.51,1.02,1.41)")
+    parser.add_argument("--gamma", type=float, default=1.0, help="Gamma level (default: 1.0)")
     args = parser.parse_args()
+
+    # Parse white balance
+    wb_parts = args.white_balance.split(",")
+    if len(wb_parts) != 3:
+        print("Error: --white-balance must be 3 comma-separated values (B,G,R)")
+        return 1
+    try:
+        wb_blue, wb_green, wb_red = float(wb_parts[0]), float(wb_parts[1]), float(wb_parts[2])
+    except ValueError:
+        print("Error: --white-balance values must be numbers")
+        return 1
 
     from PIL import Image as PILImage
 
@@ -115,6 +130,22 @@ def main():
         exposure_prop = properties.FindProperty(UCAPI_PROP.PROP_EXPOSURE_TIME)
         if exposure_prop:
             exposure_prop.GetValue().SetValue(0.001)
+
+        # Set white balance (per-channel gain)
+        gain_blue_prop = properties.FindProperty(UCAPI_PROP.PROP_GAIN_BLUE)
+        if gain_blue_prop:
+            gain_blue_prop.GetValue().SetValue(wb_blue)
+        gain_green_prop = properties.FindProperty(UCAPI_PROP.PROP_GAIN_GREEN)
+        if gain_green_prop:
+            gain_green_prop.GetValue().SetValue(wb_green)
+        gain_red_prop = properties.FindProperty(UCAPI_PROP.PROP_GAIN_RED)
+        if gain_red_prop:
+            gain_red_prop.GetValue().SetValue(wb_red)
+
+        # Set gamma
+        gamma_prop = properties.FindProperty(UCAPI_PROP.PROP_GAMMA_LEVEL)
+        if gamma_prop:
+            gamma_prop.GetValue().SetValue(args.gamma)
 
         # Check readout time
         readout_prop = properties.FindProperty(UCAPI_PROP.PROP_IMAGE_READOUT_TIME)
@@ -204,6 +235,8 @@ def main():
         print(f"Camera: {camera_unit.GetName()}")
         exp_str = f"{actual_exposure*1000:.1f}ms" if actual_exposure else "?"
         print(f"  Trigger: CONTINUOUS, Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}{readout_fps}")
+        print(f"  White balance (B,G,R): {wb_blue}, {wb_green}, {wb_red}")
+        print(f"  Gamma: {args.gamma}")
         if frame_width_px and frame_height_px:
             print(f"  Frame: {frame_width_px}x{frame_height_px} px")
         if frame_width_um and frame_height_um:
@@ -314,8 +347,11 @@ def main():
 
                 save_queue.task_done()
 
-        saver = threading.Thread(target=saver_thread, daemon=True)
-        saver.start()
+        savers = []
+        for _ in range(args.write_threads):
+            t = threading.Thread(target=saver_thread, daemon=True)
+            t.start()
+            savers.append(t)
 
         meta = {
             "x_min_um": x_min,
@@ -339,6 +375,8 @@ def main():
                 "sensor_height_px": sensor_height_px,
                 "physical_pixel_x_um": physical_pixel_x_um,
                 "physical_pixel_y_um": physical_pixel_y_um,
+                "white_balance_bgr": [wb_blue, wb_green, wb_red],
+                "gamma": args.gamma,
             },
             "optics": {
                 "objective_mag": objective_mag,
@@ -388,19 +426,18 @@ def main():
                     x_um = x_converter.GetMetricsValue(x_native)
                     x_samples.append((t_before, t_after, x_um))
 
-            # Frame storage for this row
-            frames = []
-
             # Start position polling
             x_thread = threading.Thread(target=x_poll_thread, daemon=True)
             x_thread.start()
 
             row_start = time.perf_counter()
+            row_frame_start = global_frame_idx
+            row_frame_count = 0
 
             # Start async X move
             handle = stage.x.move_to_async(x_end_pos)
 
-            # Capture frames during move
+            # Capture frames during move, queue to savers immediately
             while not handle.is_complete:
                 t_start = time.perf_counter()
                 current_image[0] = None
@@ -408,7 +445,13 @@ def main():
                 t_end = time.perf_counter()
 
                 if current_image[0] is not None:
-                    frames.append((t_start, t_end, current_image[0]))
+                    # Queue frame immediately for background saving
+                    save_queue.put((
+                        global_frame_idx, row_idx, t_start, t_end, current_image[0],
+                        row_y, x_samples, total_scan_start
+                    ))
+                    global_frame_idx += 1
+                    row_frame_count += 1
 
             row_end = time.perf_counter()
             handle.dispose()
@@ -418,21 +461,12 @@ def main():
             x_thread.join(timeout=1.0)
 
             row_duration = row_end - row_start
-            row_frame_start = global_frame_idx
 
             # Filter position samples to row scan period
             row_x_samples = [(t_before, t_after, x) for t_before, t_after, x in x_samples
                             if row_start <= t_before <= row_end]
 
-            print(f"  {len(frames)} frames, {len(row_x_samples)} pos samples, {row_duration:.2f}s")
-
-            # Queue frames for background saving
-            for i, (t_start, t_end, image) in enumerate(frames):
-                save_queue.put((
-                    global_frame_idx, row_idx, t_start, t_end, image,
-                    row_y, row_x_samples, total_scan_start
-                ))
-                global_frame_idx += 1
+            print(f"  {row_frame_count} frames, {len(row_x_samples)} pos samples, {row_duration:.2f}s")
 
             # Add position samples to global list (with adjusted timestamps)
             for t_before, t_after, x_um in row_x_samples:
@@ -463,11 +497,13 @@ def main():
         return_handle_x = stage.x.move_to_async(x_center)
         return_handle_y = stage.y.move_to_async(y_center)
 
-        # Wait for saver to finish
-        print(f"Waiting for saver ({save_queue.qsize()} frames queued)...")
-        save_queue.put(None)  # Poison pill
-        saver.join()
-        print(f"Saver done ({len(saved_frames_meta)} frames saved)")
+        # Wait for savers to finish
+        print(f"Waiting for savers ({save_queue.qsize()} frames queued, {len(savers)} threads)...")
+        for _ in savers:
+            save_queue.put(None)  # Poison pill for each thread
+        for t in savers:
+            t.join()
+        print(f"Savers done ({len(saved_frames_meta)} frames saved)")
 
         # Finalize metadata
         # Sort saved_frames_meta by frame index (may be out of order due to threading)
