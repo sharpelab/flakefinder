@@ -689,6 +689,44 @@ class Nosepiece:
         return f"Nosepiece({self._name}, {mag_str})"
 
 
+class ZDrive(Axis):
+    """Z-axis (focus) drive control.
+
+    Convenience wrapper providing easy access to the Z drive axis.
+    Inherits all Axis functionality (move_to, move_to_async, position_um, etc.)
+
+    Usage:
+        z = ZDrive.from_connection(conn)
+        print(f"Z position: {z.position_um} µm")
+        z.move_to(25000)  # blocking
+        handle = z.move_to_async(24000)  # non-blocking
+        handle.wait()
+    """
+
+    @classmethod
+    def from_connection(cls, conn: "LeicaConnection") -> "ZDrive":
+        """Create ZDrive from a LeicaConnection.
+
+        Args:
+            conn: Active LeicaConnection.
+
+        Returns:
+            ZDrive instance.
+
+        Raises:
+            LookupError: If Z drive unit not found.
+        """
+        from .core import LeicaConnection
+
+        z_unit = conn.find_unit(TID.MICROSCOPE_ZDRIVE)
+        if z_unit is None:
+            raise LookupError("Z drive unit not found")
+        return cls(z_unit)
+
+    def __repr__(self) -> str:
+        return f"ZDrive(pos={self.position_um:.1f}µm)"
+
+
 class Stage:
     """XY stage control combining X and Y axes.
 

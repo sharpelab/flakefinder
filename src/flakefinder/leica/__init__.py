@@ -4,14 +4,11 @@ This package provides a clean Python interface to the Leica AHM SDK
 for controlling DM6M microscopes.
 
 Quick start:
-    from flakefinder.leica import LeicaConnection, TID, Axis, Stage, Camera, Nosepiece
+    from flakefinder.leica import LeicaConnection, Stage, ZDrive, Camera, Nosepiece
 
     with LeicaConnection() as conn:
-        # Low-level: find units directly
-        zdrive = conn.find_unit(TID.MICROSCOPE_ZDRIVE)
-
-        # High-level: use Axis/Stage wrappers
-        z = Axis(conn.find_unit_required(TID.MICROSCOPE_ZDRIVE))
+        # High-level wrappers
+        z = ZDrive.from_connection(conn)
         z.move_to(1000.0)  # blocking
         handle = z.move_to_async(2000.0)  # non-blocking
         handle.wait()
@@ -68,7 +65,7 @@ from .enums import (
     UCAPI_IID,
     UCAPI_PROP,
 )
-from .units import Axis, Stage, MoveHandle, Lamp, Shutter, Nosepiece
+from .units import Axis, Stage, MoveHandle, Lamp, Shutter, Nosepiece, ZDrive
 from .camera import Camera, FrameStream, Frame
 from .events import Subscription, AxisEvents, PositionMonitor, EventQueue
 from .utils import (
@@ -105,6 +102,7 @@ __all__ = [
     # Units
     "Axis",
     "Stage",
+    "ZDrive",
     "MoveHandle",
     "Lamp",
     "Shutter",
