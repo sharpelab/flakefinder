@@ -1,9 +1,10 @@
-"""Test parallel position reading and image capture with interpolation."""
+"""Multi-row snake scan with parallel position reading and image capture."""
 
 import argparse
 import bisect
 import json
 import os
+import queue
 import shutil
 import threading
 import time
@@ -40,12 +41,10 @@ def interpolate_position(t, samples):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Test parallel position reading and capture")
+    parser = argparse.ArgumentParser(description="Multi-row snake scan")
     parser.add_argument("-o", "--output", required=True, help="Output directory")
-    parser.add_argument("--margin", type=float, default=1000, help="Margin from edges in µm")
-    parser.add_argument("--duration", type=float, default=10.0, help="Max duration in seconds")
-    parser.add_argument("--reverse", action="store_true", help="Scan in -X direction (right to left)")
-    parser.add_argument("--y-offset", type=float, default=0, help="Y offset from center in µm (+ moves down)")
+    parser.add_argument("--margin", type=float, default=1000, help="Margin from stage edges in µm")
+    parser.add_argument("--y-overlap-percent", type=float, default=12, help="Y overlap between rows as %% of frame height")
     parser.add_argument("--downsample", type=int, default=1, help="Downsample factor (2 = half dims)")
     parser.add_argument("--compress", action="store_true", help="Create .zip of output directory")
     parser.add_argument("--clean", action="store_true", help="Wipe output directory if it exists")
@@ -67,7 +66,7 @@ def main():
     from flakefinder.leica.core import find_unit, get_interface_required, get_interface
     from flakefinder.leica.camera import Camera
 
-    print("Row Scan v1")
+    print("Area Scan v1 (Snake Pattern)")
     print("=" * 50)
 
     with LeicaConnection() as conn:
@@ -229,105 +228,102 @@ def main():
 
         context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(on_image)
 
-        # Calculate scan range
+        # Calculate scan area bounds
         margin = args.margin
         x_min = stage.x.min_um + margin
         x_max = stage.x.max_um - margin
+        y_min = stage.y.min_um + margin
+        y_max = stage.y.max_um - margin
         x_center = (stage.x.min_um + stage.x.max_um) / 2
         y_center = (stage.y.min_um + stage.y.max_um) / 2
-        y_pos = y_center + args.y_offset
 
-        # Determine scan direction
-        if args.reverse:
-            x_start_pos, x_end_pos = x_max, x_min
-            direction = -1
-            dir_str = "-X (right to left)"
-        else:
-            x_start_pos, x_end_pos = x_min, x_max
-            direction = 1
-            dir_str = "+X (left to right)"
+        # Calculate row Y positions (top to bottom, -Y direction)
+        if not frame_height_um:
+            print("Error: Could not determine frame height. Check objective/camera.")
+            return 1
 
-        print(f"Stage X range: {x_min:.0f} - {x_max:.0f} µm")
-        print(f"Stage Y: {y_pos:.0f} µm (center {'+' if args.y_offset >= 0 else ''}{args.y_offset:.0f})")
-        print(f"Direction: {dir_str}")
+        y_step = frame_height_um * (1 - args.y_overlap_percent / 100)
+        row_y_positions = []
+        y = y_max
+        while y >= y_min:
+            row_y_positions.append(y)
+            y -= y_step
+
+        num_rows = len(row_y_positions)
+
+        print(f"Scan area: X={x_min:.0f}-{x_max:.0f} µm, Y={y_min:.0f}-{y_max:.0f} µm")
+        print(f"Frame: {frame_width_um:.1f} x {frame_height_um:.1f} µm")
+        print(f"Y step: {y_step:.1f} µm ({args.y_overlap_percent:.0f}% overlap)")
+        print(f"Rows: {num_rows}")
         print(f"Output: {args.output}/")
         print()
 
-        # Move to start
-        print(f"Moving to start (X={x_start_pos:.0f}, Y={y_pos:.0f})...")
-        stage.x.move_to(x_start_pos)
-        stage.y.move_to(y_pos)
+        # Move to start of first row
+        print(f"Moving to start (X={x_min:.0f}, Y={row_y_positions[0]:.0f})...")
+        stage.x.move_to(x_min)
+        stage.y.move_to(row_y_positions[0])
 
-        # Background thread state - store (t, x_um) directly
-        x_samples = []  # (t, x_um)
-        stop_polling = threading.Event()
+        # Initialize global metadata
+        total_scan_start = time.perf_counter()
+        all_position_samples = []  # All position samples across all rows
+        global_frame_idx = 0  # Global frame counter
 
-        def x_poll_thread():
-            """Background thread: busy-poll X position."""
-            while not stop_polling.is_set():
-                t_before = time.perf_counter()
-                x_native = x_bcv.GetControlValue()
-                t_after = time.perf_counter()
-                x_um = x_converter.GetMetricsValue(x_native)
-                x_samples.append((t_before, t_after, x_um))
+        # Background saver thread
+        save_queue = queue.Queue()
+        saved_frames_meta = []
 
-        # Main thread state - keep .NET images
-        frames = []  # (t_start, t_end, .NET image)
+        def saver_thread():
+            """Background thread: convert, resize, and save frames."""
+            while True:
+                item = save_queue.get()
+                if item is None:  # Poison pill
+                    break
 
-        print(f"Starting scan...")
-        print()
+                frame_idx, row_idx, t_start, t_end, image, row_y, row_x_samples, t0 = item
 
-        # Start background position polling
-        x_thread = threading.Thread(target=x_poll_thread, daemon=True)
-        x_thread.start()
+                # Convert to numpy and dispose .NET image
+                arr = Camera._image_to_numpy(image)
+                image.Dispose()
 
-        scan_start = time.perf_counter()
+                # Resize if needed
+                img = PILImage.fromarray(arr)
+                if args.downsample > 1:
+                    new_size = (img.width // args.downsample, img.height // args.downsample)
+                    img = img.resize(new_size, PILImage.Resampling.LANCZOS)
 
-        # Start async move
-        handle = stage.x.move_to_async(x_end_pos)
+                # Save
+                path = os.path.join(args.output, f"frame_{frame_idx:04d}.jpg")
+                img.save(path, quality=95)
 
-        # Main thread: serial capture
-        while not handle.is_complete and (time.perf_counter() - scan_start) < args.duration:
-            t_start = time.perf_counter()
-            current_image[0] = None
-            acquisition.Acquire(context, None)
-            t_end = time.perf_counter()
+                # Compute metadata
+                x_start_interp = interpolate_position(t_start, row_x_samples)
+                x_end_interp = interpolate_position(t_end, row_x_samples)
+                dt = t_end - t_start
+                x_vel = (x_end_interp - x_start_interp) / dt if dt > 0 and x_start_interp and x_end_interp else 0
 
-            if current_image[0] is not None:
-                frames.append((t_start, t_end, current_image[0]))
+                saved_frames_meta.append({
+                    "n": frame_idx,
+                    "row": row_idx,
+                    "t_start": t_start - t0,
+                    "t_end": t_end - t0,
+                    "x_start": x_start_interp,
+                    "x_end": x_end_interp,
+                    "x_vel": x_vel,
+                    "y_um": row_y,
+                })
 
-                if len(frames) <= 5 or len(frames) % 50 == 0:
-                    print(f"  Frame {len(frames)}: t={t_start - scan_start:.3f}s")
+                save_queue.task_done()
 
-        scan_end = time.perf_counter()
+        saver = threading.Thread(target=saver_thread, daemon=True)
+        saver.start()
 
-        # Dispose scan handle and start async return to center
-        handle.dispose()
-        print()
-        print(f"Returning to center (async)...")
-        return_handle = stage.x.move_to_async(x_center)
-
-        # Stop background thread
-        stop_polling.set()
-        x_thread.join(timeout=1.0)
-
-        scan_duration = scan_end - scan_start
-
-        print(f"Scan complete: {scan_duration:.2f}s, {len(frames)} frames, {len(x_samples)} position samples")
-        print()
-
-        # Filter position samples to scan period
-        scan_x_samples = [(t_before, t_after, x) for t_before, t_after, x in x_samples if scan_start <= t_before <= scan_end]
-
-        # Build metadata
         meta = {
-            "scan_duration_s": scan_duration,
             "x_min_um": x_min,
             "x_max_um": x_max,
-            "y_um": y_pos,
-            "direction": direction,
-            "frame_count": len(frames),
-            "position_sample_count": len(scan_x_samples),
+            "y_min_um": y_min,
+            "y_max_um": y_max,
+            "y_step_um": y_step,
+            "y_overlap_percent": args.y_overlap_percent,
             "downsample": args.downsample,
             # Camera and optics metadata
             "camera": {
@@ -359,120 +355,165 @@ def main():
                 "shutter_name": shutter.name if shutter else None,
                 "shutter_open": shutter.is_open if shutter else None,
             },
-            "position_stream": [
-                {"t_before": t_before - scan_start, "t_after": t_after - scan_start, "x_um": x_um}
-                for t_before, t_after, x_um in scan_x_samples
-            ],
-            "frames": [],
+            "rows": [],
         }
 
-        # Convert and save frames with interpolated positions
-        print("Converting and saving frames...")
+        # Scan each row
+        for row_idx, row_y in enumerate(row_y_positions):
+            # Snake pattern: even rows +X, odd rows -X
+            direction = 1 if row_idx % 2 == 0 else -1
+            if direction == 1:
+                x_start_pos, x_end_pos = x_min, x_max
+                dir_str = "+X"
+            else:
+                x_start_pos, x_end_pos = x_max, x_min
+                dir_str = "-X"
 
-        for i, (t_start, t_end, image) in enumerate(frames):
-            # Convert to numpy
-            arr = Camera._image_to_numpy(image)
-            image.Dispose()
+            print(f"Row {row_idx}/{num_rows-1}: Y={row_y:.0f}µm, {dir_str}")
 
-            # Downsample if requested
-            img = PILImage.fromarray(arr)
-            if args.downsample > 1:
-                new_size = (img.width // args.downsample, img.height // args.downsample)
-                img = img.resize(new_size, PILImage.Resampling.LANCZOS)
+            # Move to row start if not already there
+            if row_idx > 0:
+                stage.y.move_to(row_y)
+                stage.x.move_to(x_start_pos)
 
-            # Save frame
-            path = os.path.join(args.output, f"frame_{i:04d}.jpg")
-            img.save(path, quality=95)
+            # Set up position polling for this row
+            x_samples = []
+            stop_polling = threading.Event()
 
-            # Interpolate position at start and end
-            x_start = interpolate_position(t_start, scan_x_samples)
-            x_end = interpolate_position(t_end, scan_x_samples)
+            def x_poll_thread():
+                while not stop_polling.is_set():
+                    t_before = time.perf_counter()
+                    x_native = x_bcv.GetControlValue()
+                    t_after = time.perf_counter()
+                    x_um = x_converter.GetMetricsValue(x_native)
+                    x_samples.append((t_before, t_after, x_um))
 
-            # Calculate velocity (µm/s)
-            dt = t_end - t_start
-            x_vel = (x_end - x_start) / dt if dt > 0 and x_start and x_end else 0
+            # Frame storage for this row
+            frames = []
 
-            meta["frames"].append({
-                "n": i,
-                "t_start": t_start - scan_start,
-                "t_end": t_end - scan_start,
-                "x_start": x_start,
-                "x_end": x_end,
-                "x_vel": x_vel,
+            # Start position polling
+            x_thread = threading.Thread(target=x_poll_thread, daemon=True)
+            x_thread.start()
+
+            row_start = time.perf_counter()
+
+            # Start async X move
+            handle = stage.x.move_to_async(x_end_pos)
+
+            # Capture frames during move
+            while not handle.is_complete:
+                t_start = time.perf_counter()
+                current_image[0] = None
+                acquisition.Acquire(context, None)
+                t_end = time.perf_counter()
+
+                if current_image[0] is not None:
+                    frames.append((t_start, t_end, current_image[0]))
+
+            row_end = time.perf_counter()
+            handle.dispose()
+
+            # Stop position polling
+            stop_polling.set()
+            x_thread.join(timeout=1.0)
+
+            row_duration = row_end - row_start
+            row_frame_start = global_frame_idx
+
+            # Filter position samples to row scan period
+            row_x_samples = [(t_before, t_after, x) for t_before, t_after, x in x_samples
+                            if row_start <= t_before <= row_end]
+
+            print(f"  {len(frames)} frames, {len(row_x_samples)} pos samples, {row_duration:.2f}s")
+
+            # Queue frames for background saving
+            for i, (t_start, t_end, image) in enumerate(frames):
+                save_queue.put((
+                    global_frame_idx, row_idx, t_start, t_end, image,
+                    row_y, row_x_samples, total_scan_start
+                ))
+                global_frame_idx += 1
+
+            # Add position samples to global list (with adjusted timestamps)
+            for t_before, t_after, x_um in row_x_samples:
+                all_position_samples.append({
+                    "t_before": t_before - total_scan_start,
+                    "t_after": t_after - total_scan_start,
+                    "x_um": x_um,
+                    "row": row_idx,
+                })
+
+            # Record row metadata
+            meta["rows"].append({
+                "row_idx": row_idx,
+                "y_um": row_y,
+                "direction": direction,
+                "frame_start": row_frame_start,
+                "frame_end": global_frame_idx,
+                "duration_s": row_duration,
+                "position_samples": len(row_x_samples),
             })
 
-            if (i + 1) % 50 == 0:
-                print(f"  Saved {i + 1}/{len(frames)}...")
+        total_scan_end = time.perf_counter()
+        total_duration = total_scan_end - total_scan_start
+
+        # Return to center while saver finishes
+        print()
+        print("Returning to center...")
+        return_handle_x = stage.x.move_to_async(x_center)
+        return_handle_y = stage.y.move_to_async(y_center)
+
+        # Wait for saver to finish
+        print(f"Waiting for saver ({save_queue.qsize()} frames queued)...")
+        save_queue.put(None)  # Poison pill
+        saver.join()
+        print(f"Saver done ({len(saved_frames_meta)} frames saved)")
+
+        # Finalize metadata
+        # Sort saved_frames_meta by frame index (may be out of order due to threading)
+        saved_frames_meta.sort(key=lambda f: f["n"])
+        meta["frames"] = saved_frames_meta
+        meta["scan_duration_s"] = total_duration
+        meta["frame_count"] = global_frame_idx
+        meta["position_sample_count"] = len(all_position_samples)
+        meta["position_stream"] = all_position_samples
 
         # Save metadata
         meta_path = os.path.join(args.output, "scan_meta.json")
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2)
-
-        print(f"  Saved metadata to {meta_path}")
+        print(f"Saved metadata to {meta_path}")
 
         # Compress if requested
         if args.compress:
-            print(f"  Creating {args.output}.zip...")
+            print(f"Creating {args.output}.zip...")
             shutil.make_archive(args.output, 'zip', args.output)
-            print(f"  Created {args.output}.zip")
+            print(f"Created {args.output}.zip")
 
+        # Summary stats
         print()
-
-        # Stats
         print("=" * 50)
-        print("CAPTURE:")
-        print(f"  Frames: {len(frames)}")
-        print(f"  FPS: {len(frames) / scan_duration:.1f}")
+        print("SCAN SUMMARY:")
+        print(f"  Total time: {total_duration:.1f}s")
+        print(f"  Rows: {num_rows}")
+        print(f"  Total frames: {global_frame_idx}")
+        print(f"  Total position samples: {len(all_position_samples)}")
+        print(f"  Avg FPS: {global_frame_idx / total_duration:.1f}")
 
-        if len(frames) > 1:
-            acquire_times = [f[1] - f[0] for f in frames]
-            intervals = [frames[i+1][0] - frames[i][0] for i in range(len(frames)-1)]
-            print(f"  Acquire: avg={sum(acquire_times)/len(acquire_times)*1000:.1f}ms")
-            print(f"  Interval: avg={sum(intervals)/len(intervals)*1000:.1f}ms, min={min(intervals)*1000:.1f}ms, max={max(intervals)*1000:.1f}ms")
-            # Debug: show outlier intervals
-            avg_interval = sum(intervals) / len(intervals)
-            long_intervals = [(i, intervals[i]*1000) for i in range(len(intervals)) if intervals[i] > avg_interval * 1.5]
-            if long_intervals:
-                print(f"  Long intervals (>1.5x avg): {[(i, f'{ms:.1f}ms') for i, ms in long_intervals]}")
+        # Per-row stats
+        if meta["rows"]:
+            row_frame_counts = [r["frame_end"] - r["frame_start"] for r in meta["rows"]]
+            row_durations = [r["duration_s"] for r in meta["rows"]]
+            print(f"  Frames/row: avg={sum(row_frame_counts)/len(row_frame_counts):.0f}, "
+                  f"min={min(row_frame_counts)}, max={max(row_frame_counts)}")
+            print(f"  Row duration: avg={sum(row_durations)/len(row_durations):.2f}s")
 
+        # Wait for return
+        return_handle_x.wait()
+        return_handle_y.wait()
+        return_handle_x.dispose()
+        return_handle_y.dispose()
         print()
-        print("POSITION:")
-        print(f"  Samples: {len(scan_x_samples)}")
-
-        if len(scan_x_samples) > 1:
-            pos_duration = scan_x_samples[-1][0] - scan_x_samples[0][0]
-            print(f"  FPS: {len(scan_x_samples) / pos_duration:.1f}")
-
-            pos_intervals = [scan_x_samples[i+1][0] - scan_x_samples[i][0] for i in range(len(scan_x_samples)-1)]
-            print(f"  Interval: avg={sum(pos_intervals)/len(pos_intervals)*1000:.2f}ms, min={min(pos_intervals)*1000:.2f}ms, max={max(pos_intervals)*1000:.2f}ms")
-
-            # SDK call latency (t_after - t_before)
-            sdk_latencies = [(t_after - t_before) * 1000 for t_before, t_after, x in scan_x_samples]
-            print(f"  SDK latency: avg={sum(sdk_latencies)/len(sdk_latencies):.2f}ms, min={min(sdk_latencies):.2f}ms, max={max(sdk_latencies):.2f}ms")
-
-            x_vals = [x for t_before, t_after, x in scan_x_samples]
-            print(f"  X range: {min(x_vals):.0f} - {max(x_vals):.0f} µm")
-
-        # Interpolation accuracy check
-        if len(meta["frames"]) > 1:
-            x_starts = [f["x_start"] for f in meta["frames"] if f["x_start"]]
-            velocities = [f["x_vel"] for f in meta["frames"] if f["x_vel"]]
-            if len(x_starts) > 1:
-                x_deltas = [x_starts[i+1] - x_starts[i] for i in range(len(x_starts)-1)]
-                print()
-                print("INTERPOLATED FRAME POSITIONS:")
-                print(f"  X range: {min(x_starts):.0f} - {max(x_starts):.0f} µm")
-                print(f"  X delta: avg={sum(x_deltas)/len(x_deltas):.1f}µm, min={min(x_deltas):.1f}µm, max={max(x_deltas):.1f}µm")
-            if velocities:
-                print(f"  Velocity: avg={sum(velocities)/len(velocities)/1000:.1f}mm/s, min={min(velocities)/1000:.1f}mm/s, max={max(velocities)/1000:.1f}mm/s")
-
-        # Wait for return to center
-        print()
-        if not return_handle.is_complete:
-            print("Waiting for stage to return to center...")
-        return_handle.wait()
-        return_handle.dispose()
         print("Done.")
 
         return 0

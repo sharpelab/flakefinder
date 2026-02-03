@@ -51,3 +51,4 @@ src/flakefinder/dlls/*.xml
 # OS
 .DS_Store
 Thumbs.db
+scans/
