@@ -49,17 +49,6 @@ From `microscope_description.json`:
 - Retract for safety by **decreasing Z**
 - Snake scan: alternating +X/-X rows, top to bottom (-Y)
 
-## Running on Microscope PC
-
-```bash
-# SSH to microscope
-ssh sharpelab-microscope
-
-# Run scripts with uv
-cd C:\Users\GGG-Leica-DM6M\flakefinder
-uv run scan_area_v1.py -o scans/my_scan --objective 5x --area-rect 5000,90000,10000,80000
-```
-
 ## Documentation
 
 | Doc | Content |
