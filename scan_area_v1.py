@@ -1,13 +1,71 @@
-"""Multi-row snake scan with parallel position reading and image capture."""
+"""Multi-row snake scan with parallel position reading and image capture.
+
+Supports both 5x overview scanning and 20x detection scanning for MaskTerial.
+See docs/maskterial_integration.md for 20x scanning context.
+"""
 
 import argparse
 import bisect
 import json
 import os
 import queue
+import re
 import shutil
 import threading
 import time
+
+# Path to microscope hardware description (for pre-connection validation)
+MICROSCOPE_DESCRIPTION = os.path.join(os.path.dirname(__file__), "microscope_description.json")
+
+
+def load_microscope_description() -> dict | None:
+    """Load microscope hardware description for pre-connection validation.
+
+    Returns:
+        Dict with hardware specs, or None if file doesn't exist.
+    """
+    if not os.path.exists(MICROSCOPE_DESCRIPTION):
+        return None
+    try:
+        with open(MICROSCOPE_DESCRIPTION) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return None
+
+
+def compute_frame_size_um(desc: dict, objective_mag: float, binning_idx: int = 2) -> tuple[float, float] | None:
+    """Compute frame size in µm from microscope description.
+
+    Args:
+        desc: Loaded microscope description.
+        objective_mag: Objective magnification (e.g., 5, 10, 20).
+        binning_idx: Binning index (0=1x1, 1=2x2, 2=3x3).
+
+    Returns:
+        (frame_width_um, frame_height_um) or None if can't compute.
+    """
+    camera = desc.get("camera", {})
+    binning_info = camera.get("binning_levels", {}).get(str(binning_idx))
+    if not binning_info:
+        return None
+
+    physical_pixel_x = camera.get("physical_pixel_x_um")
+    physical_pixel_y = camera.get("physical_pixel_y_um")
+    if not physical_pixel_x or not physical_pixel_y:
+        return None
+
+    frame_width_px = binning_info.get("frame_width_px")
+    frame_height_px = binning_info.get("frame_height_px")
+    binning_factor = binning_info.get("factor", 1)
+
+    if not frame_width_px or not frame_height_px:
+        return None
+
+    # sample_pixel = physical_pixel × binning / magnification
+    sample_pixel_x = physical_pixel_x * binning_factor / objective_mag
+    sample_pixel_y = physical_pixel_y * binning_factor / objective_mag
+
+    return (frame_width_px * sample_pixel_x, frame_height_px * sample_pixel_y)
 
 
 def interpolate_position(t, samples):
@@ -40,18 +98,158 @@ def interpolate_position(t, samples):
     return x0 + alpha * (x1 - x0)
 
 
+def parse_objective_arg(value: str, nosepiece) -> int:
+    """Parse objective argument to position number.
+
+    Accepts:
+        - Position number: "1", "2", "3", etc.
+        - Magnification: "5x", "10x", "20X", "50", etc.
+
+    Returns:
+        Position number (1-indexed).
+
+    Raises:
+        ValueError: If value cannot be parsed or doesn't match known objectives.
+    """
+    # Try as position number first
+    try:
+        pos = int(value)
+        if nosepiece.min_position <= pos <= nosepiece.max_position:
+            return pos
+    except ValueError:
+        pass
+
+    # Try as magnification (e.g., "5x", "10X", "50")
+    match = re.match(r"^(\d+(?:\.\d+)?)[xX]?$", value.strip())
+    if match:
+        mag = float(match.group(1))
+        # Find position with this magnification
+        for pos, obj_mag in nosepiece.magnifications.items():
+            if obj_mag == mag:
+                return pos
+
+    # Build helpful error message
+    valid = []
+    for pos in range(nosepiece.min_position, nosepiece.max_position + 1):
+        mag = nosepiece.magnifications.get(pos)
+        if mag:
+            valid.append(f"{pos} ({mag}x)")
+        else:
+            valid.append(str(pos))
+
+    raise ValueError(
+        f"Invalid objective '{value}'. Valid options: {', '.join(valid)}"
+    )
+
+
+def parse_area_rect(value: str) -> tuple[float, float, float, float]:
+    """Parse area rectangle from comma-separated string.
+
+    Args:
+        value: "x_min,x_max,y_min,y_max" in µm
+
+    Returns:
+        (x_min, x_max, y_min, y_max) tuple, with coordinates sorted if swapped.
+
+    Raises:
+        ValueError: If format is invalid or values are degenerate.
+    """
+    parts = value.split(",")
+    if len(parts) != 4:
+        raise ValueError("--area-rect must be x_min,x_max,y_min,y_max (4 values)")
+    try:
+        x1, x2, y1, y2 = float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3])
+    except ValueError:
+        raise ValueError("--area-rect values must be numbers")
+
+    # Sort coordinates if swapped
+    x_min, x_max = min(x1, x2), max(x1, x2)
+    y_min, y_max = min(y1, y2), max(y1, y2)
+
+    # Check for degenerate (zero-area) rectangles
+    if x_min == x_max:
+        raise ValueError(f"--area-rect: x_min and x_max cannot be equal ({x_min})")
+    if y_min == y_max:
+        raise ValueError(f"--area-rect: y_min and y_max cannot be equal ({y_min})")
+
+    return (x_min, x_max, y_min, y_max)
+
+
+def parse_xy_position(value: str) -> tuple[float, float]:
+    """Parse XY position from comma-separated string.
+
+    Args:
+        value: "x,y" in µm
+
+    Returns:
+        (x, y) tuple
+
+    Raises:
+        ValueError: If format is invalid.
+    """
+    parts = value.split(",")
+    if len(parts) != 2:
+        raise ValueError("Position must be x,y (2 values)")
+    try:
+        return float(parts[0]), float(parts[1])
+    except ValueError:
+        raise ValueError("Position values must be numbers")
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Multi-row snake scan")
+    parser = argparse.ArgumentParser(
+        description="Multi-row snake scan with configurable objective and area",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # 5x overview scan of full stage area (default)
+  python scan_area_v1.py -o scan_5x
+
+  # 20x detection scan for MaskTerial over specific area
+  python scan_area_v1.py -o scan_20x --objective 20x --area-rect 10000,60000,15000,55000
+
+  # Fast 20x scan with autofocus position
+  python scan_area_v1.py -o scan_20x --objective 20 --speed-mm 15 --auto-focus-pos 35000,35000
+"""
+    )
     parser.add_argument("-o", "--output", required=True, help="Output directory")
-    parser.add_argument("--margin", type=float, default=1000, help="Margin from stage edges in µm")
-    parser.add_argument("--y-overlap-percent", type=float, default=12, help="Y overlap between rows as %% of frame height")
-    parser.add_argument("--downsample", type=int, default=1, help="Downsample factor (2 = half dims)")
-    parser.add_argument("--compress", action="store_true", help="Create .zip of output directory")
-    parser.add_argument("--clean", action="store_true", help="Wipe output directory if it exists")
-    parser.add_argument("--write-threads", type=int, default=2, help="Number of image writer threads (default: 2)")
-    parser.add_argument("--white-balance", type=str, default="2.51,1.02,1.41",
-                        help="White balance as B,G,R gains (default: 2.51,1.02,1.41)")
-    parser.add_argument("--gamma", type=float, default=1.0, help="Gamma level (default: 1.0)")
+
+    # Scan area options
+    area_group = parser.add_argument_group("Scan area")
+    area_group.add_argument("--margin", type=float, default=1000,
+                           help="Margin from stage edges in µm (default: 1000, ignored if --area-rect set)")
+    area_group.add_argument("--area-rect", type=str, metavar="X1,X2,Y1,Y2",
+                           help="Explicit scan area as x_min,x_max,y_min,y_max in µm")
+
+    # Objective/optics options
+    optics_group = parser.add_argument_group("Optics")
+    optics_group.add_argument("--objective", type=str, metavar="MAG",
+                             help="Objective magnification (e.g., 5, 10, 20x, 50) - switches before scan")
+
+    # Motion options
+    motion_group = parser.add_argument_group("Motion")
+    motion_group.add_argument("--speed-mm", type=float, default=None,
+                             help="Stage speed in mm/s (default: SDK maximum)")
+    motion_group.add_argument("--auto-focus-pos", type=str, metavar="X,Y",
+                             help="XY position for autofocus calibration before scan (µm)")
+
+    # Frame options
+    frame_group = parser.add_argument_group("Frame capture")
+    frame_group.add_argument("--y-overlap-percent", type=float, default=12,
+                            help="Y overlap between rows as %% of frame height (default: 12)")
+    frame_group.add_argument("--downsample", type=int, default=1,
+                            help="Downsample factor (2 = half dims)")
+    frame_group.add_argument("--white-balance", type=str, default="2.51,1.02,1.41",
+                            help="White balance as B,G,R gains (default: 2.51,1.02,1.41)")
+    frame_group.add_argument("--gamma", type=float, default=1.0, help="Gamma level (default: 1.0)")
+
+    # Output options
+    output_group = parser.add_argument_group("Output")
+    output_group.add_argument("--compress", action="store_true", help="Create .zip of output directory")
+    output_group.add_argument("--clean", action="store_true", help="Wipe output directory if it exists")
+    output_group.add_argument("--write-threads", type=int, default=2,
+                             help="Number of image writer threads (default: 2)")
+
     args = parser.parse_args()
 
     # Parse white balance
@@ -65,6 +263,50 @@ def main():
         print("Error: --white-balance values must be numbers")
         return 1
 
+    # Pre-validation using microscope description (avoids slow hardware connection)
+    desc = load_microscope_description()
+    if desc:
+        stage_desc = desc.get("stage", {})
+
+        # Validate area-rect against stage limits
+        if args.area_rect:
+            try:
+                x_min, x_max, y_min, y_max = parse_area_rect(args.area_rect)
+                x_desc = stage_desc.get("x", {})
+                y_desc = stage_desc.get("y", {})
+                desc_x_min = x_desc.get("min_um", 0)
+                desc_x_max = x_desc.get("max_um", float("inf"))
+                desc_y_min = y_desc.get("min_um", 0)
+                desc_y_max = y_desc.get("max_um", float("inf"))
+
+                if x_min < desc_x_min:
+                    print(f"Error: x_min ({x_min:.0f}) is below stage minimum ({desc_x_min:.0f})")
+                    return 1
+                if x_max > desc_x_max:
+                    print(f"Error: x_max ({x_max:.0f}) exceeds stage maximum ({desc_x_max:.0f})")
+                    return 1
+                if y_min < desc_y_min:
+                    print(f"Error: y_min ({y_min:.0f}) is below stage minimum ({desc_y_min:.0f})")
+                    return 1
+                if y_max > desc_y_max:
+                    print(f"Error: y_max ({y_max:.0f}) exceeds stage maximum ({desc_y_max:.0f})")
+                    return 1
+            except ValueError as e:
+                print(f"Error: {e}")
+                return 1
+
+        # Estimate scan coverage if objective specified
+        if args.objective:
+            # Parse objective magnification from arg
+            obj_match = re.match(r"^(\d+(?:\.\d+)?)[xX]?$", args.objective.strip())
+            if obj_match:
+                obj_mag = float(obj_match.group(1))
+                frame_size = compute_frame_size_um(desc, obj_mag, binning_idx=2)
+                if frame_size:
+                    print(f"Pre-check: {obj_mag}x objective, frame ~{frame_size[0]:.0f} x {frame_size[1]:.0f} µm")
+    else:
+        print("Note: No microscope description found, skipping pre-validation")
+
     from PIL import Image as PILImage
 
     # Check/create output directory before connecting to hardware
@@ -76,7 +318,7 @@ def main():
             return 1
     os.makedirs(args.output)
 
-    from flakefinder.leica import LeicaConnection, Stage, Lamp, Shutter, Nosepiece
+    from flakefinder.leica import LeicaConnection, Stage, ZDrive, Lamp, Shutter, Nosepiece
     from flakefinder.leica.camera import Camera
     from flakefinder.leica.enums import UCAPI_IID
     from flakefinder.leica.core import get_interface_required
@@ -92,6 +334,66 @@ def main():
         stage = Stage.from_connection(conn)
         x_bcv = stage.x.bcv  # Native position reader
         x_converter = stage.x.converter  # For native -> um conversion
+
+        # Set up Z drive (needed for objective switching)
+        z = ZDrive.from_connection(conn)
+
+        # Set up nosepiece early (before camera, since objective affects frame size)
+        nosepiece = None
+        objective_mag = None
+        objective_idx = None
+        try:
+            nosepiece = Nosepiece.from_connection(conn)
+            objective_idx = nosepiece.position
+            objective_mag = nosepiece.magnification
+        except LookupError:
+            pass
+
+        # Switch objective if requested
+        if args.objective is not None:
+            if nosepiece is None:
+                print("Error: Nosepiece not available, cannot switch objective")
+                return 1
+            try:
+                target_pos = parse_objective_arg(args.objective, nosepiece)
+                if target_pos != objective_idx:
+                    target_mag = nosepiece.magnifications.get(target_pos)
+                    print(f"Switching objective: {objective_mag}x -> {target_mag}x...")
+                    nosepiece.position = target_pos
+                    objective_idx = nosepiece.position
+                    objective_mag = nosepiece.magnification
+                    print(f"Objective: now at {objective_mag}x")
+                else:
+                    print(f"Objective: already at {objective_mag}x")
+            except ValueError as e:
+                print(f"Error: {e}")
+                return 1
+
+        # Set stage velocity using SDK's velocity converter (µm/s)
+        max_speed_um_s = stage.x.max_velocity_um_s
+        max_speed_mm_s = max_speed_um_s / 1000 if max_speed_um_s else None
+
+        if args.speed_mm is not None:
+            target_speed_um_s = args.speed_mm * 1000  # mm/s to µm/s
+            # Clamp to valid range
+            if max_speed_um_s:
+                min_speed_um_s = stage.x.min_velocity_um_s or 0
+                target_speed_um_s = max(min_speed_um_s, min(max_speed_um_s, target_speed_um_s))
+        else:
+            # Default to maximum speed
+            target_speed_um_s = max_speed_um_s
+
+        if stage.x.supports_velocity and target_speed_um_s is not None:
+            stage.x.set_velocity_um_s(target_speed_um_s)
+            actual_speed_um_s = stage.x.velocity_um_s
+            actual_speed_mm = actual_speed_um_s / 1000 if actual_speed_um_s else None
+            if actual_speed_mm and max_speed_mm_s:
+                print(f"Stage X velocity: {actual_speed_mm:.1f} mm/s (max: {max_speed_mm_s:.1f} mm/s)")
+            else:
+                print(f"Stage X velocity: {actual_speed_mm} mm/s")
+        else:
+            actual_speed_mm = args.speed_mm if args.speed_mm else None
+            print(f"Stage X velocity: not configurable (using default)")
 
         # Set up lighting
         shutter = None
@@ -120,10 +422,22 @@ def main():
 
         # Configure camera
         camera.trigger_mode = 0  # CONTINUOUS for faster capture
-        camera.binning = 2  # 3x3 binning
+        camera.binning = 2  # 3x3 binning (optimal for MaskTerial at 20x)
         camera.exposure_time = 0.001
         camera.gain_rgb = (wb_red, wb_green, wb_blue)
         camera.gamma = args.gamma
+
+        # Handle autofocus position if specified (after camera/lighting ready)
+        auto_focus_pos = None
+        if args.auto_focus_pos:
+            try:
+                auto_focus_pos = parse_xy_position(args.auto_focus_pos)
+                print(f"Autofocus position: ({auto_focus_pos[0]:.0f}, {auto_focus_pos[1]:.0f}) µm")
+                # TODO: Move to autofocus position and run autofocus
+                # For now, just record the position in metadata
+            except ValueError as e:
+                print(f"Error: {e}")
+                return 1
 
         # Read camera properties for metadata
         frame_width_px, frame_height_px = camera.frame_size_px
@@ -148,16 +462,6 @@ def main():
         frame_height_um = None
         sample_pixel_x_um = None
         sample_pixel_y_um = None
-
-        # Get current objective from nosepiece
-        objective_mag = None
-        objective_idx = None
-        try:
-            nosepiece = Nosepiece.from_connection(conn)
-            objective_idx = nosepiece.position
-            objective_mag = nosepiece.magnification
-        except LookupError:
-            pass
 
         # Compute sample-plane pixel size and frame size in µm
         # sample_pixel = physical_pixel × binning / magnification
@@ -200,13 +504,34 @@ def main():
         context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(on_image)
 
         # Calculate scan area bounds
-        margin = args.margin
-        x_min = stage.x.min_um + margin
-        x_max = stage.x.max_um - margin
-        y_min = stage.y.min_um + margin
-        y_max = stage.y.max_um - margin
-        x_center = (stage.x.min_um + stage.x.max_um) / 2
-        y_center = (stage.y.min_um + stage.y.max_um) / 2
+        if args.area_rect:
+            try:
+                x_min, x_max, y_min, y_max = parse_area_rect(args.area_rect)
+                # Validate against stage limits (hard fail, no clamping)
+                if x_min < stage.x.min_um:
+                    print(f"Error: x_min ({x_min:.0f}) is below stage minimum ({stage.x.min_um:.0f})")
+                    return 1
+                if x_max > stage.x.max_um:
+                    print(f"Error: x_max ({x_max:.0f}) exceeds stage maximum ({stage.x.max_um:.0f})")
+                    return 1
+                if y_min < stage.y.min_um:
+                    print(f"Error: y_min ({y_min:.0f}) is below stage minimum ({stage.y.min_um:.0f})")
+                    return 1
+                if y_max > stage.y.max_um:
+                    print(f"Error: y_max ({y_max:.0f}) exceeds stage maximum ({stage.y.max_um:.0f})")
+                    return 1
+            except ValueError as e:
+                print(f"Error: {e}")
+                return 1
+        else:
+            margin = args.margin
+            x_min = stage.x.min_um + margin
+            x_max = stage.x.max_um - margin
+            y_min = stage.y.min_um + margin
+            y_max = stage.y.max_um - margin
+
+        x_center = (x_min + x_max) / 2
+        y_center = (y_min + y_max) / 2
 
         # Calculate row Y positions (top to bottom, -Y direction)
         if not frame_height_um:
@@ -299,6 +624,14 @@ def main():
             "y_step_um": y_step,
             "y_overlap_percent": args.y_overlap_percent,
             "downsample": args.downsample,
+            # Scan parameters
+            "scan_params": {
+                "speed_mm_s": actual_speed_mm,
+                "area_rect": args.area_rect,
+                "margin_um": args.margin if not args.area_rect else None,
+                "auto_focus_pos_um": list(auto_focus_pos) if auto_focus_pos else None,
+                "objective_requested": args.objective,
+            },
             # Camera and optics metadata
             "camera": {
                 "name": camera.name,

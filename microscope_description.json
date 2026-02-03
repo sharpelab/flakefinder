@@ -1,0 +1,49 @@
+{
+  "_comment": "Static hardware description for Sharpe Lab Leica DM6M microscope. Used for pre-connection validation.",
+  "microscope": "Leica DM6M",
+  "camera": {
+    "name": "Leica K5C",
+    "sensor_width_px": 5472,
+    "sensor_height_px": 3648,
+    "physical_pixel_x_um": 2.40234375,
+    "physical_pixel_y_um": 2.40234375,
+    "binning_levels": {
+      "0": {"name": "1x1", "factor": 1, "frame_width_px": 5472, "frame_height_px": 3648},
+      "1": {"name": "2x2", "factor": 2, "frame_width_px": 2736, "frame_height_px": 1824},
+      "2": {"name": "3x3", "factor": 3, "frame_width_px": 1824, "frame_height_px": 1216}
+    }
+  },
+  "objectives": {
+    "1": {"magnification": 5, "name": "5x N PLAN"},
+    "2": {"magnification": 10, "name": "10x"},
+    "3": {"magnification": 20, "name": "20x"},
+    "4": {"magnification": 50, "name": "50x"},
+    "5": {"magnification": 150, "name": "150x"},
+    "6": {"magnification": 2.5, "name": "2.5x"}
+  },
+  "stage": {
+    "x": {
+      "min_um": 0,
+      "max_um": 95172,
+      "position_um_per_native": 0.009766,
+      "max_velocity_native": 27467476,
+      "max_speed_mm_s": 40.0,
+      "_note": "Velocity native units differ from position; 27467476 native ≈ 40 mm/s measured"
+    },
+    "y": {
+      "min_um": 0,
+      "max_um": 85103,
+      "position_um_per_native": 0.009766,
+      "max_velocity_native": 27467476,
+      "max_speed_mm_s": 40.0,
+      "_note": "Velocity native units differ from position; 27467476 native ≈ 40 mm/s measured"
+    },
+    "z": {
+      "min_um": 0,
+      "max_um": 25837,
+      "max_velocity_native": 8820000,
+      "max_speed_mm_s": 5.0,
+      "_note": "Z is much slower than X/Y"
+    }
+  }
+}
