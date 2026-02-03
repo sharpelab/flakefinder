@@ -55,15 +55,25 @@ FlakeFinder is a microscope automation system for detecting 2D material flakes (
 - Illumination: LED with adjustable intensity
 - Focus: Motorized Z-drive with autofocus capability
 
-### Stage Speeds
+#### Axis Conventions
 
-| Ball Screw Pitch | Max Speed |
-|-----------------|-----------|
-| 1mm | 60 mm/s |
-| 2mm | 120 mm/s |
-| 4mm | 240 mm/s |
+| Axis | Direction | Notes |
+|------|-----------|-------|
+| X | +X = ? | TBD |
+| Y | +Y = ? | TBD |
+| **Z** | **+Z = CLOSER to sample** | ⚠️ Higher Z values move objective toward sample (crash risk) |
 
-(Need to measure actual pitch on the microscope)
+**Z Safety**: Lower Z values = safer (more clearance). When retracting for safety, DECREASE Z.
+
+### Stage Speeds (Measured from SDK)
+
+| Axis | Max Speed | Notes |
+|------|-----------|-------|
+| X | 40 mm/s | From SDK velocity converter |
+| Y | 40 mm/s | From SDK velocity converter |
+| Z | 5 mm/s | Much slower than X/Y |
+
+Use `stage.x.max_velocity_um_s` to get max speed in µm/s from SDK.
 
 ## Phased Development
 
