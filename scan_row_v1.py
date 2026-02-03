@@ -10,23 +10,27 @@ import time
 
 
 def interpolate_position(t, samples):
-    """Interpolate position at time t from (t, x_um) samples."""
+    """Interpolate position at time t from (t_before, t_after, x_um) samples.
+
+    Uses midpoint of t_before/t_after as the effective sample time.
+    """
     if not samples:
         return None
 
-    times = [s[0] for s in samples]
+    # Use midpoint of before/after as effective time
+    times = [(s[0] + s[1]) / 2 for s in samples]
 
     # Find insertion point
     idx = bisect.bisect_left(times, t)
 
     if idx == 0:
-        return samples[0][1]  # Before first sample
+        return samples[0][2]  # Before first sample
     if idx >= len(samples):
-        return samples[-1][1]  # After last sample
+        return samples[-1][2]  # After last sample
 
     # Linear interpolate between samples[idx-1] and samples[idx]
-    t0, x0 = samples[idx - 1][0], samples[idx - 1][1]
-    t1, x1 = samples[idx][0], samples[idx][1]
+    t0, x0 = times[idx - 1], samples[idx - 1][2]
+    t1, x1 = times[idx], samples[idx][2]
 
     if t1 == t0:
         return x0
@@ -56,9 +60,9 @@ def main():
             return 1
     os.makedirs(args.output)
 
-    from flakefinder.leica import LeicaConnection, Stage, Lamp, Shutter
+    from flakefinder.leica import LeicaConnection, Stage, Lamp, Shutter, TID
     from flakefinder.leica.enums import UCAPI_TID, UCAPI_IID, UCAPI_PROP, IID
-    from flakefinder.leica.core import find_unit, get_interface_required
+    from flakefinder.leica.core import find_unit, get_interface_required, get_interface
     from flakefinder.leica.camera import Camera
 
     print("Row Scan v1")
@@ -116,8 +120,93 @@ def main():
             readout_time = readout_prop.GetValue().GetValue()
             readout_fps = f", Readout: {readout_time*1000:.1f}ms ({1/readout_time:.0f} fps)"
 
+        # Read camera properties for metadata
+        def get_prop_value(prop_id):
+            """Get a property value, returns None if not available."""
+            prop = properties.FindProperty(prop_id)
+            if prop:
+                return prop.GetValue().GetValue()
+            return None
+
+        def get_prop_index(prop_id):
+            """Get a property index value, returns None if not available."""
+            prop = properties.FindProperty(prop_id)
+            if prop:
+                return prop.GetValue().GetIndex()
+            return None
+
+        # Frame dimensions in pixels (after binning)
+        frame_width_px = get_prop_value(UCAPI_PROP.PROP_LOGICAL_XRESOLUTION)
+        frame_height_px = get_prop_value(UCAPI_PROP.PROP_LOGICAL_YRESOLUTION)
+
+        # Pixel size in µm (logical = already accounts for binning and objective)
+        # SDK returns meters, convert to µm
+        pixel_size_x_um = get_prop_value(UCAPI_PROP.PROP_LOGICAL_PIXEL_XSIZE)
+        pixel_size_y_um = get_prop_value(UCAPI_PROP.PROP_LOGICAL_PIXEL_YSIZE)
+        if pixel_size_x_um:
+            pixel_size_x_um *= 1e6
+        if pixel_size_y_um:
+            pixel_size_y_um *= 1e6
+
+        # Physical sensor properties (before binning)
+        sensor_width_px = get_prop_value(UCAPI_PROP.PROP_SENSOR_XRESOLUTION)
+        sensor_height_px = get_prop_value(UCAPI_PROP.PROP_SENSOR_YRESOLUTION)
+        physical_pixel_x_um = get_prop_value(UCAPI_PROP.PROP_PHYSICAL_PIXEL_XSIZE)
+        physical_pixel_y_um = get_prop_value(UCAPI_PROP.PROP_PHYSICAL_PIXEL_YSIZE)
+        if physical_pixel_x_um:
+            physical_pixel_x_um *= 1e6
+        if physical_pixel_y_um:
+            physical_pixel_y_um *= 1e6
+
+        # Exposure and binning
+        actual_exposure = get_prop_value(UCAPI_PROP.PROP_EXPOSURE_TIME)
+        actual_binning_idx = get_prop_index(UCAPI_PROP.PROP_BINNING_LEVEL)
+        binning_map = {0: 1, 1: 2, 2: 3}
+        actual_binning = binning_map.get(actual_binning_idx, actual_binning_idx)
+
+        # Readout time
+        readout_time = get_prop_value(UCAPI_PROP.PROP_IMAGE_READOUT_TIME)
+
+        # Compute frame size in µm
+        # The SDK's "logical pixel size" doesn't account for objective magnification
+        # Sample pixel size = physical_pixel × binning / magnification
+        frame_width_um = None
+        frame_height_um = None
+        sample_pixel_x_um = None
+        sample_pixel_y_um = None
+
+        # Get current objective from nosepiece
+        objective_mag = None
+        objective_idx = None
+        nosepiece_unit = find_unit(conn.root, TID.MICROSCOPE_NOSEPIECE)
+        if nosepiece_unit:
+            bcv_iface = get_interface(nosepiece_unit, IID.IID_BASIC_CONTROL_VALUE)
+            if bcv_iface:
+                objective_idx = bcv_iface.GetControlValue()
+                # Map index to magnification
+                obj_map = {1: 5, 2: 10, 3: 20, 4: 50, 5: 100, 6: 150}
+                objective_mag = obj_map.get(objective_idx)
+
+        # Compute sample-plane pixel size and frame size in µm
+        # sample_pixel = physical_pixel × binning / magnification
+        if physical_pixel_x_um and actual_binning and objective_mag:
+            sample_pixel_x_um = physical_pixel_x_um * actual_binning / objective_mag
+            if frame_width_px:
+                frame_width_um = frame_width_px * sample_pixel_x_um
+        if physical_pixel_y_um and actual_binning and objective_mag:
+            sample_pixel_y_um = physical_pixel_y_um * actual_binning / objective_mag
+            if frame_height_px:
+                frame_height_um = frame_height_px * sample_pixel_y_um
+
         print(f"Camera: {camera_unit.GetName()}")
-        print(f"  Trigger: CONTINUOUS, Binning: 3x3, Exposure: 1ms{readout_fps}")
+        exp_str = f"{actual_exposure*1000:.1f}ms" if actual_exposure else "?"
+        print(f"  Trigger: CONTINUOUS, Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}{readout_fps}")
+        if frame_width_px and frame_height_px:
+            print(f"  Frame: {frame_width_px}x{frame_height_px} px")
+        if frame_width_um and frame_height_um:
+            print(f"  FOV: {frame_width_um:.2f} x {frame_height_um:.2f} µm")
+        if objective_mag:
+            print(f"  Objective: {objective_mag}x")
         if args.downsample > 1:
             print(f"  Downsample: {args.downsample}x")
 
@@ -153,10 +242,11 @@ def main():
         def x_poll_thread():
             """Background thread: busy-poll X position."""
             while not stop_polling.is_set():
-                t = time.perf_counter()
+                t_before = time.perf_counter()
                 x_native = x_bcv.GetControlValue()
+                t_after = time.perf_counter()
                 x_um = x_converter.GetMetricsValue(x_native)
-                x_samples.append((t, x_um))
+                x_samples.append((t_before, t_after, x_um))
 
         # Main thread state - keep .NET images
         frames = []  # (t_start, t_end, .NET image)
@@ -204,7 +294,7 @@ def main():
         print()
 
         # Filter position samples to scan period
-        scan_x_samples = [(t, x) for t, x in x_samples if scan_start <= t <= scan_end]
+        scan_x_samples = [(t_before, t_after, x) for t_before, t_after, x in x_samples if scan_start <= t_before <= scan_end]
 
         # Build metadata
         meta = {
@@ -215,9 +305,32 @@ def main():
             "frame_count": len(frames),
             "position_sample_count": len(scan_x_samples),
             "downsample": args.downsample,
+            # Camera and optics metadata
+            "camera": {
+                "name": camera_unit.GetName(),
+                "exposure_s": actual_exposure,
+                "binning": actual_binning,
+                "readout_time_s": readout_time,
+                "frame_width_px": frame_width_px,
+                "frame_height_px": frame_height_px,
+                "pixel_size_x_um": pixel_size_x_um,
+                "pixel_size_y_um": pixel_size_y_um,
+                "sensor_width_px": sensor_width_px,
+                "sensor_height_px": sensor_height_px,
+                "physical_pixel_x_um": physical_pixel_x_um,
+                "physical_pixel_y_um": physical_pixel_y_um,
+            },
+            "optics": {
+                "objective_mag": objective_mag,
+                "objective_idx": objective_idx,
+                "sample_pixel_x_um": sample_pixel_x_um,
+                "sample_pixel_y_um": sample_pixel_y_um,
+                "frame_width_um": frame_width_um,
+                "frame_height_um": frame_height_um,
+            },
             "position_stream": [
-                {"t": t - scan_start, "x_um": x_um}
-                for t, x_um in scan_x_samples
+                {"t_before": t_before - scan_start, "t_after": t_after - scan_start, "x_um": x_um}
+                for t_before, t_after, x_um in scan_x_samples
             ],
             "frames": [],
         }
@@ -303,7 +416,11 @@ def main():
             pos_intervals = [scan_x_samples[i+1][0] - scan_x_samples[i][0] for i in range(len(scan_x_samples)-1)]
             print(f"  Interval: avg={sum(pos_intervals)/len(pos_intervals)*1000:.2f}ms, min={min(pos_intervals)*1000:.2f}ms, max={max(pos_intervals)*1000:.2f}ms")
 
-            x_vals = [x for t, x in scan_x_samples]
+            # SDK call latency (t_after - t_before)
+            sdk_latencies = [(t_after - t_before) * 1000 for t_before, t_after, x in scan_x_samples]
+            print(f"  SDK latency: avg={sum(sdk_latencies)/len(sdk_latencies):.2f}ms, min={min(sdk_latencies):.2f}ms, max={max(sdk_latencies):.2f}ms")
+
+            x_vals = [x for t_before, t_after, x in scan_x_samples]
             print(f"  X range: {min(x_vals):.0f} - {max(x_vals):.0f} µm")
 
         # Interpolation accuracy check
