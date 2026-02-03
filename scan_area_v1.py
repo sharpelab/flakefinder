@@ -218,7 +218,7 @@ def main():
             if bcv_iface:
                 objective_idx = bcv_iface.GetControlValue()
                 # Map index to magnification
-                obj_map = {1: 5, 2: 10, 3: 20, 4: 50, 5: 100, 6: 150}
+                obj_map = {1: 5, 2: 10, 3: 20, 4: 50, 5: 150, 6: 2.5}
                 objective_mag = obj_map.get(objective_idx)
 
         # Compute sample-plane pixel size and frame size in µm
