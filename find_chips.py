@@ -234,6 +234,45 @@ def find_chips(
             cv2.putText(debug_img, text, (cx - text_w // 2, cy + text_h // 2),
                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 0), font_thickness)
 
+        # Add scale bar
+        # Choose largest round number that fits in 10-20% of image width
+        img_width_um = img_w * scale
+        bar_length_um = 1000  # default 1mm
+        for candidate_um in [20000, 10000, 5000, 2000, 1000]:
+            candidate_px = int(candidate_um / scale)
+            if candidate_px <= img_w * 0.20:  # Pick largest that's ≤20% of width
+                bar_length_um = candidate_um
+                break
+        bar_length_px = int(bar_length_um / scale)
+
+        bar_height_px = max(5, int(10 * img_scale))
+        bar_margin_px = max(30, int(60 * img_scale))
+        bar_x = img_w - bar_margin_px - bar_length_px
+        bar_y = img_h - bar_margin_px - bar_height_px
+
+        # Draw scale bar with outline for visibility
+        cv2.rectangle(debug_img, (bar_x - 2, bar_y - 2),
+                     (bar_x + bar_length_px + 2, bar_y + bar_height_px + 2),
+                     (0, 0, 0), -1)  # Black outline
+        cv2.rectangle(debug_img, (bar_x, bar_y),
+                     (bar_x + bar_length_px, bar_y + bar_height_px),
+                     (255, 255, 255), -1)  # White bar
+
+        # Scale bar label
+        bar_label = f"{bar_length_um / 1000:.0f} mm" if bar_length_um >= 1000 else f"{bar_length_um} µm"
+        label_font_scale = 1.0 * img_scale
+        label_thickness = max(1, int(2 * img_scale))
+        (label_w, label_h), _ = cv2.getTextSize(bar_label, cv2.FONT_HERSHEY_SIMPLEX,
+                                                 label_font_scale, label_thickness)
+        label_x = bar_x + (bar_length_px - label_w) // 2
+        label_y = bar_y - max(5, int(10 * img_scale))
+
+        # Draw label with outline
+        cv2.putText(debug_img, bar_label, (label_x, label_y),
+                   cv2.FONT_HERSHEY_SIMPLEX, label_font_scale, (0, 0, 0), label_thickness + 2)
+        cv2.putText(debug_img, bar_label, (label_x, label_y),
+                   cv2.FONT_HERSHEY_SIMPLEX, label_font_scale, (255, 255, 255), label_thickness)
+
         # Downscale to reasonable size for viewing
         max_debug_dim = 1500
         if max(debug_img.shape[:2]) > max_debug_dim:
