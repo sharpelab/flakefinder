@@ -242,6 +242,8 @@ Examples:
     frame_group.add_argument("--white-balance", type=str, default="2.51,1.02,1.41",
                             help="White balance as B,G,R gains (default: 2.51,1.02,1.41)")
     frame_group.add_argument("--gamma", type=float, default=1.0, help="Gamma level (default: 1.0)")
+    frame_group.add_argument("--binning", type=int, default=3, choices=[1, 2, 3],
+                            help="Camera binning NxN (1=full res, 2=2x2, 3=3x3, default: 3)")
 
     # Output options
     output_group = parser.add_argument_group("Output")
@@ -262,6 +264,9 @@ Examples:
     except ValueError:
         print("Error: --white-balance values must be numbers")
         return 1
+
+    # Convert binning to SDK index (1/2/3 -> 0/1/2)
+    binning_idx = args.binning - 1
 
     # Pre-validation using microscope description (avoids slow hardware connection)
     desc = load_microscope_description()
@@ -301,9 +306,9 @@ Examples:
             obj_match = re.match(r"^(\d+(?:\.\d+)?)[xX]?$", args.objective.strip())
             if obj_match:
                 obj_mag = float(obj_match.group(1))
-                frame_size = compute_frame_size_um(desc, obj_mag, binning_idx=2)
+                frame_size = compute_frame_size_um(desc, obj_mag, binning_idx=binning_idx)
                 if frame_size:
-                    print(f"Pre-check: {obj_mag}x objective, frame ~{frame_size[0]:.0f} x {frame_size[1]:.0f} µm")
+                    print(f"Pre-check: {obj_mag}x objective @ {args.binning}x{args.binning} binning, frame ~{frame_size[0]:.0f} x {frame_size[1]:.0f} µm")
     else:
         print("Note: No microscope description found, skipping pre-validation")
 
@@ -422,21 +427,19 @@ Examples:
 
         # Configure camera
         camera.trigger_mode = 0  # CONTINUOUS for faster capture
-        camera.binning = 2  # 3x3 binning (optimal for MaskTerial at 20x)
+        camera.binning = binning_idx
         camera.exposure_time = 0.001
         camera.gain_rgb = (wb_red, wb_green, wb_blue)
         camera.gamma = args.gamma
 
-        # Handle autofocus position if specified (after camera/lighting ready)
+        # Parse autofocus position if specified (actual autofocus runs after context setup)
         auto_focus_pos = None
+        af_result = None
         if args.auto_focus_pos:
             try:
                 auto_focus_pos = parse_xy_position(args.auto_focus_pos)
-                print(f"Autofocus position: ({auto_focus_pos[0]:.0f}, {auto_focus_pos[1]:.0f}) µm")
-                # TODO: Move to autofocus position and run autofocus
-                # For now, just record the position in metadata
             except ValueError as e:
-                print(f"Error: {e}")
+                print(f"Error parsing autofocus position: {e}")
                 return 1
 
         # Read camera properties for metadata
@@ -501,6 +504,33 @@ Examples:
         def on_image(image):
             current_image[0] = image
 
+        # Run autofocus if position specified (before registering scan's image handler)
+        if auto_focus_pos:
+            from flakefinder.leica.autofocus import continuous_autofocus
+
+            print(f"\nAutofocus at ({auto_focus_pos[0]:.0f}, {auto_focus_pos[1]:.0f}) µm...")
+
+            # Move to autofocus position
+            hx, hy = stage.move_to_async(auto_focus_pos[0], auto_focus_pos[1])
+            Stage.wait_all([hx, hy])
+            hx.dispose()
+            hy.dispose()
+
+            try:
+                af_result = continuous_autofocus(
+                    conn=conn,
+                    camera=camera,
+                    acquisition=acquisition,
+                    context=context,
+                    fine_pass=True,
+                )
+                print(f"  Z: {af_result.initial_z_um:.1f} -> {af_result.best_z_um:.1f} µm")
+                print(f"  Range: {af_result.z_range_um:.0f}µm, Sharpness: {af_result.initial_sharpness:.1f} -> {af_result.best_sharpness:.1f}")
+            except ValueError as e:
+                print(f"  Autofocus error: {e}")
+                return 1
+
+        # Register scan's image handler (after autofocus, which uses its own handler)
         context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(on_image)
 
         # Calculate scan area bounds
@@ -629,9 +659,20 @@ Examples:
                 "speed_mm_s": actual_speed_mm,
                 "area_rect": args.area_rect,
                 "margin_um": args.margin if not args.area_rect else None,
-                "auto_focus_pos_um": list(auto_focus_pos) if auto_focus_pos else None,
                 "objective_requested": args.objective,
             },
+            "autofocus": {
+                "position_um": list(auto_focus_pos) if auto_focus_pos else None,
+                "initial_z_um": af_result.initial_z_um if af_result else None,
+                "best_z_um": af_result.best_z_um if af_result else None,
+                "z_range_um": af_result.z_range_um if af_result else None,
+                "initial_sharpness": af_result.initial_sharpness if af_result else None,
+                "best_sharpness": af_result.best_sharpness if af_result else None,
+                "final_sharpness": af_result.final_sharpness if af_result else None,
+                "objective_position": af_result.objective_position if af_result else None,
+                "scan_duration_s": af_result.scan_duration_s if af_result else None,
+                "frame_count": af_result.frame_count if af_result else None,
+            } if auto_focus_pos else None,
             # Camera and optics metadata
             "camera": {
                 "name": camera.name,
