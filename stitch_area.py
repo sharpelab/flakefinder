@@ -4,8 +4,10 @@ import argparse
 import json
 from pathlib import Path
 from PIL import Image
+import numpy as np
 
 DEFAULT_SCAN_DIR = Path(__file__).parent / "test_area_2"
+CALIBRATION_DIR = Path(__file__).parent / "calibration"
 
 
 def create_blend_alpha(width, height, blend_width_x, blend_width_y=0,
@@ -14,8 +16,6 @@ def create_blend_alpha(width, height, blend_width_x, blend_width_y=0,
     """
     Create alpha mask with linear gradient edges for blending in both X and Y.
     """
-    import numpy as np
-
     # Start with full opacity
     alpha = np.ones((height, width), dtype=np.float32)
 
@@ -125,7 +125,7 @@ def fit_linear_positions(frames, cv_start, cv_end):
 
 def stitch_row_to_global(meta, row, frame_w, frame_h, um_per_px, output_downsample,
                          scan_dir, global_x_min, global_x_max, blend=True, deskew=True,
-                         hysteresis_um=0):
+                         hysteresis_um=0, flatfield=None, flatfield_mean=None):
     """
     Stitch a single row directly into global X coordinate space.
 
@@ -200,6 +200,15 @@ def stitch_row_to_global(meta, row, frame_w, frame_h, um_per_px, output_downsamp
         if output_downsample > 1:
             img = img.resize((frame_w, frame_h), Image.LANCZOS)
 
+        # Apply flatfield correction (after downsample, before blending)
+        if flatfield is not None:
+            img_arr = np.array(img, dtype=np.float32)
+            # Correct RGB channels only (not alpha)
+            for c in range(3):
+                img_arr[:, :, c] = (img_arr[:, :, c] / flatfield[:, :, c]) * flatfield_mean
+            img_arr = np.clip(img_arr, 0, 255).astype(np.uint8)
+            img = Image.fromarray(img_arr, mode="RGBA")
+
         if blend:
             is_first = (seq_i == 0)
             is_last = (seq_i == len(indices) - 1)
@@ -253,6 +262,10 @@ def main():
     # Likely candidates: stage backlash, encoder offset, or position readout timing.
     parser.add_argument("--hysteresis", type=float, default=0,
                         help="Hysteresis correction in µm (applied to -X rows)")
+    parser.add_argument("--flatfield", type=Path, default=None,
+                        help="Path to flatfield .npy file (default: auto-load from calibration/)")
+    parser.add_argument("--no-flatfield", action="store_true",
+                        help="Disable flatfield correction")
     args = parser.parse_args()
 
     scan_dir = args.scan_dir
@@ -268,6 +281,31 @@ def main():
     rows = meta["rows"]
     optics = meta["optics"]
     downsample = meta["downsample"]
+
+    # Load flatfield for vignetting correction
+    flatfield = None
+    flatfield_mean = None
+    flatfield_path = None
+
+    if args.no_flatfield:
+        print("Flatfield: disabled (--no-flatfield)")
+    else:
+        if args.flatfield:
+            flatfield_path = args.flatfield
+        else:
+            # Auto-load based on objective and binning
+            obj_mag = optics["objective_mag"]
+            binning = meta["camera"]["binning"]
+            flatfield_path = CALIBRATION_DIR / f"flatfield_{obj_mag}x_bin{binning}.npy"
+
+        if not flatfield_path.exists():
+            print(f"Error: Flatfield not found: {flatfield_path}")
+            print("  Run capture_flatfield.py or specify --no-flatfield to skip correction.")
+            return 1
+
+        flatfield = np.load(flatfield_path).astype(np.float32)
+        flatfield_mean = np.mean(flatfield)
+        print(f"Flatfield: {flatfield_path}")
 
     # Parse row range if specified
     if args.rows:
@@ -290,6 +328,20 @@ def main():
     frame_w, frame_h = first_img.size
     frame_w //= args.downsample
     frame_h //= args.downsample
+
+    # Resize flatfield to match working frame dimensions
+    if flatfield is not None:
+        ff_h, ff_w = flatfield.shape[:2]
+        if ff_h != frame_h or ff_w != frame_w:
+            # Resize each channel separately using LANCZOS
+            ff_resized = np.zeros((frame_h, frame_w, 3), dtype=np.float32)
+            for c in range(3):
+                ff_channel = Image.fromarray(flatfield[:, :, c], mode='F')
+                ff_channel = ff_channel.resize((frame_w, frame_h), Image.LANCZOS)
+                ff_resized[:, :, c] = np.array(ff_channel, dtype=np.float32)
+            print(f"  Resized flatfield {ff_w}x{ff_h} -> {frame_w}x{frame_h}")
+            flatfield = ff_resized
+            flatfield_mean = np.mean(flatfield)
 
     print(f"Scan: {len(meta['rows'])} rows, {meta['frame_count']} frames")
     print(f"Processing: {len(rows)} rows")
@@ -359,7 +411,8 @@ def main():
             meta, row, frame_w, frame_h, um_per_px, args.downsample,
             scan_dir, global_x_min, global_x_max,
             blend=not args.no_blend, deskew=not args.no_deskew,
-            hysteresis_um=args.hysteresis
+            hysteresis_um=args.hysteresis,
+            flatfield=flatfield, flatfield_mean=flatfield_mean
         )
 
         # Calculate Y position for this row
@@ -380,7 +433,6 @@ def main():
             y_blend = create_blend_alpha(row_img.width, row_img.height, 0, blend_width_y,
                                          is_first_y=is_at_top, is_last_y=is_at_bottom)
 
-            import numpy as np
             existing = np.array(row_alpha, dtype=np.float32)
             new_blend = np.array(y_blend, dtype=np.float32)
             combined = (existing * new_blend / 255).astype('uint8')
@@ -427,6 +479,10 @@ def main():
         "source_scan": f"{scan_dir.name}/scan_meta.json",
         "objective_mag": optics["objective_mag"],
         "downsample": downsample * args.downsample,
+        "flatfield_correction": {
+            "applied": flatfield is not None,
+            "file": str(flatfield_path) if flatfield is not None else None,
+        },
     }
 
     meta_path = out_path.with_name(out_path.stem + "_meta.json")
