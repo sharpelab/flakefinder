@@ -59,9 +59,11 @@ FlakeFinder is a microscope automation system for detecting 2D material flakes (
 
 | Axis | Direction | Notes |
 |------|-----------|-------|
-| X | +X = ? | TBD |
-| Y | +Y = ? | TBD |
+| X | +X = right | Origin at top-left of stage |
+| Y | +Y = down | Origin at top-left of stage |
 | **Z** | **+Z = CLOSER to sample** | ⚠️ Higher Z values move objective toward sample (crash risk) |
+
+**Stage origin**: Top-left corner. X increases rightward, Y increases downward.
 
 **Z Safety**: Lower Z values = safer (more clearance). When retracting for safety, DECREASE Z.
 
