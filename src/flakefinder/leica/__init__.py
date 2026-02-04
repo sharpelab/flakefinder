@@ -68,6 +68,14 @@ from .enums import (
 from .units import Axis, Stage, MoveHandle, Lamp, Shutter, Nosepiece, ZDrive
 from .camera import Camera, FrameStream, Frame
 from .events import Subscription, AxisEvents, PositionMonitor, EventQueue
+from .autofocus import (
+    sharpness,
+    interpolate_position,
+    AutofocusFrame,
+    AutofocusResult,
+    continuous_autofocus,
+    WORKING_DISTANCES_UM,
+)
 from .utils import (
     UnitConverter,
     get_metrics_converter,
@@ -116,6 +124,13 @@ __all__ = [
     "AxisEvents",
     "PositionMonitor",
     "EventQueue",
+    # Autofocus
+    "sharpness",
+    "interpolate_position",
+    "AutofocusFrame",
+    "AutofocusResult",
+    "continuous_autofocus",
+    "WORKING_DISTANCES_UM",
     # Utils
     "UnitConverter",
     "get_metrics_converter",
