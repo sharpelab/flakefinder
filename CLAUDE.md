@@ -43,6 +43,12 @@ From `microscope_description.json`:
 - **Stitch metadata:** `*_stitch_meta.json` - coordinate mapping for stitched images
 - **Chip detection:** `*_chips.json` - detected chip bounding boxes in stage coordinates
 
+## Grabbing Files from Microscope
+
+```bash
+scp 'sharpelab-microscope:flakefinder/scans/chips_5x.zip' scans/
+```
+
 ## Axis Conventions
 
 - **+Z = closer to sample** (crash risk at high Z values)

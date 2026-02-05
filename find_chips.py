@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime
 import json
 from pathlib import Path
+import time
 
 import cv2
 import numpy as np
@@ -110,6 +111,7 @@ def find_chips(
     Returns:
         Detection results dict
     """
+    start_time = time.perf_counter()
     # Load image and metadata
     meta = load_stitch_meta(image_path)
     img = cv2.imread(str(image_path))
@@ -174,14 +176,18 @@ def find_chips(
             chips.append(geom)
             chip_id += 1
 
-    # Sort chips by area (largest first)
-    chips.sort(key=lambda c: c["area_um2"], reverse=True)
+    # Sort chips top-left to bottom-right
+    # Bucket Y by 10mm so chips in same row sort left-to-right by X
+    y_bucket_um = 10000
+    chips.sort(key=lambda c: (c["centroid_stage_um"][1] // y_bucket_um, c["centroid_stage_um"][0]))
     for i, chip in enumerate(chips):
         chip["id"] = i
 
     # Build results
+    duration_s = time.perf_counter() - start_time
     results = {
         "timestamp": datetime.now().isoformat(),
+        "duration_s": round(duration_s, 2),
         "source_stitch": image_path.name,
         "source_meta": image_path.stem + "_meta.json",
         "detection_params": {
@@ -217,9 +223,8 @@ def find_chips(
             x, y, w, h = cv2.boundingRect(contour)
 
             if edge:
-                # Red contour and bbox for rejected
+                # Red contour for rejected (no bbox)
                 cv2.drawContours(debug_img, [contour], -1, (0, 0, 255), line_thickness)
-                cv2.rectangle(debug_img, (x, y), (x + w, y + h), (0, 0, 255), bbox_thickness)
             else:
                 # Green contour, red bbox for valid
                 cv2.drawContours(debug_img, [contour], -1, (0, 255, 0), line_thickness)

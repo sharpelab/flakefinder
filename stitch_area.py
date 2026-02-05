@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime
 import json
 from pathlib import Path
+import time
 from PIL import Image
 import numpy as np
 
@@ -269,6 +270,7 @@ def main():
                         help="Disable flatfield correction")
     args = parser.parse_args()
 
+    start_time = time.perf_counter()
     scan_dir = args.scan_dir
 
     # Load metadata
@@ -472,8 +474,10 @@ def main():
         "y_max": rows[0]["y_um"] + fov_height_um / 2,
     }
 
+    duration_s = time.perf_counter() - start_time
     stitch_meta = {
         "timestamp": datetime.now().isoformat(),
+        "duration_s": round(duration_s, 2),
         "image_file": out_path.name,
         "image_size_px": [background.width, background.height],
         "stage_bounds_um": stage_bounds_um,

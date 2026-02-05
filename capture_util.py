@@ -196,11 +196,11 @@ def main() -> int:
 
         print(f"Saved: {args.output} ({img.width}x{img.height})")
 
-        # Open the output file
-        os.startfile(args.output)
-
         # Dispose camera before reporting status (avoids issues)
         camera.dispose()
+
+        # Open the output file
+        os.startfile(args.output)
 
         # Report full status
         print()
