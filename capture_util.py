@@ -94,6 +94,8 @@ def main() -> int:
     parser.add_argument("--wb-blue", type=float, help="Blue channel gain")
     parser.add_argument("--quality", type=int, default=95,
                         help="JPEG quality (default: 95)")
+    parser.add_argument("--xy", type=str, metavar="X,Y",
+                        help="Move to X,Y position in µm before capture (e.g., '5000,14441')")
     args = parser.parse_args()
 
     # Parse white balance
@@ -129,6 +131,19 @@ def main() -> int:
                 print("Shutter: opened")
         except LookupError:
             pass  # No shutter
+
+        # Move to XY position if specified
+        if args.xy:
+            parts = args.xy.split(",")
+            if len(parts) != 2:
+                print("Error: --xy must be X,Y (e.g., '5000,14441')")
+                return 1
+            target_x, target_y = float(parts[0]), float(parts[1])
+            stage = Stage.from_connection(conn)
+            print(f"Moving to X={target_x:.0f}, Y={target_y:.0f} µm...")
+            stage.move_to(target_x, target_y)
+            x, y = stage.position_um
+            print(f"Arrived at X={x:.1f}, Y={y:.1f} µm")
 
         # Initialize camera
         camera = Camera.from_connection(conn)
