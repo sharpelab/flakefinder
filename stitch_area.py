@@ -474,6 +474,21 @@ def main():
         "y_max": rows[0]["y_um"] + fov_height_um / 2,
     }
 
+    # Compute average CV X overlap across all rows
+    all_cv_steps = []
+    for rr in row_results:
+        smoothed = rr["smoothed"]
+        if len(smoothed) >= 2:
+            steps = [abs(smoothed[i+1] - smoothed[i]) for i in range(len(smoothed)-1)]
+            all_cv_steps.extend(steps)
+
+    if all_cv_steps:
+        avg_cv_step = sum(all_cv_steps) / len(all_cv_steps)
+        avg_cv_overlap_pct = (fov_width_um - avg_cv_step) / fov_width_um * 100
+    else:
+        avg_cv_step = None
+        avg_cv_overlap_pct = None
+
     duration_s = time.perf_counter() - start_time
     stitch_meta = {
         "timestamp": datetime.now().isoformat(),
@@ -488,6 +503,11 @@ def main():
         "flatfield_correction": {
             "applied": flatfield is not None,
             "file": str(flatfield_path) if flatfield is not None else None,
+        },
+        "cv_stats": {
+            "avg_step_um": round(avg_cv_step, 1) if avg_cv_step else None,
+            "avg_overlap_pct": round(avg_cv_overlap_pct, 1) if avg_cv_overlap_pct else None,
+            "frame_width_um": round(fov_width_um, 1),
         },
     }
 
