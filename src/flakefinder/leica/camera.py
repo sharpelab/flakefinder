@@ -387,7 +387,11 @@ class Camera:
         return DeferredFrameStream(self, max_frames)
 
     def dispose(self) -> None:
-        """Release camera resources."""
+        """Release camera resources.
+
+        Note: Only disposes the context we created, NOT the unit.
+        The unit is owned by LeicaConnection and disposed when it closes.
+        """
         if self._context is not None:
             self._context.IsCancelled = True
             try:
@@ -395,12 +399,7 @@ class Camera:
             except Exception:
                 pass
             self._context = None
-        if self._unit is not None:
-            try:
-                self._unit.Dispose()
-            except Exception:
-                pass
-            self._unit = None
+        # Don't dispose _unit - it's owned by LeicaConnection
 
     def __del__(self):
         self.dispose()

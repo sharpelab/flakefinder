@@ -229,8 +229,10 @@ Examples:
 
     # Motion options
     motion_group = parser.add_argument_group("Motion")
-    motion_group.add_argument("--speed-mm", type=float, default=None,
-                             help="Stage speed in mm/s (default: SDK maximum)")
+    motion_group.add_argument("--speed-mm", type=float, default=40,
+                             help="Scan speed in mm/s for X scanning and Y jogs (default: 40)")
+    motion_group.add_argument("--move-speed-mm", type=float, default=40,
+                             help="Move speed in mm/s for positioning moves (default: 40)")
     motion_group.add_argument("--auto-focus-pos", type=str, metavar="X,Y",
                              help="XY position for autofocus calibration before scan (µm)")
 
@@ -375,31 +377,34 @@ Examples:
                 print(f"Error: {e}")
                 return 1
 
-        # Set stage velocity using SDK's velocity converter (µm/s)
-        max_speed_um_s = stage.x.max_velocity_um_s
-        max_speed_mm_s = max_speed_um_s / 1000 if max_speed_um_s else None
+        # Helper to set stage velocity
+        def set_stage_speed(speed_mm: float, label: str = "") -> float:
+            """Set X and Y velocity, return actual X speed in mm/s."""
+            target_um_s = speed_mm * 1000
+            actual_mm = speed_mm
 
-        if args.speed_mm is not None:
-            target_speed_um_s = args.speed_mm * 1000  # mm/s to µm/s
-            # Clamp to valid range
-            if max_speed_um_s:
-                min_speed_um_s = stage.x.min_velocity_um_s or 0
-                target_speed_um_s = max(min_speed_um_s, min(max_speed_um_s, target_speed_um_s))
-        else:
-            # Default to maximum speed
-            target_speed_um_s = max_speed_um_s
+            for axis, name in [(stage.x, "X"), (stage.y, "Y")]:
+                if axis.supports_velocity:
+                    max_um_s = axis.max_velocity_um_s
+                    min_um_s = axis.min_velocity_um_s or 0
+                    if max_um_s:
+                        clamped = max(min_um_s, min(max_um_s, target_um_s))
+                        axis.set_velocity_um_s(clamped)
+                        if name == "X":
+                            actual_mm = (axis.velocity_um_s or clamped) / 1000
 
-        if stage.x.supports_velocity and target_speed_um_s is not None:
-            stage.x.set_velocity_um_s(target_speed_um_s)
-            actual_speed_um_s = stage.x.velocity_um_s
-            actual_speed_mm = actual_speed_um_s / 1000 if actual_speed_um_s else None
-            if actual_speed_mm and max_speed_mm_s:
-                print(f"Stage X velocity: {actual_speed_mm:.1f} mm/s (max: {max_speed_mm_s:.1f} mm/s)")
-            else:
-                print(f"Stage X velocity: {actual_speed_mm} mm/s")
-        else:
-            actual_speed_mm = args.speed_mm if args.speed_mm else None
-            print(f"Stage X velocity: not configurable (using default)")
+            return actual_mm
+
+        # Set initial move speed
+        move_speed_mm = args.move_speed_mm
+        scan_speed_mm = args.speed_mm
+
+        print(f"Move speed: {move_speed_mm:.1f} mm/s")
+        print(f"Scan speed: {scan_speed_mm:.1f} mm/s")
+
+        # Start with move speed for initial positioning
+        set_stage_speed(move_speed_mm)
+        actual_speed_mm = scan_speed_mm  # Will be set before scan
 
         # Set up lighting
         shutter = None
@@ -590,6 +595,9 @@ Examples:
         stage.x.move_to(x_min)
         stage.y.move_to(row_y_positions[0])
 
+        # Switch to scan speed for scanning
+        actual_speed_mm = set_stage_speed(scan_speed_mm, "scan")
+
         # Initialize global metadata
         total_scan_start = time.perf_counter()
         all_position_samples = []  # All position samples across all rows
@@ -658,7 +666,8 @@ Examples:
             "downsample": args.downsample,
             # Scan parameters
             "scan_params": {
-                "speed_mm_s": actual_speed_mm,
+                "scan_speed_mm_s": actual_speed_mm,
+                "move_speed_mm_s": move_speed_mm,
                 "area_rect": args.area_rect,
                 "margin_um": args.margin if not args.area_rect else None,
                 "objective_requested": args.objective,
@@ -808,6 +817,7 @@ Examples:
         # Return to center while saver finishes
         print()
         print("Returning to center...")
+        set_stage_speed(move_speed_mm)  # Switch back to move speed
         return_handle_x = stage.x.move_to_async(x_center)
         return_handle_y = stage.y.move_to_async(y_center)
 
@@ -863,6 +873,10 @@ Examples:
         return_handle_y.wait()
         return_handle_x.dispose()
         return_handle_y.dispose()
+
+        # Clean up camera before connection closes
+        camera.dispose()
+
         print()
         print("Done.")
 
