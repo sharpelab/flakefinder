@@ -170,15 +170,15 @@ def park_microscope(conn: LeicaConnection) -> None:
     # 1. Z retract first (safety)
     z_target = 15000.0
     z.move_to(z_target)
-    print(f"  Z -> {z.position_um:.0f} µm ✓")
+    print(f"  Z -> {z.position_um:.0f} um [ok]")
 
     # 2. XY to origin
     hx, hy = stage.move_to_async(0.0, 0.0)
     Stage.wait_all([hx, hy])
     hx.dispose()
     hy.dispose()
-    print(f"  X -> {stage.x.position_um:.0f} µm ✓")
-    print(f"  Y -> {stage.y.position_um:.0f} µm ✓")
+    print(f"  X -> {stage.x.position_um:.0f} um [ok]")
+    print(f"  Y -> {stage.y.position_um:.0f} um [ok]")
 
     # 3. Switch to 5x objective
     try:
@@ -191,7 +191,7 @@ def park_microscope(conn: LeicaConnection) -> None:
                 break
         if target_pos is not None and nosepiece.position != target_pos:
             nosepiece.position = target_pos
-        print(f"  Objective -> {nosepiece.magnification}x ✓")
+        print(f"  Objective -> {nosepiece.magnification}x [ok]")
     except LookupError:
         print("  Objective -> (not available)")
 
@@ -199,7 +199,7 @@ def park_microscope(conn: LeicaConnection) -> None:
     try:
         lamp = Lamp.from_connection(conn)
         lamp.intensity = 0
-        print("  Lamp off ✓")
+        print("  Lamp off [ok]")
     except LookupError:
         print("  Lamp -> (not available)")
 
@@ -207,7 +207,7 @@ def park_microscope(conn: LeicaConnection) -> None:
     try:
         shutter = Shutter.from_connection(conn)
         shutter.close()
-        print("  Shutter closed ✓")
+        print("  Shutter closed [ok]")
     except LookupError:
         print("  Shutter -> (not available)")
 
