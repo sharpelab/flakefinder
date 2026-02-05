@@ -1,6 +1,7 @@
 """Multi-row position-based stitch for snake scan patterns."""
 
 import argparse
+from datetime import datetime
 import json
 from pathlib import Path
 from PIL import Image
@@ -472,6 +473,7 @@ def main():
     }
 
     stitch_meta = {
+        "timestamp": datetime.now().isoformat(),
         "image_file": out_path.name,
         "image_size_px": [background.width, background.height],
         "stage_bounds_um": stage_bounds_um,

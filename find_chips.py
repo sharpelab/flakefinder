@@ -1,6 +1,7 @@
 """Detect chips in stitched microscope images using Otsu thresholding."""
 
 import argparse
+from datetime import datetime
 import json
 from pathlib import Path
 
@@ -180,6 +181,7 @@ def find_chips(
 
     # Build results
     results = {
+        "timestamp": datetime.now().isoformat(),
         "source_stitch": image_path.name,
         "source_meta": image_path.stem + "_meta.json",
         "detection_params": {

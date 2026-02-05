@@ -6,6 +6,7 @@ See docs/maskterial_integration.md for 20x scanning context.
 
 import argparse
 import bisect
+from datetime import datetime
 import json
 import os
 import queue
@@ -647,6 +648,7 @@ Examples:
             savers.append(t)
 
         meta = {
+            "timestamp": datetime.now().isoformat(),
             "x_min_um": x_min,
             "x_max_um": x_max,
             "y_min_um": y_min,
