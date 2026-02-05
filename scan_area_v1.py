@@ -247,6 +247,12 @@ Examples:
     frame_group.add_argument("--gamma", type=float, default=1.0, help="Gamma level (default: 1.0)")
     frame_group.add_argument("--binning", type=int, default=3, choices=[1, 2, 3],
                             help="Camera binning NxN (1=full res, 2=2x2, 3=3x3, default: 3)")
+    frame_group.add_argument("--exposure-ms", type=float, default=1.0,
+                            help="Exposure time in milliseconds (default: 1.0)")
+    frame_group.add_argument("--gain", type=float, default=1.0,
+                            help="Camera gain multiplier (default: 1.0)")
+    frame_group.add_argument("--warmup-frames", type=int, default=3,
+                            help="Warmup captures before each row (default: 3, 0 to disable)")
 
     # Output options
     output_group = parser.add_argument_group("Output")
@@ -434,7 +440,8 @@ Examples:
         # Configure camera
         camera.trigger_mode = 0  # CONTINUOUS for faster capture
         camera.binning = binning_idx
-        camera.exposure_time = 0.001
+        camera.exposure_time = args.exposure_ms / 1000.0
+        camera.gain = args.gain
         camera.gain_rgb = (wb_red, wb_green, wb_blue)
         camera.gamma = args.gamma
 
@@ -756,6 +763,13 @@ Examples:
             row_start = time.perf_counter()
             row_frame_start = global_frame_idx
             row_frame_count = 0
+
+            # Warm up camera with a few captures before starting move
+            for _ in range(args.warmup_frames):
+                current_image[0] = None
+                acquisition.Acquire(context, None)
+                if current_image[0] is not None:
+                    current_image[0].Dispose()
 
             # Start async X move
             handle = stage.x.move_to_async(x_end_pos)
