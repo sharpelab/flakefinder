@@ -43,6 +43,28 @@ From `microscope_description.json`:
 - **Stitch metadata:** `*_stitch_meta.json` - coordinate mapping for stitched images
 - **Chip detection:** `*_chips.json` - detected chip bounding boxes in stage coordinates
 
+## Microscope Operations
+
+**NEVER run scripts that touch microscope hardware without explicit user approval.**
+
+Workflow:
+1. Show the command you intend to run
+2. Ask "Go for microscope?" (or similar)
+3. Wait for "go", "go for microscope", or explicit approval
+4. Then execute
+
+Requires approval:
+- Running scans (`scan_area_v1.py`)
+- Capturing images (`capture_util.py`)
+- Moving stage (`stage_util.py`)
+- Any script that connects to the Leica hardware
+
+Does NOT require approval:
+- SCP files from microscope
+- SSH to read files or check status
+- Editing code on the microscope
+- Local operations (stitching, analysis)
+
 ## Grabbing Files from Microscope
 
 ```bash
