@@ -79,8 +79,8 @@ def main() -> int:
         description="Capture an image from the microscope"
     )
     parser.add_argument("output", help="Output file path (jpg, png, tiff)")
-    parser.add_argument("--lamp", type=int, default=100,
-                        help="Lamp intensity (default: 100)")
+    parser.add_argument("--lamp", type=int, default=255,
+                        help="Lamp intensity (default: 255)")
     parser.add_argument("--binning", type=int, choices=[0, 1, 2],
                         help="Binning level: 0=1x1, 1=2x2, 2=3x3 (default: 2)")
     parser.add_argument("--downsample", type=int, default=1,
