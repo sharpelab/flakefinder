@@ -40,7 +40,7 @@ WORKING_DISTANCES_UM: dict[int, float] = {
 }
 
 
-def sharpness(image: np.ndarray) -> float:
+def sharpness_tenengrad(image: np.ndarray) -> float:
     """Compute Tenengrad sharpness (Sobel gradient magnitude mean).
 
     Args:
@@ -57,6 +57,43 @@ def sharpness(image: np.ndarray) -> float:
     sobel_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=5)
     sobel_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=5)
     return cv2.mean(cv2.magnitude(sobel_x, sobel_y))[0]
+
+
+def sharpness_laplacian(image: np.ndarray) -> float:
+    """Compute Laplacian variance sharpness.
+
+    More reliable than Tenengrad for detecting actual focus quality.
+    Less susceptible to being fooled by bright blurry blobs.
+
+    Args:
+        image: BGR or grayscale image as numpy array.
+
+    Returns:
+        Sharpness value (higher = sharper).
+    """
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image
+
+    lap = cv2.Laplacian(gray, cv2.CV_64F)
+    return lap.var()
+
+
+# Default sharpness function (kept for backwards compatibility)
+def sharpness(image: np.ndarray, method: str = "tenengrad") -> float:
+    """Compute sharpness using specified method.
+
+    Args:
+        image: BGR or grayscale image as numpy array.
+        method: "tenengrad" or "laplacian"
+
+    Returns:
+        Sharpness value (higher = sharper).
+    """
+    if method == "laplacian":
+        return sharpness_laplacian(image)
+    return sharpness_tenengrad(image)
 
 
 def interpolate_position(t: float, samples: list[tuple[float, float, float]]) -> float | None:
@@ -120,6 +157,13 @@ class AutofocusResult:
     scan_duration_s: float
     frame_count: int
     z_sample_count: int
+    # Diagnostic fields for debugging autofocus issues
+    coarse_z_start_um: float = 0.0
+    coarse_z_end_um: float = 0.0
+    coarse_best_z_um: float = 0.0
+    coarse_best_sharpness: float = 0.0
+    fine_z_start_um: float | None = None  # None if no fine pass
+    fine_z_end_um: float | None = None
     stayed_at_initial: bool = False  # True if scan found nothing better than initial
     sharpness_curve: list[dict] = field(default_factory=list)  # [{z_um, sharpness}, ...]
     frames: list[AutofocusFrame] | None = None  # Only if store_frames=True
@@ -198,6 +242,7 @@ def _run_z_scan(
     context,
     camera_class,
     store_frames: bool,
+    sharpness_method: str = "tenengrad",
 ) -> tuple[list[dict], list[AutofocusFrame] | None, float, int, int]:
     """Execute Z scan and capture frames.
 
@@ -209,6 +254,7 @@ def _run_z_scan(
         context: SDK acquisition context.
         camera_class: Camera class for image conversion.
         store_frames: Whether to store images in result.
+        sharpness_method: "tenengrad" or "laplacian".
 
     Returns:
         (sharpness_curve, frames, duration, frame_count, z_sample_count) tuple.
@@ -280,7 +326,7 @@ def _run_z_scan(
 
     for i, (t_capture, img) in enumerate(frame_data):
         z_interp = interpolate_position(t_capture, z_samples)
-        s = sharpness(img)
+        s = sharpness(img, method=sharpness_method)
         sharpness_curve.append({
             "frame": i,
             "z_um": z_interp,
@@ -304,6 +350,7 @@ def continuous_autofocus(
     fine_pass: bool = False,
     fine_range_um: float = 50.0,
     fine_speed_factor: float = 0.25,
+    sharpness_method: str = "tenengrad",
     store_frames: bool = False,
 ) -> AutofocusResult:
     """Perform continuous Z-scan autofocus.
@@ -333,6 +380,8 @@ def continuous_autofocus(
         fine_range_um: Range for fine pass (default 50µm).
         fine_speed_factor: Speed multiplier for fine pass (default 0.25 = 1/4 speed).
             Slower fine pass improves precision in the critical region.
+        sharpness_method: "tenengrad" (default) or "laplacian". Laplacian is more
+            reliable for low-contrast areas and less fooled by bright blurry blobs.
         store_frames: If True, store images in result.frames for debugging.
 
     Returns:
@@ -374,7 +423,7 @@ def continuous_autofocus(
     z_axis.move_to(initial_z)
     time.sleep(0.05)
     initial_image = camera.capture()
-    initial_sharpness = sharpness(initial_image) if initial_image is not None else 0.0
+    initial_sharpness = sharpness(initial_image, method=sharpness_method) if initial_image is not None else 0.0
 
     # Run main scan
     sharpness_curve, frames, scan_duration, frame_count, z_sample_count = _run_z_scan(
@@ -385,15 +434,22 @@ def continuous_autofocus(
         context=context,
         camera_class=Camera,
         store_frames=store_frames,
+        sharpness_method=sharpness_method,
     )
 
     if not sharpness_curve:
         raise ValueError("No frames captured during autofocus scan")
 
-    # Find best frame
+    # Find best frame from coarse pass
     best = max(sharpness_curve, key=lambda r: r["sharpness"])
     best_z = best["z_um"]
     best_sharpness = best["sharpness"]
+
+    # Track coarse results for diagnostics
+    coarse_best_z = best_z
+    coarse_best_sharpness = best_sharpness
+    actual_fine_z_start = None
+    actual_fine_z_end = None
 
     # Optional fine pass
     if fine_pass:
@@ -403,6 +459,10 @@ def continuous_autofocus(
         # Clamp to axis limits
         fine_z_start = min(fine_z_start, z_axis.max_um)
         fine_z_end = max(fine_z_end, z_axis.min_um)
+
+        # Record actual fine pass bounds for diagnostics
+        actual_fine_z_start = fine_z_start
+        actual_fine_z_end = fine_z_end
 
         # Use slower speed for fine pass (better precision)
         if z_axis.supports_velocity and fine_speed_factor < 1.0:
@@ -418,6 +478,7 @@ def continuous_autofocus(
             context=context,
             camera_class=Camera,
             store_frames=store_frames,
+            sharpness_method=sharpness_method,
         )
 
         # Restore speed after fine pass (before final move)
@@ -457,7 +518,7 @@ def continuous_autofocus(
 
     # Capture final sharpness
     final_image = camera.capture()
-    final_sharpness = sharpness(final_image) if final_image is not None else 0.0
+    final_sharpness = sharpness(final_image, method=sharpness_method) if final_image is not None else 0.0
 
     return AutofocusResult(
         best_z_um=best_z,
@@ -470,6 +531,12 @@ def continuous_autofocus(
         scan_duration_s=scan_duration,
         frame_count=frame_count,
         z_sample_count=z_sample_count,
+        coarse_z_start_um=z_start,
+        coarse_z_end_um=z_end,
+        coarse_best_z_um=coarse_best_z,
+        coarse_best_sharpness=coarse_best_sharpness,
+        fine_z_start_um=actual_fine_z_start,
+        fine_z_end_um=actual_fine_z_end,
         stayed_at_initial=stayed_at_initial,
         sharpness_curve=sharpness_curve,
         frames=frames if store_frames else None,

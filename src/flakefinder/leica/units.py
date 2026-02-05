@@ -205,6 +205,10 @@ class Axis:
         self._calibration: "AutoCalibration | None" = get_interface(
             unit, IID.IID_AUTO_CALIBRATION
         )
+        self._directed_velocity = get_interface(
+            unit, IID.IID_DIRECTED_CONTROL_VALUE_ASYNC_VELOCITY
+        )
+        # Use regular velocity converter for directed velocity (same native units)
 
         # Cache limits
         self._min_native = self._bcv.MinControlValue()
@@ -476,6 +480,49 @@ class Axis:
         if self._calibration is None:
             raise RuntimeError(f"Axis {self._name} doesn't support calibration")
         self._calibration.Calibrate()
+
+    # --- Directed Velocity Movement ---
+
+    @property
+    def supports_directed_velocity(self) -> bool:
+        """Check if axis supports directed velocity movement."""
+        return self._directed_velocity is not None
+
+    def start_towards_max(self, velocity_um_s: float) -> None:
+        """Start moving towards max position at specified velocity.
+
+        Motion continues until halt() is called or limit is reached.
+
+        Args:
+            velocity_um_s: Velocity in microns per second.
+
+        Raises:
+            RuntimeError: If axis doesn't support directed velocity.
+        """
+        if self._directed_velocity is None:
+            raise RuntimeError(f"Axis {self._name} doesn't support directed velocity")
+        if self._velocity_converter is None:
+            raise RuntimeError(f"Axis {self._name} doesn't have velocity converter")
+        native_vel = self._velocity_converter.GetControlValue(velocity_um_s)
+        self._directed_velocity.StartTowardsMaxVelocity(native_vel)
+
+    def start_towards_min(self, velocity_um_s: float) -> None:
+        """Start moving towards min position at specified velocity.
+
+        Motion continues until halt() is called or limit is reached.
+
+        Args:
+            velocity_um_s: Velocity in microns per second.
+
+        Raises:
+            RuntimeError: If axis doesn't support directed velocity.
+        """
+        if self._directed_velocity is None:
+            raise RuntimeError(f"Axis {self._name} doesn't support directed velocity")
+        if self._velocity_converter is None:
+            raise RuntimeError(f"Axis {self._name} doesn't have velocity converter")
+        native_vel = self._velocity_converter.GetControlValue(velocity_um_s)
+        self._directed_velocity.StartTowardsMinVelocity(native_vel)
 
     def __repr__(self) -> str:
         return f"Axis({self._name}, pos={self.position_um:.1f}µm)"

@@ -156,6 +156,12 @@ def main():
         help="Disable two-pass autofocus (use single coarse pass only)",
     )
     parser.add_argument(
+        "--fine-range",
+        type=float,
+        default=50.0,
+        help="Fine pass range in µm (default: 50)",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=None,
@@ -165,6 +171,24 @@ def main():
         "--save-images",
         action="store_true",
         help="Save 'after' image at each focus point",
+    )
+    parser.add_argument(
+        "--sharpness-method",
+        choices=["tenengrad", "laplacian"],
+        default="tenengrad",
+        help="Sharpness metric for autofocus",
+    )
+    parser.add_argument(
+        "--z-speed",
+        type=float,
+        default=None,
+        help="Z axis speed in µm/s (default: use current)",
+    )
+    parser.add_argument(
+        "--notes",
+        type=str,
+        default=None,
+        help="Notes to display on rendered mosaic",
     )
     parser.add_argument(
         "--dry-run",
@@ -317,7 +341,10 @@ def main():
                     acquisition=acquisition,
                     context=context,
                     z_range_um=args.z_range,
+                    z_speed_um_s=args.z_speed,
                     fine_pass=not args.no_fine_pass,
+                    fine_range_um=args.fine_range,
+                    sharpness_method=args.sharpness_method,
                 )
                 best_z = af_result.best_z_um
                 best_sharpness = af_result.best_sharpness
@@ -335,18 +362,23 @@ def main():
                 print()
             except Exception as e:
                 print(f"FAILED: {e}")
-                best_z = None
-                best_sharpness = None
-                final_sharpness = None
+                af_result = None
 
             sample_results.append({
                 "x_um": x_um,
                 "y_um": y_um,
                 "type": pt["type"],
                 "index": pt["index"],
-                "best_z_um": best_z,
-                "best_sharpness": best_sharpness,
-                "final_sharpness": final_sharpness,
+                "best_z_um": af_result.best_z_um if af_result else None,
+                "best_sharpness": af_result.best_sharpness if af_result else None,
+                "final_sharpness": af_result.final_sharpness if af_result else None,
+                "initial_z_um": af_result.initial_z_um if af_result else None,
+                "coarse_z_start_um": af_result.coarse_z_start_um if af_result else None,
+                "coarse_z_end_um": af_result.coarse_z_end_um if af_result else None,
+                "coarse_best_z_um": af_result.coarse_best_z_um if af_result else None,
+                "coarse_best_sharpness": af_result.coarse_best_sharpness if af_result else None,
+                "fine_z_start_um": af_result.fine_z_start_um if af_result else None,
+                "fine_z_end_um": af_result.fine_z_end_um if af_result else None,
                 "image": str(image_path.name) if image_path else None,
             })
 
@@ -365,11 +397,15 @@ def main():
         "duration_s": round(duration_s, 2),
         "chip_id": args.chip,
         "source_chips_meta": str(args.chips_meta),
+        "notes": args.notes,
         "grid_params": {
             "contour_samples": args.contour_samples,
             "grid_spacing_um": args.grid_spacing_um,
             "z_range_um": args.z_range,
+            "z_speed_um_s": args.z_speed,
             "fine_pass": not args.no_fine_pass,
+            "fine_range_um": args.fine_range,
+            "sharpness_method": args.sharpness_method,
             "save_images": args.save_images,
         },
         "sample_points": sample_results,

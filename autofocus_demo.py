@@ -32,6 +32,7 @@ def main():
     parser.add_argument("--debug-dir", type=str, default=None, help="Save all scan frames to this directory")
     parser.add_argument("--fine", action="store_true", help="Two-pass: coarse scan then fine 50um scan")
     parser.add_argument("--fine-speed-factor", type=float, default=0.25, help="Speed multiplier for fine pass (default: 0.25 = 1/4 speed)")
+    parser.add_argument("--sharpness-method", choices=["tenengrad", "laplacian"], default="tenengrad", help="Sharpness metric (laplacian better for low-contrast areas)")
     parser.add_argument("--dry-run", action="store_true", help="Print what would be done without moving")
     parser.add_argument("--clean", action="store_true", help="Remove existing output/debug directories before running")
     args = parser.parse_args()
@@ -205,6 +206,7 @@ def main():
                 z_speed_um_s=args.z_speed,
                 fine_pass=args.fine,
                 fine_speed_factor=args.fine_speed_factor,
+                sharpness_method=args.sharpness_method,
                 store_frames=bool(args.debug_dir),
             )
         except ValueError as e:
