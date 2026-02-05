@@ -262,13 +262,17 @@ def main():
         print("Capturing 'after' photo...")
         time.sleep(0.1)  # Brief settle
         after_img = camera.capture()
+        after_path = None
         if after_img is not None:
             after_sharpness = sharpness(after_img)
             if args.output:
                 after_path = os.path.join(args.output, "after.jpg")
-                PILImage.fromarray(after_img).save(after_path, quality=95)
-                print(f"  Saved: {after_path}")
+            else:
+                after_path = "autofocus_after.jpg"
+            PILImage.fromarray(after_img).save(after_path, quality=95)
+            print(f"  Saved: {after_path}")
             print(f"  Sharpness: {after_sharpness:.2f}")
+            os.startfile(after_path)
         else:
             print("  Warning: Failed to capture after image")
             after_sharpness = af_result.final_sharpness
