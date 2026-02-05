@@ -27,9 +27,11 @@ def main():
     parser.add_argument("--y", type=float, default=None, help="Stage Y position (um), default: current")
     parser.add_argument("--z", type=float, default=None, help="Initial Z position (um), default: current")
     parser.add_argument("--range", type=float, default=None, help="Z scan range (um), default: auto from objective")
+    parser.add_argument("--z-speed", type=float, default=None, help="Z axis speed (um/s), default: use current. Slower = more frames.")
     parser.add_argument("--output", "-o", type=str, default=None, help="Output directory for photos (optional)")
     parser.add_argument("--debug-dir", type=str, default=None, help="Save all scan frames to this directory")
     parser.add_argument("--fine", action="store_true", help="Two-pass: coarse scan then fine 50um scan")
+    parser.add_argument("--fine-speed-factor", type=float, default=0.25, help="Speed multiplier for fine pass (default: 0.25 = 1/4 speed)")
     parser.add_argument("--dry-run", action="store_true", help="Print what would be done without moving")
     parser.add_argument("--clean", action="store_true", help="Remove existing output/debug directories before running")
     args = parser.parse_args()
@@ -200,7 +202,9 @@ def main():
                 context=context,
                 z_range_um=args.range,
                 z_start_um=target_z,
+                z_speed_um_s=args.z_speed,
                 fine_pass=args.fine,
+                fine_speed_factor=args.fine_speed_factor,
                 store_frames=bool(args.debug_dir),
             )
         except ValueError as e:
@@ -222,6 +226,8 @@ def main():
         print(f"  Mean sharpness: {mean_sharpness:.2f}")
         print(f"  Best Z: {af_result.best_z_um:.2f} um")
         print(f"  Best sharpness: {af_result.best_sharpness:.2f}")
+        if af_result.stayed_at_initial:
+            print(f"  ** Stayed at initial (scan found nothing better) **")
 
         # Find best frame for saving
         best_frame_idx = 0

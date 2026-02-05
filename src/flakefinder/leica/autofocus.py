@@ -120,6 +120,7 @@ class AutofocusResult:
     scan_duration_s: float
     frame_count: int
     z_sample_count: int
+    stayed_at_initial: bool = False  # True if scan found nothing better than initial
     sharpness_curve: list[dict] = field(default_factory=list)  # [{z_um, sharpness}, ...]
     frames: list[AutofocusFrame] | None = None  # Only if store_frames=True
 
@@ -299,8 +300,10 @@ def continuous_autofocus(
     z_range_um: float | None = None,
     z_start_um: float | None = None,
     z_max_safe_um: float | None = None,
+    z_speed_um_s: float | None = None,
     fine_pass: bool = False,
     fine_range_um: float = 50.0,
+    fine_speed_factor: float = 0.25,
     store_frames: bool = False,
 ) -> AutofocusResult:
     """Perform continuous Z-scan autofocus.
@@ -313,6 +316,7 @@ def continuous_autofocus(
     - Auto-calculates safe range from objective's working distance
     - Raises ValueError if z_range_um exceeds safe range for objective
     - Raises ValueError if z_start_um would exceed limits
+    - If scan finds nothing better than initial sharpness, stays at initial Z
 
     Args:
         conn: Active LeicaConnection (used to query objective for safety).
@@ -323,12 +327,18 @@ def continuous_autofocus(
             (working_distance / 3, max 500µm).
         z_start_um: Starting Z position in µm. None = current position.
         z_max_safe_um: Hard upper limit for Z. Raises if z_start > this.
+        z_speed_um_s: Z axis speed in µm/s. None = use current speed.
+            Slower speeds capture more frames for better precision.
         fine_pass: If True, do a second pass with fine_range_um around best Z.
         fine_range_um: Range for fine pass (default 50µm).
+        fine_speed_factor: Speed multiplier for fine pass (default 0.25 = 1/4 speed).
+            Slower fine pass improves precision in the critical region.
         store_frames: If True, store images in result.frames for debugging.
 
     Returns:
         AutofocusResult with best Z, sharpness curve, and scan statistics.
+        If stayed_at_initial is True, the scan found nothing better than
+        the initial position and did not move.
 
     Raises:
         ValueError: If Z range/position exceeds safety limits.
@@ -339,6 +349,15 @@ def continuous_autofocus(
     # Get Z axis
     z_axis = ZDrive.from_connection(conn)
     current_z = z_axis.position_um
+
+    # Save original speed (for fine pass and restoration)
+    original_speed = None
+    if z_axis.supports_velocity:
+        original_speed = z_axis.velocity_um_s
+
+    # Set Z speed if specified
+    if z_speed_um_s is not None and z_axis.supports_velocity:
+        z_axis.set_velocity_um_s(z_speed_um_s)
 
     # Get safe range based on objective
     safe_range, objective_position = _get_safe_range(conn, z_range_um)
@@ -385,6 +404,12 @@ def continuous_autofocus(
         fine_z_start = min(fine_z_start, z_axis.max_um)
         fine_z_end = max(fine_z_end, z_axis.min_um)
 
+        # Use slower speed for fine pass (better precision)
+        if z_axis.supports_velocity and fine_speed_factor < 1.0:
+            coarse_speed = z_speed_um_s if z_speed_um_s is not None else original_speed
+            if coarse_speed is not None:
+                z_axis.set_velocity_um_s(coarse_speed * fine_speed_factor)
+
         fine_curve, fine_frames, fine_duration, fine_frame_count, fine_z_count = _run_z_scan(
             z_axis=z_axis,
             z_start=fine_z_start,
@@ -394,6 +419,10 @@ def continuous_autofocus(
             camera_class=Camera,
             store_frames=store_frames,
         )
+
+        # Restore speed after fine pass (before final move)
+        if z_axis.supports_velocity and original_speed is not None:
+            z_axis.set_velocity_um_s(z_speed_um_s if z_speed_um_s is not None else original_speed)
 
         if fine_curve:
             fine_best = max(fine_curve, key=lambda r: r["sharpness"])
@@ -410,9 +439,21 @@ def continuous_autofocus(
             frame_count += fine_frame_count
             z_sample_count += fine_z_count
 
-    # Move to best Z position
+    # Check if scan found anything better than initial position
+    stayed_at_initial = best_sharpness <= initial_sharpness
+
+    if stayed_at_initial:
+        # Scan found nothing better - stay at initial position
+        best_z = initial_z
+        best_sharpness = initial_sharpness
+
+    # Move to best Z position (or back to initial if stayed_at_initial)
     z_axis.move_to(best_z)
     time.sleep(0.05)
+
+    # Restore original Z speed if we changed it
+    if original_speed is not None:
+        z_axis.set_velocity_um_s(original_speed)
 
     # Capture final sharpness
     final_image = camera.capture()
@@ -429,6 +470,7 @@ def continuous_autofocus(
         scan_duration_s=scan_duration,
         frame_count=frame_count,
         z_sample_count=z_sample_count,
+        stayed_at_initial=stayed_at_initial,
         sharpness_curve=sharpness_curve,
         frames=frames if store_frames else None,
     )
