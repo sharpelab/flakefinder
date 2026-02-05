@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 
 from PIL import Image as PILImage
@@ -78,7 +79,8 @@ def main() -> int:
         description="Capture an image from the microscope"
     )
     parser.add_argument("output", help="Output file path (jpg, png, tiff)")
-    parser.add_argument("--lamp", type=int, help="Set lamp intensity before capture")
+    parser.add_argument("--lamp", type=int, default=100,
+                        help="Lamp intensity (default: 100)")
     parser.add_argument("--binning", type=int, choices=[0, 1, 2],
                         help="Binning level: 0=1x1, 1=2x2, 2=3x3 (default: 2)")
     parser.add_argument("--downsample", type=int, default=1,
@@ -193,6 +195,9 @@ def main() -> int:
             img.save(args.output)
 
         print(f"Saved: {args.output} ({img.width}x{img.height})")
+
+        # Open the output file
+        os.startfile(args.output)
 
         # Dispose camera before reporting status (avoids issues)
         camera.dispose()
