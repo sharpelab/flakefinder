@@ -773,6 +773,160 @@ def create_mosaic(
     print(f"Mosaic saved to {output_path}")
 
 
+def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_margin_um: float = 5000.0) -> dict:
+    """Compute robust plane fit with outlier rejection and coverage analysis.
+
+    Uses coarse-fine disagreement as primary quality metric. Points with low
+    disagreement are high-confidence and used for the plane fit. Corner coverage
+    is checked separately.
+
+    Args:
+        data: Focus map data dict.
+        cf_threshold: Max coarse-fine disagreement in µm for high-confidence points.
+        corner_margin_um: Distance from edge to consider "corner" region.
+
+    Returns:
+        Dict with plane parameters, quality metrics, and coverage info.
+    """
+    points = [p for p in data["sample_points"] if p["best_z_um"] is not None]
+
+    if len(points) < 3:
+        raise ValueError(f"Need at least 3 valid points, got {len(points)}")
+
+    # Extract arrays
+    x = np.array([p["x_um"] for p in points])
+    y = np.array([p["y_um"] for p in points])
+    z = np.array([p["best_z_um"] for p in points])
+    best_sharpness = np.array([p["best_sharpness"] for p in points])
+    final_sharpness = np.array([p["final_sharpness"] for p in points])
+
+    # Compute quality metrics
+    drift_pct = np.clip((best_sharpness - final_sharpness) / best_sharpness * 100, 0, 100)
+    coarse_best_z = np.array([p.get("coarse_best_z_um", p["best_z_um"]) for p in points])
+    coarse_fine_diff = np.abs(coarse_best_z - z)
+
+    # High-confidence mask: low coarse-fine disagreement
+    high_conf_mask = coarse_fine_diff <= cf_threshold
+
+    if high_conf_mask.sum() < 3:
+        # Fall back to all points if not enough high-confidence
+        print(f"  Warning: Only {high_conf_mask.sum()} high-confidence points, using all points")
+        high_conf_mask = np.ones(len(points), dtype=bool)
+
+    # Fit plane to high-confidence points
+    x_hc = x[high_conf_mask]
+    y_hc = y[high_conf_mask]
+    z_hc = z[high_conf_mask]
+
+    A = np.column_stack([x_hc, y_hc, np.ones_like(x_hc)])
+    coeffs, _, _, _ = np.linalg.lstsq(A, z_hc, rcond=None)
+    a, b, c = coeffs
+
+    # Compute residuals and R²
+    z_pred = a * x_hc + b * y_hc + c
+    residuals = z_hc - z_pred
+    ss_res = np.sum(residuals ** 2)
+    ss_tot = np.sum((z_hc - np.mean(z_hc)) ** 2)
+    r_squared = 1 - ss_res / ss_tot if ss_tot > 0 else 0
+
+    # Corner coverage analysis
+    x_min, x_max = x.min(), x.max()
+    y_min, y_max = y.min(), y.max()
+
+    corners = {
+        "BL": (x_min, y_min),  # Bottom-left
+        "BR": (x_max, y_min),  # Bottom-right
+        "TL": (x_min, y_max),  # Top-left
+        "TR": (x_max, y_max),  # Top-right
+    }
+
+    corners_covered = []
+    corners_extrapolated = []
+
+    for corner_name, (cx, cy) in corners.items():
+        # Check if any high-confidence point is near this corner
+        near_corner = (
+            (np.abs(x_hc - cx) < corner_margin_um) &
+            (np.abs(y_hc - cy) < corner_margin_um)
+        )
+        if near_corner.any():
+            corners_covered.append(corner_name)
+        else:
+            corners_extrapolated.append(corner_name)
+
+    # Build result
+    result = {
+        "plane": {
+            "a": float(a),
+            "b": float(b),
+            "c": float(c),
+            "equation": f"Z = {a*1000:.4f}*X_mm + {b*1000:.4f}*Y_mm + {c:.2f}",
+        },
+        "units": "um",
+        "quality": {
+            "r_squared": float(r_squared),
+            "residual_std_um": float(np.std(residuals)),
+            "residual_max_um": float(np.max(np.abs(residuals))),
+            "points_total": len(points),
+            "points_used": int(high_conf_mask.sum()),
+            "cf_threshold_um": cf_threshold,
+        },
+        "tilt": {
+            "x_um_per_mm": float(a * 1000),
+            "y_um_per_mm": float(b * 1000),
+            "magnitude_um_per_mm": float(np.sqrt(a**2 + b**2) * 1000),
+        },
+        "coverage": {
+            "x_range_um": [float(x_hc.min()), float(x_hc.max())],
+            "y_range_um": [float(y_hc.min()), float(y_hc.max())],
+            "full_x_range_um": [float(x_min), float(x_max)],
+            "full_y_range_um": [float(y_min), float(y_max)],
+            "corners_covered": corners_covered,
+            "corners_extrapolated": corners_extrapolated,
+        },
+        "points_used": [
+            {
+                "type": points[i]["type"],
+                "index": points[i]["index"],
+                "x_um": float(x[i]),
+                "y_um": float(y[i]),
+                "z_um": float(z[i]),
+                "coarse_fine_diff_um": float(coarse_fine_diff[i]),
+                "drift_pct": float(drift_pct[i]),
+            }
+            for i in range(len(points)) if high_conf_mask[i]
+        ],
+    }
+
+    return result
+
+
+def export_plane(data: dict, output_path: Path, cf_threshold: float = 20.0) -> dict:
+    """Export robust plane fit to JSON file.
+
+    Args:
+        data: Focus map data dict.
+        output_path: Output JSON path.
+        cf_threshold: Max coarse-fine disagreement for high-confidence points.
+
+    Returns:
+        The plane fit result dict.
+    """
+    result = compute_robust_plane_fit(data, cf_threshold=cf_threshold)
+
+    # Add metadata
+    result["source"] = {
+        "focus_map": data.get("source_chips_meta", "unknown"),
+        "chip_id": data.get("chip_id", 0),
+        "timestamp": data.get("timestamp", "unknown"),
+    }
+
+    with open(output_path, "w") as f:
+        json.dump(result, f, indent=2)
+
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Analyze focus map data",
@@ -812,6 +966,18 @@ def main():
         action="store_true",
         help="Skip generating mosaic image",
     )
+    parser.add_argument(
+        "--export-plane",
+        type=Path,
+        default=None,
+        help="Export robust plane fit to JSON file (for scan_area focus tracking)",
+    )
+    parser.add_argument(
+        "--cf-threshold",
+        type=float,
+        default=20.0,
+        help="Coarse-fine disagreement threshold (um) for high-confidence points",
+    )
     args = parser.parse_args()
 
     if not args.focus_map.exists():
@@ -850,6 +1016,33 @@ def main():
         else:
             print(f"Images directory not found: {images_dir}")
             print("  (Run focus_map.py with --save-images to generate)")
+
+    # Export plane fit
+    if args.export_plane:
+        print()
+        print("=" * 60)
+        print("ROBUST PLANE FIT EXPORT")
+        print("=" * 60)
+        result = export_plane(data, args.export_plane, cf_threshold=args.cf_threshold)
+
+        q = result["quality"]
+        t = result["tilt"]
+        c = result["coverage"]
+
+        print(f"Points used: {q['points_used']}/{q['points_total']} (CF <= {q['cf_threshold_um']} um)")
+        print(f"R²: {q['r_squared']:.4f}")
+        print(f"Residual std: {q['residual_std_um']:.2f} um")
+        print(f"Residual max: {q['residual_max_um']:.2f} um")
+        print()
+        print(f"Plane: {result['plane']['equation']}")
+        print(f"Tilt: {t['magnitude_um_per_mm']:.2f} um/mm")
+        print()
+        print(f"Coverage X: {c['x_range_um'][0]/1000:.1f} - {c['x_range_um'][1]/1000:.1f} mm")
+        print(f"Coverage Y: {c['y_range_um'][0]/1000:.1f} - {c['y_range_um'][1]/1000:.1f} mm")
+        print(f"Corners covered: {', '.join(c['corners_covered']) or 'none'}")
+        print(f"Corners extrapolated: {', '.join(c['corners_extrapolated']) or 'none'}")
+        print()
+        print(f"Exported to: {args.export_plane}")
 
     return 0
 
