@@ -12,6 +12,7 @@ Usage:
     python stage_util.py --lamp 50            # Set lamp intensity
     python stage_util.py --objective 5x       # Switch to 5x objective (SDK handles z-hop)
     python stage_util.py --objective 3        # Switch to position 3
+    python stage_util.py --park               # Park microscope (safe idle state)
 """
 
 import argparse
@@ -151,6 +152,68 @@ def change_objective(
     print(f"Objective: done at {nosepiece.magnification}x")
 
 
+def park_microscope(conn: LeicaConnection) -> None:
+    """Put microscope in a safe idle state.
+
+    Operations in order:
+    1. Retract Z to safe position (15000 µm)
+    2. Move XY to origin (0, 0)
+    3. Switch to 5x objective
+    4. Turn lamp off
+    5. Close shutter
+    """
+    print("Parking microscope...")
+
+    stage = Stage.from_connection(conn)
+    z = ZDrive.from_connection(conn)
+
+    # 1. Z retract first (safety)
+    z_target = 15000.0
+    z.move_to(z_target)
+    print(f"  Z -> {z.position_um:.0f} µm ✓")
+
+    # 2. XY to origin
+    hx, hy = stage.move_to_async(0.0, 0.0)
+    Stage.wait_all([hx, hy])
+    hx.dispose()
+    hy.dispose()
+    print(f"  X -> {stage.x.position_um:.0f} µm ✓")
+    print(f"  Y -> {stage.y.position_um:.0f} µm ✓")
+
+    # 3. Switch to 5x objective
+    try:
+        nosepiece = Nosepiece.from_connection(conn)
+        # 5x is at position 1 on this microscope
+        target_pos = None
+        for pos, mag in nosepiece.magnifications.items():
+            if mag == 5.0:
+                target_pos = pos
+                break
+        if target_pos is not None and nosepiece.position != target_pos:
+            nosepiece.position = target_pos
+        print(f"  Objective -> {nosepiece.magnification}x ✓")
+    except LookupError:
+        print("  Objective -> (not available)")
+
+    # 4. Turn lamp off
+    try:
+        lamp = Lamp.from_connection(conn)
+        lamp.intensity = 0
+        print("  Lamp off ✓")
+    except LookupError:
+        print("  Lamp -> (not available)")
+
+    # 5. Close shutter
+    try:
+        shutter = Shutter.from_connection(conn)
+        shutter.close()
+        print("  Shutter closed ✓")
+    except LookupError:
+        print("  Shutter -> (not available)")
+
+    print("Parked.")
+
+
 def report_status(conn: LeicaConnection, verbose: bool = False) -> None:
     """Print current microscope status."""
     # Stage XY
@@ -228,8 +291,15 @@ def main() -> int:
     parser.add_argument("--shutter", choices=["open", "close"], help="Open or close shutter")
     parser.add_argument("--lamp", type=int, help="Set lamp intensity")
     parser.add_argument("--objective", type=str, help="Switch objective (position number or magnification like '5x', '20x')")
+    parser.add_argument("--park", action="store_true", help="Park microscope in safe idle state")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show velocity limits and conversion factors")
     args = parser.parse_args()
+
+    # Handle --park specially (ignores other position args)
+    if args.park:
+        with LeicaConnection() as conn:
+            park_microscope(conn)
+        return 0
 
     with LeicaConnection() as conn:
         stage = Stage.from_connection(conn)
