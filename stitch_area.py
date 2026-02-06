@@ -264,10 +264,14 @@ def main():
     # Likely candidates: stage backlash, encoder offset, or position readout timing.
     parser.add_argument("--hysteresis", type=float, default=0,
                         help="Hysteresis correction in µm (applied to -X rows)")
+    parser.add_argument("--crop", type=str, default="0,0,0,0",
+                        help="Crop margins in µm: TOP,RIGHT,BOTTOM,LEFT (default: 0,0,0,0)")
     parser.add_argument("--flatfield", type=Path, default=None,
                         help="Path to flatfield .npy file (default: auto-load from calibration/)")
     parser.add_argument("--no-flatfield", action="store_true",
                         help="Disable flatfield correction")
+    parser.add_argument("-o", "--output", type=str, default=None,
+                        help="Output filename (default: {scan_dir}_stitch.png)")
     args = parser.parse_args()
 
     start_time = time.perf_counter()
@@ -456,14 +460,7 @@ def main():
     background = Image.new("RGB", canvas.size, (255, 255, 255))
     background.paste(canvas, mask=canvas.split()[3])
 
-    # Save image
-    out_path = scan_dir.parent / f"{scan_dir.name}_stitch.png"
-    background.save(out_path)
-    print(f"Saved to {out_path}")
-    print(f"Final size: {background.width}x{background.height} px")
-
-    # Save stitch metadata for downstream processing (chip detection, etc.)
-    # Stage bounds: the actual area covered by the stitched image
+    # Stage bounds before crop
     # Note: reported positions are frame CENTERS, so coverage extends ±FOV/2
     # - X: global_x_min - fov/2 to global_x_max + fov/2
     # - Y: last row's y - fov/2 to first row's y + fov/2
@@ -473,6 +470,44 @@ def main():
         "y_min": rows[-1]["y_um"] - fov_height_um / 2,
         "y_max": rows[0]["y_um"] + fov_height_um / 2,
     }
+
+    # Apply crop margins (top, right, bottom, left in µm)
+    crop_parts = [float(x) for x in args.crop.split(",")]
+    if len(crop_parts) != 4:
+        print("Error: --crop must be TOP,RIGHT,BOTTOM,LEFT (e.g., '15000,0,7000,0')")
+        return 1
+    crop_top_um, crop_right_um, crop_bottom_um, crop_left_um = crop_parts
+
+    if any(c != 0 for c in crop_parts):
+        crop_top_px = int(crop_top_um / um_per_px)
+        crop_right_px = int(crop_right_um / um_per_px)
+        crop_bottom_px = int(crop_bottom_um / um_per_px)
+        crop_left_px = int(crop_left_um / um_per_px)
+
+        w, h = background.size
+        box = (crop_left_px, crop_top_px, w - crop_right_px, h - crop_bottom_px)
+        background = background.crop(box)
+
+        # Image top = low Y, bottom = high Y
+        stage_bounds_um["y_min"] += crop_top_um
+        stage_bounds_um["y_max"] -= crop_bottom_um
+        stage_bounds_um["x_min"] += crop_left_um
+        stage_bounds_um["x_max"] -= crop_right_um
+
+        print(f"\nCropped: top={crop_top_um:.0f} right={crop_right_um:.0f} "
+              f"bottom={crop_bottom_um:.0f} left={crop_left_um:.0f} µm")
+
+    # Save image
+    if args.output:
+        out_path = Path(args.output)
+    else:
+        out_path = scan_dir.parent / f"{scan_dir.name}_stitch.jpg"
+    if out_path.suffix.lower() in (".jpg", ".jpeg"):
+        background.save(out_path, quality=95)
+    else:
+        background.save(out_path)
+    print(f"Saved to {out_path}")
+    print(f"Final size: {background.width}x{background.height} px")
 
     # Compute average CV X overlap across all rows
     all_cv_steps = []

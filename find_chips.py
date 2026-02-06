@@ -97,16 +97,14 @@ def find_chips(
     image_path: Path,
     min_area_um2: float = 1e6,
     morph_kernel_um: float = 50,
-    debug: bool = False,
 ) -> dict:
     """
     Detect chips in a stitched microscope image.
 
     Args:
-        image_path: Path to stitched PNG image
+        image_path: Path to stitched image
         min_area_um2: Minimum chip area in µm² (default 1mm²)
         morph_kernel_um: Morphological kernel size in µm
-        debug: If True, save debug visualization
 
     Returns:
         Detection results dict
@@ -199,98 +197,96 @@ def find_chips(
         "rejected": rejected,
     }
 
-    # Debug visualization
-    if debug:
-        debug_img = img.copy()
+    # Detection visualization
+    debug_img = img.copy()
 
-        # Scale drawing parameters based on image size
-        # Reference: 2000px image gets base values, scale proportionally
-        ref_size = 2000
-        img_scale = max(img_w, img_h) / ref_size
+    # Scale drawing parameters based on image size
+    # Reference: 2000px image gets base values, scale proportionally
+    ref_size = 2000
+    img_scale = max(img_w, img_h) / ref_size
 
-        line_thickness = max(2, int(4 * img_scale))
-        bbox_thickness = max(2, int(4 * img_scale))
-        font_scale = 4.5 * img_scale
-        font_thickness = max(2, int(9 * img_scale))
+    line_thickness = max(2, int(4 * img_scale))
+    bbox_thickness = max(2, int(4 * img_scale))
+    font_scale = 4.5 * img_scale
+    font_thickness = max(2, int(9 * img_scale))
 
-        # Find contours again to draw them (we need the actual contour objects)
-        for contour in contours:
-            area_px = cv2.contourArea(contour)
-            if area_px < min_area_px:
-                continue
+    # Find contours again to draw them (we need the actual contour objects)
+    for contour in contours:
+        area_px = cv2.contourArea(contour)
+        if area_px < min_area_px:
+            continue
 
-            edge = touches_edge(contour, img_w, img_h)
-            x, y, w, h = cv2.boundingRect(contour)
+        edge = touches_edge(contour, img_w, img_h)
+        x, y, w, h = cv2.boundingRect(contour)
 
-            if edge:
-                # Red contour for rejected (no bbox)
-                cv2.drawContours(debug_img, [contour], -1, (0, 0, 255), line_thickness)
-            else:
-                # Green contour, red bbox for valid
-                cv2.drawContours(debug_img, [contour], -1, (0, 255, 0), line_thickness)
-                cv2.rectangle(debug_img, (x, y), (x + w, y + h), (0, 0, 255), bbox_thickness)
+        if edge:
+            # Red contour for rejected (no bbox)
+            cv2.drawContours(debug_img, [contour], -1, (0, 0, 255), line_thickness)
+        else:
+            # Green contour, red bbox for valid
+            cv2.drawContours(debug_img, [contour], -1, (0, 255, 0), line_thickness)
+            cv2.rectangle(debug_img, (x, y), (x + w, y + h), (0, 0, 255), bbox_thickness)
 
-        # Draw chip IDs at centroids
-        for chip in chips:
-            cx = chip["bbox_px"][0] + chip["bbox_px"][2] // 2
-            cy = chip["bbox_px"][1] + chip["bbox_px"][3] // 2
-            # Get text size to center it properly
-            text = str(chip["id"])
-            (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX,
-                                                   font_scale, font_thickness)
-            cv2.putText(debug_img, text, (cx - text_w // 2, cy + text_h // 2),
-                       cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 0), font_thickness)
+    # Draw chip IDs at centroids
+    for chip in chips:
+        cx = chip["bbox_px"][0] + chip["bbox_px"][2] // 2
+        cy = chip["bbox_px"][1] + chip["bbox_px"][3] // 2
+        text = str(chip["id"])
+        (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX,
+                                               font_scale, font_thickness)
+        cv2.putText(debug_img, text, (cx - text_w // 2, cy + text_h // 2),
+                   cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 0), font_thickness)
 
-        # Add scale bar
-        # Choose largest round number that fits in 10-20% of image width
-        img_width_um = img_w * scale
-        bar_length_um = 1000  # default 1mm
-        for candidate_um in [20000, 10000, 5000, 2000, 1000]:
-            candidate_px = int(candidate_um / scale)
-            if candidate_px <= img_w * 0.20:  # Pick largest that's ≤20% of width
-                bar_length_um = candidate_um
-                break
-        bar_length_px = int(bar_length_um / scale)
+    # Add scale bar
+    # Choose largest round number that fits in 10-20% of image width
+    img_width_um = img_w * scale
+    bar_length_um = 1000  # default 1mm
+    for candidate_um in [20000, 10000, 5000, 2000, 1000]:
+        candidate_px = int(candidate_um / scale)
+        if candidate_px <= img_w * 0.20:  # Pick largest that's ≤20% of width
+            bar_length_um = candidate_um
+            break
+    bar_length_px = int(bar_length_um / scale)
 
-        bar_height_px = max(5, int(10 * img_scale))
-        bar_margin_px = max(30, int(60 * img_scale))
-        bar_x = img_w - bar_margin_px - bar_length_px
-        bar_y = img_h - bar_margin_px - bar_height_px
+    bar_height_px = max(5, int(10 * img_scale))
+    bar_margin_px = max(30, int(60 * img_scale))
+    bar_x = img_w - bar_margin_px - bar_length_px
+    bar_y = img_h - bar_margin_px - bar_height_px
 
-        # Draw scale bar with outline for visibility
-        cv2.rectangle(debug_img, (bar_x - 2, bar_y - 2),
-                     (bar_x + bar_length_px + 2, bar_y + bar_height_px + 2),
-                     (0, 0, 0), -1)  # Black outline
-        cv2.rectangle(debug_img, (bar_x, bar_y),
-                     (bar_x + bar_length_px, bar_y + bar_height_px),
-                     (255, 255, 255), -1)  # White bar
+    # Draw scale bar with outline for visibility
+    cv2.rectangle(debug_img, (bar_x - 2, bar_y - 2),
+                 (bar_x + bar_length_px + 2, bar_y + bar_height_px + 2),
+                 (0, 0, 0), -1)  # Black outline
+    cv2.rectangle(debug_img, (bar_x, bar_y),
+                 (bar_x + bar_length_px, bar_y + bar_height_px),
+                 (255, 255, 255), -1)  # White bar
 
-        # Scale bar label
-        bar_label = f"{bar_length_um / 1000:.0f} mm" if bar_length_um >= 1000 else f"{bar_length_um} µm"
-        label_font_scale = 1.0 * img_scale
-        label_thickness = max(1, int(2 * img_scale))
-        (label_w, label_h), _ = cv2.getTextSize(bar_label, cv2.FONT_HERSHEY_SIMPLEX,
-                                                 label_font_scale, label_thickness)
-        label_x = bar_x + (bar_length_px - label_w) // 2
-        label_y = bar_y - max(5, int(10 * img_scale))
+    # Scale bar label
+    bar_label = f"{bar_length_um / 1000:.0f} mm" if bar_length_um >= 1000 else f"{bar_length_um} µm"
+    label_font_scale = 1.0 * img_scale
+    label_thickness = max(1, int(2 * img_scale))
+    (label_w, label_h), _ = cv2.getTextSize(bar_label, cv2.FONT_HERSHEY_SIMPLEX,
+                                             label_font_scale, label_thickness)
+    label_x = bar_x + (bar_length_px - label_w) // 2
+    label_y = bar_y - max(5, int(10 * img_scale))
 
-        # Draw label with outline
-        cv2.putText(debug_img, bar_label, (label_x, label_y),
-                   cv2.FONT_HERSHEY_SIMPLEX, label_font_scale, (0, 0, 0), label_thickness + 2)
-        cv2.putText(debug_img, bar_label, (label_x, label_y),
-                   cv2.FONT_HERSHEY_SIMPLEX, label_font_scale, (255, 255, 255), label_thickness)
+    # Draw label with outline
+    cv2.putText(debug_img, bar_label, (label_x, label_y),
+               cv2.FONT_HERSHEY_SIMPLEX, label_font_scale, (0, 0, 0), label_thickness + 2)
+    cv2.putText(debug_img, bar_label, (label_x, label_y),
+               cv2.FONT_HERSHEY_SIMPLEX, label_font_scale, (255, 255, 255), label_thickness)
 
-        # Downscale to reasonable size for viewing
-        max_debug_dim = 1500
-        if max(debug_img.shape[:2]) > max_debug_dim:
-            scale_factor = max_debug_dim / max(debug_img.shape[:2])
-            new_w = int(debug_img.shape[1] * scale_factor)
-            new_h = int(debug_img.shape[0] * scale_factor)
-            debug_img = cv2.resize(debug_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    # Downscale to reasonable size for viewing
+    max_debug_dim = 1500
+    if max(debug_img.shape[:2]) > max_debug_dim:
+        scale_factor = max_debug_dim / max(debug_img.shape[:2])
+        new_w = int(debug_img.shape[1] * scale_factor)
+        new_h = int(debug_img.shape[0] * scale_factor)
+        debug_img = cv2.resize(debug_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
-        debug_path = image_path.with_name(image_path.stem + "_chips_debug.png")
-        cv2.imwrite(str(debug_path), debug_img)
-        print(f"Debug image saved to {debug_path} ({debug_img.shape[1]}x{debug_img.shape[0]})")
+    detected_path = image_path.with_name(image_path.stem + "_chips_detected.png")
+    cv2.imwrite(str(detected_path), debug_img)
+    print(f"Detection image saved to {detected_path} ({debug_img.shape[1]}x{debug_img.shape[0]})")
 
     return results
 
@@ -316,11 +312,6 @@ def main():
         default=50,
         help="Morphological kernel size in µm (default: 50)",
     )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Output debug visualization image",
-    )
     args = parser.parse_args()
 
     if not args.image.exists():
@@ -332,7 +323,6 @@ def main():
         args.image,
         min_area_um2=args.min_area_um2,
         morph_kernel_um=args.morph_kernel_um,
-        debug=args.debug,
     )
 
     # Save results
