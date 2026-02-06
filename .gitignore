@@ -51,4 +51,8 @@ src/flakefinder/dlls/*.xml
 # OS
 .DS_Store
 Thumbs.db
+
+# Scan and experiment data (large, generated)
 scans/
+experiments/*
+!experiments/.gitkeep
