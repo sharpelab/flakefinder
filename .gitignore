@@ -53,6 +53,7 @@ src/flakefinder/dlls/*.xml
 Thumbs.db
 
 # Scan and experiment data (large, generated)
-scans/
+scans/*
+!scans/.gitkeep
 experiments/*
 !experiments/.gitkeep
