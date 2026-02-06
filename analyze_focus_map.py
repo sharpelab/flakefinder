@@ -181,7 +181,7 @@ def analyze_focus_map(data: dict) -> dict:
     }
 
 
-def plot_focus_map(data: dict, analysis: dict, output_path: Path) -> None:
+def plot_focus_map(data: dict, analysis: dict, output_path: Path, quiet: bool = False) -> None:
     """Generate focus map visualization."""
     fig = plt.figure(figsize=(18, 12))
 
@@ -291,7 +291,8 @@ def plot_focus_map(data: dict, analysis: dict, output_path: Path) -> None:
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     plt.close()
-    print(f"Plot saved to {output_path}")
+    if not quiet:
+        print(f"Plot saved to {output_path}")
 
 
 def print_report(data: dict, analysis: dict) -> None:
@@ -383,6 +384,7 @@ def create_mosaic(
     output_path: Path,
     max_dim: int = 3000,
     margin_px: int = 5,
+    quiet: bool = False,
 ) -> None:
     """Create mosaic image with focus map images laid out in a grid.
 
@@ -408,7 +410,8 @@ def create_mosaic(
     all_points = grid_points + contour_points
 
     if not all_points:
-        print("No images found in focus map data")
+        if not quiet:
+            print("No images found in focus map data")
         return
 
     # Compute mean Z for relative offsets
@@ -418,7 +421,8 @@ def create_mosaic(
     # Load first image to get aspect ratio
     first_img_path = images_dir / all_points[0]["image"]
     if not first_img_path.exists():
-        print(f"Image not found: {first_img_path}")
+        if not quiet:
+            print(f"Image not found: {first_img_path}")
         return
 
     first_img = cv2.imread(str(first_img_path))
@@ -453,7 +457,8 @@ def create_mosaic(
     n_cols = n_cols_grid + 2
     n_rows = n_rows_grid + 2
 
-    print(f"Grid: {n_cols_grid}x{n_rows_grid}, Total with contours: {n_cols}x{n_rows}")
+    if not quiet:
+        print(f"Grid: {n_cols_grid}x{n_rows_grid}, Total with contours: {n_cols}x{n_rows}")
 
     # Margins: double margin between contour and grid regions
     contour_margin = 2 * margin_px
@@ -492,8 +497,9 @@ def create_mosaic(
     canvas_w = n_cols * thumb_w + total_h_margin
     canvas_h = n_rows * thumb_h + total_v_margin
 
-    print(f"Thumbnails: {thumb_w}x{thumb_h} px")
-    print(f"Canvas: {canvas_w}x{canvas_h} px")
+    if not quiet:
+        print(f"Thumbnails: {thumb_w}x{thumb_h} px")
+        print(f"Canvas: {canvas_w}x{canvas_h} px")
 
     # Create canvas
     canvas = np.full((canvas_h, canvas_w, 3), 30, dtype=np.uint8)
@@ -549,7 +555,7 @@ def create_mosaic(
         final = point.get("final_sharpness")
         has_drift = (best is not None and final is not None and best > 0 and
                      abs(best - final) / best > 0.2)
-        text_color = (0, 0, 255) if (low_sharpness or has_drift) else (255, 255, 255)  # BGR
+        text_color = (0, 0, 255) if low_sharpness else (255, 255, 255)  # BGR: red if low sharpness
 
         # Draw background rectangle for readability
         label_lines = [label_id, sharpness_str]
@@ -770,7 +776,8 @@ def create_mosaic(
                         (255, 255, 200), font_thickness, cv2.LINE_AA)
 
     cv2.imwrite(str(output_path), canvas, [cv2.IMWRITE_JPEG_QUALITY, 95])
-    print(f"Mosaic saved to {output_path}")
+    if not quiet:
+        print(f"Mosaic saved to {output_path}")
 
 
 def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_margin_um: float = 5000.0) -> dict:
@@ -978,6 +985,11 @@ def main():
         default=20.0,
         help="Coarse-fine disagreement threshold (um) for high-confidence points",
     )
+    parser.add_argument(
+        "--quiet", "-q",
+        action="store_true",
+        help="Suppress verbose output (just generate files)",
+    )
     args = parser.parse_args()
 
     if not args.focus_map.exists():
@@ -991,14 +1003,15 @@ def main():
     analysis = analyze_focus_map(data)
 
     # Print report
-    print_report(data, analysis)
+    if not args.quiet:
+        print_report(data, analysis)
 
     # Generate plot
     if not args.no_plot:
         output_path = args.output or args.focus_map.with_name(
             args.focus_map.stem + "_analysis.png"
         )
-        plot_focus_map(data, analysis, output_path)
+        plot_focus_map(data, analysis, output_path, quiet=args.quiet)
 
     # Generate mosaic
     if not args.no_mosaic:
@@ -1012,37 +1025,40 @@ def main():
                 mosaic_path,
                 max_dim=args.max_dim,
                 margin_px=args.margin,
+                quiet=args.quiet,
             )
         else:
-            print(f"Images directory not found: {images_dir}")
-            print("  (Run focus_map.py with --save-images to generate)")
+            if not args.quiet:
+                print(f"Images directory not found: {images_dir}")
+                print("  (Run focus_map.py with --save-images to generate)")
 
     # Export plane fit
     if args.export_plane:
-        print()
-        print("=" * 60)
-        print("ROBUST PLANE FIT EXPORT")
-        print("=" * 60)
         result = export_plane(data, args.export_plane, cf_threshold=args.cf_threshold)
 
-        q = result["quality"]
-        t = result["tilt"]
-        c = result["coverage"]
+        if not args.quiet:
+            q = result["quality"]
+            t = result["tilt"]
+            c = result["coverage"]
 
-        print(f"Points used: {q['points_used']}/{q['points_total']} (CF <= {q['cf_threshold_um']} um)")
-        print(f"R²: {q['r_squared']:.4f}")
-        print(f"Residual std: {q['residual_std_um']:.2f} um")
-        print(f"Residual max: {q['residual_max_um']:.2f} um")
-        print()
-        print(f"Plane: {result['plane']['equation']}")
-        print(f"Tilt: {t['magnitude_um_per_mm']:.2f} um/mm")
-        print()
-        print(f"Coverage X: {c['x_range_um'][0]/1000:.1f} - {c['x_range_um'][1]/1000:.1f} mm")
-        print(f"Coverage Y: {c['y_range_um'][0]/1000:.1f} - {c['y_range_um'][1]/1000:.1f} mm")
-        print(f"Corners covered: {', '.join(c['corners_covered']) or 'none'}")
-        print(f"Corners extrapolated: {', '.join(c['corners_extrapolated']) or 'none'}")
-        print()
-        print(f"Exported to: {args.export_plane}")
+            print()
+            print("=" * 60)
+            print("ROBUST PLANE FIT EXPORT")
+            print("=" * 60)
+            print(f"Points used: {q['points_used']}/{q['points_total']} (CF <= {q['cf_threshold_um']} um)")
+            print(f"R²: {q['r_squared']:.4f}")
+            print(f"Residual std: {q['residual_std_um']:.2f} um")
+            print(f"Residual max: {q['residual_max_um']:.2f} um")
+            print()
+            print(f"Plane: {result['plane']['equation']}")
+            print(f"Tilt: {t['magnitude_um_per_mm']:.2f} um/mm")
+            print()
+            print(f"Coverage X: {c['x_range_um'][0]/1000:.1f} - {c['x_range_um'][1]/1000:.1f} mm")
+            print(f"Coverage Y: {c['y_range_um'][0]/1000:.1f} - {c['y_range_um'][1]/1000:.1f} mm")
+            print(f"Corners covered: {', '.join(c['corners_covered']) or 'none'}")
+            print(f"Corners extrapolated: {', '.join(c['corners_extrapolated']) or 'none'}")
+            print()
+            print(f"Exported to: {args.export_plane}")
 
     return 0
 
