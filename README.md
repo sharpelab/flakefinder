@@ -53,6 +53,26 @@ See [docs/setup.md](docs/setup.md) for detailed setup instructions.
 | 4 | Deep Scan - multi-magnification flake imaging | Planned |
 | 5 | Real Processors - GMM detector, Maskterial integration | Planned |
 
+## Directory Structure
+
+```
+├── src/flakefinder/leica/   # Library: Stage, Camera, ZDrive, Lamp, etc.
+├── docs/                    # Design docs, plans, hardware reference
+├── scripts/                 # One-off experiment and characterization scripts
+├── scans/                   # Scan output data (gitignored)
+├── experiments/             # Experiment data and plots (gitignored)
+├── calibration/             # Flatfield calibration images
+├── scan_area_v1.py          # Multi-row snake scan with continuous motion
+├── scan_area_with_focus.py  # Single-row scan with Z focus tracking
+├── stitch_area.py           # Stitch scan frames into overview image
+├── find_chips.py            # Detect chips in stitched image
+├── focus_map.py             # Autofocus grid sampling across a chip
+├── analyze_focus_map.py     # Analyze focus map, fit tilt plane
+├── autofocus_demo.py        # Single-point Z autofocus
+├── stage_util.py            # Stage/objective control utility
+└── capture_util.py          # Single image capture utility
+```
+
 ## Architecture
 
 ```
