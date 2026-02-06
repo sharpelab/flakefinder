@@ -792,13 +792,52 @@ class ZDrive(Axis):
     Convenience wrapper providing easy access to the Z drive axis.
     Inherits all Axis functionality (move_to, move_to_async, position_um, etc.)
 
+    Adds hysteresis-corrected position reading for more accurate Z position
+    during motion. The Z axis has ~45 µm of mechanical backlash that the
+    hysteresis-corrected interface compensates for.
+
     Usage:
         z = ZDrive.from_connection(conn)
         print(f"Z position: {z.position_um} µm")
+        print(f"Z corrected: {z.position_um_hysteresis_corrected} µm")
         z.move_to(25000)  # blocking
         handle = z.move_to_async(24000)  # non-blocking
         handle.wait()
     """
+
+    def __init__(self, unit: "Unit"):
+        """Initialize ZDrive from SDK unit.
+
+        Args:
+            unit: SDK Unit object for Z drive.
+        """
+        super().__init__(unit)
+
+        # Hysteresis-corrected interface for accurate position during motion
+        self._bcv_hysteresis = get_interface(
+            unit, IID.IID_BASIC_CONTROL_VALUE_HYSTERESIS_CORRECTED
+        )
+
+    @property
+    def position_um_hysteresis_corrected(self) -> float | None:
+        """Current Z position with hysteresis correction (more accurate during motion).
+
+        The Z axis has ~45 µm of mechanical backlash. During motion:
+        - Regular position_um lags by ~20-25 µm
+        - This corrected value compensates based on motion direction
+
+        Returns:
+            Position in microns, or None if interface not available.
+        """
+        if self._bcv_hysteresis is None:
+            return None
+        native = self._bcv_hysteresis.GetControlValue()
+        return self._converter.GetMetricsValue(native)
+
+    @property
+    def supports_hysteresis_correction(self) -> bool:
+        """Check if hysteresis-corrected position is available."""
+        return self._bcv_hysteresis is not None
 
     @classmethod
     def from_connection(cls, conn: "LeicaConnection") -> "ZDrive":

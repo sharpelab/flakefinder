@@ -568,6 +568,7 @@ Examples:
 
                 saved_frames_meta.append({
                     "n": frame_idx,
+                    "row": 0,  # Single row scan
                     "t_start": t_start - t0,
                     "t_end": t_end - t0,
                     "x_start": x_start_interp,
@@ -642,23 +643,35 @@ Examples:
                     z_um = z_converter.GetMetricsValue(z_native)
                     z_samples.append((t, z_um))
 
-            # Z control thread
+            def get_latest_x() -> tuple[float, float]:
+                """Get latest X position and timestamp from polling thread."""
+                if x_samples:
+                    s = x_samples[-1]
+                    return ((s[0] + s[1]) / 2, s[2])  # (t_mid, x_um)
+                return (time.perf_counter(), x_min)
+
+            def get_latest_z() -> tuple[float, float]:
+                """Get latest Z position and timestamp from polling thread."""
+                if z_samples:
+                    return z_samples[-1]  # (t, z_um)
+                return (time.perf_counter(), z_start)
+
+            # Z control thread (reads from polling threads, no direct SDK calls)
             def control_z():
                 """State feedback + feedforward Z velocity control."""
                 control_interval = 1.0 / args.control_rate
 
                 last_z = z_start
-                last_t = time.perf_counter()
+                last_t_z = time.perf_counter()
+                last_z_vel = 0.0
                 last_cmd_vel = 0.0
 
                 while not stop_control.is_set() and not emergency_stop.is_set():
                     t_now = time.perf_counter()
 
-                    # Read current state
-                    x_native = x_bcv.GetControlValue()
-                    current_x = x_converter.GetMetricsValue(x_native)
-                    z_native = z_bcv.GetControlValue()
-                    current_z = z_converter.GetMetricsValue(z_native)
+                    # Get positions from polling threads (no SDK calls here)
+                    _, current_x = get_latest_x()
+                    t_z, current_z = get_latest_z()
 
                     # Safety: runtime Z limit check
                     if current_z > args.z_max:
@@ -671,12 +684,12 @@ Examples:
                             pass
                         break
 
-                    # Compute actual Z velocity
-                    dt = t_now - last_t
-                    if dt > 0.001:
-                        actual_z_vel = (current_z - last_z) / dt
+                    # Compute actual Z velocity from sample timestamps
+                    dt_z = t_z - last_t_z
+                    if dt_z > 0.001:
+                        actual_z_vel = (current_z - last_z) / dt_z
                     else:
-                        actual_z_vel = 0.0
+                        actual_z_vel = last_z_vel  # Keep previous if no new sample
 
                     # Clamp X to data range
                     x_clamped = max(x_min, min(x_max, current_x))
@@ -701,8 +714,11 @@ Examples:
                     vel_from_ff = args.kff * z_vel_feedforward
                     commanded_vel = vel_from_pos + vel_from_vel + vel_from_ff
 
-                    last_z = current_z
-                    last_t = t_now
+                    # Update Z state only if new sample
+                    if t_z != last_t_z:
+                        last_z = current_z
+                        last_t_z = t_z
+                        last_z_vel = actual_z_vel
 
                     # Safety: limit velocity near Z max
                     z_headroom = args.z_max - current_z
@@ -735,7 +751,7 @@ Examples:
                     if sleep_time > 0:
                         time.sleep(sleep_time)
 
-            # Start polling threads
+            # Start position polling threads
             print("\nStarting position polling...")
             x_thread = threading.Thread(target=poll_x, daemon=True)
             z_thread = threading.Thread(target=poll_z, daemon=True)
@@ -850,14 +866,19 @@ Examples:
             z_error_mean = z_error_std = z_error_max = z_error_p95 = None
             within_dof = None
 
-        # Build metadata
+        # Build metadata (compatible with scan_area_v1.py for stitching)
         meta = {
             "timestamp": datetime.now().isoformat(),
             "x_min_um": x_min,
             "x_max_um": x_max,
             "y_min_um": y_min,
             "y_max_um": y_max,
+            "y_step_um": frame_height_um,  # Single row, so step = frame height
+            "y_overlap_percent": 0,  # Single row
             "downsample": args.downsample,
+            "scan_duration_s": scan_duration,
+            "frame_count": frame_idx,
+            "position_sample_count": len(x_samples),
             "scan_params": {
                 "scan_speed_mm_s": args.speed_mm,
                 "move_speed_mm_s": args.move_speed_mm,
@@ -895,6 +916,21 @@ Examples:
                 "shutter_name": shutter.name if shutter else None,
                 "shutter_open": shutter.is_open if shutter else None,
             },
+            # Rows array for stitch_area.py compatibility
+            "rows": [{
+                "row_idx": 0,
+                "y_um": row_y,
+                "direction": 1,  # +X direction
+                "frame_start": 0,
+                "frame_end": frame_idx,
+                "duration_s": scan_duration,
+                "position_samples": len(x_samples),
+            }],
+            # Position stream for stitching (scan_area_v1 format)
+            "position_stream": [
+                {"t_before": s[0] - t_scan_start, "t_after": s[1] - t_scan_start, "x_um": s[2], "row": 0}
+                for s in x_samples
+            ],
             "focus_tracking": {
                 "enabled": True,
                 "method": "state_feedback_feedforward",
@@ -925,20 +961,13 @@ Examples:
                 },
             },
             "timing": {
-                "scan_duration_s": scan_duration,
                 "expected_duration_s": expected_duration_s,
-            },
-            "frame_count": frame_idx,
-            "position_sample_count": {
-                "x": len(x_samples),
-                "z": len(z_samples),
             },
             "control_update_count": len(control_log),
             "frames": saved_frames_meta,
             "control_samples": control_log,
-            # Position streams for detailed analysis
-            "x_samples": [{"t_before": s[0], "t_after": s[1], "x_um": s[2]} for s in x_samples],
-            "z_samples": [{"t": s[0], "z_um": s[1]} for s in z_samples],
+            # Position streams for detailed analysis (z_samples from control thread)
+            "z_samples": [{"t": s[0] - t_scan_start, "z_um": s[1]} for s in z_samples],
         }
 
         # Save metadata
