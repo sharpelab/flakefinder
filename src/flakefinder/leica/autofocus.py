@@ -165,8 +165,10 @@ class AutofocusResult:
     fine_z_start_um: float | None = None  # None if no fine pass
     fine_z_end_um: float | None = None
     stayed_at_initial: bool = False  # True if scan found nothing better than initial
-    sharpness_curve: list[dict] = field(default_factory=list)  # [{z_um, sharpness}, ...]
-    frames: list[AutofocusFrame] | None = None  # Only if store_frames=True
+    sharpness_curve: list[dict] = field(default_factory=list)  # [{z_um, sharpness}, ...] coarse only
+    frames: list[AutofocusFrame] | None = None  # Coarse frames only (if store_frames=True)
+    fine_sharpness_curve: list[dict] = field(default_factory=list)  # Fine pass only
+    fine_frames: list[AutofocusFrame] | None = None  # Fine frames only (if store_frames=True)
 
 
 def _get_safe_range(conn: "LeicaConnection", z_range_um: float | None) -> tuple[float, int | None]:
@@ -491,11 +493,6 @@ def continuous_autofocus(
                 best_z = fine_best["z_um"]
                 best_sharpness = fine_best["sharpness"]
 
-            # Append fine pass to sharpness curve
-            sharpness_curve.extend(fine_curve)
-            if store_frames and frames is not None and fine_frames is not None:
-                frames.extend(fine_frames)
-
             scan_duration += fine_duration
             frame_count += fine_frame_count
             z_sample_count += fine_z_count
@@ -540,4 +537,6 @@ def continuous_autofocus(
         stayed_at_initial=stayed_at_initial,
         sharpness_curve=sharpness_curve,
         frames=frames if store_frames else None,
+        fine_sharpness_curve=fine_curve if fine_pass and fine_curve else [],
+        fine_frames=fine_frames if store_frames and fine_pass else None,
     )

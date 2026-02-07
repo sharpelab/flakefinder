@@ -224,8 +224,9 @@ def main():
         print(f"  Z samples: {af_result.z_sample_count}")
         print()
 
-        # Sharpness stats
-        sharpness_values = [r["sharpness"] for r in af_result.sharpness_curve]
+        # Sharpness stats (combine coarse + fine)
+        all_sharpness = af_result.sharpness_curve + af_result.fine_sharpness_curve
+        sharpness_values = [r["sharpness"] for r in all_sharpness]
         min_sharpness = min(sharpness_values) if sharpness_values else 0
         max_sharpness = max(sharpness_values) if sharpness_values else 0
         mean_sharpness = sum(sharpness_values) / len(sharpness_values) if sharpness_values else 0
@@ -237,38 +238,51 @@ def main():
         if af_result.stayed_at_initial:
             print(f"  ** Stayed at initial (scan found nothing better) **")
 
-        # Find best frame for saving
-        best_frame_idx = 0
+        # Find best frame for saving — check coarse and fine separately
         best_scan_path = None
-        if af_result.sharpness_curve:
-            best = max(af_result.sharpness_curve, key=lambda r: r["sharpness"])
-            best_frame_idx = best["frame"]
+        best_frame = None
+        if af_result.frames and af_result.sharpness_curve:
+            coarse_best = max(af_result.sharpness_curve, key=lambda r: r["sharpness"])
+            best_frame = af_result.frames[coarse_best["frame"]]
+        if af_result.fine_frames and af_result.fine_sharpness_curve:
+            fine_best = max(af_result.fine_sharpness_curve, key=lambda r: r["sharpness"])
+            fine_frame = af_result.fine_frames[fine_best["frame"]]
+            if best_frame is None or fine_frame.sharpness > best_frame.sharpness:
+                best_frame = fine_frame
 
         # Save best frame from scan (if we have frames stored and output specified)
-        if args.output and af_result.frames and len(af_result.frames) > best_frame_idx:
-            best_frame = af_result.frames[best_frame_idx]
-            if best_frame.image is not None:
-                best_scan_path = os.path.join(args.output, "best_scan_frame.jpg")
-                PILImage.fromarray(best_frame.image).save(best_scan_path, quality=95)
-                print(f"  Saved best scan frame: {best_scan_path}")
+        if args.output and best_frame is not None and best_frame.image is not None:
+            best_scan_path = os.path.join(args.output, "best_scan_frame.jpg")
+            PILImage.fromarray(best_frame.image).save(best_scan_path, quality=95)
+            print(f"  Saved best scan frame: {best_scan_path}")
 
         # Save debug frames if requested
         if args.debug_dir and af_result.frames:
-            os.makedirs(args.debug_dir)
-            print(f"  Saving {len(af_result.frames)} frames to {args.debug_dir}/...")
+            has_fine = af_result.fine_frames is not None and len(af_result.fine_frames) > 0
 
-            for i, frame in enumerate(af_result.frames):
-                if frame.image is not None:
-                    fname = f"frame_{i:03d}_z_{frame.z_um:.1f}_s_{frame.sharpness:.1f}.jpg"
-                    PILImage.fromarray(frame.image).save(os.path.join(args.debug_dir, fname), quality=95)
+            def save_pass_frames(frames, curve, out_dir):
+                """Save frames and sharpness CSV to a directory."""
+                os.makedirs(out_dir)
+                for i, frame in enumerate(frames):
+                    if frame.image is not None:
+                        fname = f"frame_{i:03d}_z_{frame.z_um:.1f}_s_{frame.sharpness:.1f}.jpg"
+                        PILImage.fromarray(frame.image).save(os.path.join(out_dir, fname), quality=95)
+                csv_path = os.path.join(out_dir, "sharpness_curve.csv")
+                with open(csv_path, "w") as f:
+                    f.write("frame,z_um,sharpness\n")
+                    for r in curve:
+                        f.write(f"{r['frame']},{r['z_um']:.2f},{r['sharpness']:.2f}\n")
 
-            # Save sharpness curve CSV
-            csv_path = os.path.join(args.debug_dir, "sharpness_curve.csv")
-            with open(csv_path, "w") as f:
-                f.write("frame,z_um,sharpness\n")
-                for r in af_result.sharpness_curve:
-                    f.write(f"{r['frame']},{r['z_um']:.2f},{r['sharpness']:.2f}\n")
-            print(f"  Saved sharpness curve to {csv_path}")
+            if has_fine:
+                coarse_dir = os.path.join(args.debug_dir, "coarse")
+                fine_dir = os.path.join(args.debug_dir, "fine")
+                print(f"  Saving {len(af_result.frames)} coarse frames to {coarse_dir}/...")
+                save_pass_frames(af_result.frames, af_result.sharpness_curve, coarse_dir)
+                print(f"  Saving {len(af_result.fine_frames)} fine frames to {fine_dir}/...")
+                save_pass_frames(af_result.fine_frames, af_result.fine_sharpness_curve, fine_dir)
+            else:
+                print(f"  Saving {len(af_result.frames)} frames to {args.debug_dir}/...")
+                save_pass_frames(af_result.frames, af_result.sharpness_curve, args.debug_dir)
 
         # === Step 5: Capture 'after' photo ===
         # Z is already at best position (library moved it there)
@@ -327,6 +341,7 @@ def main():
                     "mean": mean_sharpness,
                 },
                 "sharpness_curve": af_result.sharpness_curve,
+                "fine_sharpness_curve": af_result.fine_sharpness_curve,
             }
 
             summary_path = os.path.join(args.output, "summary.json")
