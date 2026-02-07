@@ -449,7 +449,7 @@ def main():
                         print(f" -> {fname}", end="")
 
                 # Queue all disk writes to background thread
-                if save_executor and (af_result.frames or after_img):
+                if save_executor and (af_result.frames is not None or after_img is not None):
                     _af = af_result
                     _after = after_img
                     _label = label
