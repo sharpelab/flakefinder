@@ -251,6 +251,12 @@ def main():
         help="Settle time in seconds after autofocus (before image capture)",
     )
     parser.add_argument(
+        "--suffix",
+        type=str,
+        default=None,
+        help="Suffix for output filenames (e.g. 'v6' -> focus_map_chip0_v6.json)",
+    )
+    parser.add_argument(
         "--notes",
         type=str,
         default=None,
@@ -377,7 +383,8 @@ def main():
         # Create images directory if saving images
         images_dir = None
         if args.save_images:
-            images_dir = output_dir / f"focus_map_chip{args.chip}_images"
+            stem = f"focus_map_chip{args.chip}_{args.suffix}" if args.suffix else f"focus_map_chip{args.chip}"
+            images_dir = output_dir / f"{stem}_images"
             images_dir.mkdir(parents=True, exist_ok=True)
             print(f"Saving images to {images_dir}")
 
@@ -505,7 +512,8 @@ def main():
     }
 
     # Save
-    output_path = output_dir / f"focus_map_chip{args.chip}.json"
+    stem = f"focus_map_chip{args.chip}_{args.suffix}" if args.suffix else f"focus_map_chip{args.chip}"
+    output_path = output_dir / f"{stem}.json"
     with open(output_path, "w") as f:
         json.dump(output, f, indent=2)
 
