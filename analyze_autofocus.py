@@ -20,12 +20,74 @@ from mosaic_util import make_mosaic
 
 
 def load_summary(dir_path: Path) -> dict:
-    """Load summary.json from autofocus output directory."""
+    """Load summary.json from autofocus output directory.
+
+    Handles two formats:
+    - autofocus_demo format: has "params", "before", "after" keys
+    - focus_map debug format: has "initial", "final_sharpness", no "params"/"before"/"after"
+
+    Returns the raw dict with a "_format" key ("demo" or "focus_map") for callers
+    to branch on.
+    """
     summary_path = dir_path / "summary.json"
     if not summary_path.exists():
         raise FileNotFoundError(f"summary.json not found in {dir_path}")
     with open(summary_path) as f:
-        return json.load(f)
+        data = json.load(f)
+
+    if "params" in data:
+        data["_format"] = "demo"
+    else:
+        data["_format"] = "focus_map"
+    return data
+
+
+def normalize_summary(summary: dict) -> dict:
+    """Return a dict with normalized keys so plotting code can be format-agnostic.
+
+    Adds/aliases:
+    - "before" -> from "initial" in focus_map format
+    - "after"  -> synthesized from selected + final_sharpness in focus_map format
+    - "params" -> synthesized from scan metadata in focus_map format
+    """
+    fmt = summary.get("_format", "demo")
+    if fmt == "demo":
+        return summary
+
+    # Focus map format: build compatible "before" and "after" dicts
+    out = dict(summary)
+
+    # "before" <- "initial"
+    if "initial" in summary and "before" not in summary:
+        out["before"] = summary["initial"]
+
+    # "after" <- synthesized from selected Z + final_sharpness
+    if "after" not in summary:
+        selected = summary.get("selected", {})
+        final_s = summary.get("final_sharpness")
+        if selected and final_s is not None:
+            out["after"] = {
+                "z_um": selected["z_um"],
+                "sharpness": final_s,
+            }
+        elif selected:
+            out["after"] = dict(selected)
+
+    # "params" <- synthesized from scan metadata
+    if "params" not in summary:
+        scan = summary.get("scan", {})
+        initial = summary.get("initial", {})
+        coarse = summary.get("coarse", {})
+        out["params"] = {
+            "z_initial_um": initial.get("z_um"),
+            "range_um": scan.get("z_range_um"),
+            "objective_position": scan.get("objective_position"),
+            "fine_pass": "fine" in summary,
+            "super_fine_pass": "super_fine" in summary,
+            # x_um/y_um not available in focus_map debug summaries
+        }
+
+    return out
 
 
 def find_debug_dir(dir_path: Path, explicit: str | None) -> Path | None:
@@ -71,13 +133,14 @@ def parse_frame_filename(filename: str) -> dict | None:
     }
 
 
-def collect_debug_frames(debug_dir: Path) -> tuple[list[Path], list[Path]]:
-    """Collect coarse and fine frame paths from debug directory.
+def collect_debug_frames(debug_dir: Path) -> tuple[list[Path], list[Path], list[Path]]:
+    """Collect coarse, fine, and super_fine frame paths from debug directory.
 
-    Returns (coarse_paths, fine_paths) sorted by frame number.
+    Returns (coarse_paths, fine_paths, super_fine_paths) sorted by frame number.
     """
     coarse_dir = debug_dir / "coarse"
     fine_dir = debug_dir / "fine"
+    super_fine_dir = debug_dir / "super_fine"
 
     if coarse_dir.exists():
         coarse = sorted(coarse_dir.glob("frame_*.png"))
@@ -86,8 +149,9 @@ def collect_debug_frames(debug_dir: Path) -> tuple[list[Path], list[Path]]:
         coarse = sorted(debug_dir.glob("frame_*.png"))
 
     fine = sorted(fine_dir.glob("frame_*.png")) if fine_dir.exists() else []
+    super_fine = sorted(super_fine_dir.glob("frame_*.png")) if super_fine_dir.exists() else []
 
-    return coarse, fine
+    return coarse, fine, super_fine
 
 
 def interpolate_sharpness(z: float, curve: list[dict]) -> float | None:
@@ -193,14 +257,15 @@ def plot_metrics_comparison(
     pick_z: float | None = None,
     summary: dict | None = None,
     quiet: bool = False,
+    super_fine_paths: list[Path] | None = None,
 ) -> None:
     """Compute multiple sharpness metrics on debug frames and plot comparison.
 
     If summary contains inline metrics (from --all-metrics), also shows
     live-computed values alongside the recomputed-from-disk values.
     """
-    # Compute metrics on all available frames (coarse + fine combined)
-    all_paths = list(coarse_paths) + list(fine_paths)
+    # Compute metrics on all available frames (coarse + fine + super_fine combined)
+    all_paths = list(coarse_paths) + list(fine_paths) + list(super_fine_paths or [])
     if not all_paths:
         return
 
@@ -215,7 +280,8 @@ def plot_metrics_comparison(
     if summary:
         curves = summary.get("sharpness_curve", [])
         fine_curve = summary.get("fine_sharpness_curve", [])
-        all_curves = curves + (fine_curve if fine_curve else [])
+        sf_curve = summary.get("super_fine_sharpness_curve", [])
+        all_curves = curves + (fine_curve or []) + (sf_curve or [])
         if all_curves and "metrics" in all_curves[0]:
             # Map from summary metric names to display names
             name_map = {
@@ -337,19 +403,28 @@ def plot_sharpness_curve(
     quiet: bool = False,
 ) -> None:
     """Generate sharpness curve plot with markers and inset images."""
-    coarse_curve = summary.get("sharpness_curve", [])
-    fine_curve = summary.get("fine_sharpness_curve", [])
-    params = summary["params"]
-    before = summary["before"]
-    best = summary["selected"]  # new: "selected", legacy: "best"
-    after = summary["after"]
+    norm = normalize_summary(summary)
+    coarse_curve = norm.get("sharpness_curve", [])
+    fine_curve = norm.get("fine_sharpness_curve", [])
+    super_fine_curve = norm.get("super_fine_sharpness_curve", [])
+    params = norm["params"]
+    before = norm["before"]
+    best = norm["selected"]  # new: "selected", legacy: "best"
+    after = norm["after"]
 
-    # Load inset images
+    # Load inset images — try both .jpg (demo) and .png (focus_map) extensions
     inset_images = {}
-    for name in ["before.jpg", "after.jpg", "best_scan_frame.jpg"]:
-        img_path = dir_path / name
-        if img_path.exists():
-            inset_images[name] = Image.open(img_path)
+    inset_candidates = [
+        ("before", ["before.jpg", "initial.png"]),
+        ("best_scan_frame", ["best_scan_frame.jpg"]),
+        ("after", ["after.jpg", "after.png", "final.png"]),
+    ]
+    for key, filenames in inset_candidates:
+        for name in filenames:
+            img_path = dir_path / name
+            if img_path.exists():
+                inset_images[key] = Image.open(img_path)
+                break
 
     has_insets = len(inset_images) > 0
     fig_width = 14 if has_insets else 10
@@ -378,6 +453,13 @@ def plot_sharpness_curve(
         ax.plot(fine_z, fine_s, "o-", color="#ee8833", markersize=4,
                 linewidth=1.2, label="Fine", zorder=3)
 
+    # Plot super_fine data
+    if super_fine_curve:
+        sf_z = [r["z_um"] for r in super_fine_curve]
+        sf_s = [r["sharpness"] for r in super_fine_curve]
+        ax.plot(sf_z, sf_s, "o-", color="#cc4488", markersize=3,
+                linewidth=1.2, label="Super fine", zorder=3)
+
     # Shaded scan ranges
     y_min, y_max = ax.get_ylim()
     if coarse_curve:
@@ -388,6 +470,10 @@ def plot_sharpness_curve(
         z_lo = min(fine_z)
         z_hi = max(fine_z)
         ax.axvspan(z_lo, z_hi, alpha=0.12, color="#ee8833", zorder=1)
+    if super_fine_curve:
+        z_lo = min(sf_z)
+        z_hi = max(sf_z)
+        ax.axvspan(z_lo, z_hi, alpha=0.15, color="#cc4488", zorder=1)
 
     # Marker lines
     ax.axvline(before["z_um"], color="red", linestyle="--", linewidth=1.2,
@@ -404,7 +490,7 @@ def plot_sharpness_curve(
 
     # Pick-Z marker
     if pick_z is not None:
-        all_curves = coarse_curve + fine_curve
+        all_curves = coarse_curve + fine_curve + super_fine_curve
         interp_s = interpolate_sharpness(pick_z, all_curves)
         label = f"Pick Z = {pick_z:.1f}"
         if interp_s is not None:
@@ -420,24 +506,29 @@ def plot_sharpness_curve(
     # Title
     z_adj = best["z_um"] - before["z_um"]
     title = f"Autofocus: Z adjustment {z_adj:+.1f} µm"
+    passes = ["coarse"]
     if params.get("fine_pass"):
-        title += " (coarse + fine)"
+        passes.append("fine")
+    if params.get("super_fine_pass"):
+        passes.append("super fine")
+    if len(passes) > 1:
+        title += f" ({' + '.join(passes)})"
     ax.set_title(title)
 
     # Inset images panel
     if has_insets:
         inset_order = [
-            ("before.jpg", f'Before (Z={before["z_um"]:.1f}, S={before["sharpness"]:.1f})'),
-            ("best_scan_frame.jpg", f'Best scan (Z={best["z_um"]:.1f}, S={best["sharpness"]:.1f})'),
-            ("after.jpg", f'After (Z={after["z_um"]:.1f}, S={after["sharpness"]:.1f})'),
+            ("before", f'Before (Z={before["z_um"]:.1f}, S={before["sharpness"]:.1f})'),
+            ("best_scan_frame", f'Best scan (Z={best["z_um"]:.1f}, S={best["sharpness"]:.1f})'),
+            ("after", f'After (Z={after["z_um"]:.1f}, S={after["sharpness"]:.1f})'),
         ]
-        available = [(name, label) for name, label in inset_order if name in inset_images]
+        available = [(key, label) for key, label in inset_order if key in inset_images]
         n_insets = len(available)
 
         if n_insets > 0:
             inset_h = 0.80 / n_insets - 0.02
-            for i, (name, label) in enumerate(available):
-                img = inset_images[name]
+            for i, (key, label) in enumerate(available):
+                img = inset_images[key]
                 y_pos = 0.12 + (n_insets - 1 - i) * (inset_h + 0.02)
                 ax_img = fig.add_axes([inset_left, y_pos, inset_width, inset_h])
                 ax_img.imshow(np.array(img))
@@ -600,25 +691,33 @@ def main():
     # Find debug frames
     debug_dir = find_debug_dir(dir_path, args.debug_dir)
 
+    # Normalize summary so rest of code can use consistent keys
+    norm = normalize_summary(summary)
+
     if not args.quiet:
         print("Autofocus Analysis")
         print("=" * 50)
         print(f"Input: {dir_path}/")
         print(f"Summary: {dir_path / 'summary.json'}")
+        print(f"Format: {summary.get('_format', 'unknown')}")
         print(f"Debug frames: {debug_dir or '(not found)'}")
         print()
 
-        params = summary["params"]
+        params = norm["params"]
         print("Params:")
-        print(f"  Position: X={params['x_um']:.1f}, Y={params['y_um']:.1f}")
+        if params.get("x_um") is not None and params.get("y_um") is not None:
+            print(f"  Position: X={params['x_um']:.1f}, Y={params['y_um']:.1f}")
         if params.get("objective_position"):
             print(f"  Objective: position {params['objective_position']}")
-        print(f"  Range: {params['range_um']:.1f} µm (fine: {'yes' if params.get('fine_pass') else 'no'})")
+        if params.get("range_um") is not None:
+            fine_str = "yes" if params.get("fine_pass") else "no"
+            sf_str = ", super_fine: yes" if params.get("super_fine_pass") else ""
+            print(f"  Range: {params['range_um']:.1f} µm (fine: {fine_str}{sf_str})")
         print()
 
-        before = summary["before"]
-        best = summary["selected"]
-        after = summary["after"]
+        before = norm["before"]
+        best = norm["selected"]
+        after = norm["after"]
 
         print("Results:")
         print(f"  Initial Z:  {before['z_um']:.2f} µm  (sharpness: {before['sharpness']:.2f})")
@@ -633,21 +732,35 @@ def main():
             pct = (after["sharpness"] / before["sharpness"] - 1) * 100
             print(f"  Improvement: {improvement:+.2f} ({pct:+.1f}%)")
 
+        if summary.get("stayed_at_initial"):
+            print("  (Stayed at initial position)")
+
         if args.pick_z is not None:
-            all_curves = summary.get("sharpness_curve", []) + summary.get("fine_sharpness_curve", [])
+            all_curves = (
+                norm.get("sharpness_curve", [])
+                + norm.get("fine_sharpness_curve", [])
+                + norm.get("super_fine_sharpness_curve", [])
+            )
             interp_s = interpolate_sharpness(args.pick_z, all_curves)
             s_str = f" (interpolated sharpness: ~{interp_s:.2f})" if interp_s is not None else ""
             print(f"  Pick Z:     {args.pick_z:.2f} µm{s_str}")
 
         print()
 
-        scan = summary["scan"]
-        coarse_n = len(summary.get("sharpness_curve", []))
-        fine_n = len(summary.get("fine_sharpness_curve", []))
+        scan = norm["scan"]
+        coarse_n = len(norm.get("sharpness_curve", []))
+        fine_n = len(norm.get("fine_sharpness_curve", []))
+        sf_n = len(norm.get("super_fine_sharpness_curve", []))
         print("Scan stats:")
         print(f"  Duration: {scan['duration_s']:.2f}s")
+        parts = [f"{coarse_n} coarse"]
         if fine_n > 0:
-            print(f"  Frames: {coarse_n} coarse + {fine_n} fine = {coarse_n + fine_n} total")
+            parts.append(f"{fine_n} fine")
+        if sf_n > 0:
+            parts.append(f"{sf_n} super_fine")
+        total = coarse_n + fine_n + sf_n
+        if len(parts) > 1:
+            print(f"  Frames: {' + '.join(parts)} = {total} total")
         else:
             print(f"  Frames: {coarse_n}")
         print(f"  Z samples: {scan['z_sample_count']}")
@@ -662,7 +775,7 @@ def main():
 
     # Generate mosaics from debug frames
     if not args.no_mosaic and debug_dir:
-        coarse_paths, fine_paths = collect_debug_frames(debug_dir)
+        coarse_paths, fine_paths, sf_paths = collect_debug_frames(debug_dir)
 
         if coarse_paths:
             coarse_mosaic_path = output_dir / "coarse_mosaic.jpg"
@@ -672,7 +785,11 @@ def main():
             fine_mosaic_path = output_dir / "fine_mosaic.jpg"
             make_frame_mosaic(fine_paths, fine_mosaic_path, "Fine", quiet=args.quiet)
 
-        if not coarse_paths and not fine_paths and not args.quiet:
+        if sf_paths:
+            sf_mosaic_path = output_dir / "super_fine_mosaic.jpg"
+            make_frame_mosaic(sf_paths, sf_mosaic_path, "Super fine", quiet=args.quiet)
+
+        if not coarse_paths and not fine_paths and not sf_paths and not args.quiet:
             print("No debug frames found, skipping mosaics.")
     elif not args.no_mosaic and not debug_dir and not args.quiet:
         print("No debug frames found, skipping mosaics.")
@@ -680,13 +797,13 @@ def main():
     # Multi-metric comparison
     if args.metrics:
         if debug_dir:
-            coarse_paths, fine_paths = collect_debug_frames(debug_dir)
-            if coarse_paths or fine_paths:
+            coarse_paths, fine_paths, sf_paths = collect_debug_frames(debug_dir)
+            if coarse_paths or fine_paths or sf_paths:
                 metrics_path = output_dir / "metrics_comparison.png"
                 plot_metrics_comparison(
                     coarse_paths, fine_paths, metrics_path,
                     pick_z=args.pick_z, summary=summary,
-                    quiet=args.quiet,
+                    quiet=args.quiet, super_fine_paths=sf_paths,
                 )
             elif not args.quiet:
                 print("No debug frames found, skipping metrics comparison.")
