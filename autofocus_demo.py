@@ -263,6 +263,13 @@ def main():
             if best_frame is None or fine_frame.sharpness > best_frame.sharpness:
                 best_frame = fine_frame
 
+        # === Step 5: Capture 'after' photo ===
+        # Z is already at best position (library moved it there)
+        # Capture immediately before any debug I/O to minimize delay after AF
+        vprint()
+        vprint("Capturing 'after' photo...")
+        after_img = camera.capture()
+
         # Save best frame from scan (if we have frames stored and output specified)
         if args.output and best_frame is not None and best_frame.image is not None:
             best_scan_path = os.path.join(args.output, "best_scan_frame.jpg")
@@ -283,13 +290,6 @@ def main():
             else:
                 vprint(f"  Saving {len(af_result.frames)} frames to {args.debug_dir}/...")
                 save_pass_frames(af_result.frames, af_result.sharpness_curve, args.debug_dir)
-
-        # === Step 5: Capture 'after' photo ===
-        # Z is already at best position (library moved it there)
-        vprint()
-        vprint("Capturing 'after' photo...")
-        # No extra settle needed — continuous_autofocus already settles before final_sharpness
-        after_img = camera.capture()
         after_path = None
         if after_img is not None:
             after_sharpness = sharpness(after_img)
