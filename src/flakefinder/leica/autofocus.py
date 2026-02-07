@@ -522,9 +522,10 @@ def continuous_autofocus(
     # Validate against limits
     _validate_z_limits(z_axis, z_start, z_end, z_max_safe_um)
 
-    # Capture initial sharpness at current position
+    # Capture initial sharpness at current position (flush stale sensor buffer first)
     z_axis.move_to(initial_z)
     time.sleep(0.05)
+    camera.capture()
     initial_image = camera.capture()
     initial_sharpness = sharpness(initial_image, method=sharpness_method) if initial_image is not None else 0.0
     stored_initial_image = initial_image if store_frames else None
