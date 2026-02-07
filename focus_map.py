@@ -442,11 +442,11 @@ def main():
                     else:
                         save_pass_frames(af_result.frames, af_result.sharpness_curve, point_dir)
 
-                    # Save before/after images from AF result
+                    # Save initial/final images from AF result
                     if af_result.initial_image is not None:
-                        PILImage.fromarray(af_result.initial_image).save(str(point_dir / "before.png"))
+                        PILImage.fromarray(af_result.initial_image).save(str(point_dir / "initial.png"))
                     if af_result.final_image is not None:
-                        PILImage.fromarray(af_result.final_image).save(str(point_dir / "after.png"))
+                        PILImage.fromarray(af_result.final_image).save(str(point_dir / "final.png"))
 
                 # Save after image if requested
                 if images_dir is not None:
@@ -458,6 +458,11 @@ def main():
                         image_path = images_dir / fname
                         PILImage.fromarray(img).save(str(image_path), quality=95)
                         print(f" -> {fname}", end="")
+                        # Also save to debug dir as after.png
+                        if args.debug_dir:
+                            point_dir = args.debug_dir / label
+                            point_dir.mkdir(parents=True, exist_ok=True)
+                            PILImage.fromarray(img).save(str(point_dir / "after.png"))
                 print()
             except Exception as e:
                 print(f"FAILED: {e}")
