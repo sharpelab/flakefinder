@@ -33,6 +33,7 @@ def main():
     parser.add_argument("--fine", action="store_true", help="Two-pass: coarse scan then fine 50um scan")
     parser.add_argument("--fine-speed-factor", type=float, default=0.25, help="Speed multiplier for fine pass (default: 0.25 = 1/4 speed)")
     parser.add_argument("--sharpness-method", choices=["tenengrad", "laplacian"], default="tenengrad", help="Sharpness metric (laplacian better for low-contrast areas)")
+    parser.add_argument("--settle-time", type=float, default=0, help="Settle time in seconds after moves (default: 0)")
     parser.add_argument("--dry-run", action="store_true", help="Print what would be done without moving")
     parser.add_argument("--clean", action="store_true", help="Remove existing output/debug directories before running")
     args = parser.parse_args()
@@ -172,8 +173,13 @@ def main():
         Stage.wait_all([hx, hy])
         hx.dispose()
         hy.dispose()
+        if args.settle_time > 0:
+            time.sleep(args.settle_time)
 
         # === Step 2: Move to initial Z ===
+        # Set Z speed for positioning (restores sane default if a previous crash left it slow)
+        if z_drive.supports_velocity and z_drive.max_velocity_um_s:
+            z_drive.set_velocity_um_s(args.z_speed if args.z_speed else z_drive.max_velocity_um_s)
         print(f"Moving Z to {target_z:.1f} um...")
         z_drive.move_to(target_z)
 
@@ -268,7 +274,8 @@ def main():
         # Z is already at best position (library moved it there)
         print()
         print("Capturing 'after' photo...")
-        time.sleep(0.1)  # Brief settle
+        if args.settle_time > 0:
+            time.sleep(args.settle_time)
         after_img = camera.capture()
         after_path = None
         if after_img is not None:
