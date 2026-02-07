@@ -99,6 +99,7 @@ def analyze_focus_map(data: dict) -> dict:
     # Prefer best_sharpness, fall back to legacy sharpness field
     sharpness = np.array([get_sharpness(p) for p in points if get_sharpness(p) is not None])
     types = [p["type"] for p in points]
+    indices = [p["index"] for p in points]
 
     # Filter to successful points
     valid_mask = np.array([p["best_z_um"] is not None for p in points])
@@ -177,6 +178,7 @@ def analyze_focus_map(data: dict) -> dict:
         "z": z,
         "sharpness": sharpness,
         "types": [types[i] for i in range(len(types)) if valid_mask[i]],
+        "indices": [indices[i] for i in range(len(indices)) if valid_mask[i]],
         "residuals": residuals,
     }
 
@@ -191,6 +193,15 @@ def plot_focus_map(data: dict, analysis: dict, output_path: Path, quiet: bool = 
     sharpness = analysis["sharpness"]
     residuals = analysis["residuals"]
     coeffs = analysis["plane_coeffs"]
+
+    # Build point labels like "c01", "g11"
+    labels = [f"{'c' if t == 'contour' else 'g'}{idx:02d}"
+              for t, idx in zip(analysis["types"], analysis["indices"])]
+
+    def annotate_points(ax, x, y, labels, fontsize=6):
+        for xi, yi, label in zip(x, y, labels):
+            ax.annotate(label, (xi, yi), textcoords="offset points",
+                       xytext=(4, 4), fontsize=fontsize, alpha=0.8)
 
     # 1. 3D interpolated surface from sample points
     ax1 = fig.add_subplot(2, 3, 1, projection='3d')
@@ -243,6 +254,8 @@ def plot_focus_map(data: dict, analysis: dict, output_path: Path, quiet: bool = 
     ax3.set_ylabel('Y (mm)')
     ax3.set_title('Interpolated Surface (top view)')
     ax3.set_aspect('equal')
+    ax3.invert_yaxis()
+    annotate_points(ax3, x, y, labels)
 
     # 4. Sharpness heatmap
     ax4 = fig.add_subplot(2, 3, 4)
@@ -252,6 +265,8 @@ def plot_focus_map(data: dict, analysis: dict, output_path: Path, quiet: bool = 
     ax4.set_ylabel('Y (mm)')
     ax4.set_title(f'Sharpness Map (mean={analysis["sharpness_mean"]:.1f}, std={analysis["sharpness_std"]:.1f})')
     ax4.set_aspect('equal')
+    ax4.invert_yaxis()
+    annotate_points(ax4, x, y, labels)
 
     # Mark outliers
     if len(analysis["outlier_indices"]) > 0:
@@ -270,6 +285,8 @@ def plot_focus_map(data: dict, analysis: dict, output_path: Path, quiet: bool = 
     ax5.set_ylabel('Y (mm)')
     ax5.set_title(f'Residuals from Plane Fit (std={analysis["residual_std"]:.1f} µm)')
     ax5.set_aspect('equal')
+    ax5.invert_yaxis()
+    annotate_points(ax5, x, y, labels)
 
     # 6. Z heatmap (top-down view)
     ax6 = fig.add_subplot(2, 3, 6)
@@ -279,6 +296,8 @@ def plot_focus_map(data: dict, analysis: dict, output_path: Path, quiet: bool = 
     ax6.set_ylabel('Y (mm)')
     ax6.set_title('Z Position Map')
     ax6.set_aspect('equal')
+    ax6.invert_yaxis()
+    annotate_points(ax6, x, y, labels)
 
     # Mark low sharpness points
     if len(analysis["low_sharpness_indices"]) > 0:
@@ -780,17 +799,18 @@ def create_mosaic(
         print(f"Mosaic saved to {output_path}")
 
 
-def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_margin_um: float = 5000.0) -> dict:
+def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_margin_um: float = 5000.0, min_sharpness: float = 0.0) -> dict:
     """Compute robust plane fit with outlier rejection and coverage analysis.
 
-    Uses coarse-fine disagreement as primary quality metric. Points with low
-    disagreement are high-confidence and used for the plane fit. Corner coverage
-    is checked separately.
+    Uses coarse-fine disagreement and sharpness floor as quality metrics.
+    Points with low disagreement and sufficient sharpness are high-confidence
+    and used for the plane fit. Corner coverage is checked separately.
 
     Args:
         data: Focus map data dict.
         cf_threshold: Max coarse-fine disagreement in µm for high-confidence points.
         corner_margin_um: Distance from edge to consider "corner" region.
+        min_sharpness: Minimum best_sharpness to include a point in the fit.
 
     Returns:
         Dict with plane parameters, quality metrics, and coverage info.
@@ -812,8 +832,8 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
     coarse_best_z = np.array([p.get("coarse_best_z_um", p["best_z_um"]) for p in points])
     coarse_fine_diff = np.abs(coarse_best_z - z)
 
-    # High-confidence mask: low coarse-fine disagreement
-    high_conf_mask = coarse_fine_diff <= cf_threshold
+    # High-confidence mask: low coarse-fine disagreement AND above sharpness floor
+    high_conf_mask = (coarse_fine_diff <= cf_threshold) & (best_sharpness >= min_sharpness)
 
     if high_conf_mask.sum() < 3:
         # Fall back to all points if not enough high-confidence
@@ -877,6 +897,7 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
             "points_total": len(points),
             "points_used": int(high_conf_mask.sum()),
             "cf_threshold_um": cf_threshold,
+            "min_sharpness": min_sharpness,
         },
         "tilt": {
             "x_um_per_mm": float(a * 1000),
@@ -903,23 +924,118 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
             }
             for i in range(len(points)) if high_conf_mask[i]
         ],
+        "points_dropped": [
+            {
+                "type": points[i]["type"],
+                "index": points[i]["index"],
+                "x_um": float(x[i]),
+                "y_um": float(y[i]),
+                "z_um": float(z[i]),
+                "best_sharpness": float(best_sharpness[i]),
+                "reason": "low_sharpness" if best_sharpness[i] < min_sharpness else "cf_disagreement",
+            }
+            for i in range(len(points)) if not high_conf_mask[i]
+        ],
+    }
+
+    # Compute interpolated Z grid from good points
+    n_grid = 50
+    grid_x = np.linspace(x_min, x_max, n_grid)
+    grid_y = np.linspace(y_min, y_max, n_grid)
+    G_x, G_y = np.meshgrid(grid_x, grid_y)
+
+    # Use cubic interpolation from good points, fall back to plane for extrapolation
+    Z_interp = griddata((x_hc, y_hc), z_hc, (G_x, G_y), method='cubic')
+    # Fill NaN (extrapolated regions) with plane values
+    nan_mask = np.isnan(Z_interp)
+    Z_interp[nan_mask] = a * G_x[nan_mask] + b * G_y[nan_mask] + c
+
+    result["interpolated_grid"] = {
+        "x_um": grid_x.tolist(),
+        "y_um": grid_y.tolist(),
+        "z_um": Z_interp.tolist(),
+    }
+
+    # Store arrays for plotting (not serialized)
+    result["_plot_data"] = {
+        "all_x": x, "all_y": y, "all_z": z,
+        "all_sharpness": best_sharpness,
+        "high_conf_mask": high_conf_mask,
+        "G_x": G_x, "G_y": G_y, "Z_interp": Z_interp,
     }
 
     return result
 
 
-def export_plane(data: dict, output_path: Path, cf_threshold: float = 20.0) -> dict:
+def plot_contour_map(result: dict, output_path: Path, quiet: bool = False) -> None:
+    """Generate contour map showing interpolated Z surface from filtered points."""
+    pd = result["_plot_data"]
+    G_x = pd["G_x"] / 1000  # mm
+    G_y = pd["G_y"] / 1000
+    Z_interp = pd["Z_interp"]
+    all_x = pd["all_x"] / 1000
+    all_y = pd["all_y"] / 1000
+    mask = pd["high_conf_mask"]
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    # Filled contour
+    cf = ax.contourf(G_x, G_y, Z_interp, levels=20, cmap='viridis')
+    # Contour lines
+    cl = ax.contour(G_x, G_y, Z_interp, levels=10, colors='white', linewidths=0.5, alpha=0.5)
+    ax.clabel(cl, inline=True, fontsize=7, fmt='%.0f')
+
+    plt.colorbar(cf, ax=ax, label='Z (µm)')
+
+    # Good points (white)
+    ax.scatter(all_x[mask], all_y[mask], c='white', s=60, edgecolors='black',
+               linewidths=1, zorder=5, label=f'Used ({mask.sum()})')
+    # Dropped points (red X)
+    ax.scatter(all_x[~mask], all_y[~mask], c='red', s=60, marker='x',
+               linewidths=2, zorder=5, label=f'Dropped ({(~mask).sum()})')
+
+    # Label all points
+    points_used = result["points_used"]
+    points_dropped = result["points_dropped"]
+    all_labeled = points_used + points_dropped
+    for p in all_labeled:
+        label = f"{'c' if p['type'] == 'contour' else 'g'}{p['index']:02d}"
+        ax.annotate(label, (p['x_um'] / 1000, p['y_um'] / 1000),
+                   textcoords="offset points", xytext=(5, 5), fontsize=7, alpha=0.8)
+
+    q = result["quality"]
+    t = result["tilt"]
+    ax.set_title(f'Interpolated Focus Surface (R²={q["r_squared"]:.3f}, '
+                 f'{q["points_used"]}/{q["points_total"]} pts, '
+                 f'tilt={t["magnitude_um_per_mm"]:.1f} µm/mm)\n'
+                 f'Residual std={q["residual_std_um"]:.1f} µm, '
+                 f'min_sharpness={q["min_sharpness"]:.0f}')
+    ax.set_xlabel('X (mm)')
+    ax.set_ylabel('Y (mm)')
+    ax.set_aspect('equal')
+    ax.invert_yaxis()
+    ax.legend(loc='lower right')
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+    if not quiet:
+        print(f"Contour map saved to {output_path}")
+
+
+def export_plane(data: dict, output_path: Path, cf_threshold: float = 20.0, min_sharpness: float = 0.0) -> dict:
     """Export robust plane fit to JSON file.
 
     Args:
         data: Focus map data dict.
         output_path: Output JSON path.
         cf_threshold: Max coarse-fine disagreement for high-confidence points.
+        min_sharpness: Minimum best_sharpness to include a point.
 
     Returns:
         The plane fit result dict.
     """
-    result = compute_robust_plane_fit(data, cf_threshold=cf_threshold)
+    result = compute_robust_plane_fit(data, cf_threshold=cf_threshold, min_sharpness=min_sharpness)
 
     # Add metadata
     result["source"] = {
@@ -928,8 +1044,10 @@ def export_plane(data: dict, output_path: Path, cf_threshold: float = 20.0) -> d
         "timestamp": data.get("timestamp", "unknown"),
     }
 
+    # Strip non-serializable plot data before saving
+    serializable = {k: v for k, v in result.items() if k != "_plot_data"}
     with open(output_path, "w") as f:
-        json.dump(result, f, indent=2)
+        json.dump(serializable, f, indent=2)
 
     return result
 
@@ -959,7 +1077,7 @@ def main():
     parser.add_argument(
         "--max-dim",
         type=int,
-        default=3000,
+        default=4500,
         help="Maximum canvas dimension for mosaic in pixels",
     )
     parser.add_argument(
@@ -984,6 +1102,12 @@ def main():
         type=float,
         default=20.0,
         help="Coarse-fine disagreement threshold (um) for high-confidence points",
+    )
+    parser.add_argument(
+        "--min-sharpness",
+        type=float,
+        default=20.0,
+        help="Minimum best_sharpness to include in plane fit (default: 20)",
     )
     parser.add_argument(
         "--quiet", "-q",
@@ -1034,7 +1158,7 @@ def main():
 
     # Export plane fit
     if args.export_plane:
-        result = export_plane(data, args.export_plane, cf_threshold=args.cf_threshold)
+        result = export_plane(data, args.export_plane, cf_threshold=args.cf_threshold, min_sharpness=args.min_sharpness)
 
         if not args.quiet:
             q = result["quality"]
@@ -1059,6 +1183,12 @@ def main():
             print(f"Corners extrapolated: {', '.join(c['corners_extrapolated']) or 'none'}")
             print()
             print(f"Exported to: {args.export_plane}")
+
+        # Generate contour map
+        contour_path = args.export_plane.with_name(
+            args.export_plane.stem.replace("_plane", "") + "_contour.png"
+        )
+        plot_contour_map(result, contour_path, quiet=args.quiet)
 
     return 0
 

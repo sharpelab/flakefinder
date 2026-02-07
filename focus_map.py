@@ -76,41 +76,83 @@ def sample_contour_points(
 
 
 def sample_grid_points(
-    bbox: dict,
+    convex_hull: list[list[float]],
     spacing_um: float,
+    inset_um: float = 1500.0,
 ) -> list[tuple[float, float]]:
-    """Sample interior grid points within a bounding box.
+    """Sample interior grid points within a convex hull, centered on centroid.
+
+    Grid is centered on the hull centroid and only includes points inside
+    the hull (with an inset margin to avoid crowding contour points).
 
     Args:
-        bbox: Dict with x_min, y_min, x_max, y_max in stage coords.
+        convex_hull: List of [x, y] points defining the hull in stage coords.
         spacing_um: Grid spacing in micrometers.
+        inset_um: Inset margin from hull edge in µm (avoids crowding contour points).
 
     Returns:
         List of (x, y) tuples in stage coordinates.
     """
-    x_min, x_max = bbox["x_min"], bbox["x_max"]
-    y_min, y_max = bbox["y_min"], bbox["y_max"]
+    hull = np.array(convex_hull)
 
-    # Add margin to avoid sampling exactly on edge
-    margin = spacing_um / 4
+    # Compute centroid
+    cx = hull[:, 0].mean()
+    cy = hull[:, 1].mean()
 
-    x_start = x_min + margin
-    x_end = x_max - margin
-    y_start = y_min + margin
-    y_end = y_max - margin
+    # Shrink hull inward by inset_um for the containment test
+    if inset_um > 0:
+        # Shrink toward centroid
+        dists = np.sqrt((hull[:, 0] - cx) ** 2 + (hull[:, 1] - cy) ** 2)
+        min_dist = dists.min()
+        if min_dist > inset_um:
+            scale = (min_dist - inset_um) / min_dist
+        else:
+            scale = 1.0
+        inset_hull = np.column_stack([
+            cx + (hull[:, 0] - cx) * scale,
+            cy + (hull[:, 1] - cy) * scale,
+        ])
+    else:
+        inset_hull = hull
 
-    if x_start >= x_end or y_start >= y_end:
-        # Box too small for grid
-        return [((x_min + x_max) / 2, (y_min + y_max) / 2)]
+    def point_in_polygon(px, py, polygon):
+        """Ray-casting point-in-polygon test."""
+        n = len(polygon)
+        inside = False
+        j = n - 1
+        for i in range(n):
+            xi, yi = polygon[i]
+            xj, yj = polygon[j]
+            if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+                inside = not inside
+            j = i
+        return inside
 
-    # Generate grid
-    x_vals = np.arange(x_start, x_end, spacing_um)
-    y_vals = np.arange(y_start, y_end, spacing_um)
+    # Bounding box of full hull
+    x_min, x_max = hull[:, 0].min(), hull[:, 0].max()
+    y_min, y_max = hull[:, 1].min(), hull[:, 1].max()
 
+    # Generate grid centered on centroid
+    # Expand outward from centroid in both directions
+    x_half = int((x_max - cx) / spacing_um) + 1
+    y_half = int((y_max - cy) / spacing_um) + 1
+    x_vals = cx + np.arange(-x_half, x_half + 1) * spacing_um
+    y_vals = cy + np.arange(-y_half, y_half + 1) * spacing_um
+
+    # Filter to points inside inset hull
     points = []
     for y in y_vals:
         for x in x_vals:
-            points.append((float(x), float(y)))
+            if point_in_polygon(x, y, inset_hull):
+                points.append((float(x), float(y)))
+
+    # Ensure centroid is included (deduplicate if already present)
+    centroid = (float(cx), float(cy))
+    min_dist_to_existing = min(
+        ((p[0] - cx) ** 2 + (p[1] - cy) ** 2) for p in points
+    ) if points else float('inf')
+    if min_dist_to_existing > (spacing_um / 4) ** 2:
+        points.append(centroid)
 
     return points
 
@@ -135,7 +177,7 @@ def main():
     parser.add_argument(
         "--contour-samples",
         type=int,
-        default=8,
+        default=16,
         help="Number of points to sample along contour edge",
     )
     parser.add_argument(
@@ -179,10 +221,28 @@ def main():
         help="Sharpness metric for autofocus",
     )
     parser.add_argument(
+        "--z",
+        type=float,
+        required=True,
+        help="Reference Z position in µm (used as center for all autofocus scans)",
+    )
+    parser.add_argument(
         "--z-speed",
         type=float,
         default=None,
         help="Z axis speed in µm/s (default: use current)",
+    )
+    parser.add_argument(
+        "--move-settle",
+        type=float,
+        default=0,
+        help="Settle time in seconds after stage XY move",
+    )
+    parser.add_argument(
+        "--af-settle",
+        type=float,
+        default=0,
+        help="Settle time in seconds after autofocus (before image capture)",
     )
     parser.add_argument(
         "--notes",
@@ -226,7 +286,7 @@ def main():
 
     # Generate sample points
     contour_points = sample_contour_points(convex_hull, args.contour_samples)
-    grid_points = sample_grid_points(bbox, args.grid_spacing_um)
+    grid_points = sample_grid_points(convex_hull, args.grid_spacing_um)
 
     print(f"Sample points:")
     print(f"  Contour: {len(contour_points)} points")
@@ -331,6 +391,8 @@ def main():
             Stage.wait_all([hx, hy])
             hx.dispose()
             hy.dispose()
+            if args.move_settle > 0:
+                time.sleep(args.move_settle)
 
             # Run autofocus
             image_path = None
@@ -340,6 +402,7 @@ def main():
                     camera=camera,
                     acquisition=acquisition,
                     context=context,
+                    z_start_um=args.z,
                     z_range_um=args.z_range,
                     z_speed_um_s=args.z_speed,
                     fine_pass=not args.no_fine_pass,
@@ -353,6 +416,8 @@ def main():
 
                 # Save after image if requested
                 if images_dir is not None:
+                    if args.af_settle > 0:
+                        time.sleep(args.af_settle)
                     img = camera.capture()
                     if img is not None:
                         fname = f"{pt['type']}_{pt['index']:02d}.jpg"
@@ -401,11 +466,14 @@ def main():
         "grid_params": {
             "contour_samples": args.contour_samples,
             "grid_spacing_um": args.grid_spacing_um,
+            "z_start_um": args.z,
             "z_range_um": args.z_range,
             "z_speed_um_s": args.z_speed,
             "fine_pass": not args.no_fine_pass,
             "fine_range_um": args.fine_range,
             "sharpness_method": args.sharpness_method,
+            "move_settle_s": args.move_settle,
+            "af_settle_s": args.af_settle,
             "save_images": args.save_images,
         },
         "sample_points": sample_results,
