@@ -368,7 +368,7 @@ def _run_z_scan(
             z_samples.append((t_before, t_after, z_um))
 
     # Move to scan start position
-    z_axis.move_to(z_start)
+    z_axis.move_to_corrected(z_start)
     time.sleep(0.1)  # Brief settle
 
     # Start Z polling
@@ -518,7 +518,7 @@ def continuous_autofocus(
     _validate_z_limits(z_axis, z_start, z_end, z_max_safe_um)
 
     # Capture initial sharpness at current position (flush stale sensor buffer first)
-    z_axis.move_to(initial_z)
+    z_axis.move_to_corrected(initial_z)
     time.sleep(0.05)
     camera.capture()
     initial_image = camera.capture()

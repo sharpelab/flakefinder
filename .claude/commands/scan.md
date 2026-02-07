@@ -27,7 +27,7 @@ At the start of each session:
   - Separate entries with `---` horizontal rules
   - Prose-only entries are fine too — the `---` keeps them visually distinct
   - **Log user decisions immediately** — when the user picks a value, makes a judgment call, or decides on a plan, write it to the notebook right away. Don't wait to be reminded.
-- **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `rm -r` before `scp -r` to avoid stale file issues. Download one-off files (manual AF images, etc.) into `downloads/`, not the project root. Scan data goes in `scans/`.
+- **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `rsync -a --quiet` for bulk transfers (much faster than scp for many small files over BOS↔SF RTT). Use `rm -r` before `scp -r` if using scp to avoid stale file issues. Download one-off files (manual AF images, etc.) into `downloads/`, not the project root. Scan data goes in `scans/`.
 - **Images**: `xdg-open` results for the user automatically after analysis runs. "show" = open file for the user.
 - **After every microscope run or analysis**: (1) show results to the user, (2) update the notebook. Every time. No exceptions. Do both before moving on.
 - **Errors**: When something fails, diagnose before re-running. Check the code path, don't just retry.

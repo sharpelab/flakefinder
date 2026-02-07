@@ -215,7 +215,7 @@ def main():
         if z_drive.supports_velocity and z_drive.max_velocity_um_s:
             z_drive.set_velocity_um_s(args.z_speed if args.z_speed else z_drive.max_velocity_um_s)
         vprint(f"Moving Z to {target_z:.1f} um...")
-        z_drive.move_to(target_z)
+        z_drive.move_to_corrected(target_z)
 
         # === Step 3: Capture 'before' photo ===
         vprint("Capturing 'before' photo...")
