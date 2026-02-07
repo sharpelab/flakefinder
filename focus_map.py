@@ -6,6 +6,7 @@ runs autofocus at each point, and outputs a focus map with best Z positions.
 
 import argparse
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 import time
@@ -391,6 +392,8 @@ def main():
         # Collect results
         sample_results = []
         total_points = len(all_points)
+        save_executor = ThreadPoolExecutor(max_workers=1) if (args.debug_dir or args.save_images) else None
+        save_futures = []
 
         print(f"\nRunning autofocus at {total_points} points...")
 
@@ -432,37 +435,48 @@ def main():
                 final_sharpness = af_result.final_sharpness
                 print(f"Z={best_z:.1f} µm, sharpness={selected_sharpness:.1f}/{final_sharpness:.1f}", end="")
 
-                # Save debug frames if requested
-                if args.debug_dir and af_result.frames:
-                    point_dir = args.debug_dir / label
-                    has_fine = af_result.fine_frames is not None and len(af_result.fine_frames) > 0
-                    if has_fine:
-                        save_pass_frames(af_result.frames, af_result.sharpness_curve, point_dir / "coarse")
-                        save_pass_frames(af_result.fine_frames, af_result.fine_sharpness_curve, point_dir / "fine")
-                    else:
-                        save_pass_frames(af_result.frames, af_result.sharpness_curve, point_dir)
-
-                    # Save initial/final images from AF result
-                    if af_result.initial_image is not None:
-                        PILImage.fromarray(af_result.initial_image).save(str(point_dir / "initial.png"))
-                    if af_result.final_image is not None:
-                        PILImage.fromarray(af_result.final_image).save(str(point_dir / "final.png"))
-
-                # Save after image if requested
+                # Capture after image while still at this position (needs camera)
+                after_img = None
                 if images_dir is not None:
                     if args.af_settle > 0:
                         time.sleep(args.af_settle)
-                    img = camera.capture()
-                    if img is not None:
+                    after_img = camera.capture()
+                    if after_img is not None:
                         fname = f"{pt['type']}_{pt['index']:02d}.jpg"
                         image_path = images_dir / fname
-                        PILImage.fromarray(img).save(str(image_path), quality=95)
                         print(f" -> {fname}", end="")
-                        # Also save to debug dir as after.png
-                        if args.debug_dir:
-                            point_dir = args.debug_dir / label
-                            point_dir.mkdir(parents=True, exist_ok=True)
-                            PILImage.fromarray(img).save(str(point_dir / "after.png"))
+
+                # Queue all disk writes to background thread
+                if save_executor and (af_result.frames or after_img):
+                    _af = af_result
+                    _after = after_img
+                    _label = label
+                    _image_path = image_path
+                    _debug_dir = args.debug_dir
+
+                    def _save(af=_af, after=_after, lbl=_label, img_path=_image_path, dbg=_debug_dir):
+                        if dbg and af.frames:
+                            point_dir = dbg / lbl
+                            has_fine = af.fine_frames is not None and len(af.fine_frames) > 0
+                            if has_fine:
+                                save_pass_frames(af.frames, af.sharpness_curve, point_dir / "coarse")
+                                save_pass_frames(af.fine_frames, af.fine_sharpness_curve, point_dir / "fine")
+                            else:
+                                save_pass_frames(af.frames, af.sharpness_curve, point_dir)
+                            if af.initial_image is not None:
+                                PILImage.fromarray(af.initial_image).save(str(point_dir / "initial.png"))
+                            if af.final_image is not None:
+                                PILImage.fromarray(af.final_image).save(str(point_dir / "final.png"))
+                        if after is not None:
+                            if img_path:
+                                PILImage.fromarray(after).save(str(img_path), quality=95)
+                            if dbg:
+                                point_dir = dbg / lbl
+                                point_dir.mkdir(parents=True, exist_ok=True)
+                                PILImage.fromarray(after).save(str(point_dir / "after.png"))
+
+                    save_futures.append(save_executor.submit(_save))
+
                 print()
             except Exception as e:
                 print(f"FAILED: {e}")
@@ -489,6 +503,12 @@ def main():
                 "stayed_at_initial": af_result.stayed_at_initial if af_result else None,
                 "image": str(image_path.name) if image_path else None,
             })
+
+        # Wait for background saves to finish
+        if save_executor:
+            for fut in save_futures:
+                fut.result()  # raises if any save failed
+            save_executor.shutdown(wait=True)
 
         # Dispose resources before connection closes
         try:
