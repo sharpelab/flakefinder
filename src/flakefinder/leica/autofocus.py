@@ -441,7 +441,7 @@ def continuous_autofocus(
     compute_all_metrics: bool = False,
     backlash_overshoot_um: float = 100.0,
     settle_time_s: float = 0.2,
-    min_dynamic_range: float = 0.05,
+    min_dynamic_range: float = 0.20,
 ) -> AutofocusResult:
     """Perform continuous Z-scan autofocus.
 
