@@ -33,7 +33,8 @@ def main():
     parser.add_argument("--fine", action="store_true", help="Two-pass: coarse scan then fine 50um scan")
     parser.add_argument("--fine-speed-factor", type=float, default=0.25, help="Speed multiplier for fine pass (default: 0.25 = 1/4 speed)")
     parser.add_argument("--sharpness-method", choices=["tenengrad", "laplacian"], default="tenengrad", help="Sharpness metric (laplacian better for low-contrast areas)")
-    parser.add_argument("--settle-time", type=float, default=0, help="Settle time in seconds after moves (default: 0)")
+    parser.add_argument("--settle-time", type=float, default=0.2, help="Settle time in seconds after final Z move (default: 0.2)")
+    parser.add_argument("--backlash-overshoot", type=float, default=100.0, help="Overshoot above best Z (um) for backlash compensation (default: 100, 0=disable)")
     parser.add_argument("--dry-run", action="store_true", help="Print what would be done without moving")
     parser.add_argument("--all-metrics", action="store_true", help="Compute all 5 sharpness metrics per frame (diagnostic)")
     parser.add_argument("--clean", action="store_true", help="Remove existing output/debug directories before running")
@@ -174,8 +175,6 @@ def main():
         Stage.wait_all([hx, hy])
         hx.dispose()
         hy.dispose()
-        if args.settle_time > 0:
-            time.sleep(args.settle_time)
 
         # === Step 2: Move to initial Z ===
         # Set Z speed for positioning (restores sane default if a previous crash left it slow)
@@ -216,6 +215,8 @@ def main():
                 sharpness_method=args.sharpness_method,
                 store_frames=bool(args.debug_dir),
                 compute_all_metrics=args.all_metrics,
+                backlash_overshoot_um=args.backlash_overshoot,
+                settle_time_s=args.settle_time,
             )
         except ValueError as e:
             print(f"Error: {e}")
@@ -299,8 +300,7 @@ def main():
         # Z is already at best position (library moved it there)
         print()
         print("Capturing 'after' photo...")
-        if args.settle_time > 0:
-            time.sleep(args.settle_time)
+        # No extra settle needed — continuous_autofocus already settles before final_sharpness
         after_img = camera.capture()
         after_path = None
         if after_img is not None:

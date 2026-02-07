@@ -839,6 +839,22 @@ class ZDrive(Axis):
         """Check if hysteresis-corrected position is available."""
         return self._bcv_hysteresis is not None
 
+    def move_to_corrected(self, position_um: float) -> None:
+        """Move to position using hysteresis-corrected interface.
+
+        The SDK's hysteresis-corrected interface compensates for ~45 µm
+        of mechanical backlash based on motion history/direction.
+        Falls back to regular move_to if not available.
+
+        Args:
+            position_um: Target position in microns.
+        """
+        if self._bcv_hysteresis is not None:
+            native = self._um_to_native(position_um)
+            self._bcv_hysteresis.SetControlValue(native)
+        else:
+            self.move_to(position_um)
+
     @classmethod
     def from_connection(cls, conn: "LeicaConnection") -> "ZDrive":
         """Create ZDrive from a LeicaConnection.
