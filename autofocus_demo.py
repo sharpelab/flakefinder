@@ -35,7 +35,6 @@ def main():
     parser.add_argument("--fine-speed-factor", type=float, default=0.25, help="Speed multiplier for fine pass (default: 0.25 = 1/4 speed)")
     parser.add_argument("--sharpness-method", choices=list(ALL_SHARPNESS_METRICS.keys()), default="tenengrad", help="Sharpness metric for autofocus")
     parser.add_argument("--settle-time", type=float, default=0.2, help="Settle time in seconds after final Z move (default: 0.2)")
-    parser.add_argument("--backlash-overshoot", type=float, default=100.0, help="Overshoot above best Z (um) for backlash compensation (default: 100, 0=disable)")
     parser.add_argument("--dry-run", action="store_true", help="Print what would be done without moving")
     parser.add_argument("--all-metrics", action="store_true", help="Compute all 5 sharpness metrics per frame (diagnostic)")
     parser.add_argument("--clean", action="store_true", help="Remove existing output/debug directories before running")
@@ -223,7 +222,6 @@ def main():
                 sharpness_method=args.sharpness_method,
                 store_frames=bool(args.debug_dir),
                 compute_all_metrics=args.all_metrics,
-                backlash_overshoot_um=args.backlash_overshoot,
                 settle_time_s=args.settle_time,
             )
         except ValueError as e:

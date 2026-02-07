@@ -439,7 +439,6 @@ def continuous_autofocus(
     sharpness_method: str = "tenengrad",
     store_frames: bool = False,
     compute_all_metrics: bool = False,
-    backlash_overshoot_um: float = 100.0,
     settle_time_s: float = 0.2,
     min_dynamic_range: float = 0.20,
 ) -> AutofocusResult:
@@ -476,10 +475,6 @@ def continuous_autofocus(
         compute_all_metrics: If True, compute all 5 sharpness metrics per frame
             (tenengrad, laplacian, brenner, normalized_variance, vollath_f4).
             Results stored in each sharpness_curve entry's "metrics" dict.
-        backlash_overshoot_um: Overshoot distance above best Z before final
-            approach (default 100µm). Ensures final move approaches from above,
-            matching the scan direction, to avoid ~45µm backlash error.
-            Set to 0 to disable.
         settle_time_s: Settle time in seconds after final Z move, before
             capturing final_sharpness (default 0.2s).
         min_dynamic_range: Minimum (s_max - s_min) / s_mean for the coarse
@@ -631,11 +626,6 @@ def continuous_autofocus(
         best_sharpness = initial_sharpness
 
     # Move to best Z position (or back to initial if stayed_at_initial)
-    # Backlash compensation: overshoot above, then approach from above
-    # (matching the downward scan direction) to avoid ~45µm hysteresis error.
-    if backlash_overshoot_um > 0:
-        z_axis.move_to(best_z + backlash_overshoot_um)
-        time.sleep(0.05)
     z_axis.move_to_corrected(best_z)
     time.sleep(settle_time_s)
 
