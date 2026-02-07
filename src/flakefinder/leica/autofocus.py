@@ -44,13 +44,13 @@ def sharpness_tenengrad(image: np.ndarray) -> float:
     """Compute Tenengrad sharpness (Sobel gradient magnitude mean).
 
     Args:
-        image: BGR or grayscale image as numpy array.
+        image: RGB or grayscale image as numpy array.
 
     Returns:
         Sharpness value (higher = sharper).
     """
     if len(image.shape) == 3:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     else:
         gray = image
 
@@ -66,13 +66,13 @@ def sharpness_laplacian(image: np.ndarray) -> float:
     Less susceptible to being fooled by bright blurry blobs.
 
     Args:
-        image: BGR or grayscale image as numpy array.
+        image: RGB or grayscale image as numpy array.
 
     Returns:
         Sharpness value (higher = sharper).
     """
     if len(image.shape) == 3:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     else:
         gray = image
 
@@ -80,12 +80,54 @@ def sharpness_laplacian(image: np.ndarray) -> float:
     return lap.var()
 
 
+def sharpness_brenner(image: np.ndarray) -> float:
+    """Brenner gradient sharpness."""
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    else:
+        gray = image
+    g = gray.astype(np.float64)
+    diff = g[:, 2:] - g[:, :-2]
+    return np.mean(diff**2)
+
+
+def sharpness_normalized_variance(image: np.ndarray) -> float:
+    """Normalized variance sharpness."""
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    else:
+        gray = image
+    mu = gray.mean()
+    return gray.var() / mu if mu > 0 else 0
+
+
+def sharpness_vollath_f4(image: np.ndarray) -> float:
+    """Vollath F4 autocorrelation sharpness."""
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    else:
+        gray = image
+    g = gray.astype(np.float64)
+    auto1 = np.mean(g[:, :-1] * g[:, 1:])
+    auto2 = np.mean(g[:, :-2] * g[:, 2:])
+    return auto1 - auto2
+
+
+ALL_SHARPNESS_METRICS = {
+    "tenengrad": sharpness_tenengrad,
+    "laplacian": sharpness_laplacian,
+    "brenner": sharpness_brenner,
+    "normalized_variance": sharpness_normalized_variance,
+    "vollath_f4": sharpness_vollath_f4,
+}
+
+
 # Default sharpness function (kept for backwards compatibility)
 def sharpness(image: np.ndarray, method: str = "tenengrad") -> float:
     """Compute sharpness using specified method.
 
     Args:
-        image: BGR or grayscale image as numpy array.
+        image: RGB or grayscale image as numpy array.
         method: "tenengrad" or "laplacian"
 
     Returns:
@@ -245,6 +287,7 @@ def _run_z_scan(
     camera_class,
     store_frames: bool,
     sharpness_method: str = "tenengrad",
+    compute_all_metrics: bool = False,
 ) -> tuple[list[dict], list[AutofocusFrame] | None, float, int, int]:
     """Execute Z scan and capture frames.
 
@@ -257,6 +300,7 @@ def _run_z_scan(
         camera_class: Camera class for image conversion.
         store_frames: Whether to store images in result.
         sharpness_method: "tenengrad" or "laplacian".
+        compute_all_metrics: If True, compute all 5 sharpness metrics per frame.
 
     Returns:
         (sharpness_curve, frames, duration, frame_count, z_sample_count) tuple.
@@ -329,11 +373,16 @@ def _run_z_scan(
     for i, (t_capture, img) in enumerate(frame_data):
         z_interp = interpolate_position(t_capture, z_samples)
         s = sharpness(img, method=sharpness_method)
-        sharpness_curve.append({
+        entry = {
             "frame": i,
             "z_um": z_interp,
             "sharpness": s,
-        })
+        }
+        if compute_all_metrics:
+            entry["metrics"] = {
+                name: fn(img) for name, fn in ALL_SHARPNESS_METRICS.items()
+            }
+        sharpness_curve.append(entry)
         if store_frames:
             frames.append(AutofocusFrame(z_um=z_interp, sharpness=s, image=img))
 
@@ -354,6 +403,7 @@ def continuous_autofocus(
     fine_speed_factor: float = 0.25,
     sharpness_method: str = "tenengrad",
     store_frames: bool = False,
+    compute_all_metrics: bool = False,
 ) -> AutofocusResult:
     """Perform continuous Z-scan autofocus.
 
@@ -385,6 +435,9 @@ def continuous_autofocus(
         sharpness_method: "tenengrad" (default) or "laplacian". Laplacian is more
             reliable for low-contrast areas and less fooled by bright blurry blobs.
         store_frames: If True, store images in result.frames for debugging.
+        compute_all_metrics: If True, compute all 5 sharpness metrics per frame
+            (tenengrad, laplacian, brenner, normalized_variance, vollath_f4).
+            Results stored in each sharpness_curve entry's "metrics" dict.
 
     Returns:
         AutofocusResult with best Z, sharpness curve, and scan statistics.
@@ -437,6 +490,7 @@ def continuous_autofocus(
         camera_class=Camera,
         store_frames=store_frames,
         sharpness_method=sharpness_method,
+        compute_all_metrics=compute_all_metrics,
     )
 
     if not sharpness_curve:
@@ -481,6 +535,7 @@ def continuous_autofocus(
             camera_class=Camera,
             store_frames=store_frames,
             sharpness_method=sharpness_method,
+            compute_all_metrics=compute_all_metrics,
         )
 
         # Restore speed after fine pass (before final move)
@@ -497,8 +552,11 @@ def continuous_autofocus(
             frame_count += fine_frame_count
             z_sample_count += fine_z_count
 
-    # Check if scan found anything better than initial position
-    stayed_at_initial = best_sharpness <= initial_sharpness
+    # Accept scan best if it's within margin of initial reading.
+    # On low-contrast substrates, frame-to-frame noise can cause
+    # the initial reading to randomly exceed the true peak.
+    initial_margin = 0.95  # 5% margin
+    stayed_at_initial = best_sharpness < initial_sharpness * initial_margin
 
     if stayed_at_initial:
         # Scan found nothing better - stay at initial position

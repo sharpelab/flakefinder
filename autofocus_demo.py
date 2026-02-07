@@ -35,6 +35,7 @@ def main():
     parser.add_argument("--sharpness-method", choices=["tenengrad", "laplacian"], default="tenengrad", help="Sharpness metric (laplacian better for low-contrast areas)")
     parser.add_argument("--settle-time", type=float, default=0, help="Settle time in seconds after moves (default: 0)")
     parser.add_argument("--dry-run", action="store_true", help="Print what would be done without moving")
+    parser.add_argument("--all-metrics", action="store_true", help="Compute all 5 sharpness metrics per frame (diagnostic)")
     parser.add_argument("--clean", action="store_true", help="Remove existing output/debug directories before running")
     args = parser.parse_args()
 
@@ -214,6 +215,7 @@ def main():
                 fine_speed_factor=args.fine_speed_factor,
                 sharpness_method=args.sharpness_method,
                 store_frames=bool(args.debug_dir),
+                compute_all_metrics=args.all_metrics,
             )
         except ValueError as e:
             print(f"Error: {e}")
@@ -260,18 +262,27 @@ def main():
         if args.debug_dir and af_result.frames:
             has_fine = af_result.fine_frames is not None and len(af_result.fine_frames) > 0
 
+            metric_names = ["tenengrad", "laplacian", "brenner", "normalized_variance", "vollath_f4"]
+            has_metrics = af_result.sharpness_curve and "metrics" in af_result.sharpness_curve[0]
+
             def save_pass_frames(frames, curve, out_dir):
                 """Save frames and sharpness CSV to a directory."""
                 os.makedirs(out_dir)
                 for i, frame in enumerate(frames):
                     if frame.image is not None:
-                        fname = f"frame_{i:03d}_z_{frame.z_um:.1f}_s_{frame.sharpness:.1f}.jpg"
-                        PILImage.fromarray(frame.image).save(os.path.join(out_dir, fname), quality=95)
+                        fname = f"frame_{i:03d}_z_{frame.z_um:.1f}_s_{frame.sharpness:.1f}.png"
+                        PILImage.fromarray(frame.image).save(os.path.join(out_dir, fname))
                 csv_path = os.path.join(out_dir, "sharpness_curve.csv")
                 with open(csv_path, "w") as f:
-                    f.write("frame,z_um,sharpness\n")
+                    header = "frame,z_um,sharpness"
+                    if has_metrics:
+                        header += "," + ",".join(metric_names)
+                    f.write(header + "\n")
                     for r in curve:
-                        f.write(f"{r['frame']},{r['z_um']:.2f},{r['sharpness']:.2f}\n")
+                        line = f"{r['frame']},{r['z_um']:.2f},{r['sharpness']:.2f}"
+                        if has_metrics and "metrics" in r:
+                            line += "," + ",".join(f"{r['metrics'][m]:.4f}" for m in metric_names)
+                        f.write(line + "\n")
 
             if has_fine:
                 coarse_dir = os.path.join(args.debug_dir, "coarse")
