@@ -38,4 +38,14 @@
 
 ### [Section title - e.g. "5x overview", "Chip 0 focus map"]
 
-[Commands run, results, observations, issues encountered]
+`command_that_was_run --with --flags`
+Why this was run and what happened. Focus on the why and results, don't repeat command params in the prose unless they're part of the story.
+
+---
+
+`another_command --different --params`
+Next entry. Separate log entries with `---` horizontal rules.
+
+---
+
+Prose-only entries work too — the `---` keeps them visually distinct.

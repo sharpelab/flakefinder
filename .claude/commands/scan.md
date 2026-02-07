@@ -21,9 +21,15 @@ At the start of each session:
 - Prepare and show commands, then wait
 
 ### Workflow Habits
-- **Notebook**: Update `~/Documents/Primer/Sharpelab/Scan Notebook - [DATE].md` continuously. Log every command, result, observation, and issue. Don't ask — just do it.
+- **Notebook**: Update `~/Documents/Primer/Sharpelab/Scan Notebook - [DATE].md` continuously. Don't ask — just do it. Log format:
+  - Each entry starts with the command in backticks, followed by why it was run and results
+  - Don't repeat command params in the prose unless they're part of the story
+  - Separate entries with `---` horizontal rules
+  - Prose-only entries are fine too — the `---` keeps them visually distinct
+  - **Log user decisions immediately** — when the user picks a value, makes a judgment call, or decides on a plan, write it to the notebook right away. Don't wait to be reminded.
 - **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `rm -r` before `scp -r` to avoid stale file issues. Download one-off files (manual AF images, etc.) into `downloads/`, not the project root. Scan data goes in `scans/`.
-- **Images**: `xdg-open` results for the user automatically after analysis runs.
+- **Images**: `xdg-open` results for the user automatically after analysis runs. "show" = open file for the user.
+- **After every microscope run or analysis**: (1) show results to the user, (2) update the notebook. Every time. No exceptions. Do both before moving on.
 - **Errors**: When something fails, diagnose before re-running. Check the code path, don't just retry.
 
 ### Standard Procedures
@@ -48,6 +54,8 @@ ssh sharpelab-microscope 'cd flakefinder && uv run python focus_map.py --chips-m
 **Code changes:**
 - Edit locally, `scp` to microscope before running
 - Sync only the files you changed
+- When spawning other Claude instances for code tasks, never instruct them to sync to the microscope — only this session does that
+- Always ask spawned Claudes to write a summary doc to `/tmp/` and tell you the path when done
 
 ### Key Parameters
 - Z speed 20x: 1250 µm/s (1/4 of 5000 max)
