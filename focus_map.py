@@ -215,6 +215,12 @@ def main():
         help="Save 'after' image at each focus point",
     )
     parser.add_argument(
+        "--debug-dir",
+        type=Path,
+        default=None,
+        help="Save all AF scan frames per point (coarse/fine PNGs + sharpness CSV)",
+    )
+    parser.add_argument(
         "--sharpness-method",
         choices=["tenengrad", "laplacian"],
         default="tenengrad",
@@ -317,6 +323,7 @@ def main():
     from flakefinder.leica.enums import UCAPI_IID
     from flakefinder.leica.core import get_interface_required
     from flakefinder.leica.autofocus import continuous_autofocus
+    from flakefinder.autofocus_util import save_pass_frames
 
     start_time = time.perf_counter()
 
@@ -396,6 +403,7 @@ def main():
 
             # Run autofocus
             image_path = None
+            label = f"{'c' if pt['type'] == 'contour' else 'g'}{pt['index']:02d}"
             try:
                 af_result = continuous_autofocus(
                     conn=conn,
@@ -408,11 +416,23 @@ def main():
                     fine_pass=not args.no_fine_pass,
                     fine_range_um=args.fine_range,
                     sharpness_method=args.sharpness_method,
+                    store_frames=bool(args.debug_dir),
+                    compute_all_metrics=bool(args.debug_dir),
                 )
                 best_z = af_result.best_z_um
                 best_sharpness = af_result.best_sharpness
                 final_sharpness = af_result.final_sharpness
                 print(f"Z={best_z:.1f} µm, sharpness={best_sharpness:.1f}/{final_sharpness:.1f}", end="")
+
+                # Save debug frames if requested
+                if args.debug_dir and af_result.frames:
+                    point_dir = args.debug_dir / label
+                    has_fine = af_result.fine_frames is not None and len(af_result.fine_frames) > 0
+                    if has_fine:
+                        save_pass_frames(af_result.frames, af_result.sharpness_curve, point_dir / "coarse")
+                        save_pass_frames(af_result.fine_frames, af_result.fine_sharpness_curve, point_dir / "fine")
+                    else:
+                        save_pass_frames(af_result.frames, af_result.sharpness_curve, point_dir)
 
                 # Save after image if requested
                 if images_dir is not None:
@@ -475,6 +495,7 @@ def main():
             "move_settle_s": args.move_settle,
             "af_settle_s": args.af_settle,
             "save_images": args.save_images,
+            "debug_dir": str(args.debug_dir) if args.debug_dir else None,
         },
         "sample_points": sample_results,
     }

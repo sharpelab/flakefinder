@@ -16,6 +16,7 @@ import time
 from PIL import Image as PILImage
 
 from flakefinder.leica.autofocus import sharpness, continuous_autofocus, AutofocusResult
+from flakefinder.autofocus_util import save_pass_frames
 
 
 def main():
@@ -262,28 +263,6 @@ def main():
         # Save debug frames if requested
         if args.debug_dir and af_result.frames:
             has_fine = af_result.fine_frames is not None and len(af_result.fine_frames) > 0
-
-            metric_names = ["tenengrad", "laplacian", "brenner", "normalized_variance", "vollath_f4"]
-            has_metrics = af_result.sharpness_curve and "metrics" in af_result.sharpness_curve[0]
-
-            def save_pass_frames(frames, curve, out_dir):
-                """Save frames and sharpness CSV to a directory."""
-                os.makedirs(out_dir)
-                for i, frame in enumerate(frames):
-                    if frame.image is not None:
-                        fname = f"frame_{i:03d}_z_{frame.z_um:.1f}_s_{frame.sharpness:.1f}.png"
-                        PILImage.fromarray(frame.image).save(os.path.join(out_dir, fname))
-                csv_path = os.path.join(out_dir, "sharpness_curve.csv")
-                with open(csv_path, "w") as f:
-                    header = "frame,z_um,sharpness"
-                    if has_metrics:
-                        header += "," + ",".join(metric_names)
-                    f.write(header + "\n")
-                    for r in curve:
-                        line = f"{r['frame']},{r['z_um']:.2f},{r['sharpness']:.2f}"
-                        if has_metrics and "metrics" in r:
-                            line += "," + ",".join(f"{r['metrics'][m]:.4f}" for m in metric_names)
-                        f.write(line + "\n")
 
             if has_fine:
                 coarse_dir = os.path.join(args.debug_dir, "coarse")
