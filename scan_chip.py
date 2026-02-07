@@ -196,6 +196,9 @@ Examples:
 
     # Scan control
     scan_group = parser.add_argument_group("Scan control")
+    scan_group.add_argument("--x-overlap-percent", type=float, default=30,
+                            help="Target X overlap between saved frames, %% (default: 30). "
+                                 "Frames captured before advancing enough are discarded.")
     scan_group.add_argument("--row-limit", type=int, default=None,
                             help="Scan only N rows then stop (for testing)")
 
@@ -452,6 +455,11 @@ Examples:
             print(f"  Objective: {objective_mag}x")
         print()
 
+        # ---- Frame skip target ----
+        target_advance = frame_width_um * (1 - args.x_overlap_percent / 100)
+        print(f"Frame skip: target advance {target_advance:.0f} µm ({args.x_overlap_percent:.0f}% X overlap)")
+        print()
+
         # ---- Compute row plan ----
         y_step = frame_height_um * (1 - args.y_overlap_percent / 100)
 
@@ -663,6 +671,8 @@ Examples:
                 row_start = time.perf_counter()
                 row_frame_start = global_frame_idx
                 row_frame_count = 0
+                row_skip_count = 0
+                last_saved_x = None
 
                 # Start Z velocity tracking
                 if abs(z_vel_um_s) > 0.1:
@@ -675,7 +685,7 @@ Examples:
                 stage.x.set_velocity_um_s(x_speed_um_s)
                 handle = stage.x.move_to_async(x_end_pos)
 
-                # Capture frames during move
+                # Capture frames during move (with position-based skip)
                 while not handle.is_complete:
                     t_start = time.perf_counter()
                     current_image[0] = None
@@ -683,12 +693,20 @@ Examples:
                     t_end = time.perf_counter()
 
                     if current_image[0] is not None:
-                        save_queue.put((
-                            global_frame_idx, row_idx, t_start, t_end, current_image[0],
-                            row_y, list(x_samples), list(z_samples), total_scan_start
-                        ))
-                        global_frame_idx += 1
-                        row_frame_count += 1
+                        # Check if we've advanced enough to save this frame
+                        x_now = x_samples[-1][2] if x_samples else None
+                        if last_saved_x is not None and x_now is not None and abs(x_now - last_saved_x) < target_advance:
+                            current_image[0].Dispose()
+                            row_skip_count += 1
+                        else:
+                            save_queue.put((
+                                global_frame_idx, row_idx, t_start, t_end, current_image[0],
+                                row_y, list(x_samples), list(z_samples), total_scan_start
+                            ))
+                            if x_now is not None:
+                                last_saved_x = x_now
+                            global_frame_idx += 1
+                            row_frame_count += 1
 
                 row_end = time.perf_counter()
                 handle.dispose()
@@ -706,7 +724,7 @@ Examples:
                 # Filter position samples to row scan period
                 row_x_samples = [(tb, ta, x) for tb, ta, x in x_samples if row_start <= tb <= row_end]
 
-                print(f"  {row_frame_count} frames, {len(row_x_samples)} pos, {row_duration:.2f}s")
+                print(f"  {row_frame_count} saved, {row_skip_count} skipped, {len(row_x_samples)} pos, {row_duration:.2f}s")
 
                 # Add position samples to global list
                 for tb, ta, x_um in row_x_samples:
