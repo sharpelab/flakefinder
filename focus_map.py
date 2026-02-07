@@ -212,6 +212,11 @@ def main():
         help="Enable super fine third pass: 10µm range at 20µm/s",
     )
     parser.add_argument(
+        "--all-metrics",
+        action="store_true",
+        help="Compute all 5 sharpness metrics per frame (slow; default: primary only)",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=None,
@@ -460,7 +465,7 @@ def main():
                     super_fine_pass=args.super_fine,
                     sharpness_method=args.sharpness_method,
                     store_frames=bool(args.debug_dir),
-                    compute_all_metrics=bool(args.debug_dir),
+                    compute_all_metrics=args.all_metrics,
                 )
                 best_z = af_result.selected_z_um
                 selected_sharpness = af_result.selected_sharpness

@@ -570,7 +570,8 @@ def continuous_autofocus(
         actual_fine_z_start = fine_z_start
         actual_fine_z_end = fine_z_end
 
-        # Use slower speed for fine pass (better precision)
+        # Position at full speed, then set slow scan speed
+        z_axis.move_to_corrected(fine_z_start)
         if fine_speed_factor < 1.0:
             coarse_speed = z_speed_um_s if z_speed_um_s is not None else original_speed
             z_axis.set_velocity_um_s(coarse_speed * fine_speed_factor)
@@ -617,7 +618,8 @@ def continuous_autofocus(
         actual_super_fine_z_start = sf_z_start
         actual_super_fine_z_end = sf_z_end
 
-        # Set super fine speed (absolute, not a factor)
+        # Position at full speed, then set slow scan speed
+        z_axis.move_to_corrected(sf_z_start)
         z_axis.set_velocity_um_s(super_fine_speed_um_s)
 
         sf_curve, sf_frames, sf_duration, sf_frame_count, sf_z_count = _run_z_scan(
