@@ -642,7 +642,8 @@ def continuous_autofocus(
     if original_speed is not None:
         z_axis.set_velocity_um_s(original_speed)
 
-    # Capture final sharpness
+    # Capture final sharpness (flush stale sensor buffer first)
+    camera.capture()
     final_image = camera.capture()
     final_sharpness = sharpness(final_image, method=sharpness_method) if final_image is not None else 0.0
     stored_final_image = final_image if store_frames else None
