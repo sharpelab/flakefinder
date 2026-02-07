@@ -341,46 +341,28 @@ def main():
         # === Step 6: Save summary (if output specified) ===
         summary_path = None
         if args.output:
-            summary = {
-                "params": {
-                    "x_um": target_x,
-                    "y_um": target_y,
-                    "z_initial_um": target_z,
-                    "range_um": af_result.z_range_um,
-                    "fine_pass": args.fine,
-                    "super_fine_pass": args.super_fine,
-                    "objective_position": af_result.objective_position,
-                },
-                "scan": {
-                    "duration_s": af_result.scan_duration_s,
-                    "frame_count": af_result.frame_count,
-                    "z_sample_count": af_result.z_sample_count,
-                },
-                "before": {
-                    "z_um": target_z,
-                    "sharpness": before_sharpness,
-                },
-                "selected": {
-                    "z_um": af_result.selected_z_um,
-                    "sharpness": af_result.selected_sharpness,
-                },
-                "scan_best": {
-                    "z_um": af_result.scan_best_z_um,
-                    "sharpness": af_result.scan_best_sharpness,
-                },
-                "dynamic_range": af_result.dynamic_range,
-                "after": {
-                    "z_um": af_result.selected_z_um,
-                    "sharpness": after_sharpness,
-                },
-                "sharpness_stats": {
-                    "min": min_sharpness,
-                    "max": max_sharpness,
-                    "mean": mean_sharpness,
-                },
-                "sharpness_curve": af_result.sharpness_curve,
-                "fine_sharpness_curve": af_result.fine_sharpness_curve,
-                "super_fine_sharpness_curve": af_result.super_fine_sharpness_curve,
+            summary = af_result.to_dict()
+            summary["params"] = {
+                "x_um": target_x,
+                "y_um": target_y,
+                "z_initial_um": target_z,
+                "range_um": af_result.z_range_um,
+                "fine_pass": args.fine,
+                "super_fine_pass": args.super_fine,
+                "objective_position": af_result.objective_position,
+            }
+            summary["before"] = {
+                "z_um": target_z,
+                "sharpness": before_sharpness,
+            }
+            summary["after"] = {
+                "z_um": af_result.selected_z_um,
+                "sharpness": after_sharpness,
+            }
+            summary["sharpness_stats"] = {
+                "min": min_sharpness,
+                "max": max_sharpness,
+                "mean": mean_sharpness,
             }
 
             summary_path = os.path.join(args.output, "summary.json")
