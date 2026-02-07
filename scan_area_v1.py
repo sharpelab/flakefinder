@@ -534,6 +534,7 @@ Examples:
                     acquisition=acquisition,
                     context=context,
                     fine_pass=True,
+                    super_fine_pass=True,
                 )
                 print(f"  Z: {af_result.initial_z_um:.1f} -> {af_result.selected_z_um:.1f} µm")
                 print(f"  Range: {af_result.z_range_um:.0f}µm, Sharpness: {af_result.initial_sharpness:.1f} -> {af_result.selected_sharpness:.1f}")

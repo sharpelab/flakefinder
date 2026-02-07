@@ -207,9 +207,9 @@ def main():
         help="Fine pass range in µm (default: 50)",
     )
     parser.add_argument(
-        "--super-fine",
+        "--no-super-fine",
         action="store_true",
-        help="Enable super fine third pass: 10µm range at 20µm/s",
+        help="Disable super fine third pass (10µm range at 20µm/s)",
     )
     parser.add_argument(
         "--all-metrics",
@@ -411,7 +411,7 @@ def main():
                 z_speed_um_s=args.z_speed,
                 fine_pass=not args.no_fine_pass,
                 fine_range_um=args.fine_range,
-                super_fine_pass=args.super_fine,
+                super_fine_pass=not args.no_super_fine,
                 sharpness_method=args.sharpness_method,
             )
             args.z = centroid_af.selected_z_um
@@ -462,7 +462,7 @@ def main():
                     z_speed_um_s=args.z_speed,
                     fine_pass=not args.no_fine_pass,
                     fine_range_um=args.fine_range,
-                    super_fine_pass=args.super_fine,
+                    super_fine_pass=not args.no_super_fine,
                     sharpness_method=args.sharpness_method,
                     store_frames=bool(args.debug_dir),
                     compute_all_metrics=args.all_metrics,
