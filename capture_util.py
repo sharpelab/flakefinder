@@ -11,7 +11,6 @@ Usage:
 """
 
 import argparse
-import os
 import sys
 
 from PIL import Image as PILImage
@@ -227,9 +226,6 @@ def main() -> int:
 
         # Dispose camera before reporting status (avoids issues)
         camera.dispose()
-
-        # Open the output file
-        os.startfile(args.output)
 
         # Report full status
         print()
