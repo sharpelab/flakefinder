@@ -467,6 +467,8 @@ def main():
                                 PILImage.fromarray(af.initial_image).save(str(point_dir / "initial.png"))
                             if af.final_image is not None:
                                 PILImage.fromarray(af.final_image).save(str(point_dir / "final.png"))
+                            with open(str(point_dir / "summary.json"), "w") as f:
+                                json.dump(af.to_dict(), f, indent=2)
                         if after is not None:
                             if img_path:
                                 PILImage.fromarray(after).save(str(img_path), quality=95)

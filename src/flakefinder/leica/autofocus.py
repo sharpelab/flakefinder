@@ -217,6 +217,36 @@ class AutofocusResult:
     initial_image: np.ndarray | None = None  # Image at initial Z (if store_frames=True)
     final_image: np.ndarray | None = None    # Image at selected Z after move (if store_frames=True)
 
+    def to_dict(self) -> dict:
+        """Serialize to JSON-safe dict (excludes frames and images)."""
+        return {
+            "selected": {"z_um": self.selected_z_um, "sharpness": self.selected_sharpness},
+            "scan_best": {"z_um": self.scan_best_z_um, "sharpness": self.scan_best_sharpness},
+            "initial": {"z_um": self.initial_z_um, "sharpness": self.initial_sharpness},
+            "final_sharpness": self.final_sharpness,
+            "dynamic_range": self.dynamic_range,
+            "stayed_at_initial": self.stayed_at_initial,
+            "scan": {
+                "z_range_um": self.z_range_um,
+                "duration_s": self.scan_duration_s,
+                "frame_count": self.frame_count,
+                "z_sample_count": self.z_sample_count,
+                "objective_position": self.objective_position,
+            },
+            "coarse": {
+                "z_start_um": self.coarse_z_start_um,
+                "z_end_um": self.coarse_z_end_um,
+                "best_z_um": self.coarse_best_z_um,
+                "best_sharpness": self.coarse_best_sharpness,
+            },
+            "fine": {
+                "z_start_um": self.fine_z_start_um,
+                "z_end_um": self.fine_z_end_um,
+            },
+            "sharpness_curve": self.sharpness_curve,
+            "fine_sharpness_curve": self.fine_sharpness_curve,
+        }
+
 
 def _get_safe_range(conn: "LeicaConnection", z_range_um: float | None) -> tuple[float, int | None]:
     """Query microscope and calculate safe Z range.
