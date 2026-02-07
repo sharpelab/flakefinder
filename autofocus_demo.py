@@ -33,6 +33,7 @@ def main():
     parser.add_argument("--debug-dir", type=str, default=None, help="Save all scan frames to this directory")
     parser.add_argument("--fine", action="store_true", help="Two-pass: coarse scan then fine 50um scan")
     parser.add_argument("--fine-speed-factor", type=float, default=0.25, help="Speed multiplier for fine pass (default: 0.25 = 1/4 speed)")
+    parser.add_argument("--super-fine", action="store_true", help="Third pass: 10um range at 20um/s for maximum precision")
     parser.add_argument("--sharpness-method", choices=list(ALL_SHARPNESS_METRICS.keys()), default="tenengrad", help="Sharpness metric for autofocus")
     parser.add_argument("--settle-time", type=float, default=0.2, help="Settle time in seconds after final Z move (default: 0.2)")
     parser.add_argument("--dry-run", action="store_true", help="Print what would be done without moving")
@@ -246,6 +247,7 @@ def main():
                 z_speed_um_s=args.z_speed,
                 fine_pass=args.fine,
                 fine_speed_factor=args.fine_speed_factor,
+                super_fine_pass=args.super_fine,
                 sharpness_method=args.sharpness_method,
                 store_frames=bool(args.debug_dir),
                 compute_all_metrics=args.all_metrics,
@@ -287,6 +289,11 @@ def main():
             fine_frame = af_result.fine_frames[fine_best["frame"]]
             if best_frame is None or fine_frame.sharpness > best_frame.sharpness:
                 best_frame = fine_frame
+        if af_result.super_fine_frames and af_result.super_fine_sharpness_curve:
+            sf_best = max(af_result.super_fine_sharpness_curve, key=lambda r: r["sharpness"])
+            sf_frame = af_result.super_fine_frames[sf_best["frame"]]
+            if best_frame is None or sf_frame.sharpness > best_frame.sharpness:
+                best_frame = sf_frame
 
         # === Step 5: Capture 'after' photo ===
         # Z is already at best position (library moved it there)
@@ -304,14 +311,20 @@ def main():
         # Save debug frames if requested
         if args.debug_dir and af_result.frames:
             has_fine = af_result.fine_frames is not None and len(af_result.fine_frames) > 0
+            has_super_fine = af_result.super_fine_frames is not None and len(af_result.super_fine_frames) > 0
 
-            if has_fine:
+            if has_fine or has_super_fine:
                 coarse_dir = os.path.join(args.debug_dir, "coarse")
-                fine_dir = os.path.join(args.debug_dir, "fine")
                 vprint(f"  Saving {len(af_result.frames)} coarse frames to {coarse_dir}/...")
                 save_pass_frames(af_result.frames, af_result.sharpness_curve, coarse_dir)
-                vprint(f"  Saving {len(af_result.fine_frames)} fine frames to {fine_dir}/...")
-                save_pass_frames(af_result.fine_frames, af_result.fine_sharpness_curve, fine_dir)
+                if has_fine:
+                    fine_dir = os.path.join(args.debug_dir, "fine")
+                    vprint(f"  Saving {len(af_result.fine_frames)} fine frames to {fine_dir}/...")
+                    save_pass_frames(af_result.fine_frames, af_result.fine_sharpness_curve, fine_dir)
+                if has_super_fine:
+                    sf_dir = os.path.join(args.debug_dir, "super_fine")
+                    vprint(f"  Saving {len(af_result.super_fine_frames)} super fine frames to {sf_dir}/...")
+                    save_pass_frames(af_result.super_fine_frames, af_result.super_fine_sharpness_curve, sf_dir)
             else:
                 vprint(f"  Saving {len(af_result.frames)} frames to {args.debug_dir}/...")
                 save_pass_frames(af_result.frames, af_result.sharpness_curve, args.debug_dir)

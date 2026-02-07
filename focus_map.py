@@ -207,6 +207,11 @@ def main():
         help="Fine pass range in µm (default: 50)",
     )
     parser.add_argument(
+        "--super-fine",
+        action="store_true",
+        help="Enable super fine third pass: 10µm range at 20µm/s",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=None,
@@ -401,6 +406,7 @@ def main():
                 z_speed_um_s=args.z_speed,
                 fine_pass=not args.no_fine_pass,
                 fine_range_um=args.fine_range,
+                super_fine_pass=args.super_fine,
                 sharpness_method=args.sharpness_method,
             )
             args.z = centroid_af.selected_z_um
@@ -451,6 +457,7 @@ def main():
                     z_speed_um_s=args.z_speed,
                     fine_pass=not args.no_fine_pass,
                     fine_range_um=args.fine_range,
+                    super_fine_pass=args.super_fine,
                     sharpness_method=args.sharpness_method,
                     store_frames=bool(args.debug_dir),
                     compute_all_metrics=bool(args.debug_dir),
@@ -483,9 +490,13 @@ def main():
                         if dbg and af.frames:
                             point_dir = dbg / lbl
                             has_fine = af.fine_frames is not None and len(af.fine_frames) > 0
-                            if has_fine:
+                            has_super_fine = af.super_fine_frames is not None and len(af.super_fine_frames) > 0
+                            if has_fine or has_super_fine:
                                 save_pass_frames(af.frames, af.sharpness_curve, point_dir / "coarse")
-                                save_pass_frames(af.fine_frames, af.fine_sharpness_curve, point_dir / "fine")
+                                if has_fine:
+                                    save_pass_frames(af.fine_frames, af.fine_sharpness_curve, point_dir / "fine")
+                                if has_super_fine:
+                                    save_pass_frames(af.super_fine_frames, af.super_fine_sharpness_curve, point_dir / "super_fine")
                             else:
                                 save_pass_frames(af.frames, af.sharpness_curve, point_dir)
                             if af.initial_image is not None:
@@ -561,6 +572,7 @@ def main():
             "z_speed_um_s": args.z_speed,
             "fine_pass": not args.no_fine_pass,
             "fine_range_um": args.fine_range,
+            "super_fine_pass": args.super_fine,
             "sharpness_method": args.sharpness_method,
             "move_settle_s": args.move_settle,
             "af_settle_s": args.af_settle,

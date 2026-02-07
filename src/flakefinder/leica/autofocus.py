@@ -209,11 +209,15 @@ class AutofocusResult:
     coarse_best_sharpness: float = 0.0
     fine_z_start_um: float | None = None  # None if no fine pass
     fine_z_end_um: float | None = None
+    super_fine_z_start_um: float | None = None  # None if no super fine pass
+    super_fine_z_end_um: float | None = None
     stayed_at_initial: bool = False  # True if scan found nothing better than initial
     sharpness_curve: list[dict] = field(default_factory=list)  # [{z_um, sharpness}, ...] coarse only
     frames: list[AutofocusFrame] | None = None  # Coarse frames only (if store_frames=True)
     fine_sharpness_curve: list[dict] = field(default_factory=list)  # Fine pass only
     fine_frames: list[AutofocusFrame] | None = None  # Fine frames only (if store_frames=True)
+    super_fine_sharpness_curve: list[dict] = field(default_factory=list)  # Super fine pass only
+    super_fine_frames: list[AutofocusFrame] | None = None  # Super fine frames only (if store_frames=True)
     initial_image: np.ndarray | None = None  # Image at initial Z (if store_frames=True)
     final_image: np.ndarray | None = None    # Image at selected Z after move (if store_frames=True)
 
@@ -243,8 +247,13 @@ class AutofocusResult:
                 "z_start_um": self.fine_z_start_um,
                 "z_end_um": self.fine_z_end_um,
             },
+            "super_fine": {
+                "z_start_um": self.super_fine_z_start_um,
+                "z_end_um": self.super_fine_z_end_um,
+            },
             "sharpness_curve": self.sharpness_curve,
             "fine_sharpness_curve": self.fine_sharpness_curve,
+            "super_fine_sharpness_curve": self.super_fine_sharpness_curve,
         }
 
 
@@ -436,6 +445,9 @@ def continuous_autofocus(
     fine_pass: bool = False,
     fine_range_um: float = 50.0,
     fine_speed_factor: float = 0.25,
+    super_fine_pass: bool = False,
+    super_fine_range_um: float = 10.0,
+    super_fine_speed_um_s: float = 20.0,
     sharpness_method: str = "tenengrad",
     store_frames: bool = False,
     compute_all_metrics: bool = False,
@@ -469,6 +481,10 @@ def continuous_autofocus(
         fine_range_um: Range for fine pass (default 50µm).
         fine_speed_factor: Speed multiplier for fine pass (default 0.25 = 1/4 speed).
             Slower fine pass improves precision in the critical region.
+        super_fine_pass: If True, do a third pass with super_fine_range_um around
+            best Z at super_fine_speed_um_s. Requires fine_pass or runs after coarse.
+        super_fine_range_um: Range for super fine pass (default 10µm).
+        super_fine_speed_um_s: Absolute Z speed for super fine pass (default 20µm/s).
         sharpness_method: "tenengrad" (default) or "laplacian". Laplacian is more
             reliable for low-contrast areas and less fooled by bright blurry blobs.
         store_frames: If True, store images in result.frames for debugging.
@@ -609,6 +625,55 @@ def continuous_autofocus(
             frame_count += fine_frame_count
             z_sample_count += fine_z_count
 
+    # Optional super fine pass (skip if stayed_at_initial)
+    super_fine_curve = []
+    super_fine_frames_result = None
+    actual_super_fine_z_start = None
+    actual_super_fine_z_end = None
+
+    if super_fine_pass and not stayed_at_initial:
+        sf_z_start = best_z + super_fine_range_um / 2
+        sf_z_end = best_z - super_fine_range_um / 2
+
+        # Clamp to axis limits
+        sf_z_start = min(sf_z_start, z_axis.max_um)
+        sf_z_end = max(sf_z_end, z_axis.min_um)
+
+        actual_super_fine_z_start = sf_z_start
+        actual_super_fine_z_end = sf_z_end
+
+        # Set super fine speed (absolute, not a factor)
+        if z_axis.supports_velocity:
+            z_axis.set_velocity_um_s(super_fine_speed_um_s)
+
+        sf_curve, sf_frames, sf_duration, sf_frame_count, sf_z_count = _run_z_scan(
+            z_axis=z_axis,
+            z_start=sf_z_start,
+            z_end=sf_z_end,
+            acquisition=acquisition,
+            context=context,
+            camera_class=Camera,
+            store_frames=store_frames,
+            sharpness_method=sharpness_method,
+            compute_all_metrics=compute_all_metrics,
+        )
+
+        # Restore speed after super fine pass
+        if z_axis.supports_velocity and original_speed is not None:
+            z_axis.set_velocity_um_s(z_speed_um_s if z_speed_um_s is not None else original_speed)
+
+        if sf_curve:
+            super_fine_curve = sf_curve
+            super_fine_frames_result = sf_frames
+            sf_best = max(sf_curve, key=lambda r: r["sharpness"])
+            if sf_best["sharpness"] > best_sharpness:
+                best_z = sf_best["z_um"]
+                best_sharpness = sf_best["sharpness"]
+
+            scan_duration += sf_duration
+            frame_count += sf_frame_count
+            z_sample_count += sf_z_count
+
     # Accept scan best if it's within margin of initial reading.
     # On low-contrast substrates, frame-to-frame noise can cause
     # the initial reading to randomly exceed the true peak.
@@ -659,11 +724,15 @@ def continuous_autofocus(
         coarse_best_sharpness=coarse_best_sharpness,
         fine_z_start_um=actual_fine_z_start,
         fine_z_end_um=actual_fine_z_end,
+        super_fine_z_start_um=actual_super_fine_z_start,
+        super_fine_z_end_um=actual_super_fine_z_end,
         stayed_at_initial=stayed_at_initial,
         sharpness_curve=sharpness_curve,
         frames=frames if store_frames else None,
         fine_sharpness_curve=fine_curve if fine_pass and not stayed_at_initial and fine_curve else [],
         fine_frames=fine_frames if store_frames and fine_pass and not stayed_at_initial else None,
+        super_fine_sharpness_curve=super_fine_curve,
+        super_fine_frames=super_fine_frames_result if store_frames else None,
         initial_image=stored_initial_image,
         final_image=stored_final_image,
     )
