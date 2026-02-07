@@ -232,8 +232,8 @@ def main():
     parser.add_argument(
         "--z",
         type=float,
-        required=True,
-        help="Reference Z position in µm (used as center for all autofocus scans)",
+        default=None,
+        help="Reference Z position in µm (default: autofocus at chip centroid)",
     )
     parser.add_argument(
         "--z-speed",
@@ -382,6 +382,29 @@ def main():
 
         # Acquisition context
         context = Extensions.UCAPI.CancellableImageAcquisitionContext.SystemMemoryFactory
+
+        # Determine reference Z (autofocus at centroid if not provided)
+        if args.z is None:
+            hull = np.array(convex_hull)
+            cx, cy = float(hull[:, 0].mean()), float(hull[:, 1].mean())
+            print(f"\nNo --z provided, autofocusing at chip centroid ({cx/1000:.2f}, {cy/1000:.2f}) mm...")
+            hx, hy = stage.move_to_async(cx, cy)
+            Stage.wait_all([hx, hy])
+            hx.dispose()
+            hy.dispose()
+            centroid_af = continuous_autofocus(
+                conn=conn,
+                camera=camera,
+                acquisition=acquisition,
+                context=context,
+                z_range_um=args.z_range,
+                z_speed_um_s=args.z_speed,
+                fine_pass=not args.no_fine_pass,
+                fine_range_um=args.fine_range,
+                sharpness_method=args.sharpness_method,
+            )
+            args.z = centroid_af.selected_z_um
+            print(f"  Centroid AF: Z={args.z:.1f} µm, sharpness={centroid_af.selected_sharpness:.1f}")
 
         # Create images directory if saving images
         images_dir = None
