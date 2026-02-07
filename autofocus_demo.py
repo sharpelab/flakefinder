@@ -16,7 +16,7 @@ import time
 from PIL import Image as PILImage
 
 from flakefinder.leica.autofocus import sharpness, continuous_autofocus, AutofocusResult, ALL_SHARPNESS_METRICS
-from flakefinder.autofocus_util import save_pass_frames
+from flakefinder.autofocus_util import save_debug_frames
 
 
 def main():
@@ -310,24 +310,7 @@ def main():
 
         # Save debug frames if requested
         if args.debug_dir and af_result.frames:
-            has_fine = af_result.fine_frames is not None and len(af_result.fine_frames) > 0
-            has_super_fine = af_result.super_fine_frames is not None and len(af_result.super_fine_frames) > 0
-
-            if has_fine or has_super_fine:
-                coarse_dir = os.path.join(args.debug_dir, "coarse")
-                vprint(f"  Saving {len(af_result.frames)} coarse frames to {coarse_dir}/...")
-                save_pass_frames(af_result.frames, af_result.sharpness_curve, coarse_dir)
-                if has_fine:
-                    fine_dir = os.path.join(args.debug_dir, "fine")
-                    vprint(f"  Saving {len(af_result.fine_frames)} fine frames to {fine_dir}/...")
-                    save_pass_frames(af_result.fine_frames, af_result.fine_sharpness_curve, fine_dir)
-                if has_super_fine:
-                    sf_dir = os.path.join(args.debug_dir, "super_fine")
-                    vprint(f"  Saving {len(af_result.super_fine_frames)} super fine frames to {sf_dir}/...")
-                    save_pass_frames(af_result.super_fine_frames, af_result.super_fine_sharpness_curve, sf_dir)
-            else:
-                vprint(f"  Saving {len(af_result.frames)} frames to {args.debug_dir}/...")
-                save_pass_frames(af_result.frames, af_result.sharpness_curve, args.debug_dir)
+            save_debug_frames(af_result, args.debug_dir, verbose=True)
         after_path = None
         if after_img is not None:
             after_sharpness = sharpness(after_img)

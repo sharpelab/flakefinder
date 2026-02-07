@@ -337,7 +337,7 @@ def main():
     from flakefinder.leica.enums import UCAPI_IID
     from flakefinder.leica.core import get_interface_required
     from flakefinder.leica.autofocus import continuous_autofocus
-    from flakefinder.autofocus_util import save_pass_frames
+    from flakefinder.autofocus_util import save_debug_frames
 
     start_time = time.perf_counter()
 
@@ -488,23 +488,7 @@ def main():
 
                     def _save(af=_af, after=_after, lbl=_label, img_path=_image_path, dbg=_debug_dir):
                         if dbg and af.frames:
-                            point_dir = dbg / lbl
-                            has_fine = af.fine_frames is not None and len(af.fine_frames) > 0
-                            has_super_fine = af.super_fine_frames is not None and len(af.super_fine_frames) > 0
-                            if has_fine or has_super_fine:
-                                save_pass_frames(af.frames, af.sharpness_curve, point_dir / "coarse")
-                                if has_fine:
-                                    save_pass_frames(af.fine_frames, af.fine_sharpness_curve, point_dir / "fine")
-                                if has_super_fine:
-                                    save_pass_frames(af.super_fine_frames, af.super_fine_sharpness_curve, point_dir / "super_fine")
-                            else:
-                                save_pass_frames(af.frames, af.sharpness_curve, point_dir)
-                            if af.initial_image is not None:
-                                PILImage.fromarray(af.initial_image).save(str(point_dir / "initial.png"))
-                            if af.final_image is not None:
-                                PILImage.fromarray(af.final_image).save(str(point_dir / "final.png"))
-                            with open(str(point_dir / "summary.json"), "w") as f:
-                                json.dump(af.to_dict(), f, indent=2)
+                            save_debug_frames(af, dbg / lbl)
                         if after is not None:
                             if img_path:
                                 PILImage.fromarray(after).save(str(img_path), quality=95)

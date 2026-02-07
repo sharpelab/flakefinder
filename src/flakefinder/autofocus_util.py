@@ -1,11 +1,12 @@
 """Autofocus utility functions for saving debug frames and sharpness data."""
 
+import json
 import os
 from pathlib import Path
 
 from PIL import Image as PILImage
 
-from .leica.autofocus import AutofocusFrame, ALL_SHARPNESS_METRICS
+from .leica.autofocus import AutofocusFrame, AutofocusResult, ALL_SHARPNESS_METRICS
 
 METRIC_NAMES = list(ALL_SHARPNESS_METRICS.keys())
 
@@ -43,3 +44,55 @@ def save_pass_frames(
             if has_metrics and "metrics" in r:
                 line += "," + ",".join(f"{r['metrics'][m]:.4f}" for m in METRIC_NAMES)
             f.write(line + "\n")
+
+
+def save_debug_frames(
+    af: AutofocusResult,
+    out_dir: str | Path,
+    verbose: bool = False,
+) -> None:
+    """Save all debug frames from an autofocus result.
+
+    Handles coarse/fine/super_fine subdirectory layout, plus
+    initial.png, final.png, and summary.json.
+
+    Args:
+        af: AutofocusResult with store_frames=True data.
+        out_dir: Base directory to save into.
+        verbose: If True, print progress messages.
+    """
+    if not af.frames:
+        return
+
+    out_dir = Path(out_dir)
+    has_fine = af.fine_frames is not None and len(af.fine_frames) > 0
+    has_super_fine = af.super_fine_frames is not None and len(af.super_fine_frames) > 0
+
+    if has_fine or has_super_fine:
+        coarse_dir = out_dir / "coarse"
+        if verbose:
+            print(f"  Saving {len(af.frames)} coarse frames to {coarse_dir}/...")
+        save_pass_frames(af.frames, af.sharpness_curve, coarse_dir)
+        if has_fine:
+            fine_dir = out_dir / "fine"
+            if verbose:
+                print(f"  Saving {len(af.fine_frames)} fine frames to {fine_dir}/...")
+            save_pass_frames(af.fine_frames, af.fine_sharpness_curve, fine_dir)
+        if has_super_fine:
+            sf_dir = out_dir / "super_fine"
+            if verbose:
+                print(f"  Saving {len(af.super_fine_frames)} super fine frames to {sf_dir}/...")
+            save_pass_frames(af.super_fine_frames, af.super_fine_sharpness_curve, sf_dir)
+    else:
+        if verbose:
+            print(f"  Saving {len(af.frames)} frames to {out_dir}/...")
+        save_pass_frames(af.frames, af.sharpness_curve, out_dir)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if af.initial_image is not None:
+        PILImage.fromarray(af.initial_image).save(str(out_dir / "initial.png"))
+    if af.final_image is not None:
+        PILImage.fromarray(af.final_image).save(str(out_dir / "final.png"))
+
+    with open(str(out_dir / "summary.json"), "w") as f:
+        json.dump(af.to_dict(), f, indent=2)
