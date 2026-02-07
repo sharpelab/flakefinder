@@ -390,14 +390,12 @@ Examples:
             actual_mm = speed_mm
 
             for axis, name in [(stage.x, "X"), (stage.y, "Y")]:
-                if axis.supports_velocity:
-                    max_um_s = axis.max_velocity_um_s
-                    min_um_s = axis.min_velocity_um_s or 0
-                    if max_um_s:
-                        clamped = max(min_um_s, min(max_um_s, target_um_s))
-                        axis.set_velocity_um_s(clamped)
-                        if name == "X":
-                            actual_mm = (axis.velocity_um_s or clamped) / 1000
+                max_um_s = axis.max_velocity_um_s
+                min_um_s = axis.min_velocity_um_s or 0
+                clamped = max(min_um_s, min(max_um_s, target_um_s))
+                axis.set_velocity_um_s(clamped)
+                if name == "X":
+                    actual_mm = axis.velocity_um_s / 1000
 
             return actual_mm
 

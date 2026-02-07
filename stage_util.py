@@ -230,26 +230,9 @@ def report_status(conn: LeicaConnection, verbose: bool = False) -> None:
     if verbose:
         print()
         print("Velocity (from SDK converter):")
-        if stage.x.max_velocity_um_s:
-            print(f"  X: {stage.x.velocity_um_s/1000:.1f} mm/s (max: {stage.x.max_velocity_um_s/1000:.1f} mm/s)")
-        elif stage.x.supports_velocity:
-            print(f"  X: native {stage.x.velocity_native} (no converter)")
-        else:
-            print("  X: not supported")
-
-        if stage.y.max_velocity_um_s:
-            print(f"  Y: {stage.y.velocity_um_s/1000:.1f} mm/s (max: {stage.y.max_velocity_um_s/1000:.1f} mm/s)")
-        elif stage.y.supports_velocity:
-            print(f"  Y: native {stage.y.velocity_native} (no converter)")
-        else:
-            print("  Y: not supported")
-
-        if z.max_velocity_um_s:
-            print(f"  Z: {z.velocity_um_s/1000:.1f} mm/s (max: {z.max_velocity_um_s/1000:.1f} mm/s)")
-        elif z.supports_velocity:
-            print(f"  Z: native {z.velocity_native} (no converter)")
-        else:
-            print("  Z: not supported")
+        print(f"  X: {stage.x.velocity_um_s/1000:.1f} mm/s (max: {stage.x.max_velocity_um_s/1000:.1f} mm/s)")
+        print(f"  Y: {stage.y.velocity_um_s/1000:.1f} mm/s (max: {stage.y.max_velocity_um_s/1000:.1f} mm/s)")
+        print(f"  Z: {z.velocity_um_s/1000:.1f} mm/s (max: {z.max_velocity_um_s/1000:.1f} mm/s)")
 
     # Nosepiece/objective
     try:

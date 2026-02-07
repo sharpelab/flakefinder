@@ -264,31 +264,19 @@ def _get_safe_range(conn: "LeicaConnection", z_range_um: float | None) -> tuple[
     Raises:
         ValueError: If explicit z_range_um exceeds safe limit for objective.
     """
-    # Query current objective from microscope
-    objective_position = None
-    working_distance = None
-    try:
-        nosepiece = Nosepiece.from_connection(conn)
-        objective_position = nosepiece.position
-        working_distance = WORKING_DISTANCES_UM.get(objective_position)
-    except LookupError:
-        pass  # No nosepiece available
+    nosepiece = Nosepiece.from_connection(conn)
+    objective_position = nosepiece.position
+    working_distance = WORKING_DISTANCES_UM[objective_position]
 
     if z_range_um is not None:
-        # Explicit range provided - validate against objective
-        if working_distance and z_range_um > working_distance / 2:
+        if z_range_um > working_distance / 2:
             raise ValueError(
                 f"Z range {z_range_um}µm exceeds safe limit for "
                 f"objective position {objective_position} (working distance: {working_distance}µm)"
             )
         return z_range_um, objective_position
 
-    # Auto-calculate from objective
-    if working_distance:
-        return min(working_distance / 3, 500), objective_position
-
-    # Unknown objective - use conservative default
-    return 200, objective_position  # Safe for all objectives
+    return min(working_distance / 3, 500), objective_position
 
 
 def _validate_z_limits(
@@ -499,19 +487,16 @@ def continuous_autofocus(
 
     Raises:
         ValueError: If Z range/position exceeds safety limits.
-        LookupError: If Z drive not found.
     """
     # Get Z axis
     z_axis = ZDrive.from_connection(conn)
     current_z = z_axis.position_um
 
-    # Save original speed (for fine pass and restoration)
-    original_speed = None
-    if z_axis.supports_velocity:
-        original_speed = z_axis.velocity_um_s
+    # Save original speed for restoration after scan
+    original_speed = z_axis.velocity_um_s
 
     # Set Z speed if specified
-    if z_speed_um_s is not None and z_axis.supports_velocity:
+    if z_speed_um_s is not None:
         z_axis.set_velocity_um_s(z_speed_um_s)
 
     # Get safe range based on objective
@@ -530,7 +515,7 @@ def continuous_autofocus(
     time.sleep(0.05)
     camera.capture()
     initial_image = camera.capture()
-    initial_sharpness = sharpness(initial_image, method=sharpness_method) if initial_image is not None else 0.0
+    initial_sharpness = sharpness(initial_image, method=sharpness_method)
     stored_initial_image = initial_image if store_frames else None
 
     # Run main scan
@@ -586,10 +571,9 @@ def continuous_autofocus(
         actual_fine_z_end = fine_z_end
 
         # Use slower speed for fine pass (better precision)
-        if z_axis.supports_velocity and fine_speed_factor < 1.0:
+        if fine_speed_factor < 1.0:
             coarse_speed = z_speed_um_s if z_speed_um_s is not None else original_speed
-            if coarse_speed is not None:
-                z_axis.set_velocity_um_s(coarse_speed * fine_speed_factor)
+            z_axis.set_velocity_um_s(coarse_speed * fine_speed_factor)
 
         fine_curve, fine_frames, fine_duration, fine_frame_count, fine_z_count = _run_z_scan(
             z_axis=z_axis,
@@ -604,8 +588,7 @@ def continuous_autofocus(
         )
 
         # Restore speed after fine pass (before final move)
-        if z_axis.supports_velocity and original_speed is not None:
-            z_axis.set_velocity_um_s(z_speed_um_s if z_speed_um_s is not None else original_speed)
+        z_axis.set_velocity_um_s(z_speed_um_s if z_speed_um_s is not None else original_speed)
 
         if fine_curve:
             fine_best = max(fine_curve, key=lambda r: r["sharpness"])
@@ -635,8 +618,7 @@ def continuous_autofocus(
         actual_super_fine_z_end = sf_z_end
 
         # Set super fine speed (absolute, not a factor)
-        if z_axis.supports_velocity:
-            z_axis.set_velocity_um_s(super_fine_speed_um_s)
+        z_axis.set_velocity_um_s(super_fine_speed_um_s)
 
         sf_curve, sf_frames, sf_duration, sf_frame_count, sf_z_count = _run_z_scan(
             z_axis=z_axis,
@@ -651,8 +633,7 @@ def continuous_autofocus(
         )
 
         # Restore speed after super fine pass
-        if z_axis.supports_velocity and original_speed is not None:
-            z_axis.set_velocity_um_s(z_speed_um_s if z_speed_um_s is not None else original_speed)
+        z_axis.set_velocity_um_s(z_speed_um_s if z_speed_um_s is not None else original_speed)
 
         if sf_curve:
             super_fine_curve = sf_curve
@@ -686,14 +667,13 @@ def continuous_autofocus(
     z_axis.move_to_corrected(best_z)
     time.sleep(settle_time_s)
 
-    # Restore original Z speed if we changed it
-    if original_speed is not None:
-        z_axis.set_velocity_um_s(original_speed)
+    # Restore original Z speed
+    z_axis.set_velocity_um_s(original_speed)
 
     # Capture final sharpness (flush stale sensor buffer first)
     camera.capture()
     final_image = camera.capture()
-    final_sharpness = sharpness(final_image, method=sharpness_method) if final_image is not None else 0.0
+    final_sharpness = sharpness(final_image, method=sharpness_method)
     stored_final_image = final_image if store_frames else None
 
     return AutofocusResult(

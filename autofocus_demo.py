@@ -213,8 +213,7 @@ def main():
 
         # === Step 2: Move to initial Z ===
         # Set Z speed for positioning (restores sane default if a previous crash left it slow)
-        if z_drive.supports_velocity and z_drive.max_velocity_um_s:
-            z_drive.set_velocity_um_s(args.z_speed if args.z_speed else z_drive.max_velocity_um_s)
+        z_drive.set_velocity_um_s(args.z_speed if args.z_speed else z_drive.max_velocity_um_s)
         vprint(f"Moving Z to {target_z:.1f} um...")
         z_drive.move_to_corrected(target_z)
 

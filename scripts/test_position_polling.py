@@ -59,7 +59,7 @@ def main():
         print()
 
         # Set speed if moving
-        if args.move and stage.x.supports_velocity:
+        if args.move:
             target_um_s = args.speed_mm * 1000
             max_vel = stage.x.max_velocity_um_s or target_um_s
             clamped = min(max_vel, target_um_s)
