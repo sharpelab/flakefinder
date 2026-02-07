@@ -835,6 +835,11 @@ class ZDrive(Axis):
         return self._converter.GetMetricsValue(native)
 
     @property
+    def bcv_hysteresis(self):
+        """Direct hysteresis-corrected BCV interface for fast polling, or None."""
+        return self._bcv_hysteresis
+
+    @property
     def supports_hysteresis_correction(self) -> bool:
         """Check if hysteresis-corrected position is available."""
         return self._bcv_hysteresis is not None

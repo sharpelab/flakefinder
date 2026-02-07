@@ -345,8 +345,8 @@ def _run_z_scan(
     frame_data: list[tuple[float, np.ndarray]] = []  # (t_capture, image)
     stop_polling = threading.Event()
 
-    # Get fast position reading interfaces
-    z_bcv = z_axis.bcv
+    # Get fast position reading interfaces (prefer hysteresis-corrected for accurate Z during motion)
+    z_bcv = getattr(z_axis, 'bcv_hysteresis', None) or z_axis.bcv
     z_converter = z_axis.converter
 
     current_image = [None]
