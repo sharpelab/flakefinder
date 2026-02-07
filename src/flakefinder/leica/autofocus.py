@@ -214,6 +214,8 @@ class AutofocusResult:
     frames: list[AutofocusFrame] | None = None  # Coarse frames only (if store_frames=True)
     fine_sharpness_curve: list[dict] = field(default_factory=list)  # Fine pass only
     fine_frames: list[AutofocusFrame] | None = None  # Fine frames only (if store_frames=True)
+    initial_image: np.ndarray | None = None  # Image at initial Z (if store_frames=True)
+    final_image: np.ndarray | None = None    # Image at selected Z after move (if store_frames=True)
 
 
 def _get_safe_range(conn: "LeicaConnection", z_range_um: float | None) -> tuple[float, int | None]:
@@ -495,6 +497,7 @@ def continuous_autofocus(
     time.sleep(0.05)
     initial_image = camera.capture()
     initial_sharpness = sharpness(initial_image, method=sharpness_method) if initial_image is not None else 0.0
+    stored_initial_image = initial_image if store_frames else None
 
     # Run main scan
     sharpness_curve, frames, scan_duration, frame_count, z_sample_count = _run_z_scan(
@@ -612,6 +615,7 @@ def continuous_autofocus(
     # Capture final sharpness
     final_image = camera.capture()
     final_sharpness = sharpness(final_image, method=sharpness_method) if final_image is not None else 0.0
+    stored_final_image = final_image if store_frames else None
 
     return AutofocusResult(
         selected_z_um=best_z,
@@ -638,4 +642,6 @@ def continuous_autofocus(
         frames=frames if store_frames else None,
         fine_sharpness_curve=fine_curve if fine_pass and not stayed_at_initial and fine_curve else [],
         fine_frames=fine_frames if store_frames and fine_pass and not stayed_at_initial else None,
+        initial_image=stored_initial_image,
+        final_image=stored_final_image,
     )

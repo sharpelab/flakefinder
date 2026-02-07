@@ -411,6 +411,7 @@ def main():
             # Run autofocus
             image_path = None
             label = f"{'c' if pt['type'] == 'contour' else 'g'}{pt['index']:02d}"
+
             try:
                 af_result = continuous_autofocus(
                     conn=conn,
@@ -440,6 +441,12 @@ def main():
                         save_pass_frames(af_result.fine_frames, af_result.fine_sharpness_curve, point_dir / "fine")
                     else:
                         save_pass_frames(af_result.frames, af_result.sharpness_curve, point_dir)
+
+                    # Save before/after images from AF result
+                    if af_result.initial_image is not None:
+                        PILImage.fromarray(af_result.initial_image).save(str(point_dir / "before.png"))
+                    if af_result.final_image is not None:
+                        PILImage.fromarray(af_result.final_image).save(str(point_dir / "after.png"))
 
                 # Save after image if requested
                 if images_dir is not None:

@@ -39,10 +39,17 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Print what would be done without moving")
     parser.add_argument("--all-metrics", action="store_true", help="Compute all 5 sharpness metrics per frame (diagnostic)")
     parser.add_argument("--clean", action="store_true", help="Remove existing output/debug directories before running")
+    parser.add_argument("--quiet", "-q", action="store_true",
+                        help="Single-line output: 'AF: Z=... (adj ...), sharpness=sel/after, Ns, N frames' "
+                             "or 'AF: stayed_at_initial, DR=..., scan_best_z=..., Ns, N frames'")
     args = parser.parse_args()
 
-    print("Continuous Autofocus Demo")
-    print("=" * 50)
+    def vprint(*a, **kw):
+        if not args.quiet:
+            print(*a, **kw)
+
+    vprint("Continuous Autofocus Demo")
+    vprint("=" * 50)
 
     # Handle dry-run mode (no hardware connection)
     if args.dry_run:
@@ -113,20 +120,20 @@ def main():
         current_x, current_y = stage.position_um
         current_z = z_drive.position_um
 
-        print(f"Current position: X={current_x:.1f} um, Y={current_y:.1f} um, Z={current_z:.1f} um")
-        print()
+        vprint(f"Current position: X={current_x:.1f} um, Y={current_y:.1f} um, Z={current_z:.1f} um")
+        vprint()
 
         # Use current positions as defaults
         target_x = args.x if args.x is not None else current_x
         target_y = args.y if args.y is not None else current_y
         target_z = args.z if args.z is not None else current_z
 
-        print(f"Target position: X={target_x:.1f} um, Y={target_y:.1f} um")
-        print(f"Initial Z: {target_z:.1f} um")
-        print(f"Scan range: {args.range:.1f} um" if args.range else "Scan range: auto (from objective)")
+        vprint(f"Target position: X={target_x:.1f} um, Y={target_y:.1f} um")
+        vprint(f"Initial Z: {target_z:.1f} um")
+        vprint(f"Scan range: {args.range:.1f} um" if args.range else "Scan range: auto (from objective)")
         if args.output:
-            print(f"Output: {args.output}/")
-        print()
+            vprint(f"Output: {args.output}/")
+        vprint()
 
         # Create output directory if specified
         if args.output:
@@ -161,17 +168,17 @@ def main():
         camera.binning = 2       # 3x3 binning for speed
         camera.exposure_time = 0.001  # 1ms exposure
 
-        print(f"Camera: {camera.name}")
-        print(f"  Binning: 3x3, Exposure: 1ms")
+        vprint(f"Camera: {camera.name}")
+        vprint(f"  Binning: 3x3, Exposure: 1ms")
         if lamp:
-            print(f"Lamp: {lamp.name}, intensity={lamp.intensity}/{lamp.max_intensity}")
-        print()
+            vprint(f"Lamp: {lamp.name}, intensity={lamp.intensity}/{lamp.max_intensity}")
+        vprint()
 
         # Set up acquisition context
         context = Extensions.UCAPI.CancellableImageAcquisitionContext.SystemMemoryFactory
 
         # === Step 1: Move to XY position ===
-        print(f"Moving to X={target_x:.1f}, Y={target_y:.1f}...")
+        vprint(f"Moving to X={target_x:.1f}, Y={target_y:.1f}...")
         hx, hy = stage.move_to_async(target_x, target_y)
         Stage.wait_all([hx, hy])
         hx.dispose()
@@ -181,26 +188,26 @@ def main():
         # Set Z speed for positioning (restores sane default if a previous crash left it slow)
         if z_drive.supports_velocity and z_drive.max_velocity_um_s:
             z_drive.set_velocity_um_s(args.z_speed if args.z_speed else z_drive.max_velocity_um_s)
-        print(f"Moving Z to {target_z:.1f} um...")
+        vprint(f"Moving Z to {target_z:.1f} um...")
         z_drive.move_to(target_z)
 
         # === Step 3: Capture 'before' photo ===
-        print("Capturing 'before' photo...")
+        vprint("Capturing 'before' photo...")
         before_img = camera.capture()
         if before_img is not None:
             before_sharpness = sharpness(before_img)
             if args.output:
                 before_path = os.path.join(args.output, "before.jpg")
                 PILImage.fromarray(before_img).save(before_path, quality=95)
-                print(f"  Saved: {before_path}")
-            print(f"  Sharpness: {before_sharpness:.2f}")
+                vprint(f"  Saved: {before_path}")
+            vprint(f"  Sharpness: {before_sharpness:.2f}")
         else:
-            print("  Warning: Failed to capture before image")
+            vprint("  Warning: Failed to capture before image")
             before_sharpness = 0.0
 
         # === Step 4: Run autofocus using library ===
-        print()
-        print("Starting autofocus scan...")
+        vprint()
+        vprint("Starting autofocus scan...")
 
         try:
             af_result = continuous_autofocus(
@@ -223,10 +230,10 @@ def main():
             print(f"Error: {e}")
             return 1
 
-        print(f"  Scan completed in {af_result.scan_duration_s:.2f}s")
-        print(f"  Frames captured: {af_result.frame_count}")
-        print(f"  Z samples: {af_result.z_sample_count}")
-        print()
+        vprint(f"  Scan completed in {af_result.scan_duration_s:.2f}s")
+        vprint(f"  Frames captured: {af_result.frame_count}")
+        vprint(f"  Z samples: {af_result.z_sample_count}")
+        vprint()
 
         # Sharpness stats (combine coarse + fine)
         all_sharpness = af_result.sharpness_curve + af_result.fine_sharpness_curve
@@ -235,14 +242,14 @@ def main():
         max_sharpness = max(sharpness_values) if sharpness_values else 0
         mean_sharpness = sum(sharpness_values) / len(sharpness_values) if sharpness_values else 0
 
-        print(f"  Sharpness range: {min_sharpness:.2f} - {max_sharpness:.2f}")
-        print(f"  Mean sharpness: {mean_sharpness:.2f}")
-        print(f"  Selected Z: {af_result.selected_z_um:.2f} um")
-        print(f"  Selected sharpness: {af_result.selected_sharpness:.2f}")
+        vprint(f"  Sharpness range: {min_sharpness:.2f} - {max_sharpness:.2f}")
+        vprint(f"  Mean sharpness: {mean_sharpness:.2f}")
+        vprint(f"  Selected Z: {af_result.selected_z_um:.2f} um")
+        vprint(f"  Selected sharpness: {af_result.selected_sharpness:.2f}")
         if af_result.stayed_at_initial:
-            print(f"  ** Stayed at initial (scan found nothing better) **")
-            print(f"     Scan best: Z={af_result.scan_best_z_um:.2f}, sharpness={af_result.scan_best_sharpness:.2f}")
-            print(f"     Dynamic range: {af_result.dynamic_range:.4f}")
+            vprint(f"  ** Stayed at initial (scan found nothing better) **")
+            vprint(f"     Scan best: Z={af_result.scan_best_z_um:.2f}, sharpness={af_result.scan_best_sharpness:.2f}")
+            vprint(f"     Dynamic range: {af_result.dynamic_range:.4f}")
 
         # Find best frame for saving — check coarse and fine separately
         best_scan_path = None
@@ -260,7 +267,7 @@ def main():
         if args.output and best_frame is not None and best_frame.image is not None:
             best_scan_path = os.path.join(args.output, "best_scan_frame.jpg")
             PILImage.fromarray(best_frame.image).save(best_scan_path, quality=95)
-            print(f"  Saved best scan frame: {best_scan_path}")
+            vprint(f"  Saved best scan frame: {best_scan_path}")
 
         # Save debug frames if requested
         if args.debug_dir and af_result.frames:
@@ -269,18 +276,18 @@ def main():
             if has_fine:
                 coarse_dir = os.path.join(args.debug_dir, "coarse")
                 fine_dir = os.path.join(args.debug_dir, "fine")
-                print(f"  Saving {len(af_result.frames)} coarse frames to {coarse_dir}/...")
+                vprint(f"  Saving {len(af_result.frames)} coarse frames to {coarse_dir}/...")
                 save_pass_frames(af_result.frames, af_result.sharpness_curve, coarse_dir)
-                print(f"  Saving {len(af_result.fine_frames)} fine frames to {fine_dir}/...")
+                vprint(f"  Saving {len(af_result.fine_frames)} fine frames to {fine_dir}/...")
                 save_pass_frames(af_result.fine_frames, af_result.fine_sharpness_curve, fine_dir)
             else:
-                print(f"  Saving {len(af_result.frames)} frames to {args.debug_dir}/...")
+                vprint(f"  Saving {len(af_result.frames)} frames to {args.debug_dir}/...")
                 save_pass_frames(af_result.frames, af_result.sharpness_curve, args.debug_dir)
 
         # === Step 5: Capture 'after' photo ===
         # Z is already at best position (library moved it there)
-        print()
-        print("Capturing 'after' photo...")
+        vprint()
+        vprint("Capturing 'after' photo...")
         # No extra settle needed — continuous_autofocus already settles before final_sharpness
         after_img = camera.capture()
         after_path = None
@@ -291,12 +298,25 @@ def main():
             else:
                 after_path = "autofocus_after.jpg"
             PILImage.fromarray(after_img).save(after_path, quality=95)
-            print(f"  Saved: {after_path}")
-            print(f"  Sharpness: {after_sharpness:.2f}")
+            vprint(f"  Saved: {after_path}")
+            vprint(f"  Sharpness: {after_sharpness:.2f}")
             os.startfile(after_path)
         else:
-            print("  Warning: Failed to capture after image")
+            vprint("  Warning: Failed to capture after image")
             after_sharpness = af_result.final_sharpness
+
+        # Save before/after + initial/final to debug dir
+        if args.debug_dir:
+            for name, img in [
+                ("before", before_img),
+                ("initial", af_result.initial_image),
+                ("final", af_result.final_image),
+                ("after", after_img),
+            ]:
+                if img is not None:
+                    path = os.path.join(args.debug_dir, f"{name}.png")
+                    PILImage.fromarray(img).save(path)
+                    vprint(f"  Saved {path}")
 
         # === Step 6: Save summary (if output specified) ===
         summary_path = None
@@ -344,32 +364,44 @@ def main():
             summary_path = os.path.join(args.output, "summary.json")
             with open(summary_path, "w") as f:
                 json.dump(summary, f, indent=2)
-            print()
-            print(f"Saved summary: {summary_path}")
+            vprint()
+            vprint(f"Saved summary: {summary_path}")
 
-        # === Print final summary ===
-        print()
-        print("=" * 50)
-        print("AUTOFOCUS SUMMARY")
-        print("=" * 50)
-        print(f"Initial Z:    {target_z:.2f} um (sharpness: {before_sharpness:.2f})")
-        print(f"Best Z:       {af_result.selected_z_um:.2f} um (sharpness: {af_result.selected_sharpness:.2f})")
-        print(f"After Z:      {af_result.selected_z_um:.2f} um (sharpness: {after_sharpness:.2f})")
-        print(f"Z adjustment: {af_result.selected_z_um - target_z:+.2f} um")
-        if before_sharpness > 0:
-            improvement = after_sharpness - before_sharpness
-            pct = (after_sharpness / before_sharpness - 1) * 100
-            print(f"Sharpness improvement: {improvement:+.2f} ({pct:+.1f}%)")
-        if args.output:
-            print()
-            print("Output files:")
-            print(f"  {os.path.join(args.output, 'before.jpg')}")
-            print(f"  {os.path.join(args.output, 'after.jpg')}")
-            if best_scan_path:
-                print(f"  {best_scan_path}")
-            print(f"  {summary_path}")
-        print()
-        print("Done.")
+        # === Print summary ===
+        if args.quiet:
+            # Single-line output for programmatic use
+            z_adj = af_result.selected_z_um - target_z
+            if af_result.stayed_at_initial:
+                print(f"AF: stayed_at_initial, DR={af_result.dynamic_range:.3f}, "
+                      f"scan_best_z={af_result.scan_best_z_um:.1f}, "
+                      f"{af_result.scan_duration_s:.1f}s, {af_result.frame_count} frames")
+            else:
+                print(f"AF: Z={af_result.selected_z_um:.1f} (adj {z_adj:+.1f}), "
+                      f"sharpness={af_result.selected_sharpness:.1f}/{after_sharpness:.1f}, "
+                      f"{af_result.scan_duration_s:.1f}s, {af_result.frame_count} frames")
+        else:
+            vprint()
+            vprint("=" * 50)
+            vprint("AUTOFOCUS SUMMARY")
+            vprint("=" * 50)
+            vprint(f"Initial Z:    {target_z:.2f} um (sharpness: {before_sharpness:.2f})")
+            vprint(f"Selected Z:   {af_result.selected_z_um:.2f} um (sharpness: {af_result.selected_sharpness:.2f})")
+            vprint(f"After Z:      {af_result.selected_z_um:.2f} um (sharpness: {after_sharpness:.2f})")
+            vprint(f"Z adjustment: {af_result.selected_z_um - target_z:+.2f} um")
+            if before_sharpness > 0:
+                improvement = after_sharpness - before_sharpness
+                pct = (after_sharpness / before_sharpness - 1) * 100
+                vprint(f"Sharpness improvement: {improvement:+.2f} ({pct:+.1f}%)")
+            if args.output:
+                vprint()
+                vprint("Output files:")
+                vprint(f"  {os.path.join(args.output, 'before.jpg')}")
+                vprint(f"  {os.path.join(args.output, 'after.jpg')}")
+                if best_scan_path:
+                    vprint(f"  {best_scan_path}")
+                vprint(f"  {summary_path}")
+            vprint()
+            vprint("Done.")
 
         return 0
 
