@@ -637,7 +637,15 @@ def main():
     parser.add_argument(
         "dir",
         type=Path,
-        help="Autofocus output directory (must contain summary.json)",
+        help="Autofocus output directory (must contain summary.json), "
+             "or focus map JSON when used with --focus-map-point",
+    )
+    parser.add_argument(
+        "--focus-map-point",
+        type=str,
+        default=None,
+        metavar="LABEL",
+        help="Extract a specific point from a focus map JSON (e.g. g07, c05)",
     )
     parser.add_argument(
         "--debug-dir",
@@ -674,19 +682,49 @@ def main():
     )
     args = parser.parse_args()
 
-    dir_path = args.dir.resolve()
+    input_path = args.dir.resolve()
+
+    if not input_path.exists():
+        print(f"Error: Not found: {input_path}")
+        return 1
+
+    # Load summary — either from focus map point or directory
+    if args.focus_map_point:
+        # Extract point from focus map JSON
+        if not input_path.is_file():
+            print(f"Error: --focus-map-point requires a JSON file, got directory: {input_path}")
+            return 1
+        with open(input_path) as f:
+            focus_map = json.load(f)
+        points = focus_map.get("sample_points", [])
+        label = args.focus_map_point.lower()
+        summary = None
+        for p in points:
+            pt_label = f"{p['type'][0]}{p['index']:02d}"
+            if pt_label == label:
+                summary = dict(p)
+                break
+        if summary is None:
+            available = [f"{p['type'][0]}{p['index']:02d}" for p in points]
+            print(f"Error: Point '{label}' not found. Available: {', '.join(available)}")
+            return 1
+        if "error" in summary:
+            print(f"Error: Point '{label}' failed autofocus (no data)")
+            return 1
+        summary["_format"] = "focus_map"
+        dir_path = input_path.parent
+    else:
+        dir_path = input_path
+        if not dir_path.is_dir():
+            print(f"Error: Expected a directory (or use --focus-map-point with a JSON file): {dir_path}")
+            return 1
+        try:
+            summary = load_summary(dir_path)
+        except FileNotFoundError as e:
+            print(f"Error: {e}")
+            return 1
+
     output_dir = (args.output or dir_path).resolve()
-
-    if not dir_path.exists():
-        print(f"Error: Directory not found: {dir_path}")
-        return 1
-
-    # Load summary
-    try:
-        summary = load_summary(dir_path)
-    except FileNotFoundError as e:
-        print(f"Error: {e}")
-        return 1
 
     # Find debug frames
     debug_dir = find_debug_dir(dir_path, args.debug_dir)

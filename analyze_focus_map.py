@@ -77,8 +77,8 @@ def fit_plane(x: np.ndarray, y: np.ndarray, z: np.ndarray) -> tuple[np.ndarray, 
 
 
 def get_sharpness(point: dict) -> float | None:
-    """Get selected_sharpness from a focus map point."""
-    return point.get("selected_sharpness")
+    """Get selected sharpness from a focus map point (nested to_dict format)."""
+    return point.get("selected", {}).get("sharpness")
 
 
 def analyze_focus_map(data: dict) -> dict:
@@ -91,14 +91,14 @@ def analyze_focus_map(data: dict) -> dict:
     # Extract arrays
     x = np.array([p["x_um"] for p in points])
     y = np.array([p["y_um"] for p in points])
-    z = np.array([p["selected_z_um"] for p in points if p["selected_z_um"] is not None])
+    z = np.array([p["selected"]["z_um"] for p in points if "selected" in p])
 
-    sharpness = np.array([p["selected_sharpness"] for p in points if p["selected_sharpness"] is not None])
+    sharpness = np.array([p["selected"]["sharpness"] for p in points if "selected" in p])
     types = [p["type"] for p in points]
     indices = [p["index"] for p in points]
 
     # Filter to successful points
-    valid_mask = np.array([p["selected_z_um"] is not None for p in points])
+    valid_mask = np.array(["selected" in p for p in points])
     x_valid = x[valid_mask]
     y_valid = y[valid_mask]
 
@@ -360,11 +360,11 @@ def print_report(data: dict, analysis: dict) -> None:
     if len(outliers) > 0:
         print(f"\nZ outliers ({len(outliers)}, > 2σ from plane):")
         points = data["sample_points"]
-        valid_points = [p for p in points if p["selected_z_um"] is not None]
+        valid_points = [p for p in points if "selected" in p]
         for idx in outliers:
             p = valid_points[idx]
             res = analysis["residuals"][idx]
-            print(f"  {p['type']} {p['index']}: Z={p['selected_z_um']:.1f} µm, "
+            print(f"  {p['type']} {p['index']}: Z={p['selected']['z_um']:.1f} µm, "
                   f"residual={res:+.1f} µm")
     else:
         print("No Z outliers detected.")
@@ -430,7 +430,7 @@ def create_mosaic(
         return
 
     # Compute mean Z for relative offsets
-    z_values = [p["selected_z_um"] for p in all_points if p.get("selected_z_um") is not None]
+    z_values = [p["selected"]["z_um"] for p in all_points if "selected" in p]
     z_mean = np.mean(z_values) if z_values else 0
 
     # Load first image to get aspect ratio
@@ -556,7 +556,7 @@ def create_mosaic(
             s0 = sharpness
 
         # Z offset from mean
-        z = point.get("selected_z_um")
+        z = point.get("selected", {}).get("z_um")
         if z is not None:
             z_offset = z - z_mean
             z_str = f"Z:{z_offset:+.0f}"
@@ -811,7 +811,7 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
     Returns:
         Dict with plane parameters, quality metrics, and coverage info.
     """
-    points = [p for p in data["sample_points"] if p["selected_z_um"] is not None]
+    points = [p for p in data["sample_points"] if "selected" in p]
 
     if len(points) < 3:
         raise ValueError(f"Need at least 3 valid points, got {len(points)}")
@@ -819,13 +819,13 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
     # Extract arrays
     x = np.array([p["x_um"] for p in points])
     y = np.array([p["y_um"] for p in points])
-    z = np.array([p["selected_z_um"] for p in points])
-    sel_sharpness = np.array([p["selected_sharpness"] for p in points])
+    z = np.array([p["selected"]["z_um"] for p in points])
+    sel_sharpness = np.array([p["selected"]["sharpness"] for p in points])
     final_sharpness = np.array([p["final_sharpness"] for p in points])
 
     # Compute quality metrics
     drift_pct = np.clip((sel_sharpness - final_sharpness) / sel_sharpness * 100, 0, 100)
-    coarse_best_z = np.array([p.get("coarse_best_z_um", p["selected_z_um"]) for p in points])
+    coarse_best_z = np.array([p.get("coarse", {}).get("best_z_um", p["selected"]["z_um"]) for p in points])
     coarse_fine_diff = np.abs(coarse_best_z - z)
 
     # High-confidence mask: low coarse-fine disagreement AND above sharpness floor
