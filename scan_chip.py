@@ -191,8 +191,8 @@ Examples:
                             help="Chip index (from chips JSON)")
     chip_group.add_argument("--plane", type=str, required=True,
                             help="Path to plane JSON from analyze_focus_map.py")
-    chip_group.add_argument("--margin", type=float, default=0,
-                            help="Padding around contour per row in µm (default: 0)")
+    chip_group.add_argument("--padding", type=float, default=0,
+                            help="Padding around contour per row in µm (default: 0, negative = shrink)")
 
     # Scan control
     scan_group = parser.add_argument_group("Scan control")
@@ -326,7 +326,7 @@ Examples:
     print(f"  Z limit: {args.z_max:.0f} µm")
     print()
     print(f"Scan speed: {args.speed_mm:.1f} mm/s")
-    print(f"Margin: {args.margin:.0f} µm")
+    print(f"Padding: {args.padding:.0f} µm")
     if args.row_limit:
         print(f"Row limit: {args.row_limit}")
     print()
@@ -469,13 +469,13 @@ Examples:
             extent = intersect_polygon_with_y(polygon, y)
             if extent is not None:
                 x_min, x_max = extent
-                # Skip rows narrower than one frame (polygon tip slivers)
+                # Apply padding (negative = shrink inward)
+                x_min -= args.padding
+                x_max += args.padding
+                # Skip rows narrower than one frame (polygon tips or large negative padding)
                 if (x_max - x_min) < (frame_width_um or 0):
                     y += y_step
                     continue
-                # Apply margin
-                x_min -= args.margin
-                x_max += args.margin
                 rows_plan.append((y, x_min, x_max))
             y += y_step
 
@@ -813,7 +813,7 @@ Examples:
             "scan_params": {
                 "scan_speed_mm_s": args.speed_mm,
                 "move_speed_mm_s": args.move_speed_mm,
-                "margin_um": args.margin,
+                "padding_um": args.padding,
                 "row_limit": args.row_limit,
             },
             "chip_info": {
