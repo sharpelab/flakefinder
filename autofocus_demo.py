@@ -38,6 +38,14 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Print what would be done without moving")
     parser.add_argument("--all-metrics", action="store_true", help="Compute all 5 sharpness metrics per frame (diagnostic)")
     parser.add_argument("--clean", action="store_true", help="Remove existing output/debug directories before running")
+    parser.add_argument("--exposure-ms", type=float, default=None,
+                        help="Exposure time in ms (default: 1.0)")
+    parser.add_argument("--gain", type=float, default=None,
+                        help="Camera gain (default: unchanged)")
+    parser.add_argument("--white-balance", type=str, default=None,
+                        help="White balance as B,G,R gains (e.g., 2.51,1.02,1.41)")
+    parser.add_argument("--gamma", type=float, default=None,
+                        help="Gamma correction (default: unchanged)")
     parser.add_argument("--quiet", "-q", action="store_true",
                         help="Single-line output: 'AF: Z=... (adj ...), sharpness=sel/after, Ns, N frames' "
                              "or 'AF: stayed_at_initial, DR=..., scan_best_z=..., Ns, N frames'")
@@ -165,10 +173,29 @@ def main():
         # Configure camera for fast capture
         camera.trigger_mode = 0  # CONTINUOUS
         camera.binning = 2       # 3x3 binning for speed
-        camera.exposure_time = 0.001  # 1ms exposure
+        if args.exposure_ms is not None:
+            camera.exposure_time = args.exposure_ms / 1000.0
+        else:
+            camera.exposure_time = 0.001  # 1ms default
+        if args.gain is not None:
+            camera.gain = args.gain
+        if args.white_balance is not None:
+            wb_parts = args.white_balance.split(",")
+            if len(wb_parts) != 3:
+                print("Error: --white-balance must be 3 comma-separated values (B,G,R)")
+                return 1
+            try:
+                wb_blue, wb_green, wb_red = float(wb_parts[0]), float(wb_parts[1]), float(wb_parts[2])
+            except ValueError:
+                print("Error: --white-balance values must be numbers")
+                return 1
+            camera.gain_rgb = (wb_red, wb_green, wb_blue)
+        if args.gamma is not None:
+            camera.gamma = args.gamma
 
+        exp_ms = camera.exposure_time * 1000 if camera.exposure_time else 1.0
         vprint(f"Camera: {camera.name}")
-        vprint(f"  Binning: 3x3, Exposure: 1ms")
+        vprint(f"  Binning: 3x3, Exposure: {exp_ms:.2f}ms")
         if lamp:
             vprint(f"Lamp: {lamp.name}, intensity={lamp.intensity}/{lamp.max_intensity}")
         vprint()

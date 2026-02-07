@@ -92,10 +92,14 @@ def main() -> int:
     parser.add_argument("--wb-red", type=float, help="Red channel gain")
     parser.add_argument("--wb-green", type=float, help="Green channel gain")
     parser.add_argument("--wb-blue", type=float, help="Blue channel gain")
+    parser.add_argument("--gain", type=float,
+                        help="Camera gain (e.g., 4.0)")
     parser.add_argument("--quality", type=int, default=95,
                         help="JPEG quality (default: 95)")
     parser.add_argument("--xy", type=str, metavar="X,Y",
                         help="Move to X,Y position in µm before capture (e.g., '5000,14441')")
+    parser.add_argument("--z", type=float,
+                        help="Move to Z position in µm before capture")
     args = parser.parse_args()
 
     # Parse white balance
@@ -145,6 +149,13 @@ def main() -> int:
             x, y = stage.position_um
             print(f"Arrived at X={x:.1f}, Y={y:.1f} µm")
 
+        # Move Z if specified
+        if args.z is not None:
+            z_drive = ZDrive.from_connection(conn)
+            print(f"Moving Z to {args.z:.1f} µm...")
+            z_drive.move_to(args.z)
+            print(f"Z at {z_drive.position_um:.1f} µm")
+
         # Initialize camera
         camera = Camera.from_connection(conn)
 
@@ -154,6 +165,9 @@ def main() -> int:
 
         if args.exposure is not None:
             camera.exposure_time = args.exposure
+
+        if args.gain is not None:
+            camera.gain = args.gain
 
         if wb_r is not None or wb_g is not None or wb_b is not None:
             current_r, current_g, current_b = camera.gain_rgb
