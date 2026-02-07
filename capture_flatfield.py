@@ -167,21 +167,6 @@ def save_flatfield_16bit(image: np.ndarray, path: Path) -> None:
     pil_img.save(path)
 
 
-def load_calibration_json(path: Path) -> dict:
-    """Load existing calibration.json or return empty dict."""
-    if path.exists():
-        try:
-            with open(path) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            pass
-    return {}
-
-
-def save_calibration_json(path: Path, data: dict) -> None:
-    """Save calibration.json with pretty formatting."""
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
 
 
 def main():
@@ -243,13 +228,12 @@ Examples:
 
     # Check for existing calibration
     binning = 3  # Hardcoded for now
-    cal_key = f"{int(objective_mag)}x_bin{binning}"
-    cal_json_path = args.output / "calibration.json"
-    existing_cal = load_calibration_json(cal_json_path)
+    flatfield_basename = f"flatfield_{int(objective_mag)}x_bin{binning}"
+    flatfield_json = args.output / f"{flatfield_basename}.json"
 
-    if cal_key in existing_cal and not args.force:
-        print(f"Error: Calibration for {cal_key} already exists.")
-        print(f"  Use --force to overwrite, or delete {cal_json_path}")
+    if flatfield_json.exists() and not args.force:
+        print(f"Error: Calibration already exists: {flatfield_json}")
+        print(f"  Use --force to overwrite.")
         return 1
 
     # Import microscope modules (slow, so do after arg validation)
@@ -365,8 +349,7 @@ Examples:
         print(f"Reference WB (BGR): [{cal_values['reference_wb_bgr'][0]:.3f}, {cal_values['reference_wb_bgr'][1]:.3f}, {cal_values['reference_wb_bgr'][2]:.3f}]")
 
         # Save flatfield image
-        flatfield_filename = f"flatfield_{int(objective_mag)}x_bin{binning}"
-        flatfield_path = args.output / flatfield_filename
+        flatfield_path = args.output / flatfield_basename
 
         # Save as both .npy (for processing) and .png (for viewing)
         np.save(flatfield_path.with_suffix(".npy"), averaged)
@@ -374,10 +357,8 @@ Examples:
         print(f"Saved: {flatfield_path.with_suffix('.npy')}")
         print(f"Saved: {flatfield_path.with_suffix('.png')} (preview)")
 
-        # Update calibration.json
-        existing_cal[cal_key] = {
-            "flatfield_file": f"{flatfield_filename}.npy",
-            "preview_file": f"{flatfield_filename}.png",
+        # Save per-flatfield metadata
+        meta = {
             "objective_mag": objective_mag,
             "binning": binning,
             "lamp_intensity": lamp_intensity,
@@ -393,12 +374,13 @@ Examples:
             "notes": args.notes,
         }
 
-        save_calibration_json(cal_json_path, existing_cal)
-        print(f"Updated: {cal_json_path}")
+        with open(flatfield_json, "w") as f:
+            json.dump(meta, f, indent=2)
+        print(f"Saved: {flatfield_json}")
 
         print()
         print("=" * 50)
-        print(f"Calibration complete for {cal_key}")
+        print(f"Calibration complete for {flatfield_basename}")
         print()
         print("To use in scanner:")
         print(f"  python scan_area_v1.py --objective {int(objective_mag)}x ...")
