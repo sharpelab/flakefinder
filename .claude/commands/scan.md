@@ -17,6 +17,7 @@ At the start of each session:
 
 ### Microscope Safety
 - **NEVER run hardware commands without explicit approval** ("go", "go for microscope", or similar)
+- Always show the full command when asking for approval
 - Prepare and show commands, then wait
 
 ### Workflow Habits
