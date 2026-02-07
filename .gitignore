@@ -57,3 +57,5 @@ scans/*
 !scans/.gitkeep
 experiments/*
 !experiments/.gitkeep
+downloads/*
+!downloads/.gitkeep

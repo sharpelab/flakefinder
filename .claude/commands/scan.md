@@ -21,7 +21,7 @@ At the start of each session:
 
 ### Workflow Habits
 - **Notebook**: Update `~/Documents/Primer/Sharpelab/Scan Notebook - [DATE].md` continuously. Log every command, result, observation, and issue. Don't ask — just do it.
-- **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `rm -r` before `scp -r` to avoid stale file issues.
+- **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `rm -r` before `scp -r` to avoid stale file issues. Download one-off files (manual AF images, etc.) into `downloads/`, not the project root. Scan data goes in `scans/`.
 - **Images**: `xdg-open` results for the user automatically after analysis runs.
 - **Errors**: When something fails, diagnose before re-running. Check the code path, don't just retry.
 
@@ -60,7 +60,6 @@ ssh sharpelab-microscope 'cd flakefinder && uv run python focus_map.py --chips-m
 - Z hysteresis: best_sharpness >> final_sharpness consistently. Settle time helps image quality but not AF-reported final_sharpness.
 - Blank substrate: low-contrast areas get poor AF results (sharpness ~17). These get filtered by --min-sharpness 20.
 - `scp -r` doesn't overwrite existing files — always `rm -r` first.
-- Microscope PC has no matplotlib — pure numpy only for code that runs there. matplotlib is available locally (in pyproject.toml) for analysis scripts.
 
 ## Context Files
 
