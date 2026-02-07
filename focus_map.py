@@ -14,6 +14,8 @@ import time
 import numpy as np
 from PIL import Image as PILImage
 
+from flakefinder.leica.autofocus import ALL_SHARPNESS_METRICS
+
 
 def load_chips_meta(chips_meta_path: Path) -> dict:
     """Load chips metadata from JSON file."""
@@ -223,7 +225,7 @@ def main():
     )
     parser.add_argument(
         "--sharpness-method",
-        choices=["tenengrad", "laplacian"],
+        choices=list(ALL_SHARPNESS_METRICS.keys()),
         default="tenengrad",
         help="Sharpness metric for autofocus",
     )
