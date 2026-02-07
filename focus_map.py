@@ -509,27 +509,24 @@ def main():
                 print(f"FAILED: {e}")
                 af_result = None
 
-            sample_results.append({
-                "x_um": x_um,
-                "y_um": y_um,
-                "type": pt["type"],
-                "index": pt["index"],
-                "selected_z_um": af_result.selected_z_um if af_result else None,
-                "selected_sharpness": af_result.selected_sharpness if af_result else None,
-                "scan_best_z_um": af_result.scan_best_z_um if af_result else None,
-                "scan_best_sharpness": af_result.scan_best_sharpness if af_result else None,
-                "final_sharpness": af_result.final_sharpness if af_result else None,
-                "dynamic_range": af_result.dynamic_range if af_result else None,
-                "initial_z_um": af_result.initial_z_um if af_result else None,
-                "coarse_z_start_um": af_result.coarse_z_start_um if af_result else None,
-                "coarse_z_end_um": af_result.coarse_z_end_um if af_result else None,
-                "coarse_best_z_um": af_result.coarse_best_z_um if af_result else None,
-                "coarse_best_sharpness": af_result.coarse_best_sharpness if af_result else None,
-                "fine_z_start_um": af_result.fine_z_start_um if af_result else None,
-                "fine_z_end_um": af_result.fine_z_end_um if af_result else None,
-                "stayed_at_initial": af_result.stayed_at_initial if af_result else None,
-                "image": str(image_path.name) if image_path else None,
-            })
+            if af_result is None:
+                sample_results.append({
+                    "x_um": x_um,
+                    "y_um": y_um,
+                    "type": pt["type"],
+                    "index": pt["index"],
+                    "error": True,
+                })
+            else:
+                result_dict = af_result.to_dict()
+                result_dict.update({
+                    "x_um": x_um,
+                    "y_um": y_um,
+                    "type": pt["type"],
+                    "index": pt["index"],
+                    "image": str(image_path.name) if image_path else None,
+                })
+                sample_results.append(result_dict)
 
         # Wait for background saves to finish
         if save_executor:
@@ -561,7 +558,7 @@ def main():
             "z_speed_um_s": args.z_speed,
             "fine_pass": not args.no_fine_pass,
             "fine_range_um": args.fine_range,
-            "super_fine_pass": args.super_fine,
+            "super_fine_pass": not args.no_super_fine,
             "sharpness_method": args.sharpness_method,
             "move_settle_s": args.move_settle,
             "af_settle_s": args.af_settle,
@@ -580,9 +577,9 @@ def main():
     print(f"\nFocus map saved to {output_path}")
 
     # Summary
-    successful = [r for r in sample_results if r["selected_z_um"] is not None]
-    z_values = [r["selected_z_um"] for r in successful]
-    selected_sharpness_values = [r["selected_sharpness"] for r in successful]
+    successful = [r for r in sample_results if "selected" in r]
+    z_values = [r["selected"]["z_um"] for r in successful]
+    selected_sharpness_values = [r["selected"]["sharpness"] for r in successful]
     final_sharpness_values = [r["final_sharpness"] for r in successful]
 
     print(f"\nSummary:")
