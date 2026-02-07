@@ -76,12 +76,9 @@ def fit_plane(x: np.ndarray, y: np.ndarray, z: np.ndarray) -> tuple[np.ndarray, 
     return coeffs, r_squared
 
 
-def get_sharpness(point: dict, prefer_best: bool = True) -> float | None:
-    """Get sharpness value from point, preferring best_sharpness over legacy sharpness."""
-    if prefer_best and "best_sharpness" in point:
-        return point.get("best_sharpness")
-    # Fall back to legacy 'sharpness' field or final_sharpness
-    return point.get("sharpness") or point.get("final_sharpness")
+def get_sharpness(point: dict) -> float | None:
+    """Get selected_sharpness from a focus map point."""
+    return point.get("selected_sharpness")
 
 
 def analyze_focus_map(data: dict) -> dict:
@@ -94,15 +91,14 @@ def analyze_focus_map(data: dict) -> dict:
     # Extract arrays
     x = np.array([p["x_um"] for p in points])
     y = np.array([p["y_um"] for p in points])
-    z = np.array([p["best_z_um"] for p in points if p["best_z_um"] is not None])
+    z = np.array([p["selected_z_um"] for p in points if p["selected_z_um"] is not None])
 
-    # Prefer best_sharpness, fall back to legacy sharpness field
-    sharpness = np.array([get_sharpness(p) for p in points if get_sharpness(p) is not None])
+    sharpness = np.array([p["selected_sharpness"] for p in points if p["selected_sharpness"] is not None])
     types = [p["type"] for p in points]
     indices = [p["index"] for p in points]
 
     # Filter to successful points
-    valid_mask = np.array([p["best_z_um"] is not None for p in points])
+    valid_mask = np.array([p["selected_z_um"] is not None for p in points])
     x_valid = x[valid_mask]
     y_valid = y[valid_mask]
 
@@ -112,7 +108,7 @@ def analyze_focus_map(data: dict) -> dict:
     for i, p in enumerate(points):
         if not valid_mask[i]:
             continue
-        best = p.get("best_sharpness")
+        best = get_sharpness(p)
         final = p.get("final_sharpness")
         if best is not None and final is not None and best > 0:
             drift_ratio = abs(best - final) / best
@@ -354,7 +350,7 @@ def print_report(data: dict, analysis: dict) -> None:
         points = data["sample_points"]
         for idx in low_sharp:
             p = points[idx]
-            sharpness = p.get('best_sharpness', p.get('sharpness', 0))
+            sharpness = get_sharpness(p) or 0
             print(f"  {p['type']} {p['index']}: sharpness={sharpness:.1f}, "
                   f"pos=({p['x_um']/1000:.2f}, {p['y_um']/1000:.2f}) mm")
     else:
@@ -364,11 +360,11 @@ def print_report(data: dict, analysis: dict) -> None:
     if len(outliers) > 0:
         print(f"\nZ outliers ({len(outliers)}, > 2σ from plane):")
         points = data["sample_points"]
-        valid_points = [p for p in points if p["best_z_um"] is not None]
+        valid_points = [p for p in points if p["selected_z_um"] is not None]
         for idx in outliers:
             p = valid_points[idx]
             res = analysis["residuals"][idx]
-            print(f"  {p['type']} {p['index']}: Z={p['best_z_um']:.1f} µm, "
+            print(f"  {p['type']} {p['index']}: Z={p['selected_z_um']:.1f} µm, "
                   f"residual={res:+.1f} µm")
     else:
         print("No Z outliers detected.")
@@ -379,10 +375,10 @@ def print_report(data: dict, analysis: dict) -> None:
         points = data["sample_points"]
         for idx in drift_indices:
             p = points[idx]
-            best = p.get("best_sharpness", 0)
+            sel = get_sharpness(p) or 0
             final = p.get("final_sharpness", 0)
-            drift_pct = abs(best - final) / best * 100 if best > 0 else 0
-            print(f"  {p['type']} {p['index']}: best={best:.1f}, final={final:.1f} "
+            drift_pct = abs(sel - final) / sel * 100 if sel > 0 else 0
+            print(f"  {p['type']} {p['index']}: selected={sel:.1f}, final={final:.1f} "
                   f"({drift_pct:+.0f}%)")
     else:
         print("No sharpness drift detected.")
@@ -434,7 +430,7 @@ def create_mosaic(
         return
 
     # Compute mean Z for relative offsets
-    z_values = [p["best_z_um"] for p in all_points if p.get("best_z_um") is not None]
+    z_values = [p["selected_z_um"] for p in all_points if p.get("selected_z_um") is not None]
     z_mean = np.mean(z_values) if z_values else 0
 
     # Load first image to get aspect ratio
@@ -560,7 +556,7 @@ def create_mosaic(
             s0 = sharpness
 
         # Z offset from mean
-        z = point.get("best_z_um")
+        z = point.get("selected_z_um")
         if z is not None:
             z_offset = z - z_mean
             z_str = f"Z:{z_offset:+.0f}"
@@ -570,10 +566,10 @@ def create_mosaic(
         # Text color: red for low sharpness, white otherwise
         low_sharpness = s0 is not None and s0 < 30
         # Also flag if significant drift between best and final
-        best = point.get("best_sharpness")
+        sel = get_sharpness(point)
         final = point.get("final_sharpness")
-        has_drift = (best is not None and final is not None and best > 0 and
-                     abs(best - final) / best > 0.2)
+        has_drift = (sel is not None and final is not None and sel > 0 and
+                     abs(sel - final) / sel > 0.2)
         text_color = (0, 0, 255) if low_sharpness else (255, 255, 255)  # BGR: red if low sharpness
 
         # Draw background rectangle for readability
@@ -810,12 +806,12 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
         data: Focus map data dict.
         cf_threshold: Max coarse-fine disagreement in µm for high-confidence points.
         corner_margin_um: Distance from edge to consider "corner" region.
-        min_sharpness: Minimum best_sharpness to include a point in the fit.
+        min_sharpness: Minimum selected_sharpness to include a point in the fit.
 
     Returns:
         Dict with plane parameters, quality metrics, and coverage info.
     """
-    points = [p for p in data["sample_points"] if p["best_z_um"] is not None]
+    points = [p for p in data["sample_points"] if p["selected_z_um"] is not None]
 
     if len(points) < 3:
         raise ValueError(f"Need at least 3 valid points, got {len(points)}")
@@ -823,17 +819,17 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
     # Extract arrays
     x = np.array([p["x_um"] for p in points])
     y = np.array([p["y_um"] for p in points])
-    z = np.array([p["best_z_um"] for p in points])
-    best_sharpness = np.array([p["best_sharpness"] for p in points])
+    z = np.array([p["selected_z_um"] for p in points])
+    sel_sharpness = np.array([p["selected_sharpness"] for p in points])
     final_sharpness = np.array([p["final_sharpness"] for p in points])
 
     # Compute quality metrics
-    drift_pct = np.clip((best_sharpness - final_sharpness) / best_sharpness * 100, 0, 100)
-    coarse_best_z = np.array([p.get("coarse_best_z_um", p["best_z_um"]) for p in points])
+    drift_pct = np.clip((sel_sharpness - final_sharpness) / sel_sharpness * 100, 0, 100)
+    coarse_best_z = np.array([p.get("coarse_best_z_um", p["selected_z_um"]) for p in points])
     coarse_fine_diff = np.abs(coarse_best_z - z)
 
     # High-confidence mask: low coarse-fine disagreement AND above sharpness floor
-    high_conf_mask = (coarse_fine_diff <= cf_threshold) & (best_sharpness >= min_sharpness)
+    high_conf_mask = (coarse_fine_diff <= cf_threshold) & (sel_sharpness >= min_sharpness)
 
     if high_conf_mask.sum() < 3:
         # Fall back to all points if not enough high-confidence
@@ -931,8 +927,8 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
                 "x_um": float(x[i]),
                 "y_um": float(y[i]),
                 "z_um": float(z[i]),
-                "best_sharpness": float(best_sharpness[i]),
-                "reason": "low_sharpness" if best_sharpness[i] < min_sharpness else "cf_disagreement",
+                "selected_sharpness": float(sel_sharpness[i]),
+                "reason": "low_sharpness" if sel_sharpness[i] < min_sharpness else "cf_disagreement",
             }
             for i in range(len(points)) if not high_conf_mask[i]
         ],
@@ -959,7 +955,7 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
     # Store arrays for plotting (not serialized)
     result["_plot_data"] = {
         "all_x": x, "all_y": y, "all_z": z,
-        "all_sharpness": best_sharpness,
+        "all_sharpness": sel_sharpness,
         "high_conf_mask": high_conf_mask,
         "G_x": G_x, "G_y": G_y, "Z_interp": Z_interp,
     }
@@ -1030,7 +1026,7 @@ def export_plane(data: dict, output_path: Path, cf_threshold: float = 20.0, min_
         data: Focus map data dict.
         output_path: Output JSON path.
         cf_threshold: Max coarse-fine disagreement for high-confidence points.
-        min_sharpness: Minimum best_sharpness to include a point.
+        min_sharpness: Minimum selected_sharpness to include a point.
 
     Returns:
         The plane fit result dict.
@@ -1107,7 +1103,7 @@ def main():
         "--min-sharpness",
         type=float,
         default=20.0,
-        help="Minimum best_sharpness to include in plane fit (default: 20)",
+        help="Minimum selected_sharpness to include in plane fit (default: 20)",
     )
     parser.add_argument(
         "--quiet", "-q",

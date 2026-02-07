@@ -237,10 +237,12 @@ def main():
 
         print(f"  Sharpness range: {min_sharpness:.2f} - {max_sharpness:.2f}")
         print(f"  Mean sharpness: {mean_sharpness:.2f}")
-        print(f"  Best Z: {af_result.best_z_um:.2f} um")
-        print(f"  Best sharpness: {af_result.best_sharpness:.2f}")
+        print(f"  Selected Z: {af_result.selected_z_um:.2f} um")
+        print(f"  Selected sharpness: {af_result.selected_sharpness:.2f}")
         if af_result.stayed_at_initial:
             print(f"  ** Stayed at initial (scan found nothing better) **")
+            print(f"     Scan best: Z={af_result.scan_best_z_um:.2f}, sharpness={af_result.scan_best_sharpness:.2f}")
+            print(f"     Dynamic range: {af_result.dynamic_range:.4f}")
 
         # Find best frame for saving — check coarse and fine separately
         best_scan_path = None
@@ -317,12 +319,17 @@ def main():
                     "z_um": target_z,
                     "sharpness": before_sharpness,
                 },
-                "best": {
-                    "z_um": af_result.best_z_um,
-                    "sharpness": af_result.best_sharpness,
+                "selected": {
+                    "z_um": af_result.selected_z_um,
+                    "sharpness": af_result.selected_sharpness,
                 },
+                "scan_best": {
+                    "z_um": af_result.scan_best_z_um,
+                    "sharpness": af_result.scan_best_sharpness,
+                },
+                "dynamic_range": af_result.dynamic_range,
                 "after": {
-                    "z_um": af_result.best_z_um,
+                    "z_um": af_result.selected_z_um,
                     "sharpness": after_sharpness,
                 },
                 "sharpness_stats": {
@@ -346,9 +353,9 @@ def main():
         print("AUTOFOCUS SUMMARY")
         print("=" * 50)
         print(f"Initial Z:    {target_z:.2f} um (sharpness: {before_sharpness:.2f})")
-        print(f"Best Z:       {af_result.best_z_um:.2f} um (sharpness: {af_result.best_sharpness:.2f})")
-        print(f"After Z:      {af_result.best_z_um:.2f} um (sharpness: {after_sharpness:.2f})")
-        print(f"Z adjustment: {af_result.best_z_um - target_z:+.2f} um")
+        print(f"Best Z:       {af_result.selected_z_um:.2f} um (sharpness: {af_result.selected_sharpness:.2f})")
+        print(f"After Z:      {af_result.selected_z_um:.2f} um (sharpness: {after_sharpness:.2f})")
+        print(f"Z adjustment: {af_result.selected_z_um - target_z:+.2f} um")
         if before_sharpness > 0:
             improvement = after_sharpness - before_sharpness
             pct = (after_sharpness / before_sharpness - 1) * 100

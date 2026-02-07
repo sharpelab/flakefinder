@@ -419,10 +419,10 @@ def main():
                     store_frames=bool(args.debug_dir),
                     compute_all_metrics=bool(args.debug_dir),
                 )
-                best_z = af_result.best_z_um
-                best_sharpness = af_result.best_sharpness
+                best_z = af_result.selected_z_um
+                selected_sharpness = af_result.selected_sharpness
                 final_sharpness = af_result.final_sharpness
-                print(f"Z={best_z:.1f} µm, sharpness={best_sharpness:.1f}/{final_sharpness:.1f}", end="")
+                print(f"Z={best_z:.1f} µm, sharpness={selected_sharpness:.1f}/{final_sharpness:.1f}", end="")
 
                 # Save debug frames if requested
                 if args.debug_dir and af_result.frames:
@@ -454,9 +454,12 @@ def main():
                 "y_um": y_um,
                 "type": pt["type"],
                 "index": pt["index"],
-                "best_z_um": af_result.best_z_um if af_result else None,
-                "best_sharpness": af_result.best_sharpness if af_result else None,
+                "selected_z_um": af_result.selected_z_um if af_result else None,
+                "selected_sharpness": af_result.selected_sharpness if af_result else None,
+                "scan_best_z_um": af_result.scan_best_z_um if af_result else None,
+                "scan_best_sharpness": af_result.scan_best_sharpness if af_result else None,
                 "final_sharpness": af_result.final_sharpness if af_result else None,
+                "dynamic_range": af_result.dynamic_range if af_result else None,
                 "initial_z_um": af_result.initial_z_um if af_result else None,
                 "coarse_z_start_um": af_result.coarse_z_start_um if af_result else None,
                 "coarse_z_end_um": af_result.coarse_z_end_um if af_result else None,
@@ -464,6 +467,7 @@ def main():
                 "coarse_best_sharpness": af_result.coarse_best_sharpness if af_result else None,
                 "fine_z_start_um": af_result.fine_z_start_um if af_result else None,
                 "fine_z_end_um": af_result.fine_z_end_um if af_result else None,
+                "stayed_at_initial": af_result.stayed_at_initial if af_result else None,
                 "image": str(image_path.name) if image_path else None,
             })
 
@@ -508,9 +512,9 @@ def main():
     print(f"\nFocus map saved to {output_path}")
 
     # Summary
-    successful = [r for r in sample_results if r["best_z_um"] is not None]
-    z_values = [r["best_z_um"] for r in successful]
-    best_sharpness_values = [r["best_sharpness"] for r in successful]
+    successful = [r for r in sample_results if r["selected_z_um"] is not None]
+    z_values = [r["selected_z_um"] for r in successful]
+    selected_sharpness_values = [r["selected_sharpness"] for r in successful]
     final_sharpness_values = [r["final_sharpness"] for r in successful]
 
     print(f"\nSummary:")
@@ -522,7 +526,7 @@ def main():
         print(f"  Z range: {min(z_values):.1f} - {max(z_values):.1f} µm")
         print(f"  Z mean: {np.mean(z_values):.1f} µm")
         print(f"  Z std: {np.std(z_values):.1f} µm")
-        print(f"  Sharpness (best): {np.mean(best_sharpness_values):.1f} ± {np.std(best_sharpness_values):.1f}")
+        print(f"  Sharpness (selected): {np.mean(selected_sharpness_values):.1f} ± {np.std(selected_sharpness_values):.1f}")
         print(f"  Sharpness (final): {np.mean(final_sharpness_values):.1f} ± {np.std(final_sharpness_values):.1f}")
 
     return 0

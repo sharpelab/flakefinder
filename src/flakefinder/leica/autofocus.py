@@ -189,11 +189,14 @@ class AutofocusFrame:
 class AutofocusResult:
     """Result from autofocus operation."""
 
-    best_z_um: float
-    best_sharpness: float
+    selected_z_um: float            # Selected Z position (may be initial if stayed_at_initial)
+    selected_sharpness: float      # Sharpness at the Z we actually went to
+    scan_best_z_um: float          # Best Z found during scanning (before stayed_at_initial override)
+    scan_best_sharpness: float     # Best sharpness from scanning (before stayed_at_initial override)
     initial_z_um: float
     initial_sharpness: float
     final_sharpness: float
+    dynamic_range: float           # (s_max - s_min) / s_mean of coarse curve
     z_range_um: float              # Actual range used
     objective_position: int | None  # Queried from microscope
     scan_duration_s: float
@@ -406,6 +409,7 @@ def continuous_autofocus(
     compute_all_metrics: bool = False,
     backlash_overshoot_um: float = 100.0,
     settle_time_s: float = 0.2,
+    min_dynamic_range: float = 0.05,
 ) -> AutofocusResult:
     """Perform continuous Z-scan autofocus.
 
@@ -446,6 +450,10 @@ def continuous_autofocus(
             Set to 0 to disable.
         settle_time_s: Settle time in seconds after final Z move, before
             capturing final_sharpness (default 0.2s).
+        min_dynamic_range: Minimum (s_max - s_min) / s_mean for the coarse
+            sharpness curve to be considered valid (default 0.05 = 5%).
+            Below this threshold the curve is flat noise and no real focus
+            exists, so stayed_at_initial is set and fine pass is skipped.
 
     Returns:
         AutofocusResult with best Z, sharpness curve, and scan statistics.
@@ -509,14 +517,26 @@ def continuous_autofocus(
     best_z = best["z_um"]
     best_sharpness = best["sharpness"]
 
+    # Check if sharpness curve has meaningful variation
+    sharpness_values = [r["sharpness"] for r in sharpness_curve]
+    s_min, s_max = min(sharpness_values), max(sharpness_values)
+    s_mean = sum(sharpness_values) / len(sharpness_values)
+    dynamic_range = (s_max - s_min) / s_mean if s_mean > 0 else 0
+
+    if dynamic_range < min_dynamic_range:
+        # Curve is flat noise — no real focus found
+        stayed_at_initial = True
+    else:
+        stayed_at_initial = False
+
     # Track coarse results for diagnostics
     coarse_best_z = best_z
     coarse_best_sharpness = best_sharpness
     actual_fine_z_start = None
     actual_fine_z_end = None
 
-    # Optional fine pass
-    if fine_pass:
+    # Optional fine pass (skip if dynamic range too low)
+    if fine_pass and not stayed_at_initial:
         fine_z_start = best_z + fine_range_um / 2
         fine_z_end = best_z - fine_range_um / 2
 
@@ -563,8 +583,13 @@ def continuous_autofocus(
     # Accept scan best if it's within margin of initial reading.
     # On low-contrast substrates, frame-to-frame noise can cause
     # the initial reading to randomly exceed the true peak.
-    initial_margin = 0.95  # 5% margin
-    stayed_at_initial = best_sharpness < initial_sharpness * initial_margin
+    if not stayed_at_initial:
+        initial_margin = 0.95  # 5% margin
+        stayed_at_initial = best_sharpness < initial_sharpness * initial_margin
+
+    # Save raw scan best before any stayed_at_initial override
+    scan_best_z = best_z
+    scan_best_sharpness = best_sharpness
 
     if stayed_at_initial:
         # Scan found nothing better - stay at initial position
@@ -589,11 +614,14 @@ def continuous_autofocus(
     final_sharpness = sharpness(final_image, method=sharpness_method) if final_image is not None else 0.0
 
     return AutofocusResult(
-        best_z_um=best_z,
-        best_sharpness=best_sharpness,
+        selected_z_um=best_z,
+        selected_sharpness=best_sharpness,
+        scan_best_z_um=scan_best_z,
+        scan_best_sharpness=scan_best_sharpness,
         initial_z_um=initial_z,
         initial_sharpness=initial_sharpness,
         final_sharpness=final_sharpness,
+        dynamic_range=dynamic_range,
         z_range_um=safe_range,
         objective_position=objective_position,
         scan_duration_s=scan_duration,
@@ -608,6 +636,6 @@ def continuous_autofocus(
         stayed_at_initial=stayed_at_initial,
         sharpness_curve=sharpness_curve,
         frames=frames if store_frames else None,
-        fine_sharpness_curve=fine_curve if fine_pass and fine_curve else [],
-        fine_frames=fine_frames if store_frames and fine_pass else None,
+        fine_sharpness_curve=fine_curve if fine_pass and not stayed_at_initial and fine_curve else [],
+        fine_frames=fine_frames if store_frames and fine_pass and not stayed_at_initial else None,
     )

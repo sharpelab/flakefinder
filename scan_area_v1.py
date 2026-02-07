@@ -537,8 +537,8 @@ Examples:
                     context=context,
                     fine_pass=True,
                 )
-                print(f"  Z: {af_result.initial_z_um:.1f} -> {af_result.best_z_um:.1f} µm")
-                print(f"  Range: {af_result.z_range_um:.0f}µm, Sharpness: {af_result.initial_sharpness:.1f} -> {af_result.best_sharpness:.1f}")
+                print(f"  Z: {af_result.initial_z_um:.1f} -> {af_result.selected_z_um:.1f} µm")
+                print(f"  Range: {af_result.z_range_um:.0f}µm, Sharpness: {af_result.initial_sharpness:.1f} -> {af_result.selected_sharpness:.1f}")
             except ValueError as e:
                 print(f"  Autofocus error: {e}")
                 return 1
@@ -682,10 +682,10 @@ Examples:
             "autofocus": {
                 "position_um": list(auto_focus_pos) if auto_focus_pos else None,
                 "initial_z_um": af_result.initial_z_um if af_result else None,
-                "best_z_um": af_result.best_z_um if af_result else None,
+                "selected_z_um": af_result.selected_z_um if af_result else None,
                 "z_range_um": af_result.z_range_um if af_result else None,
                 "initial_sharpness": af_result.initial_sharpness if af_result else None,
-                "best_sharpness": af_result.best_sharpness if af_result else None,
+                "selected_sharpness": af_result.selected_sharpness if af_result else None,
                 "final_sharpness": af_result.final_sharpness if af_result else None,
                 "objective_position": af_result.objective_position if af_result else None,
                 "scan_duration_s": af_result.scan_duration_s if af_result else None,

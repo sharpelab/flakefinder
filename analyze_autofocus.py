@@ -341,7 +341,7 @@ def plot_sharpness_curve(
     fine_curve = summary.get("fine_sharpness_curve", [])
     params = summary["params"]
     before = summary["before"]
-    best = summary["best"]
+    best = summary["selected"]  # new: "selected", legacy: "best"
     after = summary["after"]
 
     # Load inset images
@@ -617,12 +617,12 @@ def main():
         print()
 
         before = summary["before"]
-        best = summary["best"]
+        best = summary["selected"]
         after = summary["after"]
 
         print("Results:")
         print(f"  Initial Z:  {before['z_um']:.2f} µm  (sharpness: {before['sharpness']:.2f})")
-        print(f"  Best Z:     {best['z_um']:.2f} µm  (sharpness: {best['sharpness']:.2f})")
+        print(f"  Selected Z: {best['z_um']:.2f} µm  (sharpness: {best['sharpness']:.2f})")
         print(f"  After Z:    {after['z_um']:.2f} µm  (sharpness: {after['sharpness']:.2f})")
 
         z_adj = best["z_um"] - before["z_um"]
