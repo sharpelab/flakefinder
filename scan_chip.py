@@ -632,7 +632,7 @@ Examples:
                 # Move to row start position
                 stage.y.move_to(row_y)
                 stage.x.move_to(x_start_pos)
-                z_drive.move_to(z_start)
+                z_drive.move_to_corrected(z_start)
                 time.sleep(0.1)
 
                 # Set up position polling for this row
@@ -891,7 +891,7 @@ Examples:
         Stage.wait_all([hx, hy])
         hx.dispose()
         hy.dispose()
-        z_drive.move_to(initial_z)
+        z_drive.move_to_corrected(initial_z)
 
         # Clean up camera
         camera.dispose()
