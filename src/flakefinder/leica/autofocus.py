@@ -122,20 +122,20 @@ ALL_SHARPNESS_METRICS = {
 }
 
 
-# Default sharpness function (kept for backwards compatibility)
 def sharpness(image: np.ndarray, method: str = "tenengrad") -> float:
     """Compute sharpness using specified method.
 
     Args:
         image: RGB or grayscale image as numpy array.
-        method: "tenengrad" or "laplacian"
+        method: One of ALL_SHARPNESS_METRICS keys.
 
     Returns:
         Sharpness value (higher = sharper).
     """
-    if method == "laplacian":
-        return sharpness_laplacian(image)
-    return sharpness_tenengrad(image)
+    fn = ALL_SHARPNESS_METRICS.get(method)
+    if fn is None:
+        raise ValueError(f"Unknown sharpness method: {method}")
+    return float(fn(image))
 
 
 def interpolate_position(t: float, samples: list[tuple[float, float, float]]) -> float | None:
@@ -415,7 +415,7 @@ def _run_z_scan(
         }
         if compute_all_metrics:
             entry["metrics"] = {
-                name: fn(img) for name, fn in ALL_SHARPNESS_METRICS.items()
+                name: float(fn(img)) for name, fn in ALL_SHARPNESS_METRICS.items()
             }
         sharpness_curve.append(entry)
         if store_frames:
