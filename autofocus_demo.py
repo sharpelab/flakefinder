@@ -261,8 +261,8 @@ def main():
         vprint(f"  Z samples: {af_result.z_sample_count}")
         vprint()
 
-        # Sharpness stats (combine coarse + fine)
-        all_sharpness = af_result.sharpness_curve + af_result.fine_sharpness_curve
+        # Sharpness stats (combine coarse + fine + super_fine)
+        all_sharpness = af_result.sharpness_curve + af_result.fine_sharpness_curve + af_result.super_fine_sharpness_curve
         sharpness_values = [r["sharpness"] for r in all_sharpness]
         min_sharpness = min(sharpness_values) if sharpness_values else 0
         max_sharpness = max(sharpness_values) if sharpness_values else 0
@@ -348,6 +348,7 @@ def main():
                     "z_initial_um": target_z,
                     "range_um": af_result.z_range_um,
                     "fine_pass": args.fine,
+                    "super_fine_pass": args.super_fine,
                     "objective_position": af_result.objective_position,
                 },
                 "scan": {
@@ -379,6 +380,7 @@ def main():
                 },
                 "sharpness_curve": af_result.sharpness_curve,
                 "fine_sharpness_curve": af_result.fine_sharpness_curve,
+                "super_fine_sharpness_curve": af_result.super_fine_sharpness_curve,
             }
 
             summary_path = os.path.join(args.output, "summary.json")
