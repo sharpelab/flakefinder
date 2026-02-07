@@ -59,15 +59,23 @@ Write a prompt file to `/tmp/subtask_<descriptive_slug>.prompt.md`. Structure:
 
 ## Rules
 
-**DO NOT sync to the microscope.** You are a subtask instance — the main scan session handles all `scp` to the microscope. Work locally only. Do not SSH to run commands on the microscope.
-
-**Propose before implementing.** Before writing any code, present your plan to the user:
+**Propose before implementing.** ALWAYS present your plan to the user before writing any code:
 - What you'll build or change, and why
 - For new scripts: CLI arguments (names, types, defaults), expected output files/formats, example usage
 - For modifications: which files you'll touch and what the changes look like
-Wait for the user to approve before writing code.
+Wait for the user to explicitly approve before writing code.
 
-**Write a summary when done.** When finished, write `/tmp/<descriptive_name>_summary.md` with a concise handoff summary — what you found/built, the key decisions and rationale, and anything that needs action. Write it like a message to a coworker, not a reference document. No exhaustive tables or line-number inventories. If there are concrete artifacts (scripts, files, commands), mention them. Tell the user the path.
+**Git workflow.** Prefer commit → push → pull on microscope over raw scp:
+- NEVER commit, push, or pull without the user's explicit go-ahead
+- Propose changes first, implement after approval, then ask "commit/push/pull?"
+- `ssh sharpelab-microscope 'cd flakefinder && git pull'` to sync to microscope
+- If pull fails due to local changes on the microscope (e.g. old scp'd files superseded by the new commit), `git stash && git pull` is fine — no need to ask
+- Do NOT run microscope hardware commands (scans, autofocus, stage moves, etc.) — only the main scan session does that
+
+**Summary files.** Write `/tmp/<descriptive_name>_summary.md`:
+- Only write/update when the user asks or after a commit/push/pull
+- Should only reference the current state: what changed, sync status. Keep detailed discussion in the thread.
+- If reused for follow-up tasks, write a NEW summary file covering only the new changes
 
 ## Conventions
 
@@ -98,5 +106,5 @@ Tell the user: the subtask is running in a new terminal. It will propose its pla
 
 - Log the spawn in the scan notebook: what task, what prompt file
 - When the user says the subtask is done (or you read its summary), review the output
-- If the subtask produced code changes, you handle syncing to the microscope if needed
-- If the subtask has open questions, relay them or spawn a follow-up
+- Subtasks handle their own code sync (commit/push/pull) — you don't need to scp
+- 
