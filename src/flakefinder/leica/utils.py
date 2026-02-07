@@ -1,14 +1,8 @@
 """Utility functions for Leica SDK operations."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
 from .enums import EMetricsId, IID
 from .core import get_interface
-
-if TYPE_CHECKING:
-    from .types import Unit, MetricsConverter, BasicControlValue
+from .types import Unit, MetricsConverter, BasicControlValue
 
 
 def get_metrics_converter(

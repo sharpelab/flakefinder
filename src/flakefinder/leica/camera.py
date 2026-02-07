@@ -4,21 +4,15 @@ This module provides camera control for the Leica microscope using the UCAPI SDK
 Supports both single-shot capture and continuous streaming for scanning operations.
 """
 
-from __future__ import annotations
-
 import queue
 import threading
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
 import numpy as np
 
 from .enums import IID, UCAPI_TID, UCAPI_IID, UCAPI_PROP
 from .core import get_interface, get_interface_required, find_unit
-
-if TYPE_CHECKING:
-    from .types import Unit
+from .types import Unit
 
 
 @dataclass

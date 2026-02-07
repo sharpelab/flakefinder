@@ -8,24 +8,18 @@ for safety. Z range is auto-calculated from the current objective's
 working distance if not specified.
 """
 
-from __future__ import annotations
-
 import bisect
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 
-from .core import get_interface_required, find_unit
+from .camera import Camera
+from .core import LeicaConnection, get_interface_required, find_unit
 from .enums import TID, UCAPI_IID
 from .units import Axis, Nosepiece, ZDrive
-
-if TYPE_CHECKING:
-    from .core import LeicaConnection
-    from .camera import Camera
 
 
 # Working distances in µm by objective position (from stage_util.py)
@@ -507,8 +501,6 @@ def continuous_autofocus(
         ValueError: If Z range/position exceeds safety limits.
         LookupError: If Z drive not found.
     """
-    from .camera import Camera
-
     # Get Z axis
     z_axis = ZDrive.from_connection(conn)
     current_z = z_axis.position_um

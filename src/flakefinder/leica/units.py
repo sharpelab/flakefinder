@@ -4,27 +4,21 @@ This module provides high-level classes for controlling microscope components
 with both blocking (sync) and non-blocking (async) operations.
 """
 
-from __future__ import annotations
-
 import time
 import threading
-from typing import TYPE_CHECKING
-
 from .enums import TID, IID, EMetricsId, MoveState
 from .core import get_interface, get_interface_required, find_unit
-
-if TYPE_CHECKING:
-    from .types import (
-        Unit,
-        BasicControlValue,
-        BasicControlValueAsync,
-        HaltControlValue,
-        BasicControlState,
-        BasicControlValueVelocity,
-        AutoCalibration,
-        MetricsConverter,
-        AsyncResult,
-    )
+from .types import (
+    Unit,
+    BasicControlValue,
+    BasicControlValueAsync,
+    HaltControlValue,
+    BasicControlState,
+    BasicControlValueVelocity,
+    AutoCalibration,
+    MetricsConverter,
+    AsyncResult,
+)
 
 
 class MoveHandle:

@@ -9,19 +9,15 @@ Key classes:
 - PositionMonitor: Tracks position changes on an axis
 """
 
-from __future__ import annotations
-
 import queue
 import threading
 import weakref
-from typing import TYPE_CHECKING, Callable, Any
+from typing import Callable, Any
 from contextlib import contextmanager
 
 from .enums import IID
 from .core import get_interface
-
-if TYPE_CHECKING:
-    from .types import Unit, EventSource
+from .types import Unit, EventSource
 
 
 # Type alias for position callback: (position_native: int) -> None

@@ -4,16 +4,12 @@ This module provides the low-level connection to the Leica hardware model
 and utilities for finding units in the device tree.
 """
 
-from __future__ import annotations
-
 import os
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Iterator, TypeVar, Callable
+from typing import Iterator, TypeVar, Callable
 
 from .enums import TID, IID
-
-if TYPE_CHECKING:
-    from .types import Unit, HardwareModel, Interface
+from .types import Unit, HardwareModel, Interface
 
 # DLLs are in shared location: flakefinder/dlls/
 _DLL_DIR = os.path.join(os.path.dirname(__file__), "..", "dlls")
