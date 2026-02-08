@@ -206,6 +206,10 @@ Examples:
         help=f"Chip scan padding in µm (default: {DEFAULT_CHIP_PADDING})",
     )
     parser.add_argument(
+        "--notes", type=str, default=None,
+        help="Free-text notes stored in checkpoint.json",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="Print commands without running them",
     )
@@ -260,6 +264,13 @@ Examples:
 
     # Load checkpoint
     checkpoint = load_checkpoint(run_dir)
+
+    # Resolve notes: CLI arg wins, otherwise fall back to checkpoint
+    notes = args.notes or checkpoint.get("notes")
+    if notes:
+        checkpoint["notes"] = notes
+        print(f"Notes:         {notes}")
+
     if checkpoint["completed_steps"]:
         print(f"\nResuming from checkpoint ({len(checkpoint['completed_steps'])} steps complete)")
         for s in checkpoint["completed_steps"]:
