@@ -4,9 +4,10 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
+import math
 from pathlib import Path
 import time
-from PIL import Image, ImageColor
+from PIL import Image, ImageColor, ImageDraw, ImageFont
 import numpy as np
 
 DEFAULT_SCAN_DIR = Path(__file__).parent / "test_area_2"
@@ -63,6 +64,65 @@ def deskew_image(img, shear_px, bg_color=(0, 0, 0)):
         resample=Image.BICUBIC,
         fillcolor=(bg_color + (0,)) if img.mode == 'RGBA' else bg_color
     )
+
+
+def draw_grid(background, stage_bounds_um, um_per_px, spacing_um,
+              line_color, line_width):
+    """Draw stage-coordinate grid lines and mm labels on the stitched image."""
+    w, h = background.size
+    x_min = stage_bounds_um["x_min"]
+    x_max = stage_bounds_um["x_max"]
+    y_min = stage_bounds_um["y_min"]
+    y_max = stage_bounds_um["y_max"]
+
+    color = ImageColor.getrgb(line_color)
+    if len(color) == 3:
+        color = color + (80,)
+    # Label color: same hue but higher opacity for readability
+    label_alpha = min(255, color[3] * 3)
+    label_color = color[:3] + (label_alpha,)
+    shadow_color = (0, 0, 0, label_alpha)
+
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    font_size = max(14, min(w, h) // 500)
+    try:
+        font = ImageFont.load_default(size=font_size)
+    except TypeError:
+        font = ImageFont.load_default()
+
+    label_pad = 4
+
+    # Vertical grid lines (constant X)
+    x = math.ceil(x_min / spacing_um) * spacing_um
+    while x <= x_max:
+        px = int((x - x_min) / um_per_px)
+        if 0 <= px < w:
+            draw.line([(px, 0), (px, h - 1)], fill=color, width=line_width)
+            label = f"{x / 1000:.1f}"
+            # Shadow then text
+            draw.text((px + label_pad + 1, label_pad + 1), label,
+                      fill=shadow_color, font=font)
+            draw.text((px + label_pad, label_pad), label,
+                      fill=label_color, font=font)
+        x += spacing_um
+
+    # Horizontal grid lines (constant Y)
+    y = math.ceil(y_min / spacing_um) * spacing_um
+    while y <= y_max:
+        py = int((y - y_min) / um_per_px)
+        if 0 <= py < h:
+            draw.line([(0, py), (w - 1, py)], fill=color, width=line_width)
+            label = f"{y / 1000:.1f}"
+            draw.text((label_pad + 1, py + label_pad + 1), label,
+                      fill=shadow_color, font=font)
+            draw.text((label_pad, py + label_pad), label,
+                      fill=label_color, font=font)
+        y += spacing_um
+
+    result = Image.alpha_composite(background.convert("RGBA"), overlay)
+    return result.convert("RGB")
 
 
 def find_constant_velocity_frames(frames):
@@ -281,6 +341,12 @@ def main():
                         help="Number of threads for parallel frame loading (default: 4)")
     parser.add_argument("--bg", type=str, default="black",
                         help="Background color: name or #RRGGBB (default: black)")
+    parser.add_argument("--grid-spacing-um", type=float, default=0,
+                        help="Grid line spacing in µm (0 = no grid, 1000 = 1mm)")
+    parser.add_argument("--grid-line-color", type=str, default="#FFFFFF50",
+                        help="Grid line color: name or #RRGGBBAA (default: #FFFFFF50)")
+    parser.add_argument("--grid-line-width", type=int, default=1,
+                        help="Grid line width in pixels (default: 1)")
     parser.add_argument("-o", "--output", type=str, default=None,
                         help="Output filename (default: {scan_dir}_stitch.png)")
     args = parser.parse_args()
@@ -508,6 +574,13 @@ def main():
 
         print(f"\nCropped: top={crop_top_um:.0f} right={crop_right_um:.0f} "
               f"bottom={crop_bottom_um:.0f} left={crop_left_um:.0f} µm")
+
+    # Draw grid overlay
+    if args.grid_spacing_um > 0:
+        background = draw_grid(background, stage_bounds_um, um_per_px,
+                               args.grid_spacing_um, args.grid_line_color,
+                               args.grid_line_width)
+        print(f"Grid: {args.grid_spacing_um:.0f} µm spacing")
 
     # Save image
     if args.output:
