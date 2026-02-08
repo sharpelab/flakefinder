@@ -178,10 +178,10 @@ def main():
         help="Chip number to map (0-indexed)",
     )
     parser.add_argument(
-        "--contour-samples",
-        type=int,
-        default=16,
-        help="Number of points to sample along contour edge",
+        "--contour-spacing-mm",
+        type=float,
+        default=5.0,
+        help="Target spacing between contour points in mm (count = perimeter/spacing, clamped to 4-24)",
     )
     parser.add_argument(
         "--grid-spacing-um",
@@ -309,12 +309,19 @@ def main():
         print("Error: Chip has no bounding box data")
         return 1
 
+    # Compute contour sample count from perimeter and target spacing
+    hull_arr = np.array(convex_hull)
+    hull_closed = np.vstack([hull_arr, hull_arr[0:1]])
+    diffs = np.diff(hull_closed, axis=0)
+    perimeter_mm = np.sum(np.sqrt((diffs ** 2).sum(axis=1))) / 1000
+    contour_samples = max(4, min(24, round(perimeter_mm / args.contour_spacing_mm)))
+
     # Generate sample points
-    contour_points = sample_contour_points(convex_hull, args.contour_samples)
+    contour_points = sample_contour_points(convex_hull, contour_samples)
     grid_points = sample_grid_points(convex_hull, args.grid_spacing_um)
 
-    print(f"Sample points:")
-    print(f"  Contour: {len(contour_points)} points")
+    print(f"Sample points (perimeter={perimeter_mm:.1f} mm, spacing={args.contour_spacing_mm:.1f} mm):")
+    print(f"  Contour: {len(contour_points)} points ({perimeter_mm/len(contour_points):.1f} mm apart)")
     print(f"  Grid: {len(grid_points)} points")
     print(f"  Total: {len(contour_points) + len(grid_points)} points")
 
@@ -551,7 +558,8 @@ def main():
         "source_chips_meta": str(args.chips_meta),
         "notes": args.notes,
         "grid_params": {
-            "contour_samples": args.contour_samples,
+            "contour_samples": contour_samples,
+            "contour_spacing_mm": args.contour_spacing_mm,
             "grid_spacing_um": args.grid_spacing_um,
             "z_start_um": args.z,
             "z_range_um": args.z_range,
