@@ -233,6 +233,8 @@ Examples:
                              help="Scan speed in mm/s for X scanning and Y jogs (default: 40)")
     motion_group.add_argument("--move-speed-mm", type=float, default=40,
                              help="Move speed in mm/s for positioning moves (default: 40)")
+    motion_group.add_argument("--z", type=float, metavar="Z",
+                             help="Initial Z position in µm (moved before scan, e.g. 24690)")
     motion_group.add_argument("--auto-focus-pos", type=str, metavar="X,Y",
                              help="XY position for autofocus calibration before scan (µm)")
 
@@ -382,6 +384,13 @@ Examples:
             except ValueError as e:
                 print(f"Error: {e}")
                 return 1
+
+        # Move Z if requested (after objective switch, before scan)
+        if args.z is not None:
+            current_z = z.position_um
+            print(f"Moving Z: {current_z:.1f} -> {args.z:.1f} µm...")
+            z.move_to_corrected(args.z)
+            print(f"Z at {z.position_um:.1f} µm")
 
         # Helper to set stage velocity
         def set_stage_speed(speed_mm: float, label: str = "") -> float:
@@ -677,6 +686,7 @@ Examples:
                 "area_rect": args.area_rect,
                 "margin_um": args.margin if not args.area_rect else None,
                 "objective_requested": args.objective,
+                "initial_z_um": args.z,
             },
             "autofocus": {
                 "position_um": list(auto_focus_pos) if auto_focus_pos else None,
