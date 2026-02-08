@@ -1,4 +1,4 @@
-# Scan Notebook - [DATE]
+# Scan Notebook - [YYYY-MM-DD]
 
 [Brief description: new sample set, revisiting previous samples, specific experiment, etc.]
 

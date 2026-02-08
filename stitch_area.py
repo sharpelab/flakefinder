@@ -384,9 +384,9 @@ def main():
         print(f"  Row {row['row_idx']:2d}: CV frames {cv_start}-{cv_end-1} "
               f"({cv_count} frames), X: {x_min:.0f} - {x_max:.0f} µm")
 
-    # Find global X bounds: intersection of all rows
-    global_x_min = max(r["x_min"] for r in row_results)
-    global_x_max = min(r["x_max"] for r in row_results)
+    # Find global X bounds: union of all rows
+    global_x_min = min(r["x_min"] for r in row_results)
+    global_x_max = max(r["x_max"] for r in row_results)
     global_x_range = global_x_max - global_x_min + fov_width_um
 
     print(f"\nGlobal X bounds: {global_x_min:.0f} - {global_x_max:.0f} µm ({global_x_range:.0f} µm total)")
@@ -422,19 +422,17 @@ def main():
             flatfield=flatfield, flatfield_mean=flatfield_mean
         )
 
-        # Calculate Y position for this row
-        # Use last row as reference (lowest Y = top of image)
-        last_y = rows[-1]["y_um"]
+        # Calculate Y position for this row (min Y = top of image)
+        min_y = min(r["y_um"] for r in rows)
         row_y = row["y_um"]
-        y_offset_um = row_y - last_y
+        y_offset_um = row_y - min_y
         y_offset_px = int(y_offset_um / um_per_px)
 
         # Apply Y blending
-        # Note: rows are placed with highest row index at top (y=0), lowest at bottom
         # is_first_y = don't fade top edge, is_last_y = don't fade bottom edge
         if not args.no_blend:
-            is_at_top = (i == n_rows - 1)  # Last in iteration = top of image
-            is_at_bottom = (i == 0)         # First in iteration = bottom of image
+            is_at_top = (row_y == min(r["y_um"] for r in rows))
+            is_at_bottom = (row_y == max(r["y_um"] for r in rows))
 
             row_alpha = row_img.split()[3]
             y_blend = create_blend_alpha(row_img.width, row_img.height, 0, blend_width_y,
@@ -467,8 +465,8 @@ def main():
     stage_bounds_um = {
         "x_min": global_x_min - fov_width_um / 2,
         "x_max": global_x_max + fov_width_um / 2,
-        "y_min": rows[-1]["y_um"] - fov_height_um / 2,
-        "y_max": rows[0]["y_um"] + fov_height_um / 2,
+        "y_min": min(r["y_um"] for r in rows) - fov_height_um / 2,
+        "y_max": max(r["y_um"] for r in rows) + fov_height_um / 2,
     }
 
     # Apply crop margins (top, right, bottom, left in µm)
