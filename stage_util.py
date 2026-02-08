@@ -12,6 +12,7 @@ Usage:
     python stage_util.py --lamp 50            # Set lamp intensity
     python stage_util.py --objective-mag 5x    # Switch to 5x objective (SDK handles z-hop)
     python stage_util.py --objective-pos 3    # Switch to position 3
+    python stage_util.py --z-speed 5000       # Set Z velocity to 5000 µm/s
     python stage_util.py --park               # Park microscope (safe idle state)
 """
 
@@ -94,7 +95,7 @@ def change_objective(
     print(f"  Z before: {z_before:.1f} µm")
     print(f"  Switching (SDK handles z-hop)...")
 
-    nosepiece.position = target_position
+    nosepiece.set_position(target_position, z=z)
 
     z_after = z.position_um
     print(f"  Z after: {z_after:.1f} µm (delta: {z_after - z_before:+.1f} µm)")
@@ -145,7 +146,7 @@ def park_microscope(conn: LeicaConnection) -> None:
                 target_pos = pos
                 break
         if target_pos is not None and nosepiece.position != target_pos:
-            nosepiece.position = target_pos
+            nosepiece.set_position(target_pos, z=z)
         print(f"  Objective -> {nosepiece.magnification}x [ok]")
     except LookupError:
         print("  Objective -> (not available)")
@@ -232,6 +233,7 @@ def main() -> int:
                         help="Switch objective by magnification (e.g., 5, 5x, 20, 2.5)")
     parser.add_argument("--objective-pos", type=int, metavar="POS",
                         help="Switch objective by turret position (1-6)")
+    parser.add_argument("--z-speed", type=float, metavar="UM_S", help="Set Z velocity (µm/s)")
     parser.add_argument("--park", action="store_true", help="Park microscope in safe idle state")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show velocity limits and conversion factors")
     args = parser.parse_args()
@@ -315,6 +317,13 @@ def main() -> int:
             print(f"Z: {z_before:.1f} + {args.dz:+.1f} µm")
             z.move_rel(args.dz)
             print(f"Z: done at {z.position_um:.1f} µm")
+
+        # Z speed
+        if args.z_speed is not None:
+            before = z.velocity_um_s
+            z.set_velocity_um_s(args.z_speed)
+            after = z.velocity_um_s
+            print(f"Z speed: {before:.0f} -> {after:.0f} µm/s")
 
         # Objective change
         if args.objective_mag is not None or args.objective_pos is not None:

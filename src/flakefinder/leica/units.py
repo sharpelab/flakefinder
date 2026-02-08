@@ -745,6 +745,28 @@ class Nosepiece:
         """Set objective position (1-indexed)."""
         self._bcv.SetControlValue(value)
 
+    def set_position(self, value: int, z: "ZDrive") -> None:
+        """Set objective position, temporarily maxing Z speed to avoid SDK timeout.
+
+        The SDK's nosepiece SetControlValue performs an internal z-hop
+        (retract, rotate, return). If Z speed is set low (e.g. from
+        autofocus), this can exceed the SDK's internal timeout. This method
+        temporarily sets Z to max velocity for the switch, then restores it.
+
+        TODO: Move to a higher-level Microscope class that owns both the
+        nosepiece and ZDrive, so callers don't need to pass z explicitly.
+
+        Args:
+            value: Target position (1-indexed).
+            z: ZDrive instance for temporary velocity override.
+        """
+        saved = z.velocity_native
+        z.set_velocity_native(z.max_velocity_native)
+        try:
+            self._bcv.SetControlValue(value)
+        finally:
+            z.set_velocity_native(saved)
+
     @property
     def magnification(self) -> float | None:
         """Current objective magnification from lookup table.
