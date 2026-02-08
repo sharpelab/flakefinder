@@ -6,12 +6,21 @@ per-chip focus mapping → plane analysis → 20x scanning.
 Calls existing scripts as subprocesses. If any step fails, prints what
 completed and exits. Output goes under a single timestamped run directory.
 
+Supports checkpointing: re-running with the same -o directory resumes
+from where the previous run left off.
+
 Usage:
     # Full pipeline
     uv run python find_flakes.py
 
     # Only process chips 0 and 2
     uv run python find_flakes.py --chips 0,2
+
+    # Resume a previous run
+    uv run python find_flakes.py -o scans/run_20260208_1430
+
+    # Process chips after chip 3, limit to 2 chips
+    uv run python find_flakes.py --after 3 --limit 2
 
     # Preview commands without running
     uv run python find_flakes.py --dry-run
@@ -37,6 +46,36 @@ DEFAULT_SCAN_Z_SPEED = 625
 DEFAULT_CHIP_PADDING = 2000
 
 SCRIPT_DIR = Path(__file__).parent
+
+
+def load_checkpoint(run_dir):
+    """Load checkpoint from run directory, or return empty checkpoint."""
+    path = run_dir / "checkpoint.json"
+    if path.exists():
+        with open(path) as f:
+            return json.load(f)
+    return {"completed_steps": [], "step_timing": {}, "n_chips": None, "chip_indices": None}
+
+
+def save_checkpoint(run_dir, checkpoint):
+    """Write checkpoint to run directory (atomic via temp file)."""
+    path = run_dir / "checkpoint.json"
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w") as f:
+        json.dump(checkpoint, f, indent=2)
+    tmp.replace(path)
+
+
+def step_done(checkpoint, step_key):
+    """Check if a step is already checkpointed."""
+    return step_key in checkpoint["completed_steps"]
+
+
+def mark_step(run_dir, checkpoint, step_key, duration=0):
+    """Mark a step as complete, record its timing, and persist."""
+    checkpoint["completed_steps"].append(step_key)
+    checkpoint["step_timing"][step_key] = duration
+    save_checkpoint(run_dir, checkpoint)
 
 
 def run_step(name, cmd, dry_run=False, pause=False):
@@ -120,6 +159,12 @@ Examples:
   # Preview all commands
   uv run python find_flakes.py --dry-run
 
+  # Resume a previous run
+  uv run python find_flakes.py -o scans/run_20260208_1430
+
+  # Process chips after chip 3, limit to 2
+  uv run python find_flakes.py --after 3 --limit 2
+
   # Step through with confirmation between each stage
   uv run python find_flakes.py --pause
 """,
@@ -139,6 +184,14 @@ Examples:
     parser.add_argument(
         "--chips", type=str, default=None,
         help="Comma-separated chip indices to process (default: all)",
+    )
+    parser.add_argument(
+        "--after", type=int, default=None, metavar="N",
+        help="Skip chips with index <= N (applied after --chips filter)",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None, metavar="N",
+        help="Process at most N chips (applied after --after filter)",
     )
     parser.add_argument(
         "--scan-speed", type=float, default=DEFAULT_SCAN_SPEED,
@@ -192,6 +245,10 @@ Examples:
     print(f"Chip padding:  {args.chip_padding} µm")
     if chip_filter:
         print(f"Chips:         {chip_filter}")
+    if args.after is not None:
+        print(f"After:         {args.after}")
+    if args.limit is not None:
+        print(f"Limit:         {args.limit}")
     if args.dry_run:
         print(f"Mode:          DRY RUN")
     if args.pause:
@@ -201,77 +258,108 @@ Examples:
     if not args.dry_run:
         run_dir.mkdir(parents=True, exist_ok=True)
 
-    timing = {}
+    # Load checkpoint
+    checkpoint = load_checkpoint(run_dir)
+    if checkpoint["completed_steps"]:
+        print(f"\nResuming from checkpoint ({len(checkpoint['completed_steps'])} steps complete)")
+        for s in checkpoint["completed_steps"]:
+            print(f"  [checkpoint] {s}")
+
     pipeline_start = time.perf_counter()
 
     # ----------------------------------------------------------------
     # Step 1: 5x overview scan (includes initial Z move via --z)
     # ----------------------------------------------------------------
-    duration, _ = run_step(
-        "5x Overview Scan",
-        [
-            "uv", "run", "python", "scan_area_v1.py",
-            "-o", str(overview_dir),
-            "--objective-mag", "5x",
-            "--z", str(args.initial_z),
-            "--area-rect", args.area_rect,
-            "--downsample", "4",
-            "--clean",
-        ],
-        dry_run=args.dry_run,
-        pause=args.pause,
-    )
-    timing["overview_scan"] = duration
+    if step_done(checkpoint, "overview_scan"):
+        print(f"\n  [checkpoint] Skipping 5x Overview Scan (already complete)")
+    else:
+        duration, _ = run_step(
+            "5x Overview Scan",
+            [
+                "uv", "run", "python", "scan_area_v1.py",
+                "-o", str(overview_dir),
+                "--objective-mag", "5x",
+                "--z", str(args.initial_z),
+                "--area-rect", args.area_rect,
+                "--downsample", "4",
+                "--clean",
+            ],
+            dry_run=args.dry_run,
+            pause=args.pause,
+        )
+        if not args.dry_run:
+            mark_step(run_dir, checkpoint, "overview_scan", duration)
 
     # ----------------------------------------------------------------
     # Step 2: Stitch overview
     # ----------------------------------------------------------------
-    duration, _ = run_step(
-        "Stitch Overview",
-        [
-            "uv", "run", "python", "stitch_area.py",
-            str(overview_dir),
-        ],
-        dry_run=args.dry_run,
-        pause=args.pause,
-    )
-    timing["stitch"] = duration
+    if step_done(checkpoint, "stitch"):
+        print(f"\n  [checkpoint] Skipping Stitch Overview (already complete)")
+    else:
+        duration, _ = run_step(
+            "Stitch Overview",
+            [
+                "uv", "run", "python", "stitch_area.py",
+                str(overview_dir),
+            ],
+            dry_run=args.dry_run,
+            pause=args.pause,
+        )
+        if not args.dry_run:
+            mark_step(run_dir, checkpoint, "stitch", duration)
 
     # ----------------------------------------------------------------
     # Step 3: Detect chips
     # ----------------------------------------------------------------
-    duration, _ = run_step(
-        "Detect Chips",
-        [
-            "uv", "run", "python", "find_chips.py",
-            str(stitch_path),
-        ],
-        dry_run=args.dry_run,
-        pause=args.pause,
-    )
-    timing["detect_chips"] = duration
+    if step_done(checkpoint, "detect_chips"):
+        print(f"\n  [checkpoint] Skipping Detect Chips (already complete)")
+    else:
+        duration, _ = run_step(
+            "Detect Chips",
+            [
+                "uv", "run", "python", "find_chips.py",
+                str(stitch_path),
+            ],
+            dry_run=args.dry_run,
+            pause=args.pause,
+        )
+        if not args.dry_run:
+            # Store chip info in checkpoint
+            with open(chips_json_path) as f:
+                chips_data = json.load(f)
+            n_chips = len(chips_data.get("chips", []))
+            checkpoint["n_chips"] = n_chips
+            checkpoint["chip_indices"] = list(range(n_chips))
+            mark_step(run_dir, checkpoint, "detect_chips", duration)
 
     # ----------------------------------------------------------------
     # Step 4: Switch to 20x for focus mapping and chip scans
     # ----------------------------------------------------------------
-    duration, _ = run_step(
-        "Switch to 20x",
-        [
-            "uv", "run", "python", "stage_util.py",
-            "--objective-mag", "20x",
-        ],
-        dry_run=args.dry_run,
-        pause=args.pause,
-    )
-    timing["switch_20x"] = duration
+    if step_done(checkpoint, "switch_20x"):
+        print(f"\n  [checkpoint] Skipping Switch to 20x (already complete)")
+    else:
+        duration, _ = run_step(
+            "Switch to 20x",
+            [
+                "uv", "run", "python", "stage_util.py",
+                "--objective-mag", "20x",
+            ],
+            dry_run=args.dry_run,
+            pause=args.pause,
+        )
+        if not args.dry_run:
+            mark_step(run_dir, checkpoint, "switch_20x", duration)
 
     # ----------------------------------------------------------------
-    # Load chip data to plan per-chip steps
+    # Load chip data and apply filters
     # ----------------------------------------------------------------
     if args.dry_run:
-        # For dry run, show example commands for chip 0
         chip_indices = chip_filter or [0]
-        print(f"\n  [dry-run] Would process chips: {chip_indices} (showing chip 0 as example)")
+        if args.after is not None:
+            chip_indices = [i for i in chip_indices if i > args.after]
+        if args.limit is not None:
+            chip_indices = chip_indices[:args.limit]
+        print(f"\n  [dry-run] Would process chips: {chip_indices} (showing as example)")
     else:
         with open(chips_json_path) as f:
             chips_data = json.load(f)
@@ -279,6 +367,7 @@ Examples:
         n_chips = len(all_chips)
         print(f"\nDetected {n_chips} chips")
 
+        # 1. Start with all chips or --chips subset
         if chip_filter:
             chip_indices = [i for i in chip_filter if i < n_chips]
             if len(chip_indices) < len(chip_filter):
@@ -287,82 +376,111 @@ Examples:
         else:
             chip_indices = list(range(n_chips))
 
+        # 2. Apply --after: drop chips with index <= N
+        if args.after is not None:
+            before = len(chip_indices)
+            chip_indices = [i for i in chip_indices if i > args.after]
+            dropped = before - len(chip_indices)
+            if dropped:
+                print(f"  --after {args.after}: dropped {dropped} chip(s)")
+
+        # 3. Apply --limit: cap count
+        if args.limit is not None and len(chip_indices) > args.limit:
+            chip_indices = chip_indices[:args.limit]
+            print(f"  --limit {args.limit}: capped to {args.limit} chip(s)")
+
         print(f"Processing chips: {chip_indices}")
 
     # ----------------------------------------------------------------
     # Per-chip loop
     # ----------------------------------------------------------------
-    timing["chips"] = {}
-
     for chip_idx in chip_indices:
         chip_dir = run_dir / f"chip_{chip_idx}"
         focus_map_path = chip_dir / f"focus_map_chip{chip_idx}.json"
         plane_path = chip_dir / f"focus_map_chip{chip_idx}_plane.json"
         scan_20x_dir = chip_dir / "scan_20x"
 
-        chip_timing = {}
+        fm_key = f"chip_{chip_idx}_focus_map"
+        an_key = f"chip_{chip_idx}_analyze"
+        sc_key = f"chip_{chip_idx}_scan"
+
+        # Skip fully-completed chips
+        if step_done(checkpoint, fm_key) and step_done(checkpoint, an_key) and step_done(checkpoint, sc_key):
+            print(f"\n  [checkpoint] Skipping chip {chip_idx} (all steps complete)")
+            continue
 
         print(f"\n{'#' * 70}")
         print(f"# CHIP {chip_idx}")
         print(f"{'#' * 70}")
 
         # Step 4a: Focus map
-        duration, _ = run_step(
-            f"Chip {chip_idx} - Focus Map",
-            [
-                "uv", "run", "python", "focus_map.py",
-                "--chips-meta", str(chips_json_path),
-                "--chip", str(chip_idx),
-                "--save-images",
-                "--z-speed", str(int(args.scan_z_speed)),
-                "--af-settle", "0.2",
-                "--output-dir", str(chip_dir),
-            ],
-            dry_run=args.dry_run,
-            pause=args.pause,
-        )
-        chip_timing["focus_map"] = duration
+        if step_done(checkpoint, fm_key):
+            print(f"\n  [checkpoint] Skipping Chip {chip_idx} - Focus Map (already complete)")
+        else:
+            duration, _ = run_step(
+                f"Chip {chip_idx} - Focus Map",
+                [
+                    "uv", "run", "python", "focus_map.py",
+                    "--chips-meta", str(chips_json_path),
+                    "--chip", str(chip_idx),
+                    "--save-images",
+                    "--z-speed", str(int(args.scan_z_speed)),
+                    "--af-settle", "0.2",
+                    "--output-dir", str(chip_dir),
+                ],
+                dry_run=args.dry_run,
+                pause=args.pause,
+            )
+            if not args.dry_run:
+                mark_step(run_dir, checkpoint, fm_key, duration)
 
         # Step 4b: Analyze focus map + export plane
-        duration, _ = run_step(
-            f"Chip {chip_idx} - Analyze Focus Map",
-            [
-                "uv", "run", "python", "analyze_focus_map.py",
-                str(focus_map_path),
-                "--export-plane", str(plane_path),
-                "--min-sharpness", "20",
-                "-q",
-            ],
-            dry_run=args.dry_run,
-            pause=args.pause,
-        )
-        chip_timing["analyze"] = duration
+        if step_done(checkpoint, an_key):
+            print(f"\n  [checkpoint] Skipping Chip {chip_idx} - Analyze (already complete)")
+        else:
+            duration, _ = run_step(
+                f"Chip {chip_idx} - Analyze Focus Map",
+                [
+                    "uv", "run", "python", "analyze_focus_map.py",
+                    str(focus_map_path),
+                    "--export-plane", str(plane_path),
+                    "--min-sharpness", "20",
+                    "-q",
+                ],
+                dry_run=args.dry_run,
+                pause=args.pause,
+            )
+            if not args.dry_run:
+                mark_step(run_dir, checkpoint, an_key, duration)
 
         # Step 4c: 20x scan
-        duration, _ = run_step(
-            f"Chip {chip_idx} - 20x Scan",
-            [
-                "uv", "run", "python", "scan_chip.py",
-                "-o", str(scan_20x_dir),
-                "--chips-meta", str(chips_json_path),
-                "--chip", str(chip_idx),
-                "--plane", str(plane_path),
-                "--objective-mag", "20x",
-                "--padding", str(int(args.chip_padding)),
-                "--speed-mm", str(args.scan_speed),
-                "--clean",
-            ],
-            dry_run=args.dry_run,
-            pause=args.pause,
-        )
-        chip_timing["scan_20x"] = duration
-
-        timing["chips"][str(chip_idx)] = chip_timing
+        if step_done(checkpoint, sc_key):
+            print(f"\n  [checkpoint] Skipping Chip {chip_idx} - 20x Scan (already complete)")
+        else:
+            duration, _ = run_step(
+                f"Chip {chip_idx} - 20x Scan",
+                [
+                    "uv", "run", "python", "scan_chip.py",
+                    "-o", str(scan_20x_dir),
+                    "--chips-meta", str(chips_json_path),
+                    "--chip", str(chip_idx),
+                    "--plane", str(plane_path),
+                    "--objective-mag", "20x",
+                    "--padding", str(int(args.chip_padding)),
+                    "--speed-mm", str(args.scan_speed),
+                    "--clean",
+                ],
+                dry_run=args.dry_run,
+                pause=args.pause,
+            )
+            if not args.dry_run:
+                mark_step(run_dir, checkpoint, sc_key, duration)
 
     # ----------------------------------------------------------------
     # Summary
     # ----------------------------------------------------------------
     pipeline_duration = time.perf_counter() - pipeline_start
+    t = checkpoint["step_timing"]
 
     print()
     print("=" * 70)
@@ -370,38 +488,39 @@ Examples:
     print("=" * 70)
     print(f"{'Step':<30} {'Duration':>12}")
     print("-" * 42)
-    print(f"{'Overview scan':<30} {format_duration(timing.get('overview_scan', 0)):>12}")
-    print(f"{'Stitch':<30} {format_duration(timing.get('stitch', 0)):>12}")
-    print(f"{'Detect chips':<30} {format_duration(timing.get('detect_chips', 0)):>12}")
-    print(f"{'Switch to 20x':<30} {format_duration(timing.get('switch_20x', 0)):>12}")
+    print(f"{'Overview scan':<30} {format_duration(t.get('overview_scan', 0)):>12}")
+    print(f"{'Stitch':<30} {format_duration(t.get('stitch', 0)):>12}")
+    print(f"{'Detect chips':<30} {format_duration(t.get('detect_chips', 0)):>12}")
+    print(f"{'Switch to 20x':<30} {format_duration(t.get('switch_20x', 0)):>12}")
 
-    for chip_idx_str, chip_t in timing.get("chips", {}).items():
-        print(f"{'  Chip ' + chip_idx_str + ' focus map':<30} {format_duration(chip_t.get('focus_map', 0)):>12}")
-        print(f"{'  Chip ' + chip_idx_str + ' analyze':<30} {format_duration(chip_t.get('analyze', 0)):>12}")
-        print(f"{'  Chip ' + chip_idx_str + ' 20x scan':<30} {format_duration(chip_t.get('scan_20x', 0)):>12}")
+    for chip_idx in chip_indices:
+        fm = t.get(f"chip_{chip_idx}_focus_map", 0)
+        an = t.get(f"chip_{chip_idx}_analyze", 0)
+        sc = t.get(f"chip_{chip_idx}_scan", 0)
+        print(f"{'  Chip ' + str(chip_idx) + ' focus map':<30} {format_duration(fm):>12}")
+        print(f"{'  Chip ' + str(chip_idx) + ' analyze':<30} {format_duration(an):>12}")
+        print(f"{'  Chip ' + str(chip_idx) + ' 20x scan':<30} {format_duration(sc):>12}")
 
+    total_recorded = sum(t.values())
     print("-" * 42)
-    print(f"{'TOTAL':<30} {format_duration(pipeline_duration):>12}")
+    print(f"{'Total (recorded)':<30} {format_duration(total_recorded):>12}")
+    print(f"{'This invocation':<30} {format_duration(pipeline_duration):>12}")
     print()
     print(f"Output: {run_dir}/")
 
-    # Save timing data
+    # Save args to checkpoint for reference
     if not args.dry_run:
-        timing["total_s"] = pipeline_duration
-        timing["timestamp"] = datetime.now().isoformat()
-        timing["args"] = {
+        checkpoint["args"] = {
             "area_rect": args.area_rect,
             "initial_z": args.initial_z,
             "scan_speed": args.scan_speed,
             "scan_z_speed": args.scan_z_speed,
             "chip_padding": args.chip_padding,
             "chips": args.chips,
+            "after": args.after,
+            "limit": args.limit,
         }
-
-        timing_path = run_dir / "timing.json"
-        with open(timing_path, "w") as f:
-            json.dump(timing, f, indent=2)
-        print(f"Timing saved to {timing_path}")
+        save_checkpoint(run_dir, checkpoint)
 
     return 0
 
