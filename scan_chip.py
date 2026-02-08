@@ -172,6 +172,8 @@ Examples:
     scan_group.add_argument("--x-overlap-percent", type=float, default=30,
                             help="Target X overlap between saved frames, %% (default: 30). "
                                  "Frames captured before advancing enough are discarded.")
+    scan_group.add_argument("--dry-run", action="store_true",
+                            help="Print scan plan and row summary, then exit (no hardware)")
     scan_group.add_argument("--row-limit", type=int, default=None,
                             help="Scan only N rows then stop (for testing)")
     scan_group.add_argument("--row-settle", type=float, default=0.1,
@@ -308,13 +310,51 @@ Examples:
         return 1
 
     # ---- Output directory ----
-    if os.path.exists(args.output):
-        if args.clean:
-            shutil.rmtree(args.output)
-        else:
-            print(f"Error: Output directory '{args.output}' exists. Use --clean to wipe.")
+    if not args.dry_run:
+        if os.path.exists(args.output):
+            if args.clean:
+                shutil.rmtree(args.output)
+            else:
+                print(f"Error: Output directory '{args.output}' exists. Use --clean to wipe.")
+                return 1
+        os.makedirs(args.output)
+
+    # ---- Compute frame dimensions from microscope description ----
+    # Used for dry-run row planning; overridden by live camera values in normal mode
+    desc = load_microscope_description()
+    if desc is None:
+        if args.dry_run:
+            print("Error: microscope_description.json required for --dry-run")
             return 1
-    os.makedirs(args.output)
+    else:
+        # Resolve objective magnification for frame size calculation
+        obj_mag_for_plan = None
+        if args.objective_mag is not None:
+            mag_str = args.objective_mag.lower().rstrip("x")
+            for pos, obj in desc["objectives"].items():
+                if str(obj["magnification"]) == mag_str:
+                    obj_mag_for_plan = obj["magnification"]
+                    break
+            if obj_mag_for_plan is None:
+                if args.dry_run:
+                    print(f"Error: Unknown objective magnification '{args.objective_mag}'")
+                    return 1
+        elif args.objective_pos is not None:
+            obj_info = desc["objectives"].get(str(args.objective_pos))
+            if obj_info:
+                obj_mag_for_plan = obj_info["magnification"]
+
+        if obj_mag_for_plan is not None:
+            bin_info = desc["camera"]["binning_levels"][str(binning_idx)]
+            phys_px = desc["camera"]["physical_pixel_x_um"]
+            phys_py = desc["camera"]["physical_pixel_y_um"]
+            plan_sample_px_x = phys_px * args.binning / obj_mag_for_plan
+            plan_sample_px_y = phys_py * args.binning / obj_mag_for_plan
+            plan_frame_width_um = bin_info["frame_width_px"] * plan_sample_px_x
+            plan_frame_height_um = bin_info["frame_height_px"] * plan_sample_px_y
+        else:
+            plan_frame_width_um = None
+            plan_frame_height_um = None
 
     # ---- Print scan plan ----
     print("Chip Scan with Focus Plane")
@@ -335,6 +375,67 @@ Examples:
     if args.row_limit:
         print(f"Row limit: {args.row_limit}")
     print()
+
+    # ---- Dry-run: compute row plan from description and exit ----
+    if args.dry_run:
+        if plan_frame_width_um is None or plan_frame_height_um is None:
+            print("Error: --dry-run requires --objective-mag or --objective-pos")
+            return 1
+
+        target_advance = plan_frame_width_um * (1 - args.x_overlap_percent / 100)
+        print(f"Frame FOV: {plan_frame_width_um:.1f} x {plan_frame_height_um:.1f} µm (from description)")
+        print(f"Frame skip: target advance {target_advance:.0f} µm ({args.x_overlap_percent:.0f}% X overlap)")
+        print()
+
+        y_step = plan_frame_height_um * (1 - args.y_overlap_percent / 100)
+        rows_plan = []
+        y = bbox["y_min"]
+        while y <= bbox["y_max"]:
+            extent = intersect_polygon_with_y(polygon, y)
+            if extent is not None:
+                x_min, x_max = extent
+                if (x_max - x_min) < plan_frame_width_um:
+                    y += y_step
+                    continue
+                x_min -= args.padding
+                x_max += args.padding
+                rows_plan.append((y, x_min, x_max))
+            y += y_step
+
+        if args.row_limit:
+            rows_plan = rows_plan[:args.row_limit]
+
+        if not rows_plan:
+            print("Error: No rows intersect the chip contour")
+            return 1
+
+        all_z = []
+        for row_y, row_x_min, row_x_max in rows_plan:
+            all_z.append(compute_plane_z(plane_a, plane_b, plane_c, row_x_min, row_y))
+            all_z.append(compute_plane_z(plane_a, plane_b, plane_c, row_x_max, row_y))
+        z_scan_min = min(all_z)
+        z_scan_max = max(all_z)
+
+        if z_scan_max > args.z_max:
+            print(f"ABORT: Scan Z max ({z_scan_max:.0f}) exceeds limit ({args.z_max:.0f})")
+            return 1
+
+        row_widths = [(x_max - x_min) / 1000 for _, x_min, x_max in rows_plan]
+        total_distance_mm = sum(row_widths)
+        est_scan_time_s = total_distance_mm / args.speed_mm
+        est_total_time_s = est_scan_time_s + len(rows_plan) * 0.5
+
+        print(f"Row plan: {len(rows_plan)} rows")
+        print(f"  Y step: {y_step:.1f} µm ({args.y_overlap_percent:.0f}% overlap)")
+        print(f"  Row widths: {min(row_widths):.1f} - {max(row_widths):.1f} mm")
+        print(f"  Total scan distance: {total_distance_mm:.1f} mm")
+        print(f"  Z range: {z_scan_min:.0f} - {z_scan_max:.0f} µm")
+        z_vel = abs(plane_a * args.speed_mm * 1000)
+        print(f"  Z velocity: {z_vel:.1f} µm/s (from plane slope)")
+        print(f"  Estimated time: ~{est_total_time_s:.0f}s")
+        print()
+        print("(dry run — exiting)")
+        return 0
 
     # ---- Connect to hardware ----
     from PIL import Image as PILImage
