@@ -252,6 +252,20 @@ Examples:
     timing["detect_chips"] = duration
 
     # ----------------------------------------------------------------
+    # Step 4: Switch to 20x for focus mapping and chip scans
+    # ----------------------------------------------------------------
+    duration, _ = run_step(
+        "Switch to 20x",
+        [
+            "uv", "run", "python", "stage_util.py",
+            "--objective-mag", "20x",
+        ],
+        dry_run=args.dry_run,
+        pause=args.pause,
+    )
+    timing["switch_20x"] = duration
+
+    # ----------------------------------------------------------------
     # Load chip data to plan per-chip steps
     # ----------------------------------------------------------------
     if args.dry_run:
@@ -359,6 +373,7 @@ Examples:
     print(f"{'Overview scan':<30} {format_duration(timing.get('overview_scan', 0)):>12}")
     print(f"{'Stitch':<30} {format_duration(timing.get('stitch', 0)):>12}")
     print(f"{'Detect chips':<30} {format_duration(timing.get('detect_chips', 0)):>12}")
+    print(f"{'Switch to 20x':<30} {format_duration(timing.get('switch_20x', 0)):>12}")
 
     for chip_idx_str, chip_t in timing.get("chips", {}).items():
         print(f"{'  Chip ' + chip_idx_str + ' focus map':<30} {format_duration(chip_t.get('focus_map', 0)):>12}")
