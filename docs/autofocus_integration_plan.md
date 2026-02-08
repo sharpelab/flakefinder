@@ -359,7 +359,7 @@ Wire up `--auto-focus-pos` parameter:
    ```bash
    # Small area scan with autofocus
    python scan_area_v1.py -o test_scan --area-rect 45000,55000,30000,40000 \
-       --auto-focus-pos 50000,35000 --objective 5x
+       --auto-focus-pos 50000,35000 --objective-mag 5x
    ```
 
 4. **Verify metadata includes autofocus info**:

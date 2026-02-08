@@ -11,12 +11,12 @@ Usage:
         --chips-meta scans/working_overview_5x_stitch_chips.json \
         --chip 0 \
         --plane scans/focus_map_chip0_v10_no_overshoot_plane.json \
-        --objective 20x --speed-mm 5
+        --objective-mag 20x --speed-mm 5
 
     # Test with just 3 rows
     python scan_chip.py -o scans/chip0_test \
         --chips-meta scans/chips.json --chip 0 --plane scans/plane.json \
-        --objective 20x --row-limit 3
+        --objective-mag 20x --row-limit 3
 """
 
 import argparse
@@ -25,7 +25,6 @@ from datetime import datetime
 import json
 import os
 import queue
-import re
 import shutil
 import threading
 import time
@@ -133,37 +132,6 @@ def interpolate_z_position(t, z_samples):
     return z0 + alpha * (z1 - z0)
 
 
-def parse_objective_arg(value: str, nosepiece) -> int:
-    """Parse objective argument to position number."""
-    try:
-        pos = int(value)
-        if nosepiece.min_position <= pos <= nosepiece.max_position:
-            return pos
-    except ValueError:
-        pass
-
-    match = re.match(r"^(\d+(?:\.\d+)?)[xX]?$", value.strip())
-    if match:
-        mag = float(match.group(1))
-        for pos, obj_mag in nosepiece.magnifications.items():
-            if obj_mag == mag:
-                return pos
-
-    valid = []
-    for pos in range(nosepiece.min_position, nosepiece.max_position + 1):
-        mag = nosepiece.magnifications.get(pos)
-        if mag:
-            valid.append(f"{pos} ({mag}x)")
-        else:
-            valid.append(str(pos))
-
-    raise ValueError(f"Invalid objective '{value}'. Valid options: {', '.join(valid)}")
-
-
-# ============================================================================
-# Main Scan
-# ============================================================================
-
 def main():
     parser = argparse.ArgumentParser(
         description="Chip-aware scan with focus plane Z tracking",
@@ -173,12 +141,17 @@ Examples:
   # Scan chip 0 at 20x with focus plane
   python scan_chip.py -o scans/chip0_20x \\
       --chips-meta scans/chips.json --chip 0 \\
-      --plane scans/plane.json --objective 20x
+      --plane scans/plane.json --objective-mag 20x
+
+  # Objective by turret position (position 3 = 20x)
+  python scan_chip.py -o scans/chip0_20x \\
+      --chips-meta scans/chips.json --chip 0 \\
+      --plane scans/plane.json --objective-pos 3
 
   # Test with 3 rows
   python scan_chip.py -o scans/chip0_test \\
       --chips-meta scans/chips.json --chip 0 \\
-      --plane scans/plane.json --objective 20x --row-limit 3
+      --plane scans/plane.json --objective-mag 20x --row-limit 3
 """
     )
     parser.add_argument("-o", "--output", required=True, help="Output directory")
@@ -204,8 +177,10 @@ Examples:
 
     # Optics
     optics_group = parser.add_argument_group("Optics")
-    optics_group.add_argument("--objective", type=str, metavar="MAG",
-                              help="Objective magnification (e.g., 5, 10, 20x)")
+    optics_group.add_argument("--objective-mag", type=str, metavar="MAG",
+                              help="Objective by magnification (e.g., 5, 5x, 20, 2.5) - switches before scan")
+    optics_group.add_argument("--objective-pos", type=int, metavar="POS",
+                              help="Objective by turret position (1-6) - switches before scan")
 
     # Motion
     motion_group = parser.add_argument_group("Motion")
@@ -243,6 +218,11 @@ Examples:
     output_group.add_argument("--compress", action="store_true", help="Create .zip of output")
 
     args = parser.parse_args()
+
+    # Validate objective args are mutually exclusive
+    if args.objective_mag is not None and args.objective_pos is not None:
+        print("Error: --objective-mag and --objective-pos are mutually exclusive")
+        return 1
 
     # ---- Load chip data ----
     chips_path = Path(args.chips_meta)
@@ -365,24 +345,36 @@ Examples:
             pass
 
         # Switch objective if requested
-        if args.objective is not None:
+        target_pos = None
+        if args.objective_mag is not None:
             if nosepiece is None:
-                print("Error: Nosepiece not available")
+                print("Error: Nosepiece not available, cannot switch objective")
                 return 1
             try:
-                target_pos = parse_objective_arg(args.objective, nosepiece)
-                if target_pos != objective_idx:
-                    target_mag = nosepiece.magnifications.get(target_pos)
-                    print(f"Switching objective: {objective_mag}x -> {target_mag}x...")
-                    nosepiece.position = target_pos
-                    objective_idx = nosepiece.position
-                    objective_mag = nosepiece.magnification
-                    print(f"Objective: now at {objective_mag}x")
-                else:
-                    print(f"Objective: already at {objective_mag}x")
+                target_pos = nosepiece.parse_magnification(args.objective_mag)
             except ValueError as e:
                 print(f"Error: {e}")
                 return 1
+        elif args.objective_pos is not None:
+            if nosepiece is None:
+                print("Error: Nosepiece not available, cannot switch objective")
+                return 1
+            try:
+                target_pos = nosepiece.validate_position(args.objective_pos)
+            except ValueError as e:
+                print(f"Error: {e}")
+                return 1
+
+        if target_pos is not None:
+            if target_pos != objective_idx:
+                target_mag = nosepiece.magnifications.get(target_pos)
+                print(f"Switching objective: {objective_mag}x -> {target_mag}x...")
+                nosepiece.position = target_pos
+                objective_idx = nosepiece.position
+                objective_mag = nosepiece.magnification
+                print(f"Objective: now at {objective_mag}x")
+            else:
+                print(f"Objective: already at {objective_mag}x")
 
         # Lighting
         shutter = None

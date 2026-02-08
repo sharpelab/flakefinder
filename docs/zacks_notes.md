@@ -11,7 +11,7 @@ can't move to coordinates defined by bounding boxes, they don't quite work
   - Y: half frame (~220 µm) each side → y: 15951 to 30709
 
   python scan_area_v1.py -o chip1_20x \
-    --objective 20x \
+    --objective-mag 20x \
     --area-rect 16895,46451,15951,30709 \
     --speed-mm 20 \
     --auto-focus-pos 31676,23316
@@ -31,7 +31,7 @@ can't move to coordinates defined by bounding boxes, they don't quite work
   - X: 24300 to 39050
 
   python scan_area_v1.py -o chip1_20x_test \
-    --objective 20x \
+    --objective-mag 20x \
     --area-rect 24300,39050,22500,24100 \
     --speed-mm 20 \
     --auto-focus-pos 31676,23316

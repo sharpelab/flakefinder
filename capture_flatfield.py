@@ -5,13 +5,13 @@ by the scanner and stitcher.
 
 Usage:
     # Interactive: position stage at blank area first
-    python capture_flatfield.py --objective 5x
+    python capture_flatfield.py --objective-mag 5x
 
     # With position: move to known blank spot
-    python capture_flatfield.py --objective 5x --position 50000,35000
+    python capture_flatfield.py --objective-mag 5x --position 50000,35000
 
     # Add notes about substrate
-    python capture_flatfield.py --objective 5x --notes "Blank SiO2/Si wafer edge"
+    python capture_flatfield.py --objective-mag 5x --notes "Blank SiO2/Si wafer edge"
 """
 
 import argparse
@@ -39,12 +39,33 @@ def parse_position(value: str) -> tuple[float, float]:
         raise ValueError("Position values must be numbers")
 
 
-def parse_objective(value: str) -> float:
-    """Parse objective magnification from string like '5x', '20X', or '50'."""
-    match = re.match(r"^(\d+(?:\.\d+)?)[xX]?$", value.strip())
-    if not match:
-        raise ValueError(f"Invalid objective format: {value}")
-    return float(match.group(1))
+def resolve_objective_mag(objective_mag: str | None, objective_pos: int | None) -> float:
+    """Resolve objective magnification from --objective-mag or --objective-pos.
+
+    Uses Nosepiece.DEFAULT_MAGNIFICATIONS for position-to-mag lookup (no hardware needed).
+
+    Returns the magnification as a float (e.g. 5.0, 20.0).
+    """
+    from flakefinder.leica.units import Nosepiece
+
+    if objective_mag is not None:
+        match = re.match(r"^(\d+(?:\.\d+)?)[xX]?$", objective_mag.strip())
+        if not match:
+            raise ValueError(f"Invalid objective format: {objective_mag}")
+        mag = float(match.group(1))
+        if mag not in Nosepiece.DEFAULT_MAGNIFICATIONS.values():
+            valid = [f"{m}x" for m in sorted(Nosepiece.DEFAULT_MAGNIFICATIONS.values())]
+            raise ValueError(f"Unknown magnification {mag}x. Available: {', '.join(valid)}")
+        return mag
+
+    if objective_pos is not None:
+        mag = Nosepiece.DEFAULT_MAGNIFICATIONS.get(objective_pos)
+        if mag is None:
+            valid_pos = sorted(Nosepiece.DEFAULT_MAGNIFICATIONS.keys())
+            raise ValueError(f"Position {objective_pos} not in magnification table. Valid: {valid_pos}")
+        return mag
+
+    raise ValueError("Either --objective-mag or --objective-pos is required")
 
 
 def validate_flatfield(image: np.ndarray, max_cv: float = 0.15) -> tuple[bool, str]:
@@ -176,17 +197,22 @@ def main():
         epilog="""
 Examples:
     # Position stage at blank area first, then capture
-    python capture_flatfield.py --objective 5x
+    python capture_flatfield.py --objective-mag 5x
 
     # Move to specific position first
-    python capture_flatfield.py --objective 5x --position 50000,35000
+    python capture_flatfield.py --objective-mag 5x --position 50000,35000
+
+    # By turret position (position 3 = 20x)
+    python capture_flatfield.py --objective-pos 3
 
     # Add notes about the substrate
-    python capture_flatfield.py --objective 5x --notes "Blank SiO2/Si edge"
+    python capture_flatfield.py --objective-mag 5x --notes "Blank SiO2/Si edge"
 """
     )
-    parser.add_argument("--objective", "-obj", required=True,
-                        help="Objective magnification (e.g., 5x, 10, 20X)")
+    parser.add_argument("--objective-mag", type=str, metavar="MAG",
+                        help="Objective by magnification (e.g., 5, 5x, 20, 2.5)")
+    parser.add_argument("--objective-pos", type=int, metavar="POS",
+                        help="Objective by turret position (1-6)")
     parser.add_argument("--position", "-p", type=str, default=None,
                         help="Stage position X,Y in µm (default: use current position)")
     parser.add_argument("--frames", "-n", type=int, default=5,
@@ -208,9 +234,17 @@ Examples:
 
     args = parser.parse_args()
 
+    # Validate objective args
+    if args.objective_mag is None and args.objective_pos is None:
+        print("Error: Either --objective-mag or --objective-pos is required")
+        return 1
+    if args.objective_mag is not None and args.objective_pos is not None:
+        print("Error: --objective-mag and --objective-pos are mutually exclusive")
+        return 1
+
     # Parse inputs
     try:
-        objective_mag = parse_objective(args.objective)
+        objective_mag = resolve_objective_mag(args.objective_mag, args.objective_pos)
     except ValueError as e:
         print(f"Error: {e}")
         return 1
@@ -254,17 +288,10 @@ Examples:
             nosepiece = Nosepiece.from_connection(conn)
             current_mag = nosepiece.magnification
 
-            # Find position for requested magnification
-            target_pos = None
-            for pos, mag in nosepiece.magnifications.items():
-                if mag == objective_mag:
-                    target_pos = pos
-                    break
-
-            if target_pos is None:
-                print(f"Error: No objective with magnification {objective_mag}x found")
-                print(f"  Available: {list(nosepiece.magnifications.values())}")
-                return 1
+            if args.objective_mag is not None:
+                target_pos = nosepiece.parse_magnification(args.objective_mag)
+            else:
+                target_pos = nosepiece.validate_position(args.objective_pos)
 
             if nosepiece.position != target_pos:
                 print(f"Switching objective: {current_mag}x -> {objective_mag}x...")
@@ -383,7 +410,7 @@ Examples:
         print(f"Calibration complete for {flatfield_basename}")
         print()
         print("To use in scanner:")
-        print(f"  python scan_area_v1.py --objective {int(objective_mag)}x ...")
+        print(f"  python scan_area_v1.py --objective-mag {int(objective_mag)}x ...")
         print()
         print("The stitcher will automatically apply flatfield correction.")
 

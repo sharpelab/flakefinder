@@ -4,6 +4,7 @@ This module provides high-level classes for controlling microscope components
 with both blocking (sync) and non-blocking (async) operations.
 """
 
+import re
 import time
 import threading
 from .enums import TID, IID, EMetricsId, MoveState
@@ -773,6 +774,39 @@ class Nosepiece:
     def max_position(self) -> int:
         """Maximum objective position."""
         return self._bcv.MaxControlValue()
+
+    def parse_magnification(self, value: str) -> int:
+        """Parse magnification string (e.g. '5', '5x', '20X', '2.5') to position number.
+
+        Returns:
+            Position number (1-indexed).
+
+        Raises:
+            ValueError: If value cannot be parsed or doesn't match known objectives.
+        """
+        match = re.match(r"^(\d+(?:\.\d+)?)[xX]?$", value.strip())
+        if match:
+            mag = float(match.group(1))
+            for pos, obj_mag in self._magnifications.items():
+                if obj_mag == mag:
+                    return pos
+
+        valid = [f"{mag}x (pos {pos})" for pos, mag in sorted(self._magnifications.items())]
+        raise ValueError(
+            f"Unknown magnification '{value}'. Available: {', '.join(valid)}"
+        )
+
+    def validate_position(self, pos: int) -> int:
+        """Validate turret position is in range, return it.
+
+        Raises:
+            ValueError: If position is out of range.
+        """
+        if self.min_position <= pos <= self.max_position:
+            return pos
+        raise ValueError(
+            f"Position {pos} out of range ({self.min_position}-{self.max_position})"
+        )
 
     def __repr__(self) -> str:
         mag = self.magnification

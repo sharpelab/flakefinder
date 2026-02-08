@@ -19,7 +19,7 @@ def main():
         cmd = [
             sys.executable, "scan_area_v1.py",
             "-o", output,
-            "--objective", OBJECTIVE,
+            "--objective-mag", OBJECTIVE,
             "--area-rect", AREA_RECT,
             "--speed-mm", str(speed),
             "--compress",

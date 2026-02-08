@@ -10,13 +10,12 @@ Usage:
     python stage_util.py --shutter open       # Open shutter
     python stage_util.py --shutter close      # Close shutter
     python stage_util.py --lamp 50            # Set lamp intensity
-    python stage_util.py --objective 5x       # Switch to 5x objective (SDK handles z-hop)
-    python stage_util.py --objective 3        # Switch to position 3
+    python stage_util.py --objective-mag 5x    # Switch to 5x objective (SDK handles z-hop)
+    python stage_util.py --objective-pos 3    # Switch to position 3
     python stage_util.py --park               # Park microscope (safe idle state)
 """
 
 import argparse
-import re
 import sys
 
 from flakefinder.leica import LeicaConnection, Stage, ZDrive, Lamp, Nosepiece, Shutter
@@ -61,50 +60,6 @@ PARFOCAL_OFFSETS_UM: dict[int, float] = {
 
 # Safety margin added to Z retraction (µm)
 Z_SAFETY_MARGIN_UM = 500
-
-
-def parse_objective_arg(value: str, nosepiece: Nosepiece) -> int:
-    """Parse objective argument to position number.
-
-    Accepts:
-        - Position number: "1", "2", "3", etc.
-        - Magnification: "5x", "10x", "20X", "50", etc.
-
-    Returns:
-        Position number (1-indexed).
-
-    Raises:
-        ValueError: If value cannot be parsed or doesn't match known objectives.
-    """
-    # Try as position number first
-    try:
-        pos = int(value)
-        if nosepiece.min_position <= pos <= nosepiece.max_position:
-            return pos
-    except ValueError:
-        pass
-
-    # Try as magnification (e.g., "5x", "10X", "50")
-    match = re.match(r"^(\d+(?:\.\d+)?)[xX]?$", value.strip())
-    if match:
-        mag = float(match.group(1))
-        # Find position with this magnification
-        for pos, obj_mag in nosepiece.magnifications.items():
-            if obj_mag == mag:
-                return pos
-
-    # Build helpful error message
-    valid = []
-    for pos in range(nosepiece.min_position, nosepiece.max_position + 1):
-        mag = nosepiece.magnifications.get(pos)
-        if mag:
-            valid.append(f"{pos} ({mag}x)")
-        else:
-            valid.append(str(pos))
-
-    raise ValueError(
-        f"Invalid objective '{value}'. Valid options: {', '.join(valid)}"
-    )
 
 
 def change_objective(
@@ -273,10 +228,18 @@ def main() -> int:
     parser.add_argument("--dz", type=float, help="Relative Z move (µm)")
     parser.add_argument("--shutter", choices=["open", "close"], help="Open or close shutter")
     parser.add_argument("--lamp", type=int, help="Set lamp intensity")
-    parser.add_argument("--objective", type=str, help="Switch objective (position number or magnification like '5x', '20x')")
+    parser.add_argument("--objective-mag", type=str, metavar="MAG",
+                        help="Switch objective by magnification (e.g., 5, 5x, 20, 2.5)")
+    parser.add_argument("--objective-pos", type=int, metavar="POS",
+                        help="Switch objective by turret position (1-6)")
     parser.add_argument("--park", action="store_true", help="Park microscope in safe idle state")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show velocity limits and conversion factors")
     args = parser.parse_args()
+
+    # Validate objective args are mutually exclusive
+    if args.objective_mag is not None and args.objective_pos is not None:
+        print("Error: --objective-mag and --objective-pos are mutually exclusive")
+        return 1
 
     # Handle --park specially (ignores other position args)
     if args.park:
@@ -354,10 +317,13 @@ def main() -> int:
             print(f"Z: done at {z.position_um:.1f} µm")
 
         # Objective change
-        if args.objective is not None:
+        if args.objective_mag is not None or args.objective_pos is not None:
             nosepiece = Nosepiece.from_connection(conn)
             try:
-                target_pos = parse_objective_arg(args.objective, nosepiece)
+                if args.objective_mag is not None:
+                    target_pos = nosepiece.parse_magnification(args.objective_mag)
+                else:
+                    target_pos = nosepiece.validate_position(args.objective_pos)
                 change_objective(nosepiece, z, target_pos)
             except ValueError as e:
                 print(f"Error: {e}")

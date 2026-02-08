@@ -13,7 +13,7 @@ Run on microscope PC.
 
 Usage:
     python scan_area_with_focus.py -o test_scan --area-rect 12000,35000,8175,8175 --speed-mm 5
-    python scan_area_with_focus.py -o test_scan --area-rect 12000,35000,8175,8175 --speed-mm 10 --objective 20x
+    python scan_area_with_focus.py -o test_scan --area-rect 12000,35000,8175,8175 --speed-mm 10 --objective-mag 20x
 """
 
 import argparse
@@ -22,7 +22,6 @@ from datetime import datetime
 import json
 import os
 import queue
-import re
 import shutil
 import threading
 import time
@@ -191,33 +190,6 @@ def interpolate_z_position(t, z_samples):
     return z0 + alpha * (z1 - z0)
 
 
-def parse_objective_arg(value: str, nosepiece) -> int:
-    """Parse objective argument to position number."""
-    try:
-        pos = int(value)
-        if nosepiece.min_position <= pos <= nosepiece.max_position:
-            return pos
-    except ValueError:
-        pass
-
-    match = re.match(r"^(\d+(?:\.\d+)?)[xX]?$", value.strip())
-    if match:
-        mag = float(match.group(1))
-        for pos, obj_mag in nosepiece.magnifications.items():
-            if obj_mag == mag:
-                return pos
-
-    valid = []
-    for pos in range(nosepiece.min_position, nosepiece.max_position + 1):
-        mag = nosepiece.magnifications.get(pos)
-        if mag:
-            valid.append(f"{pos} ({mag}x)")
-        else:
-            valid.append(str(pos))
-
-    raise ValueError(f"Invalid objective '{value}'. Valid options: {', '.join(valid)}")
-
-
 def parse_area_rect(value: str) -> tuple[float, float, float, float]:
     """Parse area rectangle from comma-separated string."""
     parts = value.split(",")
@@ -251,7 +223,10 @@ Examples:
   python scan_area_with_focus.py -o scan_focus --area-rect 12000,35000,8175,8175 --speed-mm 5
 
   # 20x scan with faster speed
-  python scan_area_with_focus.py -o scan_20x --area-rect 12000,35000,8175,8175 --objective 20x --speed-mm 10
+  python scan_area_with_focus.py -o scan_20x --area-rect 12000,35000,8175,8175 --objective-mag 20x --speed-mm 10
+
+  # Objective by turret position
+  python scan_area_with_focus.py -o scan_20x --area-rect 12000,35000,8175,8175 --objective-pos 3 --speed-mm 10
 """
     )
     parser.add_argument("-o", "--output", required=True, help="Output directory")
@@ -265,8 +240,10 @@ Examples:
 
     # Optics
     optics_group = parser.add_argument_group("Optics")
-    optics_group.add_argument("--objective", type=str, metavar="MAG",
-                             help="Objective magnification (e.g., 5, 10, 20x)")
+    optics_group.add_argument("--objective-mag", type=str, metavar="MAG",
+                             help="Objective by magnification (e.g., 5, 5x, 20, 2.5) - switches before scan")
+    optics_group.add_argument("--objective-pos", type=int, metavar="POS",
+                             help="Objective by turret position (1-6) - switches before scan")
 
     # Motion
     motion_group = parser.add_argument_group("Motion")
@@ -317,6 +294,11 @@ Examples:
     output_group.add_argument("--compress", action="store_true", help="Create .zip of output")
 
     args = parser.parse_args()
+
+    # Validate objective args are mutually exclusive
+    if args.objective_mag is not None and args.objective_pos is not None:
+        print("Error: --objective-mag and --objective-pos are mutually exclusive")
+        return 1
 
     # Parse white balance
     wb_parts = args.white_balance.split(",")
@@ -437,22 +419,36 @@ Examples:
             pass
 
         # Switch objective if requested
-        if args.objective is not None:
+        target_pos = None
+        if args.objective_mag is not None:
             if nosepiece is None:
-                print("Error: Nosepiece not available")
+                print("Error: Nosepiece not available, cannot switch objective")
                 return 1
             try:
-                target_pos = parse_objective_arg(args.objective, nosepiece)
-                if target_pos != objective_idx:
-                    target_mag = nosepiece.magnifications.get(target_pos)
-                    print(f"Switching objective: {objective_mag}x -> {target_mag}x...")
-                    nosepiece.position = target_pos
-                    objective_idx = nosepiece.position
-                    objective_mag = nosepiece.magnification
-                    print(f"Objective: now at {objective_mag}x")
+                target_pos = nosepiece.parse_magnification(args.objective_mag)
             except ValueError as e:
                 print(f"Error: {e}")
                 return 1
+        elif args.objective_pos is not None:
+            if nosepiece is None:
+                print("Error: Nosepiece not available, cannot switch objective")
+                return 1
+            try:
+                target_pos = nosepiece.validate_position(args.objective_pos)
+            except ValueError as e:
+                print(f"Error: {e}")
+                return 1
+
+        if target_pos is not None:
+            if target_pos != objective_idx:
+                target_mag = nosepiece.magnifications.get(target_pos)
+                print(f"Switching objective: {objective_mag}x -> {target_mag}x...")
+                nosepiece.position = target_pos
+                objective_idx = nosepiece.position
+                objective_mag = nosepiece.magnification
+                print(f"Objective: now at {objective_mag}x")
+            else:
+                print(f"Objective: already at {objective_mag}x")
 
         # Lighting
         shutter = None

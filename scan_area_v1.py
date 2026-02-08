@@ -99,30 +99,6 @@ def interpolate_position(t, samples):
     return x0 + alpha * (x1 - x0)
 
 
-def parse_objective_mag(value: str, nosepiece) -> int:
-    """Parse objective magnification to position number.
-
-    Accepts magnification values like "5", "5x", "20X", "2.5".
-
-    Returns:
-        Position number (1-indexed).
-
-    Raises:
-        ValueError: If value cannot be parsed or doesn't match known objectives.
-    """
-    match = re.match(r"^(\d+(?:\.\d+)?)[xX]?$", value.strip())
-    if match:
-        mag = float(match.group(1))
-        for pos, obj_mag in nosepiece.magnifications.items():
-            if obj_mag == mag:
-                return pos
-
-    valid = [f"{mag}x (pos {pos})" for pos, mag in sorted(nosepiece.magnifications.items())]
-    raise ValueError(
-        f"Unknown magnification '{value}'. Available: {', '.join(valid)}"
-    )
-
-
 def parse_area_rect(value: str) -> tuple[float, float, float, float]:
     """Parse area rectangle from comma-separated string.
 
@@ -358,7 +334,7 @@ Examples:
                 print("Error: Nosepiece not available, cannot switch objective")
                 return 1
             try:
-                target_pos = parse_objective_mag(args.objective_mag, nosepiece)
+                target_pos = nosepiece.parse_magnification(args.objective_mag)
             except ValueError as e:
                 print(f"Error: {e}")
                 return 1
@@ -366,9 +342,10 @@ Examples:
             if nosepiece is None:
                 print("Error: Nosepiece not available, cannot switch objective")
                 return 1
-            target_pos = args.objective_pos
-            if not (nosepiece.min_position <= target_pos <= nosepiece.max_position):
-                print(f"Error: Position {target_pos} out of range ({nosepiece.min_position}-{nosepiece.max_position})")
+            try:
+                target_pos = nosepiece.validate_position(args.objective_pos)
+            except ValueError as e:
+                print(f"Error: {e}")
                 return 1
 
         if target_pos is not None:
