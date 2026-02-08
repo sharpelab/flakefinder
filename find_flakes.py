@@ -216,7 +216,6 @@ Examples:
             "--z", str(args.initial_z),
             "--area-rect", args.area_rect,
             "--downsample", "4",
-            "--compress",
             "--clean",
         ],
         dry_run=args.dry_run,
