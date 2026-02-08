@@ -1,11 +1,12 @@
 """Multi-row position-based stitch for snake scan patterns."""
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
 from pathlib import Path
 import time
-from PIL import Image
+from PIL import Image, ImageColor
 import numpy as np
 
 DEFAULT_SCAN_DIR = Path(__file__).parent / "test_area_2"
@@ -42,13 +43,13 @@ def create_blend_alpha(width, height, blend_width_x, blend_width_y=0,
     return Image.fromarray((alpha * 255).astype('uint8'), mode='L')
 
 
-def deskew_image(img, shear_px):
+def deskew_image(img, shear_px, bg_color=(0, 0, 0)):
     """Apply horizontal shear to correct rolling shutter skew.
 
     Positive shear_px: bottom of image shifts RIGHT
     Negative shear_px: bottom of image shifts LEFT
 
-    Returns image with same dimensions. Void regions filled with transparent white.
+    Returns image with same dimensions. Void regions filled with bg_color.
     """
     width, height = img.size
 
@@ -60,7 +61,7 @@ def deskew_image(img, shear_px):
         Image.AFFINE,
         (a, b, c, d, e, f),
         resample=Image.BICUBIC,
-        fillcolor=(255, 255, 255, 0) if img.mode == 'RGBA' else (255, 255, 255)
+        fillcolor=(bg_color + (0,)) if img.mode == 'RGBA' else bg_color
     )
 
 
@@ -127,7 +128,8 @@ def fit_linear_positions(frames, cv_start, cv_end):
 
 def stitch_row_to_global(meta, row, frame_w, frame_h, um_per_px, output_downsample,
                          scan_dir, global_x_min, global_x_max, blend=True, deskew=True,
-                         hysteresis_um=0, flatfield=None, flatfield_mean=None):
+                         hysteresis_um=0, flatfield=None, flatfield_mean=None,
+                         num_threads=1, bg_color=(0, 0, 0)):
     """
     Stitch a single row directly into global X coordinate space.
 
@@ -169,43 +171,45 @@ def stitch_row_to_global(meta, row, frame_w, frame_h, um_per_px, output_downsamp
     # Create canvas
     canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
 
-    # Determine which frames fall within global range and stitch them
+    # Determine which frames fall within global range
     num_frames = len(cv_frames)
-    frames_placed = 0
 
     # For snake pattern, process frames in the order that places them left-to-right
     if direction < 0:
-        # -X direction: reverse the order
         indices = list(range(num_frames - 1, -1, -1))
     else:
-        # +X direction: normal order
         indices = list(range(num_frames))
 
+    # Build work list: filter to frames that overlap canvas
+    canvas_right_um = global_x_max + fov_width_um
+    work_items = []
     for seq_i, i in enumerate(indices):
         x_um = smoothed_positions[i]
-        frame_idx = row["frame_start"] + cv_start + i
-
-        # Check if this frame overlaps with global bounds
-        # Frame center is at x_um, so frame covers [x_um, x_um + fov_width] in our placement
-        # (left edge at x_um position for stitching purposes)
-        frame_left = x_um
-        frame_right = x_um + fov_width_um
-        canvas_left = global_x_min
-        canvas_right = global_x_max + fov_width_um
-
-        # Skip if frame doesn't overlap with canvas at all
-        if frame_right < canvas_left or frame_left > canvas_right:
+        if x_um + fov_width_um < global_x_min or x_um > canvas_right_um:
             continue
+        frame_idx = row["frame_start"] + cv_start + i
+        x_offset = int((x_um - global_x_min) / um_per_px)
+        work_items.append((seq_i, frame_idx, x_offset))
 
-        img = Image.open(scan_dir / f"frame_{frame_idx:04d}.jpg").convert("RGBA")
+    num_work = len(work_items)
 
+    def load_frame(item):
+        """Load, resize, flatfield-correct, and alpha-blend a single frame."""
+        seq_i, frame_idx, _ = item
+        path = scan_dir / f"frame_{frame_idx:04d}.jpg"
+
+        img = Image.open(path)
+        # JPEG draft() decodes at reduced resolution (1/2, 1/4, 1/8) during
+        # DCT, avoiding a full-resolution decode. No-op for non-JPEG.
         if output_downsample > 1:
+            img.draft('RGB', (frame_w, frame_h))
+        img.load()
+        if img.size[0] != frame_w or img.size[1] != frame_h:
             img = img.resize((frame_w, frame_h), Image.LANCZOS)
+        img = img.convert('RGBA')
 
-        # Apply flatfield correction (after downsample, before blending)
         if flatfield is not None:
             img_arr = np.array(img, dtype=np.float32)
-            # Correct RGB channels only (not alpha)
             for c in range(3):
                 img_arr[:, :, c] = (img_arr[:, :, c] / flatfield[:, :, c]) * flatfield_mean
             img_arr = np.clip(img_arr, 0, 255).astype(np.uint8)
@@ -213,27 +217,30 @@ def stitch_row_to_global(meta, row, frame_w, frame_h, um_per_px, output_downsamp
 
         if blend:
             is_first = (seq_i == 0)
-            is_last = (seq_i == len(indices) - 1)
+            is_last = (seq_i == num_work - 1)
             alpha = create_blend_alpha(frame_w, frame_h, blend_width_x, 0,
                                        is_first_x=is_first, is_last_x=is_last)
         else:
             alpha = Image.new('L', img.size, 128)
-
         img.putalpha(alpha)
 
-        # Place at global X position
-        x_offset = int((x_um - global_x_min) / um_per_px)
+        return img
 
+    # Load frames in parallel, composite sequentially
+    if num_threads > 1 and num_work > 1:
+        with ThreadPoolExecutor(max_workers=num_threads) as pool:
+            loaded = list(pool.map(load_frame, work_items))
+    else:
+        loaded = [load_frame(item) for item in work_items]
+
+    frames_placed = 0
+    for img, (_, _, x_offset) in zip(loaded, work_items):
         # Clamp to canvas bounds
         if x_offset < 0:
-            # Crop left edge of frame
-            crop_left = -x_offset
-            img = img.crop((crop_left, 0, img.width, img.height))
+            img = img.crop((-x_offset, 0, img.width, img.height))
             x_offset = 0
         if x_offset + img.width > canvas_w:
-            # Crop right edge of frame
-            crop_right = canvas_w - x_offset
-            img = img.crop((0, 0, crop_right, img.height))
+            img = img.crop((0, 0, canvas_w - x_offset, img.height))
 
         if img.width > 0 and img.height > 0:
             canvas.alpha_composite(img, (x_offset, 0))
@@ -245,7 +252,7 @@ def stitch_row_to_global(meta, row, frame_w, frame_h, um_per_px, output_downsamp
         shear_um = abs(fit_velocity) * readout_time
         shear_px = shear_um / um_per_px
         correction_shear = -shear_px * direction
-        canvas = deskew_image(canvas, correction_shear)
+        canvas = deskew_image(canvas, correction_shear, bg_color)
 
     return canvas, frames_placed
 
@@ -270,9 +277,15 @@ def main():
                         help="Path to flatfield .npy file (default: auto-load from calibration/)")
     parser.add_argument("--no-flatfield", action="store_true",
                         help="Disable flatfield correction")
+    parser.add_argument("--threads", type=int, default=4,
+                        help="Number of threads for parallel frame loading (default: 4)")
+    parser.add_argument("--bg", type=str, default="black",
+                        help="Background color: name or #RRGGBB (default: black)")
     parser.add_argument("-o", "--output", type=str, default=None,
                         help="Output filename (default: {scan_dir}_stitch.png)")
     args = parser.parse_args()
+
+    bg_color = ImageColor.getrgb(args.bg)
 
     start_time = time.perf_counter()
     scan_dir = args.scan_dir
@@ -419,7 +432,8 @@ def main():
             scan_dir, global_x_min, global_x_max,
             blend=not args.no_blend, deskew=not args.no_deskew,
             hysteresis_um=args.hysteresis,
-            flatfield=flatfield, flatfield_mean=flatfield_mean
+            flatfield=flatfield, flatfield_mean=flatfield_mean,
+            num_threads=args.threads, bg_color=bg_color
         )
 
         # Calculate Y position for this row (min Y = top of image)
@@ -454,8 +468,8 @@ def main():
 
         print(f"  Row {row_idx}: {frames_placed} frames, y={y_offset_px} px")
 
-    # Convert to RGB with white background
-    background = Image.new("RGB", canvas.size, (255, 255, 255))
+    # Convert to RGB with background color
+    background = Image.new("RGB", canvas.size, bg_color)
     background.paste(canvas, mask=canvas.split()[3])
 
     # Stage bounds before crop
