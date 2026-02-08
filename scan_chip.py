@@ -217,6 +217,14 @@ Examples:
     frame_group.add_argument("--y-overlap-percent", type=float, default=12,
                              help="Y overlap between rows as %% of frame height (default: 12)")
 
+    # Polling
+    poll_group = parser.add_argument_group("Polling")
+    poll_group.add_argument("--persistent-polling", action="store_true",
+                            help="Keep X/Z position polling threads running across all rows "
+                                 "instead of per-row start/stop (gives continuous inter-row data)")
+    poll_group.add_argument("--debug-polling", action="store_true",
+                            help="Dump full X/Z position timeseries to polling_debug.json")
+
     # Safety
     safety_group = parser.add_argument_group("Safety")
     safety_group.add_argument("--z-max", type=float, default=26000.0,
@@ -605,6 +613,33 @@ Examples:
         all_position_samples = []
         global_frame_idx = 0
 
+        # Persistent polling: start threads once before the loop
+        if args.persistent_polling:
+            scan_x_samples = []
+            scan_z_samples = []
+            scan_stop_polling = threading.Event()
+
+            def scan_x_poll_thread():
+                while not scan_stop_polling.is_set():
+                    t_before = time.perf_counter()
+                    x_native = x_bcv.GetControlValue()
+                    t_after = time.perf_counter()
+                    x_um = x_converter.GetMetricsValue(x_native)
+                    scan_x_samples.append((t_before, t_after, x_um))
+
+            def scan_z_poll_thread():
+                while not scan_stop_polling.is_set():
+                    t = time.perf_counter()
+                    z_native = z_bcv_hysteresis.GetControlValue()
+                    z_um = z_converter.GetMetricsValue(z_native)
+                    scan_z_samples.append((t, z_um))
+
+            scan_x_thread = threading.Thread(target=scan_x_poll_thread, daemon=True)
+            scan_z_thread = threading.Thread(target=scan_z_poll_thread, daemon=True)
+            scan_x_thread.start()
+            scan_z_thread.start()
+            print("Persistent polling: started X/Z threads")
+
         try:
             for row_idx, (row_y, row_x_min, row_x_max) in enumerate(rows_plan):
                 # Snake pattern: even rows +X, odd rows -X
@@ -648,30 +683,36 @@ Examples:
                 t_s4 = time.perf_counter()
 
                 # Set up position polling for this row
-                x_samples = []
-                z_samples = []
-                stop_polling = threading.Event()
+                if args.persistent_polling:
+                    # Use scan-wide lists — record index for row partitioning
+                    x_samples = scan_x_samples
+                    z_samples = scan_z_samples
+                    row_x_start_idx = len(scan_x_samples)
+                    row_z_start_idx = len(scan_z_samples)
+                else:
+                    x_samples = []
+                    z_samples = []
+                    stop_polling = threading.Event()
 
-                def x_poll_thread():
-                    while not stop_polling.is_set():
-                        t_before = time.perf_counter()
-                        x_native = x_bcv.GetControlValue()
-                        t_after = time.perf_counter()
-                        x_um = x_converter.GetMetricsValue(x_native)
-                        x_samples.append((t_before, t_after, x_um))
+                    def x_poll_thread():
+                        while not stop_polling.is_set():
+                            t_before = time.perf_counter()
+                            x_native = x_bcv.GetControlValue()
+                            t_after = time.perf_counter()
+                            x_um = x_converter.GetMetricsValue(x_native)
+                            x_samples.append((t_before, t_after, x_um))
 
-                def z_poll_thread():
-                    while not stop_polling.is_set():
-                        t = time.perf_counter()
-                        z_native = z_bcv_hysteresis.GetControlValue()
-                        z_um = z_converter.GetMetricsValue(z_native)
-                        z_samples.append((t, z_um))
+                    def z_poll_thread():
+                        while not stop_polling.is_set():
+                            t = time.perf_counter()
+                            z_native = z_bcv_hysteresis.GetControlValue()
+                            z_um = z_converter.GetMetricsValue(z_native)
+                            z_samples.append((t, z_um))
 
-                # Start polling
-                x_thread = threading.Thread(target=x_poll_thread, daemon=True)
-                z_thread = threading.Thread(target=z_poll_thread, daemon=True)
-                x_thread.start()
-                z_thread.start()
+                    x_thread = threading.Thread(target=x_poll_thread, daemon=True)
+                    z_thread = threading.Thread(target=z_poll_thread, daemon=True)
+                    x_thread.start()
+                    z_thread.start()
                 t_s5 = time.perf_counter()
 
                 # Warmup camera
@@ -738,15 +779,22 @@ Examples:
                 else:
                     z_drive.halt()
 
-                # Stop polling
-                stop_polling.set()
-                x_thread.join(timeout=1.0)
-                z_thread.join(timeout=1.0)
+                # Stop polling (per-row mode only)
+                if not args.persistent_polling:
+                    stop_polling.set()
+                    x_thread.join(timeout=1.0)
+                    z_thread.join(timeout=1.0)
 
                 row_duration = row_end - row_start
 
                 # Filter position samples to row scan period
-                row_x_samples = [(tb, ta, x) for tb, ta, x in x_samples if row_start <= tb <= row_end]
+                if args.persistent_polling:
+                    row_x_end_idx = len(scan_x_samples)
+                    row_z_end_idx = len(scan_z_samples)
+                    row_x_samples = [(tb, ta, x) for tb, ta, x in scan_x_samples[row_x_start_idx:row_x_end_idx]
+                                     if row_start <= tb <= row_end]
+                else:
+                    row_x_samples = [(tb, ta, x) for tb, ta, x in x_samples if row_start <= tb <= row_end]
 
                 print(f"  {row_frame_count} saved, {row_skip_count} skipped, {len(row_x_samples)} pos, {row_duration:.2f}s")
                 print(f"  Startup: Y={1000*(t_s1-t_s0):.0f}ms X={1000*(t_s2-t_s1):.0f}ms Z={1000*(t_s3-t_s2):.0f}ms "
@@ -767,6 +815,13 @@ Examples:
                 stage.x.set_velocity_um_s(args.move_speed_mm * 1000)
 
         finally:
+            # Stop persistent polling threads
+            if args.persistent_polling:
+                scan_stop_polling.set()
+                scan_x_thread.join(timeout=1.0)
+                scan_z_thread.join(timeout=1.0)
+                print(f"Persistent polling: {len(scan_x_samples)} X samples, {len(scan_z_samples)} Z samples total")
+
             # Stop any motion
             z_drive.halt()
             stage.x.halt()
@@ -791,6 +846,28 @@ Examples:
 
         # Sort frames
         saved_frames_meta.sort(key=lambda f: f["n"])
+
+        # Debug polling dump
+        if args.debug_polling:
+            debug_data = {"t0": total_scan_start}
+            if args.persistent_polling:
+                debug_data["x_samples"] = [
+                    {"t_before": tb - total_scan_start, "t_after": ta - total_scan_start, "x_um": x}
+                    for tb, ta, x in scan_x_samples
+                ]
+                debug_data["z_samples"] = [
+                    {"t": t - total_scan_start, "z_um": z}
+                    for t, z in scan_z_samples
+                ]
+            else:
+                # In per-row mode, all_position_samples has the X data already
+                debug_data["x_samples"] = all_position_samples
+                debug_data["z_samples"] = []  # Not available scan-wide in per-row mode
+                debug_data["note"] = "Per-row mode: Z samples not available scan-wide. Use --persistent-polling for full Z timeseries."
+            debug_path = os.path.join(args.output, "polling_debug.json")
+            with open(debug_path, "w") as f:
+                json.dump(debug_data, f)
+            print(f"Debug polling: saved to {debug_path} ({len(debug_data['x_samples'])} X, {len(debug_data['z_samples'])} Z samples)")
 
         # Z tracking error stats
         z_errors = [f["z_error"] for f in saved_frames_meta if f["z_error"] is not None]
