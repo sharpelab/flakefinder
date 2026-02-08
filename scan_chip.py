@@ -176,6 +176,15 @@ Examples:
                             help="Scan only N rows then stop (for testing)")
     scan_group.add_argument("--row-settle", type=float, default=0.1,
                             help="Settle time in seconds after Z pre-position (default: 0.1)")
+    scan_group.add_argument("--z-preposition-mode", choices=["corrected", "raw"],
+                            default="corrected",
+                            help="Z pre-position method: 'corrected' (hysteresis-compensated) "
+                                 "or 'raw' (regular move_to) (default: corrected)")
+    scan_group.add_argument("--z-tracking-mode", choices=["directed", "async"],
+                            default="directed",
+                            help="Z tracking during row: 'directed' (constant velocity via "
+                                 "start_towards_max/min) or 'async' (position move via "
+                                 "move_to_async at set velocity) (default: directed)")
 
     # Optics
     optics_group = parser.add_argument_group("Optics")
@@ -309,6 +318,7 @@ Examples:
     print()
     print(f"Scan speed: {args.speed_mm:.1f} mm/s")
     print(f"Padding: {args.padding:.0f} µm")
+    print(f"Z preposition: {args.z_preposition_mode}, Z tracking: {args.z_tracking_mode}")
     if args.row_limit:
         print(f"Row limit: {args.row_limit}")
     print()
@@ -629,7 +639,10 @@ Examples:
                 t_s1 = time.perf_counter()
                 stage.x.move_to(x_start_pos)
                 t_s2 = time.perf_counter()
-                z_drive.move_to_corrected(z_start)
+                if args.z_preposition_mode == "corrected":
+                    z_drive.move_to_corrected(z_start)
+                else:
+                    z_drive.move_to(z_start)
                 t_s3 = time.perf_counter()
                 time.sleep(args.row_settle)
                 t_s4 = time.perf_counter()
@@ -676,11 +689,16 @@ Examples:
                 last_saved_x = None
 
                 # Start Z velocity tracking
+                z_tracking_handle = None
                 if abs(z_vel_um_s) > 0.1:
-                    if z_vel_um_s > 0:
-                        z_drive.start_towards_max(abs(z_vel_um_s))
-                    else:
-                        z_drive.start_towards_min(abs(z_vel_um_s))
+                    if args.z_tracking_mode == "directed":
+                        if z_vel_um_s > 0:
+                            z_drive.start_towards_max(abs(z_vel_um_s))
+                        else:
+                            z_drive.start_towards_min(abs(z_vel_um_s))
+                    else:  # async
+                        z_drive.set_velocity_um_s(abs(z_vel_um_s))
+                        z_tracking_handle = z_drive.move_to_async(z_end)
                 t_s7 = time.perf_counter()
 
                 # Start X motion
@@ -715,7 +733,10 @@ Examples:
                 handle.dispose()
 
                 # Stop Z motion
-                z_drive.halt()
+                if z_tracking_handle is not None:
+                    z_tracking_handle.dispose()
+                else:
+                    z_drive.halt()
 
                 # Stop polling
                 stop_polling.set()
