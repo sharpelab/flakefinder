@@ -31,6 +31,7 @@ At the start of each session:
   - **Always include durations for chip scans** and record the commands used.
 - **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `rsync -a --quiet` for bulk transfers. Use `rm -r` before `scp -r` if using scp to avoid stale file issues. Download one-off files (manual AF images, etc.) into `downloads/`, not the project root. Scan data goes in `scans/`.
 - **Images**: `show` results for the user automatically after analysis runs. "show" = open file for the user.
+- **Images in notebook**: When embedding images, copy them to the notebook's `attachments/` folder first, then link with `![description](attachments/filename.jpg)`.
 - **After every microscope run or analysis**: (1) show results to the user, (2) update the notebook. Every time. No exceptions. Do both before moving on.
 - **Errors**: When something fails, diagnose before re-running. Check the code path, don't just retry.  Retries after updates require another explicit go.
 
