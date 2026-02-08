@@ -165,7 +165,7 @@ Examples:
     chip_group.add_argument("--plane", type=str, required=True,
                             help="Path to plane JSON from analyze_focus_map.py")
     chip_group.add_argument("--padding", type=float, default=0,
-                            help="Padding around contour per row in µm (default: 0, negative = shrink)")
+                            help="X padding per row in µm — extends scan start/end beyond hull (default: 0)")
 
     # Scan control
     scan_group = parser.add_argument_group("Scan control")
@@ -237,6 +237,11 @@ Examples:
     output_group.add_argument("--compress", action="store_true", help="Create .zip of output")
 
     args = parser.parse_args()
+
+    # Validate padding
+    if args.padding < 0:
+        print("Error: --padding must be >= 0")
+        return 1
 
     # Validate objective args are mutually exclusive
     if args.objective_mag is not None and args.objective_pos is not None:
@@ -481,13 +486,13 @@ Examples:
             extent = intersect_polygon_with_y(polygon, y)
             if extent is not None:
                 x_min, x_max = extent
-                # Apply padding (negative = shrink inward)
-                x_min -= args.padding
-                x_max += args.padding
-                # Skip rows narrower than one frame (polygon tips or large negative padding)
+                # Skip rows narrower than one frame (polygon tips)
                 if (x_max - x_min) < (frame_width_um or 0):
                     y += y_step
                     continue
+                # Apply padding — extends X range beyond hull intersection
+                x_min -= args.padding
+                x_max += args.padding
                 rows_plan.append((y, x_min, x_max))
             y += y_step
 
