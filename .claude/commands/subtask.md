@@ -73,8 +73,8 @@ Wait for the user to explicitly approve before writing code.
 - Do NOT run microscope hardware commands (scans, autofocus, stage moves, etc.) — only the main scan session does that
 
 **Summary files.** Write `/tmp/<descriptive_name>_summary.md`:
-- Only write/update when the user asks or after a commit/push/pull
-- Should only reference the current state: what changed, sync status. Keep detailed discussion in the thread.
+- Do NOT write until after commit/push/pull is complete (or the user explicitly asks)
+- Content: 2-3 sentences max — what changed and sync status. No implementation details.
 - If reused for follow-up tasks, write a NEW summary file covering only the new changes
 
 ## Conventions
