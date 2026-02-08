@@ -174,6 +174,8 @@ Examples:
                                  "Frames captured before advancing enough are discarded.")
     scan_group.add_argument("--row-limit", type=int, default=None,
                             help="Scan only N rows then stop (for testing)")
+    scan_group.add_argument("--row-settle", type=float, default=0.1,
+                            help="Settle time in seconds after Z pre-position (default: 0.1)")
 
     # Optics
     optics_group = parser.add_argument_group("Optics")
@@ -621,11 +623,16 @@ Examples:
                     print(f"  SKIP: Z would exceed limit ({max(z_start, z_end):.0f} > {args.z_max:.0f})")
                     continue
 
-                # Move to row start position
+                # Move to row start position (instrumented)
+                t_s0 = time.perf_counter()
                 stage.y.move_to(row_y)
+                t_s1 = time.perf_counter()
                 stage.x.move_to(x_start_pos)
+                t_s2 = time.perf_counter()
                 z_drive.move_to_corrected(z_start)
-                time.sleep(0.1)
+                t_s3 = time.perf_counter()
+                time.sleep(args.row_settle)
+                t_s4 = time.perf_counter()
 
                 # Set up position polling for this row
                 x_samples = []
@@ -652,6 +659,7 @@ Examples:
                 z_thread = threading.Thread(target=z_poll_thread, daemon=True)
                 x_thread.start()
                 z_thread.start()
+                t_s5 = time.perf_counter()
 
                 # Warmup camera
                 for _ in range(args.warmup_frames):
@@ -659,6 +667,7 @@ Examples:
                     acquisition.Acquire(context, None)
                     if current_image[0] is not None:
                         current_image[0].Dispose()
+                t_s6 = time.perf_counter()
 
                 row_start = time.perf_counter()
                 row_frame_start = global_frame_idx
@@ -672,10 +681,12 @@ Examples:
                         z_drive.start_towards_max(abs(z_vel_um_s))
                     else:
                         z_drive.start_towards_min(abs(z_vel_um_s))
+                t_s7 = time.perf_counter()
 
                 # Start X motion
                 stage.x.set_velocity_um_s(x_speed_um_s)
                 handle = stage.x.move_to_async(x_end_pos)
+                t_s8 = time.perf_counter()
 
                 # Capture frames during move (with position-based skip)
                 while not handle.is_complete:
@@ -717,6 +728,10 @@ Examples:
                 row_x_samples = [(tb, ta, x) for tb, ta, x in x_samples if row_start <= tb <= row_end]
 
                 print(f"  {row_frame_count} saved, {row_skip_count} skipped, {len(row_x_samples)} pos, {row_duration:.2f}s")
+                print(f"  Startup: Y={1000*(t_s1-t_s0):.0f}ms X={1000*(t_s2-t_s1):.0f}ms Z={1000*(t_s3-t_s2):.0f}ms "
+                      f"settle={1000*(t_s4-t_s3):.0f}ms poll={1000*(t_s5-t_s4):.0f}ms "
+                      f"warmup={1000*(t_s6-t_s5):.0f}ms Zvel={1000*(t_s7-t_s6):.0f}ms "
+                      f"Xstart={1000*(t_s8-t_s7):.0f}ms | Zvel->X gap={1000*(t_s8-t_s7):.0f}ms")
 
                 # Add position samples to global list
                 for tb, ta, x_um in row_x_samples:
