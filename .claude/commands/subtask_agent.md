@@ -34,5 +34,8 @@ During your session, the user may paste a message starting with `# Operator Task
 When you see `# Operator Task`:
 1. Treat it as a fresh task — read the problem description below the heading
 2. It will include a `Summary file:` line with the path for this task's summary (e.g. `/tmp/subtask_<slug>_summary.md`)
-3. Re-enter the propose-before-implementing flow: analyze the problem, present your plan, wait for approval
-4. After completion, write the summary to the path specified in the task (not the original summary file)
+
+**All rules from above still apply — re-read them.** In particular:
+- **Propose before implementing.** Analyze the problem, present your plan, wait for explicit approval before writing code.
+- **Git workflow.** After implementing, ask "commit/push/pull?" — do NOT sync without explicit go-ahead.
+- **Summary files.** Do NOT write until after sync is complete (or user explicitly asks). Write to the path specified in the task.

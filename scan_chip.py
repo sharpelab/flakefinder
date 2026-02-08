@@ -915,16 +915,7 @@ Examples:
             shutil.make_archive(args.output, 'zip', args.output)
             print(f"Created {args.output}.zip")
 
-        # Wait for return
-        Stage.wait_all([hx, hy])
-        hx.dispose()
-        hy.dispose()
-        z_drive.move_to_corrected(initial_z)
-
-        # Clean up camera
-        camera.dispose()
-
-        # Summary
+        # Summary (printed before cleanup to survive Dispose() crashes)
         print()
         print("=" * 60)
         print("SCAN SUMMARY:")
@@ -941,6 +932,13 @@ Examples:
         print(f"  Output: {args.output}/")
         print()
         print("Done.")
+
+        # Cleanup (may crash with AccessViolationException on Dispose)
+        Stage.wait_all([hx, hy])
+        hx.dispose()
+        hy.dispose()
+        z_drive.move_to_corrected(initial_z)
+        camera.dispose()
 
         return 0
 
