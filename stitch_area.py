@@ -9,6 +9,7 @@ from pathlib import Path
 import time
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 import numpy as np
+from scipy.signal import savgol_filter
 
 DEFAULT_SCAN_DIR = Path(__file__).parent / "test_area_2"
 CALIBRATION_DIR = Path(__file__).parent / "calibration"
@@ -186,15 +187,41 @@ def fit_linear_positions(frames, cv_start, cv_end):
     return smoothed, fit_velocity
 
 
+def smooth_positions_savgol(frames, cv_start, cv_end, window=7, polyorder=2):
+    """Smooth CV frame positions with Savitzky-Golay filter.
+
+    Unlike fit_linear_positions which fits a single line across all CV frames,
+    this uses a local polynomial fit that tracks the actual stage trajectory
+    while reducing position jitter (~100 µm from SDK readout noise).
+
+    Returns (smoothed_positions, fit_velocity) — fit_velocity is from a linear
+    fit used only for deskew correction.
+    """
+    cv_frames = frames[cv_start:cv_end]
+    raw_x = np.array([f["x_start"] for f in cv_frames])
+
+    if len(raw_x) < window:
+        return raw_x.tolist(), 0
+
+    smoothed = savgol_filter(raw_x, window, polyorder)
+
+    # Linear fit velocity still needed for rolling shutter deskew
+    _, fit_velocity = fit_linear_positions(frames, cv_start, cv_end)
+
+    return smoothed.tolist(), fit_velocity
+
+
 def stitch_row_to_global(meta, row, frame_w, frame_h, um_per_px, output_downsample,
                          scan_dir, global_x_min, global_x_max, blend=True, deskew=True,
                          hysteresis_um=0, flatfield=None, flatfield_mean=None,
-                         num_threads=1, bg_color=(0, 0, 0)):
+                         num_threads=1, bg_color=(0, 0, 0), smoothing="linear"):
     """
     Stitch a single row directly into global X coordinate space.
 
     Returns (row_image, cv_count) where row_image is sized to fit
     global_x_min to global_x_max + fov_width.
+
+    smoothing: "linear" (global linear fit) or "savgol" (Savitzky-Golay local filter)
     """
     frames = meta["frames"]
     optics = meta["optics"]
@@ -207,8 +234,11 @@ def stitch_row_to_global(meta, row, frame_w, frame_h, um_per_px, output_downsamp
     cv_start, cv_end, velocity = find_constant_velocity_frames(row_frames)
     cv_frames = row_frames[cv_start:cv_end]
 
-    # Fit linear positions - keep in original order (global coordinates)
-    smoothed_positions, fit_velocity = fit_linear_positions(row_frames, cv_start, cv_end)
+    # Smooth positions
+    if smoothing == "savgol":
+        smoothed_positions, fit_velocity = smooth_positions_savgol(row_frames, cv_start, cv_end)
+    else:
+        smoothed_positions, fit_velocity = fit_linear_positions(row_frames, cv_start, cv_end)
 
     # Apply hysteresis correction to -X rows
     if direction < 0 and hysteresis_um != 0:
@@ -347,6 +377,9 @@ def main():
                         help="Grid line color: name or #RRGGBBAA (default: #FFFFFF50)")
     parser.add_argument("--grid-line-width", type=int, default=1,
                         help="Grid line width in pixels (default: 1)")
+    parser.add_argument("--smoothing", type=str, default="linear",
+                        choices=["linear", "savgol"],
+                        help="Position smoothing: linear (global fit, default) or savgol (local filter)")
     parser.add_argument("-o", "--output", type=str, default=None,
                         help="Output filename (default: {scan_dir}_stitch.png)")
     args = parser.parse_args()
@@ -436,7 +469,8 @@ def main():
     print(f"Y step: {y_step_um:.0f} µm, Y overlap: {y_overlap_um:.0f} µm ({y_overlap_um/fov_height_um*100:.0f}%)")
 
     # Process each row to find CV regions and global X bounds
-    print(f"\nDetecting constant-velocity regions...")
+    smooth_fn = smooth_positions_savgol if args.smoothing == "savgol" else fit_linear_positions
+    print(f"\nDetecting constant-velocity regions (smoothing: {args.smoothing})...")
     row_results = []
 
     for row in rows:
@@ -445,7 +479,7 @@ def main():
         cv_count = cv_end - cv_start
 
         # Get smoothed X positions for CV region (in global coordinates)
-        smoothed, fit_vel = fit_linear_positions(frames, cv_start, cv_end)
+        smoothed, fit_vel = smooth_fn(frames, cv_start, cv_end)
         x_min = min(smoothed)
         x_max = max(smoothed)
 
@@ -499,7 +533,8 @@ def main():
             blend=not args.no_blend, deskew=not args.no_deskew,
             hysteresis_um=args.hysteresis,
             flatfield=flatfield, flatfield_mean=flatfield_mean,
-            num_threads=args.threads, bg_color=bg_color
+            num_threads=args.threads, bg_color=bg_color,
+            smoothing=args.smoothing
         )
 
         # Calculate Y position for this row (min Y = top of image)
