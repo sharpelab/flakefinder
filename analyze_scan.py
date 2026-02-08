@@ -510,8 +510,6 @@ def main() -> int:
     # Generate plot
     if args.output:
         output_path = args.output
-    elif args.notes:
-        output_path = scan_dir / f"scan_analysis_{args.notes}.png"
     else:
         output_path = scan_dir / "scan_analysis.png"
     print(f"Generating plot...")
