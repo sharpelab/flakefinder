@@ -17,7 +17,7 @@ Wait for the user to explicitly approve before writing code.
 
 **Summary files.** Write `/tmp/<descriptive_name>_summary.md`:
 - Do NOT write until after commit/push/pull is complete (or the user explicitly asks)
-- Content: 2-3 sentences max — what changed and sync status. No implementation details.
+- Content: Root cause, fix approach (high-level, no code references or line numbers), any new CLI flags/tools. Plus sync status. 2-4 sentences.
 - On continuation tasks (see below), replace the summary with the new task's changes
 
 ## Conventions
