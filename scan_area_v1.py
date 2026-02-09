@@ -15,7 +15,7 @@ import threading
 import time
 from datetime import datetime
 
-from flakefinder.data_utils import compute_frame_size_um, load_microscope_description
+from flakefinder.data_utils import compute_frame_size_um, require_microscope_description
 from flakefinder.scan_utils import build_lighting_meta, interpolate_position
 from flakefinder.types import CameraMeta, OpticsMeta
 
@@ -218,45 +218,43 @@ Examples:
     binning_idx = args.binning - 1
 
     # Pre-validation using microscope description (avoids slow hardware connection)
-    desc = load_microscope_description(MICROSCOPE_DESCRIPTION)
-    if desc:
-        # Validate area-rect against stage limits
-        if args.area_rect:
-            try:
-                x_min, x_max, y_min, y_max = parse_area_rect(args.area_rect)
-                desc_x_min = desc.stage.x.min_um
-                desc_x_max = desc.stage.x.max_um
-                desc_y_min = desc.stage.y.min_um
-                desc_y_max = desc.stage.y.max_um
+    desc = require_microscope_description(MICROSCOPE_DESCRIPTION)
 
-                if x_min < desc_x_min:
-                    print(f"Error: x_min ({x_min:.0f}) is below stage minimum ({desc_x_min:.0f})")
-                    return 1
-                if x_max > desc_x_max:
-                    print(f"Error: x_max ({x_max:.0f}) exceeds stage maximum ({desc_x_max:.0f})")
-                    return 1
-                if y_min < desc_y_min:
-                    print(f"Error: y_min ({y_min:.0f}) is below stage minimum ({desc_y_min:.0f})")
-                    return 1
-                if y_max > desc_y_max:
-                    print(f"Error: y_max ({y_max:.0f}) exceeds stage maximum ({desc_y_max:.0f})")
-                    return 1
-            except ValueError as e:
-                print(f"Error: {e}")
+    # Validate area-rect against stage limits
+    if args.area_rect:
+        try:
+            x_min, x_max, y_min, y_max = parse_area_rect(args.area_rect)
+            desc_x_min = desc.stage.x.min_um
+            desc_x_max = desc.stage.x.max_um
+            desc_y_min = desc.stage.y.min_um
+            desc_y_max = desc.stage.y.max_um
+
+            if x_min < desc_x_min:
+                print(f"Error: x_min ({x_min:.0f}) is below stage minimum ({desc_x_min:.0f})")
                 return 1
+            if x_max > desc_x_max:
+                print(f"Error: x_max ({x_max:.0f}) exceeds stage maximum ({desc_x_max:.0f})")
+                return 1
+            if y_min < desc_y_min:
+                print(f"Error: y_min ({y_min:.0f}) is below stage minimum ({desc_y_min:.0f})")
+                return 1
+            if y_max > desc_y_max:
+                print(f"Error: y_max ({y_max:.0f}) exceeds stage maximum ({desc_y_max:.0f})")
+                return 1
+        except ValueError as e:
+            print(f"Error: {e}")
+            return 1
 
-        # Estimate scan coverage if objective specified
-        if args.objective_mag:
-            obj_match = re.match(r"^(\d+(?:\.\d+)?)[xX]?$", args.objective_mag.strip())
-            if obj_match:
-                obj_mag = float(obj_match.group(1))
-                frame_size = compute_frame_size_um(desc.camera, obj_mag, binning_idx=binning_idx)
-                if frame_size:
-                    print(
-                        f"Pre-check: {obj_mag}x objective @ {args.binning}x{args.binning} binning, frame ~{frame_size[0]:.0f} x {frame_size[1]:.0f} µm"  # noqa: E501
-                    )
-    else:
-        print("Note: No microscope description found, skipping pre-validation")
+    # Estimate scan coverage if objective specified
+    if args.objective_mag:
+        obj_match = re.match(r"^(\d+(?:\.\d+)?)[xX]?$", args.objective_mag.strip())
+        if obj_match:
+            obj_mag = float(obj_match.group(1))
+            frame_size = compute_frame_size_um(desc.camera, obj_mag, binning_idx=binning_idx)
+            if frame_size:
+                print(
+                    f"Pre-check: {obj_mag}x objective @ {args.binning}x{args.binning} binning, frame ~{frame_size[0]:.0f} x {frame_size[1]:.0f} µm"  # noqa: E501
+                )
 
     from PIL import Image as PILImage
 

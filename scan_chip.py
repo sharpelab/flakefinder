@@ -34,7 +34,7 @@ from pathlib import Path
 from flakefinder.data_utils import (
     compute_frame_size_um,
     load_chip_geometry,
-    load_microscope_description,
+    require_microscope_description,
 )
 from flakefinder.scan_utils import (
     build_lighting_meta,
@@ -287,10 +287,7 @@ Examples:
         os.makedirs(args.output)
 
     # ---- Compute frame dimensions from microscope description ----
-    desc = load_microscope_description(MICROSCOPE_DESCRIPTION)
-    if desc is None:
-        print("Error: microscope_description.json not found")
-        return 1
+    desc = require_microscope_description(MICROSCOPE_DESCRIPTION)
 
     obj_mag_for_plan = None
     if args.objective_mag is not None:

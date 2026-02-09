@@ -442,10 +442,10 @@ Examples:
         actual_binning = binning_map.get(actual_binning_idx, actual_binning_idx)
 
         # Compute frame size in µm
-        from flakefinder.data_utils import compute_frame_size_um, load_microscope_description
+        from flakefinder.data_utils import compute_frame_size_um, require_microscope_description
 
-        desc = load_microscope_description(MICROSCOPE_DESCRIPTION)
-        actual_frame_size = compute_frame_size_um(desc.camera, objective_mag, actual_binning_idx) if desc else None
+        desc = require_microscope_description(MICROSCOPE_DESCRIPTION)
+        actual_frame_size = compute_frame_size_um(desc.camera, objective_mag, actual_binning_idx)
         if actual_frame_size is None:
             print("Error: Could not determine frame size. Check objective/camera.")
             return 1

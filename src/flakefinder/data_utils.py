@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 
 from flakefinder.types import (
     AxisDescription,
@@ -18,22 +17,21 @@ from flakefinder.types import (
 )
 
 
-def load_microscope_description(path: str) -> MicroscopeDescription | None:
+def require_microscope_description(path: str) -> MicroscopeDescription:
     """Load and parse microscope hardware description JSON.
 
     Args:
         path: Path to microscope_description.json.
 
     Returns:
-        MicroscopeDescription, or None if file doesn't exist or is invalid.
+        MicroscopeDescription.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        json.JSONDecodeError: If the file is not valid JSON.
     """
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path) as f:
-            raw = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None
+    with open(path) as f:
+        raw = json.load(f)
 
     raw_camera = raw.get("camera", {})
     raw_binning = raw_camera.get("binning_levels", {})
