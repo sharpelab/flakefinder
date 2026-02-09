@@ -64,6 +64,14 @@ def compute_z_tracking_stats(meta: dict) -> dict:
             continue
         row_errors = np.array([f["z_error"] for f in row_frames])
         row_abs = np.abs(row_errors)
+
+        direction = row["direction"]
+
+        # Initial jump: abs(mean z_error of first 2 frames)
+        init_frames = row_frames[: min(2, len(row_frames))]
+        init_errors = [f["z_error"] for f in init_frames]
+        init_jump = float(np.abs(np.mean(init_errors)))
+
         per_row.append(
             {
                 "row_idx": row_idx,
@@ -72,6 +80,8 @@ def compute_z_tracking_stats(meta: dict) -> dict:
                 "mean_error_um": float(np.mean(row_errors)),
                 "std_um": float(np.std(row_errors)),
                 "max_abs_um": float(np.max(row_abs)),
+                "direction": direction,
+                "init_jump_um": init_jump,
             }
         )
 
@@ -184,7 +194,7 @@ def plot_analysis(
     frames = meta["frames"]
     n_rows = len(meta["rows"])
 
-    # Determine layout: 2x2 if sharpness data, 1x1 if only Z
+    # Determine layout: 2x2 if sharpness data, 1x2 if only Z
     has_sharpness = sharpness_data is not None
     if has_sharpness:
         fig, axes = plt.subplots(2, 2, figsize=(16, 10))
@@ -195,7 +205,7 @@ def plot_analysis(
             axes[1, 1],
         )
     else:
-        fig, ax_zerr = plt.subplots(1, 1, figsize=(12, 5))
+        fig, (ax_zerr, ax_zmap_only) = plt.subplots(1, 2, figsize=(16, 5))
 
     # Color map for rows
     cmap = plt.cm.viridis
@@ -233,8 +243,32 @@ def plot_analysis(
         ax_zerr.axvline(row["frame_start"], color="gray", alpha=0.15, linewidth=0.5)
 
     if not has_sharpness:
+        # Right panel: spatial Z error map
+        x_mm = np.array([(f["x_start"] + f["x_end"]) / 2 for f in frames]) / 1000
+        y_mm = np.array([f["y_um"] for f in frames]) / 1000
+        z_err_arr = np.array(z_errors)
+
+        abs_max = max(np.percentile(np.abs(z_err_arr), 99), 0.5)
+        sc = ax_zmap_only.scatter(
+            x_mm,
+            y_mm,
+            c=z_err_arr,
+            cmap="coolwarm",
+            s=2,
+            alpha=0.6,
+            vmin=-abs_max,
+            vmax=abs_max,
+            rasterized=True,
+        )
+        plt.colorbar(sc, ax=ax_zmap_only, label="Z error (um)")
+        ax_zmap_only.set_xlabel("X (mm)")
+        ax_zmap_only.set_ylabel("Y (mm)")
+        ax_zmap_only.set_title("Spatial Z Error Map")
+        ax_zmap_only.set_aspect("equal")
+        ax_zmap_only.invert_yaxis()  # +Y down
+
         plt.tight_layout()
-        plt.savefig(output_path, dpi=150)
+        plt.savefig(output_path, dpi=150, bbox_inches="tight")
         plt.close()
         print(f"Plot saved to {output_path}")
         return
@@ -403,15 +437,31 @@ def print_summary(
     print(f"Outside 2 um:   {ov['pct_outside_2um']:.1f}% ({int(ov['n_frames'] * ov['pct_outside_2um'] / 100)} frames)")
     print(f"Outside 4 um:   {ov['pct_outside_4um']:.1f}% ({int(ov['n_frames'] * ov['pct_outside_4um'] / 100)} frames)")
 
-    # Per-row Z (worst rows)
-    worst_rows = sorted(z_stats["per_row"], key=lambda r: r["max_abs_um"], reverse=True)
-    print("\nWorst Z rows (top 5 by max |error|):")
-    for r in worst_rows[:5]:
-        print(
-            f"  Row {r['row_idx']:2d} (y={r['y_um'] / 1000:.2f} mm): "
-            f"mean={r['mean_error_um']:+.3f}, std={r['std_um']:.3f}, "
-            f"max={r['max_abs_um']:.3f} um  [{r['n_frames']} frames]"
-        )
+    # Per-row Z table
+    print("\n--- Per-Row Z Error ---")
+    print(f"{'Row':>3}  {'Dir':>3}  {'Frames':>6}  {'Mean err':>9}  {'Max |err|':>9}  {'Init jump':>9}")
+    print(f"{'---':>3}  {'---':>3}  {'------':>6}  {'---------':>9}  {'---------':>9}  {'---------':>9}")
+    for r in z_stats["per_row"]:
+        dir_str = "+X" if r["direction"] > 0 else "-X"
+        init_str = f"{r['init_jump_um']:.3f}"
+        me = r["mean_error_um"]
+        mx = r["max_abs_um"]
+        print(f"{r['row_idx']:3d}   {dir_str:>2}  {r['n_frames']:6d}  {me:+9.3f}  {mx:9.3f}  {init_str:>9}")
+
+    # Directional bias summary
+    pos_rows = [r for r in z_stats["per_row"] if r["direction"] > 0]
+    neg_rows = [r for r in z_stats["per_row"] if r["direction"] < 0]
+    print("\n--- Directional Bias ---")
+    if pos_rows:
+        pos_mean = np.mean([r["mean_error_um"] for r in pos_rows])
+        pos_init = np.mean([r["init_jump_um"] for r in pos_rows])
+        print(f"+X rows ({len(pos_rows):2d}):  mean Z err = {pos_mean:+.3f} um,  mean init jump = {pos_init:.3f} um")
+    if neg_rows:
+        neg_mean = np.mean([r["mean_error_um"] for r in neg_rows])
+        neg_init = np.mean([r["init_jump_um"] for r in neg_rows])
+        print(f"-X rows ({len(neg_rows):2d}):  mean Z err = {neg_mean:+.3f} um,  mean init jump = {neg_init:.3f} um")
+    if pos_rows and neg_rows:
+        print(f"Directional split:  {pos_mean - neg_mean:+.3f} um (+X minus -X)")
 
     # Sharpness
     if sharpness_data is not None:
@@ -449,6 +499,88 @@ def print_summary(
                 f"mean={r['mean']:.1f}, std={r['std']:.1f}, "
                 f"min={r['min']:.1f}  [{r['n_frames']} frames]"
             )
+
+    print()
+    print("=" * 65)
+
+
+def print_comparison(
+    z_stats_a: dict,
+    z_stats_b: dict,
+    label_a: str,
+    label_b: str,
+) -> None:
+    """Print side-by-side comparison of two scans."""
+    ov_a, ov_b = z_stats_a["overall"], z_stats_b["overall"]
+
+    print()
+    print("=" * 65)
+    print("SCAN COMPARISON")
+    print("=" * 65)
+
+    # Overall stats table
+    wa = max(len(label_a), 10)
+    wb = max(len(label_b), 10)
+    print(f"{'Metric':<20}  {label_a:>{wa}}  {label_b:>{wb}}")
+    print(f"{'------':<20}  {'-' * wa}  {'-' * wb}")
+
+    rows = [
+        ("Frames", f"{ov_a['n_frames']}", f"{ov_b['n_frames']}"),
+        ("Mean error (um)", f"{ov_a['mean_error_um']:+.4f}", f"{ov_b['mean_error_um']:+.4f}"),
+        ("Std (um)", f"{ov_a['std_um']:.4f}", f"{ov_b['std_um']:.4f}"),
+        ("Max |error| (um)", f"{ov_a['max_abs_um']:.4f}", f"{ov_b['max_abs_um']:.4f}"),
+        ("P95 |error| (um)", f"{ov_a['p95_um']:.4f}", f"{ov_b['p95_um']:.4f}"),
+        ("Outside 2 um", f"{ov_a['pct_outside_2um']:.1f}%", f"{ov_b['pct_outside_2um']:.1f}%"),
+        ("Outside 4 um", f"{ov_a['pct_outside_4um']:.1f}%", f"{ov_b['pct_outside_4um']:.1f}%"),
+    ]
+    for label, va, vb in rows:
+        print(f"{label:<20}  {va:>{wa}}  {vb:>{wb}}")
+
+    # Directional bias comparison
+    def _dir_stats(per_row, sign):
+        matched = [r for r in per_row if r["direction"] * sign > 0]
+        if not matched:
+            return None, None
+        return (
+            float(np.mean([r["mean_error_um"] for r in matched])),
+            float(np.mean([r["init_jump_um"] for r in matched])) if matched else None,
+        )
+
+    print(f"\n{'Directional bias':<20}  {label_a:>{wa}}  {label_b:>{wb}}")
+    print(f"{'----------------':<20}  {'-' * wa}  {'-' * wb}")
+    for dir_name, sign in [("+X mean err", 1), ("-X mean err", -1)]:
+        mean_a, _ = _dir_stats(z_stats_a["per_row"], sign)
+        mean_b, _ = _dir_stats(z_stats_b["per_row"], sign)
+        va = f"{mean_a:+.3f}" if mean_a is not None else "N/A"
+        vb = f"{mean_b:+.3f}" if mean_b is not None else "N/A"
+        print(f"{dir_name:<20}  {va:>{wa}}  {vb:>{wb}}")
+    for dir_name, sign in [("+X init jump", 1), ("-X init jump", -1)]:
+        _, init_a = _dir_stats(z_stats_a["per_row"], sign)
+        _, init_b = _dir_stats(z_stats_b["per_row"], sign)
+        va = f"{init_a:.3f}" if init_a is not None else "N/A"
+        vb = f"{init_b:.3f}" if init_b is not None else "N/A"
+        print(f"{dir_name:<20}  {va:>{wa}}  {vb:>{wb}}")
+
+    # Per-row comparison (paired by row index)
+    rows_a = {r["row_idx"]: r for r in z_stats_a["per_row"]}
+    rows_b = {r["row_idx"]: r for r in z_stats_b["per_row"]}
+    common_rows = sorted(set(rows_a.keys()) & set(rows_b.keys()))
+
+    if common_rows:
+        hdr = f"{'Row':>3}  {'Dir':>3}  {'Mean A':>8}  {'Mean B':>8}"
+        hdr += f"  {'Delta':>7}  {'Max A':>7}  {'Max B':>7}"
+        print(f"\n{hdr}")
+        sep = f"{'---':>3}  {'---':>3}  {'------':>8}  {'------':>8}"
+        sep += f"  {'-----':>7}  {'-----':>7}  {'-----':>7}"
+        print(sep)
+        for ri in common_rows:
+            ra, rb = rows_a[ri], rows_b[ri]
+            dir_str = "+X" if ra["direction"] > 0 else "-X"
+            delta = rb["mean_error_um"] - ra["mean_error_um"]
+            line = f"{ri:3d}   {dir_str:>2}  {ra['mean_error_um']:+8.3f}"
+            line += f"  {rb['mean_error_um']:+8.3f}  {delta:+7.3f}"
+            line += f"  {ra['max_abs_um']:7.3f}  {rb['max_abs_um']:7.3f}"
+            print(line)
 
     print()
     print("=" * 65)
@@ -494,6 +626,13 @@ def main() -> int:
         default=None,
         help="Label for plot title and output filename (e.g. 'raw_async')",
     )
+    parser.add_argument(
+        "--compare",
+        type=Path,
+        default=None,
+        metavar="SCAN_DIR_B",
+        help="Second scan directory for side-by-side comparison",
+    )
     args = parser.parse_args()
 
     scan_dir = args.scan_dir.resolve()
@@ -519,6 +658,22 @@ def main() -> int:
 
     # Print summary
     print_summary(meta, z_stats, sharpness_data, args.min_sharpness)
+
+    # Comparison mode
+    if args.compare:
+        compare_dir = args.compare.resolve()
+        if not compare_dir.is_dir():
+            print(f"Error: Compare directory not found: {compare_dir}")
+            return 1
+        print(f"\nLoading comparison scan from {compare_dir}")
+        meta_b = load_scan_meta(compare_dir)
+        z_stats_b = compute_z_tracking_stats(meta_b)
+        print_comparison(
+            z_stats,
+            z_stats_b,
+            label_a=scan_dir.name,
+            label_b=compare_dir.name,
+        )
 
     # Generate plot
     if args.output:
