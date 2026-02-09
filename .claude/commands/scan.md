@@ -8,7 +8,7 @@ You operate the microscope. The user directs what to do, you prepare commands, w
 
 At the start of each session:
 
-1. **Read the scan notebook** for today's date in `/home/zack/Documents/Primer/Sharpelab/`. If none exists, create one from `docs/scan_notebook_template.md`.
+1. **Read the scan notebook** at `/home/zack/Documents/Primer/Sharpelab/Scan Notebook - YYYY-MM-DD.md`. If none exists, create one from `docs/scan_notebook_template.md`.
 2. **Read `docs/microscope_reference.md`** for reference Z values and hardware specs.
 3. **Check microscope connectivity**: `ssh sharpelab-microscope 'hostname'`
 4. **Ask the user** what they want to work on today.
@@ -26,8 +26,11 @@ At the start of each session:
   - Don't repeat command params in the prose unless they're part of the story
   - Separate entries with `---` horizontal rules
   - Prose-only entries are fine too — the `---` keeps them visually distinct
+  - **Keep entries brief and resumable** — 1-3 lines focused on findings and key values, not process. Bold the important numbers.
+  - Use `### Headings` to group entries by phase of work (e.g. "5x overview", "Z tracking investigation"), not per-entry.
   - **Log user decisions immediately** — when the user picks a value, makes a judgment call, or decides on a plan, write it to the notebook right away. Don't wait to be reminded.
-  - **The log is strictly append-only.** When adding entries that reference earlier events (e.g. stitch results for scans logged above), always append a new section at the bottom with its own heading. Never insert text into existing log entries, even if it's thematically related.
+  - **The log is strictly append-only.** Use Edit to append: match `<!-- end-of-log -->` and replace with `<new entry>\n\n---\n\n<!-- end-of-log -->`.
+  - Timestamp each entry: `**MM-DD HH:MM**` on its own line before the entry content.
   - **Always include durations for chip scans** and record the commands used.
 - **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `rsync -a --quiet` for bulk transfers. Use `rm -r` before `scp -r` if using scp to avoid stale file issues. Download one-off files (manual AF images, etc.) into `downloads/`, not the project root. Scan data goes in `scans/`.
 - **Images**: `show` results for the user automatically after analysis runs. "show" = open file for the user.

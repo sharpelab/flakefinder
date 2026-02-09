@@ -56,8 +56,6 @@ CLAUDE.md is auto-loaded by the subtask — don't list it.
 Write a prompt file to `/tmp/subtask_<descriptive_slug>.prompt.md`. Structure:
 
 ```
-/subtask_agent
-
 # Operator Task
 
 <one-line summary>
@@ -87,7 +85,7 @@ If relevant, pull details from the current session into the prompt:
 ### 6. Spawn
 
 ```bash
-newclaude ~/sharpelab/flakefinder -f /tmp/subtask_<slug>.prompt.md
+newclaude ~/sharpelab/flakefinder --agent subtask_agent -f /tmp/subtask_<slug>.prompt.md
 ```
 
 Tell the user: the subtask is running in a new terminal. It will propose its plan before writing any code, and write a summary to `/tmp/<name>_summary.md` when done.

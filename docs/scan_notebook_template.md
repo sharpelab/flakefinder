@@ -38,14 +38,21 @@
 
 ### [Section title - e.g. "5x overview", "Chip 0 focus map"]
 
+**02-08 14:30**
 `command_that_was_run --with --flags`
-Why this was run and what happened. Focus on the why and results, don't repeat command params in the prose unless they're part of the story.
+Brief finding or result. **Bold key values.** 1-3 lines max.
 
 ---
 
+**02-08 14:45**
 `another_command --different --params`
-Next entry. Separate log entries with `---` horizontal rules.
+Next entry. Separate with `---`. Focus on findings and key numbers, not process.
 
 ---
 
+**02-08 15:00**
 Prose-only entries work too — the `---` keeps them visually distinct.
+
+---
+
+<!-- end-of-log -->
