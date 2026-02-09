@@ -15,11 +15,11 @@ import time
 from pathlib import Path
 
 import cv2
-import numpy as np
 import matplotlib
+import numpy as np
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
 
 from src.flakefinder.leica.autofocus import sharpness
 
@@ -59,28 +59,26 @@ def compute_z_tracking_stats(meta: dict) -> dict:
     per_row = []
     for row in rows:
         row_idx = row["row_idx"]
-        fs = row["frame_start"]
-        fe = row["frame_end"]
         row_frames = [f for f in frames if f["row"] == row_idx]
         if not row_frames:
             continue
         row_errors = np.array([f["z_error"] for f in row_frames])
         row_abs = np.abs(row_errors)
-        per_row.append({
-            "row_idx": row_idx,
-            "y_um": row["y_um"],
-            "n_frames": len(row_frames),
-            "mean_error_um": float(np.mean(row_errors)),
-            "std_um": float(np.std(row_errors)),
-            "max_abs_um": float(np.max(row_abs)),
-        })
+        per_row.append(
+            {
+                "row_idx": row_idx,
+                "y_um": row["y_um"],
+                "n_frames": len(row_frames),
+                "mean_error_um": float(np.mean(row_errors)),
+                "std_um": float(np.std(row_errors)),
+                "max_abs_um": float(np.max(row_abs)),
+            }
+        )
 
     return {"overall": overall, "per_row": per_row}
 
 
-def compute_sharpness_values(
-    scan_dir: Path, meta: dict, sample_every: int = 1
-) -> dict:
+def compute_sharpness_values(scan_dir: Path, meta: dict, sample_every: int = 1) -> dict:
     """Compute tenengrad sharpness for saved frame JPGs.
 
     Args:
@@ -137,8 +135,7 @@ def compute_sharpness_values(
 
     elapsed = time.monotonic() - t0
     print(
-        f"  Processed {processed} frames in {elapsed:.1f}s "
-        f"({processed / elapsed:.0f} fps)        "
+        f"  Processed {processed} frames in {elapsed:.1f}s ({processed / elapsed:.0f} fps)        "
     )
 
     sharpness_arr = np.array(sharpness_vals)
@@ -153,13 +150,15 @@ def compute_sharpness_values(
     for r in unique_rows:
         mask = row_arr == r
         row_sharp = sharpness_arr[mask]
-        per_row.append({
-            "row_idx": r,
-            "n_frames": int(mask.sum()),
-            "mean": float(np.mean(row_sharp)),
-            "std": float(np.std(row_sharp)),
-            "min": float(np.min(row_sharp)),
-        })
+        per_row.append(
+            {
+                "row_idx": r,
+                "n_frames": int(mask.sum()),
+                "mean": float(np.mean(row_sharp)),
+                "std": float(np.std(row_sharp)),
+                "min": float(np.min(row_sharp)),
+            }
+        )
 
     return {
         "indices": indices_arr,
@@ -253,24 +252,30 @@ def plot_analysis(
 
     if min_sharpness is not None:
         ax_sharp.axhline(
-            min_sharpness, color="red", linewidth=1, linestyle="--",
+            min_sharpness,
+            color="red",
+            linewidth=1,
+            linestyle="--",
             label=f"Threshold ({min_sharpness})",
         )
         below = s_vals < min_sharpness
         n_below = int(np.sum(below))
         if n_below > 0:
             ax_sharp.scatter(
-                s_indices[below], s_vals[below],
-                s=20, facecolors="none", edgecolors="red", linewidths=1,
-                zorder=5, label=f"Below threshold ({n_below})",
+                s_indices[below],
+                s_vals[below],
+                s=20,
+                facecolors="none",
+                edgecolors="red",
+                linewidths=1,
+                zorder=5,
+                label=f"Below threshold ({n_below})",
             )
 
     ax_sharp.set_xlabel("Frame number")
     ax_sharp.set_ylabel("Tenengrad sharpness")
     sample_note = (
-        f" (every {sharpness_data['sample_every']}th)"
-        if sharpness_data["sample_every"] > 1
-        else ""
+        f" (every {sharpness_data['sample_every']}th)" if sharpness_data["sample_every"] > 1 else ""
     )
     ax_sharp.set_title(
         f"Frame Sharpness{sample_note}: mean={sharpness_data['overall_mean']:.1f}, "
@@ -291,8 +296,15 @@ def plot_analysis(
     # Use absolute Z error for color
     abs_max = max(np.percentile(np.abs(z_err_arr), 99), 0.5)
     sc = ax_zmap.scatter(
-        x_mm, y_mm, c=z_err_arr, cmap="coolwarm",
-        s=2, alpha=0.6, vmin=-abs_max, vmax=abs_max, rasterized=True,
+        x_mm,
+        y_mm,
+        c=z_err_arr,
+        cmap="coolwarm",
+        s=2,
+        alpha=0.6,
+        vmin=-abs_max,
+        vmax=abs_max,
+        rasterized=True,
     )
     plt.colorbar(sc, ax=ax_zmap, label="Z error (um)")
     ax_zmap.set_xlabel("X (mm)")
@@ -306,8 +318,13 @@ def plot_analysis(
     sy_mm = sharpness_data["y_um"] / 1000
 
     sc2 = ax_sharpmap.scatter(
-        sx_mm, sy_mm, c=sharpness_data["sharpness"], cmap="plasma",
-        s=4, alpha=0.6, rasterized=True,
+        sx_mm,
+        sy_mm,
+        c=sharpness_data["sharpness"],
+        cmap="plasma",
+        s=4,
+        alpha=0.6,
+        rasterized=True,
     )
     plt.colorbar(sc2, ax=ax_sharpmap, label="Tenengrad sharpness")
 
@@ -315,9 +332,14 @@ def plot_analysis(
         below = sharpness_data["sharpness"] < min_sharpness
         if np.any(below):
             ax_sharpmap.scatter(
-                sx_mm[below], sy_mm[below],
-                s=20, facecolors="none", edgecolors="red", linewidths=1,
-                zorder=5, label=f"Below {min_sharpness}",
+                sx_mm[below],
+                sy_mm[below],
+                s=20,
+                facecolors="none",
+                edgecolors="red",
+                linewidths=1,
+                zorder=5,
+                label=f"Below {min_sharpness}",
             )
             ax_sharpmap.legend(loc="lower right", fontsize=8)
 
@@ -383,15 +405,19 @@ def print_summary(
     print(f"Std:            {ov['std_um']:.4f} um")
     print(f"Max |error|:    {ov['max_abs_um']:.4f} um")
     print(f"P95 |error|:    {ov['p95_um']:.4f} um")
-    print(f"Outside 2 um:   {ov['pct_outside_2um']:.1f}% ({int(ov['n_frames'] * ov['pct_outside_2um'] / 100)} frames)")
-    print(f"Outside 4 um:   {ov['pct_outside_4um']:.1f}% ({int(ov['n_frames'] * ov['pct_outside_4um'] / 100)} frames)")
+    print(
+        f"Outside 2 um:   {ov['pct_outside_2um']:.1f}% ({int(ov['n_frames'] * ov['pct_outside_2um'] / 100)} frames)"
+    )
+    print(
+        f"Outside 4 um:   {ov['pct_outside_4um']:.1f}% ({int(ov['n_frames'] * ov['pct_outside_4um'] / 100)} frames)"
+    )
 
     # Per-row Z (worst rows)
     worst_rows = sorted(z_stats["per_row"], key=lambda r: r["max_abs_um"], reverse=True)
-    print(f"\nWorst Z rows (top 5 by max |error|):")
+    print("\nWorst Z rows (top 5 by max |error|):")
     for r in worst_rows[:5]:
         print(
-            f"  Row {r['row_idx']:2d} (y={r['y_um']/1000:.2f} mm): "
+            f"  Row {r['row_idx']:2d} (y={r['y_um'] / 1000:.2f} mm): "
             f"mean={r['mean_error_um']:+.3f}, std={r['std_um']:.3f}, "
             f"max={r['max_abs_um']:.3f} um  [{r['n_frames']} frames]"
         )
@@ -422,12 +448,12 @@ def print_summary(
                 idx_below = sharpness_data["indices"][below]
                 row_below = sharpness_data["rows"][below]
                 s_below = sharpness_data["sharpness"][below]
-                for fi, ri, si in zip(idx_below, row_below, s_below):
+                for fi, ri, si in zip(idx_below, row_below, s_below, strict=True):
                     print(f"  frame_{fi:04d}.jpg  row {ri}  sharpness={si:.1f}")
 
         # Per-row sharpness (worst rows)
         worst_sharp = sorted(sharpness_data["per_row"], key=lambda r: r["min"])
-        print(f"\nWorst sharpness rows (top 5 by min):")
+        print("\nWorst sharpness rows (top 5 by min):")
         for r in worst_sharp[:5]:
             print(
                 f"  Row {r['row_idx']:2d}: "
@@ -500,9 +526,7 @@ def main() -> int:
     sharpness_data = None
     if not args.no_sharpness:
         print(f"Computing sharpness (sample every {args.sample})...")
-        sharpness_data = compute_sharpness_values(
-            scan_dir, meta, sample_every=args.sample
-        )
+        sharpness_data = compute_sharpness_values(scan_dir, meta, sample_every=args.sample)
 
     # Print summary
     print_summary(meta, z_stats, sharpness_data, args.min_sharpness)
@@ -512,7 +536,7 @@ def main() -> int:
         output_path = args.output
     else:
         output_path = scan_dir / "scan_analysis.png"
-    print(f"Generating plot...")
+    print("Generating plot...")
     plot_analysis(meta, z_stats, sharpness_data, output_path, args.min_sharpness, notes=args.notes)
 
     return 0

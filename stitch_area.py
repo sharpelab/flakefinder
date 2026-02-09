@@ -1,23 +1,31 @@
 """Multi-row position-based stitch for snake scan patterns."""
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 import json
 import math
-from pathlib import Path
 import time
-from PIL import Image, ImageColor, ImageDraw, ImageFont
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from pathlib import Path
+
 import numpy as np
+from PIL import Image, ImageColor, ImageDraw, ImageFont
 from scipy.signal import savgol_filter
 
 DEFAULT_SCAN_DIR = Path(__file__).parent / "test_area_2"
 CALIBRATION_DIR = Path(__file__).parent / "calibration"
 
 
-def create_blend_alpha(width, height, blend_width_x, blend_width_y=0,
-                       is_first_x=False, is_last_x=False,
-                       is_first_y=False, is_last_y=False):
+def create_blend_alpha(
+    width,
+    height,
+    blend_width_x,
+    blend_width_y=0,
+    is_first_x=False,
+    is_last_x=False,
+    is_first_y=False,
+    is_last_y=False,
+):
     """
     Create alpha mask with linear gradient edges for blending in both X and Y.
     """
@@ -42,7 +50,7 @@ def create_blend_alpha(width, height, blend_width_x, blend_width_y=0,
             for y in range(max(0, height - blend_width_y), height):
                 alpha[y, :] *= (height - 1 - y) / blend_width_y
 
-    return Image.fromarray((alpha * 255).astype('uint8'), mode='L')
+    return Image.fromarray((alpha * 255).astype("uint8"), mode="L")
 
 
 def deskew_image(img, shear_px, bg_color=(0, 0, 0)):
@@ -63,12 +71,11 @@ def deskew_image(img, shear_px, bg_color=(0, 0, 0)):
         Image.AFFINE,
         (a, b, c, d, e, f),
         resample=Image.BICUBIC,
-        fillcolor=(bg_color + (0,)) if img.mode == 'RGBA' else bg_color
+        fillcolor=(bg_color + (0,)) if img.mode == "RGBA" else bg_color,
     )
 
 
-def draw_grid(background, stage_bounds_um, um_per_px, spacing_um,
-              line_color, line_width):
+def draw_grid(background, stage_bounds_um, um_per_px, spacing_um, line_color, line_width):
     """Draw stage-coordinate grid lines and mm labels on the stitched image."""
     w, h = background.size
     x_min = stage_bounds_um["x_min"]
@@ -103,10 +110,8 @@ def draw_grid(background, stage_bounds_um, um_per_px, spacing_um,
             draw.line([(px, 0), (px, h - 1)], fill=color, width=line_width)
             label = f"{x / 1000:.1f}"
             # Shadow then text
-            draw.text((px + label_pad + 1, label_pad + 1), label,
-                      fill=shadow_color, font=font)
-            draw.text((px + label_pad, label_pad), label,
-                      fill=label_color, font=font)
+            draw.text((px + label_pad + 1, label_pad + 1), label, fill=shadow_color, font=font)
+            draw.text((px + label_pad, label_pad), label, fill=label_color, font=font)
         x += spacing_um
 
     # Horizontal grid lines (constant Y)
@@ -116,10 +121,8 @@ def draw_grid(background, stage_bounds_um, um_per_px, spacing_um,
         if 0 <= py < h:
             draw.line([(0, py), (w - 1, py)], fill=color, width=line_width)
             label = f"{y / 1000:.1f}"
-            draw.text((label_pad + 1, py + label_pad + 1), label,
-                      fill=shadow_color, font=font)
-            draw.text((label_pad, py + label_pad), label,
-                      fill=label_color, font=font)
+            draw.text((label_pad + 1, py + label_pad + 1), label, fill=shadow_color, font=font)
+            draw.text((label_pad, py + label_pad), label, fill=label_color, font=font)
         y += spacing_um
 
     result = Image.alpha_composite(background.convert("RGBA"), overlay)
@@ -135,11 +138,11 @@ def find_constant_velocity_frames(frames):
         return 0, len(frames), 0
 
     # Get frame-to-frame deltas
-    deltas = [frames[i+1]["x_start"] - frames[i]["x_start"] for i in range(len(frames)-1)]
+    deltas = [frames[i + 1]["x_start"] - frames[i]["x_start"] for i in range(len(frames) - 1)]
 
     # Find median delta (robust estimate of constant velocity spacing)
     sorted_deltas = sorted(deltas, key=abs)
-    median_delta = sorted_deltas[len(sorted_deltas)//2]
+    median_delta = sorted_deltas[len(sorted_deltas) // 2]
 
     if abs(median_delta) < 1e-6:
         return 0, len(frames), 0
@@ -156,8 +159,9 @@ def find_constant_velocity_frames(frames):
         return 0, len(frames), 0
 
     # Estimate velocity from median delta and frame timing
-    avg_dt = sum(frames[i+1]["t_start"] - frames[i]["t_start"]
-                 for i in range(first_cv, last_cv)) / max(1, last_cv - first_cv)
+    avg_dt = sum(
+        frames[i + 1]["t_start"] - frames[i]["t_start"] for i in range(first_cv, last_cv)
+    ) / max(1, last_cv - first_cv)
     velocity = median_delta / avg_dt if avg_dt > 0 else 0
 
     return first_cv, last_cv + 1, velocity
@@ -173,8 +177,8 @@ def fit_linear_positions(frames, cv_start, cv_end):
     n = len(times)
     sum_t = sum(times)
     sum_x = sum(positions)
-    sum_tt = sum(t*t for t in times)
-    sum_tx = sum(t*x for t, x in zip(times, positions))
+    sum_tt = sum(t * t for t in times)
+    sum_tx = sum(t * x for t, x in zip(times, positions, strict=True))
 
     denom = n * sum_tt - sum_t * sum_t
     if abs(denom) < 1e-10:
@@ -211,10 +215,25 @@ def smooth_positions_savgol(frames, cv_start, cv_end, window=7, polyorder=2):
     return smoothed.tolist(), fit_velocity
 
 
-def stitch_row_to_global(meta, row, frame_w, frame_h, um_per_px, output_downsample,
-                         scan_dir, global_x_min, global_x_max, blend=True, deskew=True,
-                         hysteresis_um=0, flatfield=None, flatfield_mean=None,
-                         num_threads=1, bg_color=(0, 0, 0), smoothing="linear"):
+def stitch_row_to_global(
+    meta,
+    row,
+    frame_w,
+    frame_h,
+    um_per_px,
+    output_downsample,
+    scan_dir,
+    global_x_min,
+    global_x_max,
+    blend=True,
+    deskew=True,
+    hysteresis_um=0,
+    flatfield=None,
+    flatfield_mean=None,
+    num_threads=1,
+    bg_color=(0, 0, 0),
+    smoothing="linear",
+):
     """
     Stitch a single row directly into global X coordinate space.
 
@@ -227,7 +246,7 @@ def stitch_row_to_global(meta, row, frame_w, frame_h, um_per_px, output_downsamp
     optics = meta["optics"]
     fov_width_um = optics["frame_width_um"]
 
-    row_frames = frames[row["frame_start"]:row["frame_end"]]
+    row_frames = frames[row["frame_start"] : row["frame_end"]]
     direction = row["direction"]
 
     # Find constant-velocity region for this row
@@ -292,11 +311,11 @@ def stitch_row_to_global(meta, row, frame_w, frame_h, um_per_px, output_downsamp
         # JPEG draft() decodes at reduced resolution (1/2, 1/4, 1/8) during
         # DCT, avoiding a full-resolution decode. No-op for non-JPEG.
         if output_downsample > 1:
-            img.draft('RGB', (frame_w, frame_h))
+            img.draft("RGB", (frame_w, frame_h))
         img.load()
         if img.size[0] != frame_w or img.size[1] != frame_h:
             img = img.resize((frame_w, frame_h), Image.LANCZOS)
-        img = img.convert('RGBA')
+        img = img.convert("RGBA")
 
         if flatfield is not None:
             img_arr = np.array(img, dtype=np.float32)
@@ -306,12 +325,13 @@ def stitch_row_to_global(meta, row, frame_w, frame_h, um_per_px, output_downsamp
             img = Image.fromarray(img_arr, mode="RGBA")
 
         if blend:
-            is_first = (seq_i == 0)
-            is_last = (seq_i == num_work - 1)
-            alpha = create_blend_alpha(frame_w, frame_h, blend_width_x, 0,
-                                       is_first_x=is_first, is_last_x=is_last)
+            is_first = seq_i == 0
+            is_last = seq_i == num_work - 1
+            alpha = create_blend_alpha(
+                frame_w, frame_h, blend_width_x, 0, is_first_x=is_first, is_last_x=is_last
+            )
         else:
-            alpha = Image.new('L', img.size, 128)
+            alpha = Image.new("L", img.size, 128)
         img.putalpha(alpha)
 
         return img
@@ -324,7 +344,7 @@ def stitch_row_to_global(meta, row, frame_w, frame_h, um_per_px, output_downsamp
         loaded = [load_frame(item) for item in work_items]
 
     frames_placed = 0
-    for img, (_, _, x_offset) in zip(loaded, work_items):
+    for img, (_, _, x_offset) in zip(loaded, work_items, strict=True):
         # Clamp to canvas bounds
         if x_offset < 0:
             img = img.crop((-x_offset, 0, img.width, img.height))
@@ -349,39 +369,83 @@ def stitch_row_to_global(meta, row, frame_w, frame_h, um_per_px, output_downsamp
 
 def main():
     parser = argparse.ArgumentParser(description="Stitch multi-row snake scan into 2D image")
-    parser.add_argument("scan_dir", nargs="?", type=Path, default=DEFAULT_SCAN_DIR,
-                        help="Scan directory (default: test_area_2)")
+    parser.add_argument(
+        "scan_dir",
+        nargs="?",
+        type=Path,
+        default=DEFAULT_SCAN_DIR,
+        help="Scan directory (default: test_area_2)",
+    )
     parser.add_argument("--no-deskew", action="store_true", help="Disable rolling shutter deskew")
     parser.add_argument("--no-blend", action="store_true", help="Disable gradient blending")
-    parser.add_argument("--downsample", type=int, default=1,
-                        help="Additional downsample factor (e.g., 2 = half resolution)")
-    parser.add_argument("--rows", type=str, default=None,
-                        help="Row range to process (e.g., '0-5' or '10')")
+    parser.add_argument(
+        "--downsample",
+        type=int,
+        default=1,
+        help="Additional downsample factor (e.g., 2 = half resolution)",
+    )
+    parser.add_argument(
+        "--rows", type=str, default=None, help="Row range to process (e.g., '0-5' or '10')"
+    )
     # TODO: Investigate source of ~100 µm hysteresis between +X and -X scan directions.
     # Likely candidates: stage backlash, encoder offset, or position readout timing.
-    parser.add_argument("--hysteresis", type=float, default=0,
-                        help="Hysteresis correction in µm (applied to -X rows)")
-    parser.add_argument("--crop", type=str, default="0,0,0,0",
-                        help="Crop margins in µm: TOP,RIGHT,BOTTOM,LEFT (default: 0,0,0,0)")
-    parser.add_argument("--flatfield", type=Path, default=None,
-                        help="Path to flatfield .npy file (default: auto-load from calibration/)")
-    parser.add_argument("--no-flatfield", action="store_true",
-                        help="Disable flatfield correction")
-    parser.add_argument("--threads", type=int, default=4,
-                        help="Number of threads for parallel frame loading (default: 4)")
-    parser.add_argument("--bg", type=str, default="black",
-                        help="Background color: name or #RRGGBB (default: black)")
-    parser.add_argument("--grid-spacing-um", type=float, default=0,
-                        help="Grid line spacing in µm (0 = no grid, 1000 = 1mm)")
-    parser.add_argument("--grid-line-color", type=str, default="#FFFFFF50",
-                        help="Grid line color: name or #RRGGBBAA (default: #FFFFFF50)")
-    parser.add_argument("--grid-line-width", type=int, default=1,
-                        help="Grid line width in pixels (default: 1)")
-    parser.add_argument("--smoothing", type=str, default="linear",
-                        choices=["linear", "savgol"],
-                        help="Position smoothing: linear (global fit, default) or savgol (local filter)")
-    parser.add_argument("-o", "--output", type=str, default=None,
-                        help="Output filename (default: {scan_dir}_stitch.png)")
+    parser.add_argument(
+        "--hysteresis",
+        type=float,
+        default=0,
+        help="Hysteresis correction in µm (applied to -X rows)",
+    )
+    parser.add_argument(
+        "--crop",
+        type=str,
+        default="0,0,0,0",
+        help="Crop margins in µm: TOP,RIGHT,BOTTOM,LEFT (default: 0,0,0,0)",
+    )
+    parser.add_argument(
+        "--flatfield",
+        type=Path,
+        default=None,
+        help="Path to flatfield .npy file (default: auto-load from calibration/)",
+    )
+    parser.add_argument("--no-flatfield", action="store_true", help="Disable flatfield correction")
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=4,
+        help="Number of threads for parallel frame loading (default: 4)",
+    )
+    parser.add_argument(
+        "--bg", type=str, default="black", help="Background color: name or #RRGGBB (default: black)"
+    )
+    parser.add_argument(
+        "--grid-spacing-um",
+        type=float,
+        default=0,
+        help="Grid line spacing in µm (0 = no grid, 1000 = 1mm)",
+    )
+    parser.add_argument(
+        "--grid-line-color",
+        type=str,
+        default="#FFFFFF50",
+        help="Grid line color: name or #RRGGBBAA (default: #FFFFFF50)",
+    )
+    parser.add_argument(
+        "--grid-line-width", type=int, default=1, help="Grid line width in pixels (default: 1)"
+    )
+    parser.add_argument(
+        "--smoothing",
+        type=str,
+        default="linear",
+        choices=["linear", "savgol"],
+        help="Position smoothing: linear (global fit, default) or savgol (local filter)",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default=None,
+        help="Output filename (default: {scan_dir}_stitch.png)",
+    )
     args = parser.parse_args()
 
     bg_color = ImageColor.getrgb(args.bg)
@@ -394,7 +458,9 @@ def main():
         meta = json.load(f)
 
     if "rows" not in meta:
-        print("Error: scan_meta.json has no 'rows' array. Use stitch_position.py for single-row scans.")
+        print(
+            "Error: scan_meta.json has no 'rows' array. Use stitch_position.py for single-row scans."
+        )
         return
 
     rows = meta["rows"]
@@ -428,8 +494,8 @@ def main():
 
     # Parse row range if specified
     if args.rows:
-        if '-' in args.rows:
-            start, end = map(int, args.rows.split('-'))
+        if "-" in args.rows:
+            start, end = map(int, args.rows.split("-"))
             rows = [r for r in rows if start <= r["row_idx"] <= end]
         else:
             row_idx = int(args.rows)
@@ -455,7 +521,7 @@ def main():
             # Resize each channel separately using LANCZOS
             ff_resized = np.zeros((frame_h, frame_w, 3), dtype=np.float32)
             for c in range(3):
-                ff_channel = Image.fromarray(flatfield[:, :, c], mode='F')
+                ff_channel = Image.fromarray(flatfield[:, :, c], mode="F")
                 ff_channel = ff_channel.resize((frame_w, frame_h), Image.LANCZOS)
                 ff_resized[:, :, c] = np.array(ff_channel, dtype=np.float32)
             print(f"  Resized flatfield {ff_w}x{ff_h} -> {frame_w}x{frame_h}")
@@ -466,7 +532,9 @@ def main():
     print(f"Processing: {len(rows)} rows")
     print(f"Calibration: {um_per_px:.3f} µm/px (downsample {downsample}x{args.downsample})")
     print(f"Frame: {frame_w}x{frame_h} px = {fov_width_um:.0f}x{fov_height_um:.0f} µm")
-    print(f"Y step: {y_step_um:.0f} µm, Y overlap: {y_overlap_um:.0f} µm ({y_overlap_um/fov_height_um*100:.0f}%)")
+    print(
+        f"Y step: {y_step_um:.0f} µm, Y overlap: {y_overlap_um:.0f} µm ({y_overlap_um / fov_height_um * 100:.0f}%)"
+    )
 
     # Process each row to find CV regions and global X bounds
     smooth_fn = smooth_positions_savgol if args.smoothing == "savgol" else fit_linear_positions
@@ -474,7 +542,7 @@ def main():
     row_results = []
 
     for row in rows:
-        frames = meta["frames"][row["frame_start"]:row["frame_end"]]
+        frames = meta["frames"][row["frame_start"] : row["frame_end"]]
         cv_start, cv_end, velocity = find_constant_velocity_frames(frames)
         cv_count = cv_end - cv_start
 
@@ -483,26 +551,32 @@ def main():
         x_min = min(smoothed)
         x_max = max(smoothed)
 
-        row_results.append({
-            "row": row,
-            "cv_start": cv_start,
-            "cv_end": cv_end,
-            "cv_count": cv_count,
-            "x_min": x_min,
-            "x_max": x_max,
-            "smoothed": smoothed,
-            "velocity": velocity,
-        })
+        row_results.append(
+            {
+                "row": row,
+                "cv_start": cv_start,
+                "cv_end": cv_end,
+                "cv_count": cv_count,
+                "x_min": x_min,
+                "x_max": x_max,
+                "smoothed": smoothed,
+                "velocity": velocity,
+            }
+        )
 
-        print(f"  Row {row['row_idx']:2d}: CV frames {cv_start}-{cv_end-1} "
-              f"({cv_count} frames), X: {x_min:.0f} - {x_max:.0f} µm")
+        print(
+            f"  Row {row['row_idx']:2d}: CV frames {cv_start}-{cv_end - 1} "
+            f"({cv_count} frames), X: {x_min:.0f} - {x_max:.0f} µm"
+        )
 
     # Find global X bounds: union of all rows
     global_x_min = min(r["x_min"] for r in row_results)
     global_x_max = max(r["x_max"] for r in row_results)
     global_x_range = global_x_max - global_x_min + fov_width_um
 
-    print(f"\nGlobal X bounds: {global_x_min:.0f} - {global_x_max:.0f} µm ({global_x_range:.0f} µm total)")
+    print(
+        f"\nGlobal X bounds: {global_x_min:.0f} - {global_x_max:.0f} µm ({global_x_range:.0f} µm total)"
+    )
 
     # Calculate final canvas dimensions
     n_rows = len(rows)
@@ -520,21 +594,31 @@ def main():
     # Create final canvas
     canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
 
-    print(f"\nStitching rows...")
+    print("\nStitching rows...")
 
-    for i, result in enumerate(row_results):
+    for result in row_results:
         row = result["row"]
         row_idx = row["row_idx"]
 
         # Stitch this row in global coordinates
         row_img, frames_placed = stitch_row_to_global(
-            meta, row, frame_w, frame_h, um_per_px, args.downsample,
-            scan_dir, global_x_min, global_x_max,
-            blend=not args.no_blend, deskew=not args.no_deskew,
+            meta,
+            row,
+            frame_w,
+            frame_h,
+            um_per_px,
+            args.downsample,
+            scan_dir,
+            global_x_min,
+            global_x_max,
+            blend=not args.no_blend,
+            deskew=not args.no_deskew,
             hysteresis_um=args.hysteresis,
-            flatfield=flatfield, flatfield_mean=flatfield_mean,
-            num_threads=args.threads, bg_color=bg_color,
-            smoothing=args.smoothing
+            flatfield=flatfield,
+            flatfield_mean=flatfield_mean,
+            num_threads=args.threads,
+            bg_color=bg_color,
+            smoothing=args.smoothing,
         )
 
         # Calculate Y position for this row (min Y = top of image)
@@ -546,17 +630,23 @@ def main():
         # Apply Y blending
         # is_first_y = don't fade top edge, is_last_y = don't fade bottom edge
         if not args.no_blend:
-            is_at_top = (row_y == min(r["y_um"] for r in rows))
-            is_at_bottom = (row_y == max(r["y_um"] for r in rows))
+            is_at_top = row_y == min(r["y_um"] for r in rows)
+            is_at_bottom = row_y == max(r["y_um"] for r in rows)
 
             row_alpha = row_img.split()[3]
-            y_blend = create_blend_alpha(row_img.width, row_img.height, 0, blend_width_y,
-                                         is_first_y=is_at_top, is_last_y=is_at_bottom)
+            y_blend = create_blend_alpha(
+                row_img.width,
+                row_img.height,
+                0,
+                blend_width_y,
+                is_first_y=is_at_top,
+                is_last_y=is_at_bottom,
+            )
 
             existing = np.array(row_alpha, dtype=np.float32)
             new_blend = np.array(y_blend, dtype=np.float32)
-            combined = (existing * new_blend / 255).astype('uint8')
-            row_img.putalpha(Image.fromarray(combined, mode='L'))
+            combined = (existing * new_blend / 255).astype("uint8")
+            row_img.putalpha(Image.fromarray(combined, mode="L"))
 
         # Ensure row image fits canvas width (handle rounding)
         if row_img.width != canvas_w:
@@ -607,14 +697,21 @@ def main():
         stage_bounds_um["x_min"] += crop_left_um
         stage_bounds_um["x_max"] -= crop_right_um
 
-        print(f"\nCropped: top={crop_top_um:.0f} right={crop_right_um:.0f} "
-              f"bottom={crop_bottom_um:.0f} left={crop_left_um:.0f} µm")
+        print(
+            f"\nCropped: top={crop_top_um:.0f} right={crop_right_um:.0f} "
+            f"bottom={crop_bottom_um:.0f} left={crop_left_um:.0f} µm"
+        )
 
     # Draw grid overlay
     if args.grid_spacing_um > 0:
-        background = draw_grid(background, stage_bounds_um, um_per_px,
-                               args.grid_spacing_um, args.grid_line_color,
-                               args.grid_line_width)
+        background = draw_grid(
+            background,
+            stage_bounds_um,
+            um_per_px,
+            args.grid_spacing_um,
+            args.grid_line_color,
+            args.grid_line_width,
+        )
         print(f"Grid: {args.grid_spacing_um:.0f} µm spacing")
 
     # Save image
@@ -634,7 +731,7 @@ def main():
     for rr in row_results:
         smoothed = rr["smoothed"]
         if len(smoothed) >= 2:
-            steps = [abs(smoothed[i+1] - smoothed[i]) for i in range(len(smoothed)-1)]
+            steps = [abs(smoothed[i + 1] - smoothed[i]) for i in range(len(smoothed) - 1)]
             all_cv_steps.extend(steps)
 
     if all_cv_steps:
@@ -667,7 +764,7 @@ def main():
     }
 
     meta_path = out_path.with_name(out_path.stem + "_meta.json")
-    with open(meta_path, 'w') as f:
+    with open(meta_path, "w") as f:
         json.dump(stitch_meta, f, indent=2)
     print(f"Saved metadata to {meta_path}")
 

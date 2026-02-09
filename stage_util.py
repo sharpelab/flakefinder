@@ -19,8 +19,7 @@ Usage:
 import argparse
 import sys
 
-from flakefinder.leica import LeicaConnection, Stage, ZDrive, Lamp, Nosepiece, Shutter
-
+from flakefinder.leica import Lamp, LeicaConnection, Nosepiece, Shutter, Stage, ZDrive
 
 # =============================================================================
 # Axis Conventions
@@ -40,9 +39,9 @@ from flakefinder.leica import LeicaConnection, Stage, ZDrive, Lamp, Nosepiece, S
 WORKING_DISTANCES_UM: dict[int, float] = {
     1: 12700,  # 5x N PLAN - 12.7mm working distance
     2: 11000,  # 10x - ~11mm (typical)
-    3: 1900,   # 20x - ~1.9mm (typical)
-    4: 380,    # 50x - ~0.38mm (typical long WD)
-    5: 210,    # 150x - ~0.21mm (short WD, highest risk)
+    3: 1900,  # 20x - ~1.9mm (typical)
+    4: 380,  # 50x - ~0.38mm (typical long WD)
+    5: 210,  # 150x - ~0.21mm (short WD, highest risk)
     6: 15000,  # 2.5x - ~15mm (very safe)
 }
 
@@ -51,12 +50,12 @@ WORKING_DISTANCES_UM: dict[int, float] = {
 # Positive means this objective focuses at higher Z than reference.
 # All zeros until calibrated - set reference objective to position 1 (5x).
 PARFOCAL_OFFSETS_UM: dict[int, float] = {
-    1: 0,    # 5x - reference
-    2: 0,    # 10x
-    3: 0,    # 20x
-    4: 0,    # 50x
-    5: 0,    # 150x
-    6: 0,    # 2.5x
+    1: 0,  # 5x - reference
+    2: 0,  # 10x
+    3: 0,  # 20x
+    4: 0,  # 50x
+    5: 0,  # 150x
+    6: 0,  # 2.5x
 }
 
 # Safety margin added to Z retraction (µm)
@@ -91,9 +90,11 @@ def change_objective(
 
     z_before = z.position_um
 
-    print(f"Objective: {current_mag}x (pos {current_position}) -> {target_mag}x (pos {target_position})")
+    print(
+        f"Objective: {current_mag}x (pos {current_position}) -> {target_mag}x (pos {target_position})"
+    )
     print(f"  Z before: {z_before:.1f} µm")
-    print(f"  Switching (SDK handles z-hop)...")
+    print("  Switching (SDK handles z-hop)...")
 
     nosepiece.set_position(target_position, z=z)
 
@@ -186,9 +187,15 @@ def report_status(conn: LeicaConnection, verbose: bool = False) -> None:
     if verbose:
         print()
         print("Velocity (from SDK converter):")
-        print(f"  X: {stage.x.velocity_um_s/1000:.1f} mm/s (max: {stage.x.max_velocity_um_s/1000:.1f} mm/s)")
-        print(f"  Y: {stage.y.velocity_um_s/1000:.1f} mm/s (max: {stage.y.max_velocity_um_s/1000:.1f} mm/s)")
-        print(f"  Z: {z.velocity_um_s/1000:.1f} mm/s (max: {z.max_velocity_um_s/1000:.1f} mm/s)")
+        print(
+            f"  X: {stage.x.velocity_um_s / 1000:.1f} mm/s (max: {stage.x.max_velocity_um_s / 1000:.1f} mm/s)"
+        )
+        print(
+            f"  Y: {stage.y.velocity_um_s / 1000:.1f} mm/s (max: {stage.y.max_velocity_um_s / 1000:.1f} mm/s)"
+        )
+        print(
+            f"  Z: {z.velocity_um_s / 1000:.1f} mm/s (max: {z.max_velocity_um_s / 1000:.1f} mm/s)"
+        )
 
     # Nosepiece/objective
     try:
@@ -218,9 +225,7 @@ def report_status(conn: LeicaConnection, verbose: bool = False) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Microscope stage status and position utility"
-    )
+    parser = argparse.ArgumentParser(description="Microscope stage status and position utility")
     parser.add_argument("--x", type=float, help="Target X position (µm)")
     parser.add_argument("--y", type=float, help="Target Y position (µm)")
     parser.add_argument("--z", type=float, help="Target Z position (µm)")
@@ -229,13 +234,20 @@ def main() -> int:
     parser.add_argument("--dz", type=float, help="Relative Z move (µm)")
     parser.add_argument("--shutter", choices=["open", "close"], help="Open or close shutter")
     parser.add_argument("--lamp", type=int, help="Set lamp intensity")
-    parser.add_argument("--objective-mag", type=str, metavar="MAG",
-                        help="Switch objective by magnification (e.g., 5, 5x, 20, 2.5)")
-    parser.add_argument("--objective-pos", type=int, metavar="POS",
-                        help="Switch objective by turret position (1-6)")
+    parser.add_argument(
+        "--objective-mag",
+        type=str,
+        metavar="MAG",
+        help="Switch objective by magnification (e.g., 5, 5x, 20, 2.5)",
+    )
+    parser.add_argument(
+        "--objective-pos", type=int, metavar="POS", help="Switch objective by turret position (1-6)"
+    )
     parser.add_argument("--z-speed", type=float, metavar="UM_S", help="Set Z velocity (µm/s)")
     parser.add_argument("--park", action="store_true", help="Park microscope in safe idle state")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Show velocity limits and conversion factors")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Show velocity limits and conversion factors"
+    )
     args = parser.parse_args()
 
     # Validate objective args are mutually exclusive

@@ -21,13 +21,13 @@ Usage:
 
 import argparse
 import bisect
-from datetime import datetime
 import json
 import os
 import queue
 import shutil
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 from flakefinder.data_utils import (
@@ -37,8 +37,8 @@ from flakefinder.data_utils import (
 )
 from flakefinder.scan_utils import (
     build_lighting_meta,
-    compute_plane_z,
     compute_planar_scan_plan,
+    compute_plane_z,
     interpolate_position,
 )
 from flakefinder.types import CameraMeta, OpticsMeta
@@ -89,89 +89,138 @@ Examples:
   python scan_chip.py -o scans/chip0_test \\
       --chips-meta scans/chips.json --chip 0 \\
       --plane scans/plane.json --objective-mag 20x --row-limit 3
-"""
+""",
     )
     parser.add_argument("-o", "--output", required=True, help="Output directory")
 
     # Chip and plane
     chip_group = parser.add_argument_group("Chip and focus")
-    chip_group.add_argument("--chips-meta", type=str, required=True,
-                            help="Path to chips JSON from find_chips.py")
-    chip_group.add_argument("--chip", type=int, required=True,
-                            help="Chip index (from chips JSON)")
-    chip_group.add_argument("--plane", type=str, required=True,
-                            help="Path to plane JSON from analyze_focus_map.py")
-    chip_group.add_argument("--padding", type=float, default=0,
-                            help="X padding per row in µm — extends scan start/end beyond hull (default: 0)")
+    chip_group.add_argument(
+        "--chips-meta", type=str, required=True, help="Path to chips JSON from find_chips.py"
+    )
+    chip_group.add_argument("--chip", type=int, required=True, help="Chip index (from chips JSON)")
+    chip_group.add_argument(
+        "--plane", type=str, required=True, help="Path to plane JSON from analyze_focus_map.py"
+    )
+    chip_group.add_argument(
+        "--padding",
+        type=float,
+        default=0,
+        help="X padding per row in µm — extends scan start/end beyond hull (default: 0)",
+    )
 
     # Scan control
     scan_group = parser.add_argument_group("Scan control")
-    scan_group.add_argument("--x-overlap-percent", type=float, default=30,
-                            help="Target X overlap between saved frames, %% (default: 30). "
-                                 "Frames captured before advancing enough are discarded.")
-    scan_group.add_argument("--dry-run", action="store_true",
-                            help="Print scan plan and row summary, then exit (no hardware)")
-    scan_group.add_argument("--row-limit", type=int, default=None,
-                            help="Scan only N rows then stop (for testing)")
-    scan_group.add_argument("--row-settle", type=float, default=0.1,
-                            help="Settle time in seconds after Z pre-position (default: 0.1)")
-    scan_group.add_argument("--z-preposition-mode", choices=["corrected", "raw"],
-                            default="corrected",
-                            help="Z pre-position method: 'corrected' (hysteresis-compensated) "
-                                 "or 'raw' (regular move_to) (default: corrected)")
-    scan_group.add_argument("--z-tracking-mode", choices=["directed", "async"],
-                            default="directed",
-                            help="Z tracking during row: 'directed' (constant velocity via "
-                                 "start_towards_max/min) or 'async' (position move via "
-                                 "move_to_async at set velocity) (default: directed)")
+    scan_group.add_argument(
+        "--x-overlap-percent",
+        type=float,
+        default=30,
+        help="Target X overlap between saved frames, %% (default: 30). "
+        "Frames captured before advancing enough are discarded.",
+    )
+    scan_group.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print scan plan and row summary, then exit (no hardware)",
+    )
+    scan_group.add_argument(
+        "--row-limit", type=int, default=None, help="Scan only N rows then stop (for testing)"
+    )
+    scan_group.add_argument(
+        "--row-settle",
+        type=float,
+        default=0.1,
+        help="Settle time in seconds after Z pre-position (default: 0.1)",
+    )
+    scan_group.add_argument(
+        "--z-preposition-mode",
+        choices=["corrected", "raw"],
+        default="corrected",
+        help="Z pre-position method: 'corrected' (hysteresis-compensated) "
+        "or 'raw' (regular move_to) (default: corrected)",
+    )
+    scan_group.add_argument(
+        "--z-tracking-mode",
+        choices=["directed", "async"],
+        default="directed",
+        help="Z tracking during row: 'directed' (constant velocity via "
+        "start_towards_max/min) or 'async' (position move via "
+        "move_to_async at set velocity) (default: directed)",
+    )
 
     # Optics
     optics_group = parser.add_argument_group("Optics")
-    optics_group.add_argument("--objective-mag", type=str, metavar="MAG",
-                              help="Objective by magnification (e.g., 5, 5x, 20, 2.5) - switches before scan")
-    optics_group.add_argument("--objective-pos", type=int, metavar="POS",
-                              help="Objective by turret position (1-6) - switches before scan")
+    optics_group.add_argument(
+        "--objective-mag",
+        type=str,
+        metavar="MAG",
+        help="Objective by magnification (e.g., 5, 5x, 20, 2.5) - switches before scan",
+    )
+    optics_group.add_argument(
+        "--objective-pos",
+        type=int,
+        metavar="POS",
+        help="Objective by turret position (1-6) - switches before scan",
+    )
 
     # Motion
     motion_group = parser.add_argument_group("Motion")
-    motion_group.add_argument("--speed-mm", type=float, default=5.0,
-                              help="Scan speed in mm/s (default: 5)")
-    motion_group.add_argument("--move-speed-mm", type=float, default=40,
-                              help="Move speed for positioning (default: 40)")
+    motion_group.add_argument(
+        "--speed-mm", type=float, default=5.0, help="Scan speed in mm/s (default: 5)"
+    )
+    motion_group.add_argument(
+        "--move-speed-mm", type=float, default=40, help="Move speed for positioning (default: 40)"
+    )
 
     # Camera
     frame_group = parser.add_argument_group("Camera")
-    frame_group.add_argument("--exposure-ms", type=float, default=0.25,
-                             help="Exposure time in ms (default: 0.25)")
-    frame_group.add_argument("--gain", type=float, default=4.0,
-                             help="Camera gain (default: 4.0)")
-    frame_group.add_argument("--binning", type=int, default=3, choices=[1, 2, 3],
-                             help="Camera binning NxN (default: 3)")
-    frame_group.add_argument("--white-balance", type=str, default="2.51,1.02,1.41",
-                             help="White balance as B,G,R gains")
+    frame_group.add_argument(
+        "--exposure-ms", type=float, default=0.25, help="Exposure time in ms (default: 0.25)"
+    )
+    frame_group.add_argument("--gain", type=float, default=4.0, help="Camera gain (default: 4.0)")
+    frame_group.add_argument(
+        "--binning", type=int, default=3, choices=[1, 2, 3], help="Camera binning NxN (default: 3)"
+    )
+    frame_group.add_argument(
+        "--white-balance", type=str, default="2.51,1.02,1.41", help="White balance as B,G,R gains"
+    )
     frame_group.add_argument("--gamma", type=float, default=1.0, help="Gamma (default: 1.0)")
     frame_group.add_argument("--downsample", type=int, default=1, help="Downsample factor")
-    frame_group.add_argument("--warmup-frames", type=int, default=3,
-                             help="Warmup captures before each row (default: 3)")
-    frame_group.add_argument("--y-overlap-percent", type=float, default=12,
-                             help="Y overlap between rows as %% of frame height (default: 12)")
+    frame_group.add_argument(
+        "--warmup-frames", type=int, default=3, help="Warmup captures before each row (default: 3)"
+    )
+    frame_group.add_argument(
+        "--y-overlap-percent",
+        type=float,
+        default=12,
+        help="Y overlap between rows as %% of frame height (default: 12)",
+    )
 
     # Polling
     poll_group = parser.add_argument_group("Polling")
-    poll_group.add_argument("--persistent-polling", action="store_true",
-                            help="Keep X/Z position polling threads running across all rows "
-                                 "instead of per-row start/stop (gives continuous inter-row data)")
-    poll_group.add_argument("--debug-polling", action="store_true",
-                            help="Dump full X/Z position timeseries to polling_debug.json")
+    poll_group.add_argument(
+        "--persistent-polling",
+        action="store_true",
+        help="Keep X/Z position polling threads running across all rows "
+        "instead of per-row start/stop (gives continuous inter-row data)",
+    )
+    poll_group.add_argument(
+        "--debug-polling",
+        action="store_true",
+        help="Dump full X/Z position timeseries to polling_debug.json",
+    )
 
     # Safety
     safety_group = parser.add_argument_group("Safety")
-    safety_group.add_argument("--z-max", type=float, default=26000.0,
-                              help="Hard Z limit in µm (default: 26000)")
+    safety_group.add_argument(
+        "--z-max", type=float, default=26000.0, help="Hard Z limit in µm (default: 26000)"
+    )
 
     # Output
     output_group = parser.add_argument_group("Output")
-    output_group.add_argument("--clean", action="store_true", help="Wipe output directory if exists")
+    output_group.add_argument(
+        "--clean", action="store_true", help="Wipe output directory if exists"
+    )
     output_group.add_argument("--write-threads", type=int, default=2, help="Image writer threads")
     output_group.add_argument("--compress", action="store_true", help="Create .zip of output")
 
@@ -289,12 +338,14 @@ Examples:
     print("Chip Scan with Focus Plane")
     print("=" * 60)
     print(f"Chip: #{args.chip}")
-    print(f"  BBox: X=[{bbox['x_min']:.0f}, {bbox['x_max']:.0f}], Y=[{bbox['y_min']:.0f}, {bbox['y_max']:.0f}] µm")
+    print(
+        f"  BBox: X=[{bbox['x_min']:.0f}, {bbox['x_max']:.0f}], Y=[{bbox['y_min']:.0f}, {bbox['y_max']:.0f}] µm"
+    )
     print(f"  Centroid: ({centroid[0]:.0f}, {centroid[1]:.0f}) µm")
     print(f"  Hull vertices: {len(polygon)}")
-    print(f"  Area: {chip_geo.area_um2/1e6:.1f} mm²")
+    print(f"  Area: {chip_geo.area_um2 / 1e6:.1f} mm²")
     print()
-    print(f"Focus plane: Z = {plane_a*1000:.4f}*X_mm + {plane_b*1000:.4f}*Y_mm + {plane_c:.2f}")
+    print(f"Focus plane: Z = {plane_a * 1000:.4f}*X_mm + {plane_b * 1000:.4f}*Y_mm + {plane_c:.2f}")
     print(f"  Expected Z range: {z_min_expected:.0f} - {z_max_expected:.0f} µm")
     print(f"  Z limit: {args.z_max:.0f} µm")
     print()
@@ -308,8 +359,11 @@ Examples:
     # ---- Compute row plan ----
     try:
         plan = compute_planar_scan_plan(
-            bbox, polygon,
-            plane_a=plane_a, plane_b=plane_b, plane_c=plane_c,
+            bbox,
+            polygon,
+            plane_a=plane_a,
+            plane_b=plane_b,
+            plane_c=plane_c,
             frame_width_um=plan_frame_width_um,
             frame_height_um=plan_frame_height_um,
             x_overlap_pct=args.x_overlap_percent,
@@ -329,7 +383,9 @@ Examples:
     est_total_time_s = total_distance_mm / args.speed_mm + len(plan.rows) * 0.5
 
     print(f"Frame FOV: {plan.frame_width_um:.1f} x {plan.frame_height_um:.1f} µm")
-    print(f"Frame skip: target advance {plan.target_advance_um:.0f} µm ({args.x_overlap_percent:.0f}% X overlap)")
+    print(
+        f"Frame skip: target advance {plan.target_advance_um:.0f} µm ({args.x_overlap_percent:.0f}% X overlap)"
+    )
     print()
     print(f"Row plan: {len(plan.rows)} rows")
     print(f"  Y step: {plan.y_step_um:.1f} µm ({args.y_overlap_percent:.0f}% overlap)")
@@ -347,13 +403,15 @@ Examples:
 
     # ---- Connect to hardware ----
     from PIL import Image as PILImage
-    from flakefinder.leica import LeicaConnection, Stage, ZDrive, Lamp, Shutter, Nosepiece
+
+    from flakefinder.leica import Lamp, LeicaConnection, Nosepiece, Shutter, Stage, ZDrive
     from flakefinder.leica.camera import Camera
-    from flakefinder.leica.enums import UCAPI_IID
     from flakefinder.leica.core import get_interface_required
+    from flakefinder.leica.enums import UCAPI_IID
 
     with LeicaConnection() as conn:
         from LeicaMicrosystems.HardwareModel import Extensions
+
         Extensions.ExUCAPI.Register()
 
         # Set up hardware
@@ -363,9 +421,8 @@ Examples:
         # Fast position readers
         x_bcv = stage.x.bcv
         x_converter = stage.x.converter
-        z_bcv = z_drive.bcv
         z_converter = z_drive.converter
-        z_bcv_hysteresis = getattr(z_drive, 'bcv_hysteresis', None) or z_drive.bcv
+        z_bcv_hysteresis = getattr(z_drive, "bcv_hysteresis", None) or z_drive.bcv
 
         # Nosepiece
         nosepiece = None
@@ -472,15 +529,21 @@ Examples:
 
         # Assert camera dimensions match the plan
         if abs(frame_width_um - plan.frame_width_um) > 1.0:
-            print(f"ABORT: Camera frame width {frame_width_um:.1f} != plan {plan.frame_width_um:.1f} µm")
+            print(
+                f"ABORT: Camera frame width {frame_width_um:.1f} != plan {plan.frame_width_um:.1f} µm"
+            )
             return 1
         if abs(frame_height_um - plan.frame_height_um) > 1.0:
-            print(f"ABORT: Camera frame height {frame_height_um:.1f} != plan {plan.frame_height_um:.1f} µm")
+            print(
+                f"ABORT: Camera frame height {frame_height_um:.1f} != plan {plan.frame_height_um:.1f} µm"
+            )
             return 1
 
-        exp_str = f"{actual_exposure*1000:.2f}ms" if actual_exposure else "?"
+        exp_str = f"{actual_exposure * 1000:.2f}ms" if actual_exposure else "?"
         print(f"Camera: {camera.name}")
-        print(f"  Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}, Gain: {args.gain}")
+        print(
+            f"  Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}, Gain: {args.gain}"
+        )
         if frame_width_px and frame_height_px:
             print(f"  Frame: {frame_width_px}x{frame_height_px} px")
         if frame_width_um and frame_height_um:
@@ -508,7 +571,17 @@ Examples:
                 if item is None:
                     break
 
-                frame_idx, row_idx, t_start, t_end, image, row_y, row_x_samples, row_z_samples, t0 = item
+                (
+                    frame_idx,
+                    row_idx,
+                    t_start,
+                    t_end,
+                    image,
+                    row_y,
+                    row_x_samples,
+                    row_z_samples,
+                    t0,
+                ) = item
 
                 arr = Camera._image_to_numpy(image)
                 image.Dispose()
@@ -527,25 +600,37 @@ Examples:
                 z_interp = interpolate_z_position(t_start, row_z_samples)
 
                 # Compute ideal Z and error
-                z_ideal = compute_plane_z(plan.plane_a, plan.plane_b, plan.plane_c, x_start_interp, row_y) if x_start_interp else None
-                z_error = (z_interp - z_ideal) if (z_interp is not None and z_ideal is not None) else None
+                z_ideal = (
+                    compute_plane_z(plan.plane_a, plan.plane_b, plan.plane_c, x_start_interp, row_y)
+                    if x_start_interp
+                    else None
+                )
+                z_error = (
+                    (z_interp - z_ideal) if (z_interp is not None and z_ideal is not None) else None
+                )
 
                 dt = t_end - t_start
-                x_vel = (x_end_interp - x_start_interp) / dt if dt > 0 and x_start_interp and x_end_interp else 0
+                x_vel = (
+                    (x_end_interp - x_start_interp) / dt
+                    if dt > 0 and x_start_interp and x_end_interp
+                    else 0
+                )
 
-                saved_frames_meta.append({
-                    "n": frame_idx,
-                    "row": row_idx,
-                    "t_start": t_start - t0,
-                    "t_end": t_end - t0,
-                    "x_start": x_start_interp,
-                    "x_end": x_end_interp,
-                    "x_vel": x_vel,
-                    "y_um": row_y,
-                    "z_actual": z_interp,
-                    "z_ideal": z_ideal,
-                    "z_error": z_error,
-                })
+                saved_frames_meta.append(
+                    {
+                        "n": frame_idx,
+                        "row": row_idx,
+                        "t_start": t_start - t0,
+                        "t_end": t_end - t0,
+                        "x_start": x_start_interp,
+                        "x_end": x_end_interp,
+                        "x_vel": x_vel,
+                        "y_um": row_y,
+                        "z_actual": z_interp,
+                        "z_ideal": z_ideal,
+                        "z_error": z_error,
+                    }
+                )
 
                 save_queue.task_done()
 
@@ -613,20 +698,26 @@ Examples:
                     dir_str = "-X"
 
                 # Compute Z for start and end of this row
-                z_start = compute_plane_z(plan.plane_a, plan.plane_b, plan.plane_c, x_start_pos, row_y)
+                z_start = compute_plane_z(
+                    plan.plane_a, plan.plane_b, plan.plane_c, x_start_pos, row_y
+                )
                 z_end = compute_plane_z(plan.plane_a, plan.plane_b, plan.plane_c, x_end_pos, row_y)
 
                 # Z velocity during this row: dZ/dt = (plane_a * direction) * x_speed
                 z_vel_um_s = plan.plane_a * direction * x_speed_um_s
 
                 row_width_mm = (row_x_max - row_x_min) / 1000
-                print(f"Row {row_idx}/{len(plan.rows)-1}: Y={row_y:.0f}µm, {dir_str}, "
-                      f"X=[{row_x_min:.0f},{row_x_max:.0f}] ({row_width_mm:.1f}mm), "
-                      f"Z={z_start:.0f}->{z_end:.0f}")
+                print(
+                    f"Row {row_idx}/{len(plan.rows) - 1}: Y={row_y:.0f}µm, {dir_str}, "
+                    f"X=[{row_x_min:.0f},{row_x_max:.0f}] ({row_width_mm:.1f}mm), "
+                    f"Z={z_start:.0f}->{z_end:.0f}"
+                )
 
                 # Runtime Z safety check
                 if max(z_start, z_end) > args.z_max:
-                    print(f"  SKIP: Z would exceed limit ({max(z_start, z_end):.0f} > {args.z_max:.0f})")
+                    print(
+                        f"  SKIP: Z would exceed limit ({max(z_start, z_end):.0f} > {args.z_max:.0f})"
+                    )
                     continue
 
                 # Move to row start position (instrumented)
@@ -649,7 +740,6 @@ Examples:
                     x_samples = scan_x_samples
                     z_samples = scan_z_samples
                     row_x_start_idx = len(scan_x_samples)
-                    row_z_start_idx = len(scan_z_samples)
                 else:
                     x_samples = []
                     z_samples = []
@@ -685,7 +775,6 @@ Examples:
                 t_s6 = time.perf_counter()
 
                 row_start = time.perf_counter()
-                row_frame_start = global_frame_idx
                 row_frame_count = 0
                 row_skip_count = 0
                 last_saved_x = None
@@ -718,14 +807,27 @@ Examples:
                     if current_image[0] is not None:
                         # Check if we've advanced enough to save this frame
                         x_now = x_samples[-1][2] if x_samples else None
-                        if last_saved_x is not None and x_now is not None and abs(x_now - last_saved_x) < plan.target_advance_um:
+                        if (
+                            last_saved_x is not None
+                            and x_now is not None
+                            and abs(x_now - last_saved_x) < plan.target_advance_um
+                        ):
                             current_image[0].Dispose()
                             row_skip_count += 1
                         else:
-                            save_queue.put((
-                                global_frame_idx, row_idx, t_start, t_end, current_image[0],
-                                row_y, list(x_samples), list(z_samples), total_scan_start
-                            ))
+                            save_queue.put(
+                                (
+                                    global_frame_idx,
+                                    row_idx,
+                                    t_start,
+                                    t_end,
+                                    current_image[0],
+                                    row_y,
+                                    list(x_samples),
+                                    list(z_samples),
+                                    total_scan_start,
+                                )
+                            )
                             if x_now is not None:
                                 last_saved_x = x_now
                             global_frame_idx += 1
@@ -751,26 +853,36 @@ Examples:
                 # Filter position samples to row scan period
                 if args.persistent_polling:
                     row_x_end_idx = len(scan_x_samples)
-                    row_z_end_idx = len(scan_z_samples)
-                    row_x_samples = [(tb, ta, x) for tb, ta, x in scan_x_samples[row_x_start_idx:row_x_end_idx]
-                                     if row_start <= tb <= row_end]
+                    row_x_samples = [
+                        (tb, ta, x)
+                        for tb, ta, x in scan_x_samples[row_x_start_idx:row_x_end_idx]
+                        if row_start <= tb <= row_end
+                    ]
                 else:
-                    row_x_samples = [(tb, ta, x) for tb, ta, x in x_samples if row_start <= tb <= row_end]
+                    row_x_samples = [
+                        (tb, ta, x) for tb, ta, x in x_samples if row_start <= tb <= row_end
+                    ]
 
-                print(f"  {row_frame_count} saved, {row_skip_count} skipped, {len(row_x_samples)} pos, {row_duration:.2f}s")
-                print(f"  Startup: Y={1000*(t_s1-t_s0):.0f}ms X={1000*(t_s2-t_s1):.0f}ms Z={1000*(t_s3-t_s2):.0f}ms "
-                      f"settle={1000*(t_s4-t_s3):.0f}ms poll={1000*(t_s5-t_s4):.0f}ms "
-                      f"warmup={1000*(t_s6-t_s5):.0f}ms Zvel={1000*(t_s7-t_s6):.0f}ms "
-                      f"Xstart={1000*(t_s8-t_s7):.0f}ms | Zvel->X gap={1000*(t_s8-t_s7):.0f}ms")
+                print(
+                    f"  {row_frame_count} saved, {row_skip_count} skipped, {len(row_x_samples)} pos, {row_duration:.2f}s"  # noqa: E501
+                )
+                print(
+                    f"  Startup: Y={1000 * (t_s1 - t_s0):.0f}ms X={1000 * (t_s2 - t_s1):.0f}ms Z={1000 * (t_s3 - t_s2):.0f}ms "  # noqa: E501
+                    f"settle={1000 * (t_s4 - t_s3):.0f}ms poll={1000 * (t_s5 - t_s4):.0f}ms "
+                    f"warmup={1000 * (t_s6 - t_s5):.0f}ms Zvel={1000 * (t_s7 - t_s6):.0f}ms "
+                    f"Xstart={1000 * (t_s8 - t_s7):.0f}ms | Zvel->X gap={1000 * (t_s8 - t_s7):.0f}ms"
+                )
 
                 # Add position samples to global list
                 for tb, ta, x_um in row_x_samples:
-                    all_position_samples.append({
-                        "t_before": tb - total_scan_start,
-                        "t_after": ta - total_scan_start,
-                        "x_um": x_um,
-                        "row": row_idx,
-                    })
+                    all_position_samples.append(
+                        {
+                            "t_before": tb - total_scan_start,
+                            "t_after": ta - total_scan_start,
+                            "x_um": x_um,
+                            "row": row_idx,
+                        }
+                    )
 
                 # Restore move speed for positioning to next row
                 stage.x.set_velocity_um_s(args.move_speed_mm * 1000)
@@ -781,7 +893,9 @@ Examples:
                 scan_stop_polling.set()
                 scan_x_thread.join(timeout=1.0)
                 scan_z_thread.join(timeout=1.0)
-                print(f"Persistent polling: {len(scan_x_samples)} X samples, {len(scan_z_samples)} Z samples total")
+                print(
+                    f"Persistent polling: {len(scan_x_samples)} X samples, {len(scan_z_samples)} Z samples total"
+                )
 
             # Stop any motion
             z_drive.halt()
@@ -791,7 +905,7 @@ Examples:
         total_duration = total_scan_end - total_scan_start
 
         # Return to initial position
-        print(f"\nReturning to initial position...")
+        print("\nReturning to initial position...")
         stage.x.set_velocity_um_s(args.move_speed_mm * 1000)
         stage.y.set_velocity_um_s(args.move_speed_mm * 1000)
         hx = stage.x.move_to_async(initial_x)
@@ -817,23 +931,27 @@ Examples:
                     for tb, ta, x in scan_x_samples
                 ]
                 debug_data["z_samples"] = [
-                    {"t": t - total_scan_start, "z_um": z}
-                    for t, z in scan_z_samples
+                    {"t": t - total_scan_start, "z_um": z} for t, z in scan_z_samples
                 ]
             else:
                 # In per-row mode, all_position_samples has the X data already
                 debug_data["x_samples"] = all_position_samples
                 debug_data["z_samples"] = []  # Not available scan-wide in per-row mode
-                debug_data["note"] = "Per-row mode: Z samples not available scan-wide. Use --persistent-polling for full Z timeseries."
+                debug_data["note"] = (
+                    "Per-row mode: Z samples not available scan-wide. Use --persistent-polling for full Z timeseries."
+                )
             debug_path = os.path.join(args.output, "polling_debug.json")
             with open(debug_path, "w") as f:
                 json.dump(debug_data, f)
-            print(f"Debug polling: saved to {debug_path} ({len(debug_data['x_samples'])} X, {len(debug_data['z_samples'])} Z samples)")
+            print(
+                f"Debug polling: saved to {debug_path} ({len(debug_data['x_samples'])} X, {len(debug_data['z_samples'])} Z samples)"  # noqa: E501
+            )
 
         # Z tracking error stats
         z_errors = [f["z_error"] for f in saved_frames_meta if f["z_error"] is not None]
         if z_errors:
             import numpy as np
+
             z_error_arr = np.array(z_errors)
             z_error_mean = float(np.mean(z_error_arr))
             z_error_std = float(np.std(z_error_arr))
@@ -851,17 +969,19 @@ Examples:
             frame_end = (row_frames[-1]["n"] + 1) if row_frames else global_frame_idx
             row_pos_samples = [s for s in all_position_samples if s["row"] == row_idx]
 
-            rows_meta.append({
-                "row_idx": row_idx,
-                "y_um": row_y,
-                "x_min_um": row_x_min,
-                "x_max_um": row_x_max,
-                "direction": direction,
-                "frame_start": frame_start,
-                "frame_end": frame_end,
-                "duration_s": None,  # Not tracked per-row precisely
-                "position_samples": len(row_pos_samples),
-            })
+            rows_meta.append(
+                {
+                    "row_idx": row_idx,
+                    "y_um": row_y,
+                    "x_min_um": row_x_min,
+                    "x_max_um": row_x_max,
+                    "direction": direction,
+                    "frame_start": frame_start,
+                    "frame_end": frame_end,
+                    "duration_s": None,  # Not tracked per-row precisely
+                    "position_samples": len(row_pos_samples),
+                }
+            )
 
         # Build metadata (scan_area_v1.py compatible for stitching)
         meta = {
@@ -895,7 +1015,9 @@ Examples:
                 "a": plan.plane_a,
                 "b": plan.plane_b,
                 "c": plan.plane_c,
-                "equation": plane.get("equation", f"Z = {plan.plane_a}*X + {plan.plane_b}*Y + {plan.plane_c}"),
+                "equation": plane.get(
+                    "equation", f"Z = {plan.plane_a}*X + {plan.plane_b}*Y + {plan.plane_c}"
+                ),
                 "z_range_um": [plan.validated_z_min_um, plan.validated_z_max_um],
                 "tracking_error": {
                     "mean_um": z_error_mean,
@@ -905,18 +1027,29 @@ Examples:
                 },
             },
             "camera": CameraMeta(
-                name=camera.name, exposure_s=actual_exposure, gain=args.gain,
-                binning=actual_binning, readout_time_s=readout_time,
-                frame_width_px=frame_width_px, frame_height_px=frame_height_px,
-                pixel_size_x_um=pixel_size_x_um, pixel_size_y_um=pixel_size_y_um,
-                sensor_width_px=sensor_width_px, sensor_height_px=sensor_height_px,
-                physical_pixel_x_um=physical_pixel_x_um, physical_pixel_y_um=physical_pixel_y_um,
-                white_balance_bgr=[wb_blue, wb_green, wb_red], gamma=args.gamma,
+                name=camera.name,
+                exposure_s=actual_exposure,
+                gain=args.gain,
+                binning=actual_binning,
+                readout_time_s=readout_time,
+                frame_width_px=frame_width_px,
+                frame_height_px=frame_height_px,
+                pixel_size_x_um=pixel_size_x_um,
+                pixel_size_y_um=pixel_size_y_um,
+                sensor_width_px=sensor_width_px,
+                sensor_height_px=sensor_height_px,
+                physical_pixel_x_um=physical_pixel_x_um,
+                physical_pixel_y_um=physical_pixel_y_um,
+                white_balance_bgr=[wb_blue, wb_green, wb_red],
+                gamma=args.gamma,
             ),
             "optics": OpticsMeta(
-                objective_mag=objective_mag, objective_idx=objective_idx,
-                sample_pixel_x_um=sample_pixel_x_um, sample_pixel_y_um=sample_pixel_y_um,
-                frame_width_um=frame_width_um, frame_height_um=frame_height_um,
+                objective_mag=objective_mag,
+                objective_idx=objective_idx,
+                sample_pixel_x_um=sample_pixel_x_um,
+                sample_pixel_y_um=sample_pixel_y_um,
+                frame_width_um=frame_width_um,
+                frame_height_um=frame_height_um,
             ),
             "lighting": build_lighting_meta(lamp=lamp, shutter=shutter),
             "rows": rows_meta,
@@ -933,7 +1066,7 @@ Examples:
         # Compress if requested
         if args.compress:
             print(f"Creating {args.output}.zip...")
-            shutil.make_archive(args.output, 'zip', args.output)
+            shutil.make_archive(args.output, "zip", args.output)
             print(f"Created {args.output}.zip")
 
         # Summary (printed before cleanup to survive Dispose() crashes)
@@ -943,13 +1076,21 @@ Examples:
         print(f"  Total time: {total_duration:.1f}s")
         print(f"  Rows: {len(plan.rows)}")
         print(f"  Total frames: {global_frame_idx}")
-        print(f"  Avg FPS: {global_frame_idx / total_duration:.1f}" if total_duration > 0 else "  Avg FPS: N/A")
+        print(
+            f"  Avg FPS: {global_frame_idx / total_duration:.1f}"
+            if total_duration > 0
+            else "  Avg FPS: N/A"
+        )
         if z_error_max is not None:
             dof_20x = 1.7
-            print(f"  Z tracking error: mean={z_error_mean:+.2f}, std={z_error_std:.2f}, "
-                  f"max={z_error_max:.2f}, p95={z_error_p95:.2f} µm")
-            print(f"  {'PASS' if z_error_max < dof_20x else 'NOTE'}: max error "
-                  f"{'within' if z_error_max < dof_20x else 'exceeds'} 20x DOF ({dof_20x} µm)")
+            print(
+                f"  Z tracking error: mean={z_error_mean:+.2f}, std={z_error_std:.2f}, "
+                f"max={z_error_max:.2f}, p95={z_error_p95:.2f} µm"
+            )
+            print(
+                f"  {'PASS' if z_error_max < dof_20x else 'NOTE'}: max error "
+                f"{'within' if z_error_max < dof_20x else 'exceeds'} 20x DOF ({dof_20x} µm)"
+            )
         print(f"  Output: {args.output}/")
         print()
         print("Done.")

@@ -11,12 +11,15 @@ output. The core autofocus logic is in flakefinder.leica.autofocus.
 import argparse
 import json
 import os
-import time
 
 from PIL import Image as PILImage
 
-from flakefinder.leica.autofocus import sharpness, continuous_autofocus, AutofocusResult, ALL_SHARPNESS_METRICS
 from flakefinder.autofocus_util import save_debug_frames
+from flakefinder.leica.autofocus import (
+    ALL_SHARPNESS_METRICS,
+    continuous_autofocus,
+    sharpness,
+)
 
 
 def main():
@@ -24,32 +27,89 @@ def main():
         description="Continuous Z-scan autofocus demo",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--x", type=float, default=None, help="Stage X position (um), default: current")
-    parser.add_argument("--y", type=float, default=None, help="Stage Y position (um), default: current")
-    parser.add_argument("--z", type=float, default=None, help="Initial Z position (um), default: current")
-    parser.add_argument("--range", type=float, default=None, help="Z scan range (um), default: auto from objective")
-    parser.add_argument("--z-speed", type=float, default=None, help="Z axis speed (um/s), default: use current. Slower = more frames.")
-    parser.add_argument("--output", "-o", type=str, default=None, help="Output directory for photos (optional)")
-    parser.add_argument("--debug-dir", type=str, default=None, help="Save all scan frames to this directory")
-    parser.add_argument("--fine", action="store_true", help="Two-pass: coarse scan then fine 50um scan")
-    parser.add_argument("--fine-speed-factor", type=float, default=0.25, help="Speed multiplier for fine pass (default: 0.25 = 1/4 speed)")
-    parser.add_argument("--super-fine", action="store_true", help="Third pass: 10um range at 20um/s for maximum precision")
-    parser.add_argument("--sharpness-method", choices=list(ALL_SHARPNESS_METRICS.keys()), default="tenengrad", help="Sharpness metric for autofocus")
-    parser.add_argument("--settle-time", type=float, default=0.2, help="Settle time in seconds after final Z move (default: 0.2)")
-    parser.add_argument("--dry-run", action="store_true", help="Print what would be done without moving")
-    parser.add_argument("--all-metrics", action="store_true", help="Compute all 5 sharpness metrics per frame (diagnostic)")
-    parser.add_argument("--clean", action="store_true", help="Remove existing output/debug directories before running")
-    parser.add_argument("--exposure-ms", type=float, default=None,
-                        help="Exposure time in ms (default: 1.0)")
-    parser.add_argument("--gain", type=float, default=None,
-                        help="Camera gain (default: unchanged)")
-    parser.add_argument("--white-balance", type=str, default=None,
-                        help="White balance as B,G,R gains (e.g., 2.51,1.02,1.41)")
-    parser.add_argument("--gamma", type=float, default=None,
-                        help="Gamma correction (default: unchanged)")
-    parser.add_argument("--quiet", "-q", action="store_true",
-                        help="Single-line output: 'AF: Z=... (adj ...), sharpness=sel/after, Ns, N frames' "
-                             "or 'AF: stayed_at_initial, DR=..., scan_best_z=..., Ns, N frames'")
+    parser.add_argument(
+        "--x", type=float, default=None, help="Stage X position (um), default: current"
+    )
+    parser.add_argument(
+        "--y", type=float, default=None, help="Stage Y position (um), default: current"
+    )
+    parser.add_argument(
+        "--z", type=float, default=None, help="Initial Z position (um), default: current"
+    )
+    parser.add_argument(
+        "--range", type=float, default=None, help="Z scan range (um), default: auto from objective"
+    )
+    parser.add_argument(
+        "--z-speed",
+        type=float,
+        default=None,
+        help="Z axis speed (um/s), default: use current. Slower = more frames.",
+    )
+    parser.add_argument(
+        "--output", "-o", type=str, default=None, help="Output directory for photos (optional)"
+    )
+    parser.add_argument(
+        "--debug-dir", type=str, default=None, help="Save all scan frames to this directory"
+    )
+    parser.add_argument(
+        "--fine", action="store_true", help="Two-pass: coarse scan then fine 50um scan"
+    )
+    parser.add_argument(
+        "--fine-speed-factor",
+        type=float,
+        default=0.25,
+        help="Speed multiplier for fine pass (default: 0.25 = 1/4 speed)",
+    )
+    parser.add_argument(
+        "--super-fine",
+        action="store_true",
+        help="Third pass: 10um range at 20um/s for maximum precision",
+    )
+    parser.add_argument(
+        "--sharpness-method",
+        choices=list(ALL_SHARPNESS_METRICS.keys()),
+        default="tenengrad",
+        help="Sharpness metric for autofocus",
+    )
+    parser.add_argument(
+        "--settle-time",
+        type=float,
+        default=0.2,
+        help="Settle time in seconds after final Z move (default: 0.2)",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print what would be done without moving"
+    )
+    parser.add_argument(
+        "--all-metrics",
+        action="store_true",
+        help="Compute all 5 sharpness metrics per frame (diagnostic)",
+    )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Remove existing output/debug directories before running",
+    )
+    parser.add_argument(
+        "--exposure-ms", type=float, default=None, help="Exposure time in ms (default: 1.0)"
+    )
+    parser.add_argument("--gain", type=float, default=None, help="Camera gain (default: unchanged)")
+    parser.add_argument(
+        "--white-balance",
+        type=str,
+        default=None,
+        help="White balance as B,G,R gains (e.g., 2.51,1.02,1.41)",
+    )
+    parser.add_argument(
+        "--gamma", type=float, default=None, help="Gamma correction (default: unchanged)"
+    )
+    parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Single-line output: 'AF: Z=... (adj ...), sharpness=sel/after, Ns, N frames' "
+        "or 'AF: stayed_at_initial, DR=..., scan_best_z=..., Ns, N frames'",
+    )
     args = parser.parse_args()
 
     def vprint(*a, **kw):
@@ -80,14 +140,14 @@ def main():
         print("[DRY RUN] Would perform:")
         print(f"  1. Move stage to X={args.x:.1f}, Y={args.y:.1f}")
         print(f"  2. Move Z to {args.z:.1f} um")
-        print(f"  3. Capture 'before' photo")
+        print("  3. Capture 'before' photo")
         print(f"  4. Scan Z from {z_start:.1f} to {z_end:.1f} um")
-        print(f"     - Capture frames continuously")
-        print(f"     - Poll Z position at ~64 Hz")
-        print(f"     - Compute Sobel sharpness for each frame")
-        print(f"  5. Find Z with maximum sharpness")
-        print(f"  6. Move to best Z")
-        print(f"  7. Capture 'after' photo")
+        print("     - Capture frames continuously")
+        print("     - Poll Z position at ~64 Hz")
+        print("     - Compute Sobel sharpness for each frame")
+        print("  5. Find Z with maximum sharpness")
+        print("  6. Move to best Z")
+        print("  7. Capture 'after' photo")
         if args.output:
             print(f"  8. Save summary to {args.output}/")
         return 0
@@ -95,6 +155,7 @@ def main():
     # Clean existing directories if requested
     if args.clean:
         import shutil
+
         if args.output and os.path.exists(args.output):
             shutil.rmtree(args.output)
             print(f"Removed existing: {args.output}")
@@ -111,13 +172,14 @@ def main():
         return 1
 
     # Import hardware libraries
-    from flakefinder.leica import LeicaConnection, Stage, Lamp, Shutter, ZDrive
+    from flakefinder.leica import Lamp, LeicaConnection, Shutter, Stage, ZDrive
     from flakefinder.leica.camera import Camera
-    from flakefinder.leica.enums import UCAPI_IID
     from flakefinder.leica.core import get_interface_required
+    from flakefinder.leica.enums import UCAPI_IID
 
     with LeicaConnection() as conn:
         from LeicaMicrosystems.HardwareModel import Extensions
+
         Extensions.ExUCAPI.Register()
 
         # Set up stage (X, Y) and Z
@@ -128,7 +190,9 @@ def main():
         current_x, current_y = stage.position_um
         current_z = z_drive.position_um
 
-        vprint(f"Current position: X={current_x:.1f} um, Y={current_y:.1f} um, Z={current_z:.1f} um")
+        vprint(
+            f"Current position: X={current_x:.1f} um, Y={current_y:.1f} um, Z={current_z:.1f} um"
+        )
         vprint()
 
         # Use current positions as defaults
@@ -138,7 +202,11 @@ def main():
 
         vprint(f"Target position: X={target_x:.1f} um, Y={target_y:.1f} um")
         vprint(f"Initial Z: {target_z:.1f} um")
-        vprint(f"Scan range: {args.range:.1f} um" if args.range else "Scan range: auto (from objective)")
+        vprint(
+            f"Scan range: {args.range:.1f} um"
+            if args.range
+            else "Scan range: auto (from objective)"
+        )
         if args.output:
             vprint(f"Output: {args.output}/")
         vprint()
@@ -173,7 +241,7 @@ def main():
 
         # Configure camera for fast capture
         camera.trigger_mode = 0  # CONTINUOUS
-        camera.binning = 2       # 3x3 binning for speed
+        camera.binning = 2  # 3x3 binning for speed
         if args.exposure_ms is not None:
             camera.exposure_time = args.exposure_ms / 1000.0
         else:
@@ -186,7 +254,11 @@ def main():
                 print("Error: --white-balance must be 3 comma-separated values (B,G,R)")
                 return 1
             try:
-                wb_blue, wb_green, wb_red = float(wb_parts[0]), float(wb_parts[1]), float(wb_parts[2])
+                wb_blue, wb_green, wb_red = (
+                    float(wb_parts[0]),
+                    float(wb_parts[1]),
+                    float(wb_parts[2]),
+                )
             except ValueError:
                 print("Error: --white-balance values must be numbers")
                 return 1
@@ -262,7 +334,11 @@ def main():
         vprint()
 
         # Sharpness stats (combine coarse + fine + super_fine)
-        all_sharpness = af_result.sharpness_curve + af_result.fine_sharpness_curve + af_result.super_fine_sharpness_curve
+        all_sharpness = (
+            af_result.sharpness_curve
+            + af_result.fine_sharpness_curve
+            + af_result.super_fine_sharpness_curve
+        )
         sharpness_values = [r["sharpness"] for r in all_sharpness]
         min_sharpness = min(sharpness_values) if sharpness_values else 0
         max_sharpness = max(sharpness_values) if sharpness_values else 0
@@ -273,8 +349,10 @@ def main():
         vprint(f"  Selected Z: {af_result.selected_z_um:.2f} um")
         vprint(f"  Selected sharpness: {af_result.selected_sharpness:.2f}")
         if af_result.stayed_at_initial:
-            vprint(f"  ** Stayed at initial (scan found nothing better) **")
-            vprint(f"     Scan best: Z={af_result.scan_best_z_um:.2f}, sharpness={af_result.scan_best_sharpness:.2f}")
+            vprint("  ** Stayed at initial (scan found nothing better) **")
+            vprint(
+                f"     Scan best: Z={af_result.scan_best_z_um:.2f}, sharpness={af_result.scan_best_sharpness:.2f}"
+            )
             vprint(f"     Dynamic range: {af_result.dynamic_range:.4f}")
 
         # Find best frame for saving — check coarse and fine separately
@@ -376,21 +454,29 @@ def main():
             # Single-line output for programmatic use
             z_adj = af_result.selected_z_um - target_z
             if af_result.stayed_at_initial:
-                print(f"AF: stayed_at_initial, DR={af_result.dynamic_range:.3f}, "
-                      f"scan_best_z={af_result.scan_best_z_um:.1f}, "
-                      f"{af_result.scan_duration_s:.1f}s, {af_result.frame_count} frames")
+                print(
+                    f"AF: stayed_at_initial, DR={af_result.dynamic_range:.3f}, "
+                    f"scan_best_z={af_result.scan_best_z_um:.1f}, "
+                    f"{af_result.scan_duration_s:.1f}s, {af_result.frame_count} frames"
+                )
             else:
-                print(f"AF: Z={af_result.selected_z_um:.1f} (adj {z_adj:+.1f}), "
-                      f"sharpness={af_result.selected_sharpness:.1f}/{after_sharpness:.1f}, "
-                      f"{af_result.scan_duration_s:.1f}s, {af_result.frame_count} frames")
+                print(
+                    f"AF: Z={af_result.selected_z_um:.1f} (adj {z_adj:+.1f}), "
+                    f"sharpness={af_result.selected_sharpness:.1f}/{after_sharpness:.1f}, "
+                    f"{af_result.scan_duration_s:.1f}s, {af_result.frame_count} frames"
+                )
         else:
             vprint()
             vprint("=" * 50)
             vprint("AUTOFOCUS SUMMARY")
             vprint("=" * 50)
             vprint(f"Initial Z:    {target_z:.2f} um (sharpness: {before_sharpness:.2f})")
-            vprint(f"Selected Z:   {af_result.selected_z_um:.2f} um (sharpness: {af_result.selected_sharpness:.2f})")
-            vprint(f"After Z:      {af_result.selected_z_um:.2f} um (sharpness: {after_sharpness:.2f})")
+            vprint(
+                f"Selected Z:   {af_result.selected_z_um:.2f} um (sharpness: {af_result.selected_sharpness:.2f})"
+            )
+            vprint(
+                f"After Z:      {af_result.selected_z_um:.2f} um (sharpness: {after_sharpness:.2f})"
+            )
             vprint(f"Z adjustment: {af_result.selected_z_um - target_z:+.2f} um")
             if before_sharpness > 0:
                 improvement = after_sharpness - before_sharpness

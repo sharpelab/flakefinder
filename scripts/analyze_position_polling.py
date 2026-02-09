@@ -10,7 +10,6 @@ Loads JSON output from test_position_polling.py and analyzes:
 
 import argparse
 import json
-from pathlib import Path
 import statistics
 
 
@@ -28,8 +27,8 @@ def main():
     duration = config["duration_actual_s"]
     is_move_test = config.get("move", False)
 
-    print(f"Position Polling Analysis")
-    print(f"=" * 60)
+    print("Position Polling Analysis")
+    print("=" * 60)
     print(f"Threads: {num_threads}")
     print(f"Duration: {duration:.2f}s")
     print(f"Total samples: {len(samples)}")
@@ -37,7 +36,7 @@ def main():
         start_x = config.get("start_x_um", 0)
         end_x = config.get("end_x_um", 0)
         speed = config.get("speed_mm_s", 0)
-        print(f"Mode: Motion test")
+        print("Mode: Motion test")
         print(f"  X: {start_x:.0f} -> {end_x:.0f} µm ({abs(end_x - start_x):.0f} µm)")
         print(f"  Speed: {speed} mm/s")
     print()
@@ -62,7 +61,7 @@ def main():
         gaps = []
         for i in range(1, len(ts)):
             # Use midpoint of before/after as sample time
-            t_prev = (ts[i-1]["t_before"] + ts[i-1]["t_after"]) / 2
+            t_prev = (ts[i - 1]["t_before"] + ts[i - 1]["t_after"]) / 2
             t_curr = (ts[i]["t_before"] + ts[i]["t_after"]) / 2
             gaps.append(t_curr - t_prev)
 
@@ -76,8 +75,10 @@ def main():
         avg_call_ms = statistics.mean(call_durations)
 
         print(f"  Thread {tid}: {len(ts)} samples, {rate:.1f} Hz")
-        print(f"    Inter-sample gap: avg={avg_gap_ms:.2f}ms, std={std_gap_ms:.2f}ms, "
-              f"min={min_gap_ms:.2f}ms, max={max_gap_ms:.2f}ms")
+        print(
+            f"    Inter-sample gap: avg={avg_gap_ms:.2f}ms, std={std_gap_ms:.2f}ms, "
+            f"min={min_gap_ms:.2f}ms, max={max_gap_ms:.2f}ms"
+        )
         print(f"    SDK call duration: avg={avg_call_ms:.2f}ms")
 
     # Combined analysis
@@ -87,26 +88,34 @@ def main():
 
     combined_rate = len(samples) / duration
     print(f"  Combined sample rate: {combined_rate:.1f} Hz")
-    print(f"  Expected if no serialization: {combined_rate / num_threads:.1f} Hz × {num_threads} threads")
+    print(
+        f"  Expected if no serialization: {combined_rate / num_threads:.1f} Hz × {num_threads} threads"
+    )
 
     # Check interleaving - compute gaps in the combined stream
     combined_gaps = []
     for i in range(1, len(samples)):
-        t_prev = (samples[i-1]["t_before"] + samples[i-1]["t_after"]) / 2
+        t_prev = (samples[i - 1]["t_before"] + samples[i - 1]["t_after"]) / 2
         t_curr = (samples[i]["t_before"] + samples[i]["t_after"]) / 2
         combined_gaps.append(t_curr - t_prev)
 
     if combined_gaps:
         avg_combined_gap_ms = statistics.mean(combined_gaps) * 1000
-        std_combined_gap_ms = statistics.stdev(combined_gaps) * 1000 if len(combined_gaps) > 1 else 0
+        std_combined_gap_ms = (
+            statistics.stdev(combined_gaps) * 1000 if len(combined_gaps) > 1 else 0
+        )
         min_combined_gap_ms = min(combined_gaps) * 1000
         max_combined_gap_ms = max(combined_gaps) * 1000
         median_combined_gap_ms = statistics.median(combined_gaps) * 1000
 
-        print(f"  Combined inter-sample gap: avg={avg_combined_gap_ms:.2f}ms, "
-              f"median={median_combined_gap_ms:.2f}ms")
-        print(f"    std={std_combined_gap_ms:.2f}ms, min={min_combined_gap_ms:.2f}ms, "
-              f"max={max_combined_gap_ms:.2f}ms")
+        print(
+            f"  Combined inter-sample gap: avg={avg_combined_gap_ms:.2f}ms, "
+            f"median={median_combined_gap_ms:.2f}ms"
+        )
+        print(
+            f"    std={std_combined_gap_ms:.2f}ms, min={min_combined_gap_ms:.2f}ms, "
+            f"max={max_combined_gap_ms:.2f}ms"
+        )
 
     # Check for thread interleaving
     print()
@@ -117,7 +126,7 @@ def main():
     consecutive_runs = []
     current_run = 1
     for i in range(1, len(samples)):
-        if samples[i]["thread_id"] == samples[i-1]["thread_id"]:
+        if samples[i]["thread_id"] == samples[i - 1]["thread_id"]:
             current_run += 1
         else:
             consecutive_runs.append(current_run)
@@ -130,11 +139,11 @@ def main():
     print(f"  Consecutive same-thread runs: avg={avg_run_len:.1f}, max={max_run_len}")
 
     if avg_run_len > 5:
-        print(f"  → Low interleaving: threads appear to be serialized by SDK")
+        print("  → Low interleaving: threads appear to be serialized by SDK")
     elif avg_run_len < 2:
-        print(f"  → High interleaving: threads are running concurrently")
+        print("  → High interleaving: threads are running concurrently")
     else:
-        print(f"  → Moderate interleaving")
+        print("  → Moderate interleaving")
 
     # Check if we're actually getting better resolution
     print()
@@ -145,7 +154,11 @@ def main():
 
     print(f"  Single thread rate: {single_thread_rate:.1f} Hz")
     print(f"  Combined rate: {combined_rate:.1f} Hz")
-    print(f"  Speedup factor: {combined_rate / single_thread_rate:.2f}x" if single_thread_rate > 0 else "  (no data)")
+    print(
+        f"  Speedup factor: {combined_rate / single_thread_rate:.2f}x"
+        if single_thread_rate > 0
+        else "  (no data)"
+    )
 
     theoretical_max = single_thread_rate * num_threads
     efficiency = (combined_rate / theoretical_max * 100) if theoretical_max > 0 else 0
@@ -168,7 +181,7 @@ def main():
         # Compute position deltas between consecutive samples (combined stream)
         x_deltas = []
         for i in range(1, len(samples)):
-            dx = abs(samples[i]["x_um"] - samples[i-1]["x_um"])
+            dx = abs(samples[i]["x_um"] - samples[i - 1]["x_um"])
             x_deltas.append(dx)
 
         if x_deltas:
@@ -184,7 +197,9 @@ def main():
 
             if nonzero_deltas:
                 avg_nonzero = statistics.mean(nonzero_deltas)
-                print(f"    non-zero avg={avg_nonzero:.1f}µm ({len(nonzero_deltas)}/{len(x_deltas)} samples)")
+                print(
+                    f"    non-zero avg={avg_nonzero:.1f}µm ({len(nonzero_deltas)}/{len(x_deltas)} samples)"
+                )
 
         # Compare single-thread vs combined resolution
         print()
@@ -195,7 +210,7 @@ def main():
                 continue
             deltas = []
             for i in range(1, len(ts)):
-                dx = abs(ts[i]["x_um"] - ts[i-1]["x_um"])
+                dx = abs(ts[i]["x_um"] - ts[i - 1]["x_um"])
                 deltas.append(dx)
             if deltas:
                 avg_d = statistics.mean(deltas)
@@ -207,9 +222,13 @@ def main():
         combined_resolution = speed_um_s / combined_rate if combined_rate > 0 else 0
 
         print()
-        print(f"  Theoretical spatial resolution at {speed_um_s/1000:.0f} mm/s:")
-        print(f"    Single thread ({single_thread_rate:.0f} Hz): {single_resolution:.1f} µm between samples")
-        print(f"    Combined ({combined_rate:.0f} Hz): {combined_resolution:.1f} µm between samples")
+        print(f"  Theoretical spatial resolution at {speed_um_s / 1000:.0f} mm/s:")
+        print(
+            f"    Single thread ({single_thread_rate:.0f} Hz): {single_resolution:.1f} µm between samples"
+        )
+        print(
+            f"    Combined ({combined_rate:.0f} Hz): {combined_resolution:.1f} µm between samples"
+        )
         print(f"    Improvement: {single_resolution / combined_resolution:.1f}x finer resolution")
 
     # Conclusion
@@ -218,14 +237,20 @@ def main():
     print("-" * 60)
 
     if efficiency > 80:
-        print(f"  ✓ Multi-threading DOES improve effective sample rate")
-        print(f"    {num_threads} threads achieved {combined_rate:.1f} Hz vs {single_thread_rate:.1f} Hz single-thread")
+        print("  ✓ Multi-threading DOES improve effective sample rate")
+        print(
+            f"    {num_threads} threads achieved {combined_rate:.1f} Hz vs {single_thread_rate:.1f} Hz single-thread"
+        )
     elif efficiency > 50:
-        print(f"  ~ Partial improvement from multi-threading")
-        print(f"    Some SDK serialization detected, but still gaining {combined_rate / single_thread_rate:.1f}x")
+        print("  ~ Partial improvement from multi-threading")
+        print(
+            f"    Some SDK serialization detected, but still gaining {combined_rate / single_thread_rate:.1f}x"
+        )
     else:
-        print(f"  ✗ SDK appears to serialize access")
-        print(f"    {num_threads} threads only achieved {combined_rate:.1f} Hz (~{efficiency:.0f}% of theoretical)")
+        print("  ✗ SDK appears to serialize access")
+        print(
+            f"    {num_threads} threads only achieved {combined_rate:.1f} Hz (~{efficiency:.0f}% of theoretical)"
+        )
         print(f"    Single thread at {single_thread_rate:.1f} Hz is sufficient")
 
     # Compare to 60Hz baseline
@@ -238,7 +263,9 @@ def main():
     if is_move_test and efficiency > 80:
         print()
         print(f"  → Multi-threaded polling provides {combined_resolution:.1f}µm spatial resolution")
-        print(f"    vs {single_resolution:.1f}µm with single thread ({single_resolution/combined_resolution:.1f}x improvement)")
+        print(
+            f"    vs {single_resolution:.1f}µm with single thread ({single_resolution / combined_resolution:.1f}x improvement)"  # noqa: E501
+        )
 
     return 0
 

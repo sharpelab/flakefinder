@@ -5,7 +5,6 @@ See docs/maskterial_integration.md for 20x scanning context.
 """
 
 import argparse
-from datetime import datetime
 import json
 import os
 import queue
@@ -13,6 +12,7 @@ import re
 import shutil
 import threading
 import time
+from datetime import datetime
 
 from flakefinder.data_utils import compute_frame_size_um, load_microscope_description
 from flakefinder.scan_utils import build_lighting_meta, interpolate_position
@@ -39,7 +39,7 @@ def parse_area_rect(value: str) -> tuple[float, float, float, float]:
     try:
         x1, x2, y1, y2 = float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3])
     except ValueError:
-        raise ValueError("--area-rect values must be numbers")
+        raise ValueError("--area-rect values must be numbers") from None
 
     # Sort coordinates if swapped
     x_min, x_max = min(x1, x2), max(x1, x2)
@@ -72,7 +72,7 @@ def parse_xy_position(value: str) -> tuple[float, float]:
     try:
         return float(parts[0]), float(parts[1])
     except ValueError:
-        raise ValueError("Position values must be numbers")
+        raise ValueError("Position values must be numbers") from None
 
 
 def main():
@@ -89,59 +89,119 @@ Examples:
 
   # Objective by turret position (position 3 = 20x)
   python scan_area_v1.py -o scan_20x --objective-pos 3 --z 24699
-"""
+""",
     )
     parser.add_argument("-o", "--output", required=True, help="Output directory")
 
     # Scan area options
     area_group = parser.add_argument_group("Scan area")
-    area_group.add_argument("--margin", type=float, default=1000,
-                           help="Margin from stage edges in µm (default: 1000, ignored if --area-rect set)")
-    area_group.add_argument("--area-rect", type=str, metavar="X1,X2,Y1,Y2",
-                           help="Explicit scan area as x_min,x_max,y_min,y_max in µm")
+    area_group.add_argument(
+        "--margin",
+        type=float,
+        default=1000,
+        help="Margin from stage edges in µm (default: 1000, ignored if --area-rect set)",
+    )
+    area_group.add_argument(
+        "--area-rect",
+        type=str,
+        metavar="X1,X2,Y1,Y2",
+        help="Explicit scan area as x_min,x_max,y_min,y_max in µm",
+    )
 
     # Objective/optics options
     optics_group = parser.add_argument_group("Optics")
-    optics_group.add_argument("--objective-mag", type=str, metavar="MAG",
-                             help="Objective by magnification (e.g., 5, 5x, 20, 2.5) - switches before scan")
-    optics_group.add_argument("--objective-pos", type=int, metavar="POS",
-                             help="Objective by turret position (1-6) - switches before scan")
+    optics_group.add_argument(
+        "--objective-mag",
+        type=str,
+        metavar="MAG",
+        help="Objective by magnification (e.g., 5, 5x, 20, 2.5) - switches before scan",
+    )
+    optics_group.add_argument(
+        "--objective-pos",
+        type=int,
+        metavar="POS",
+        help="Objective by turret position (1-6) - switches before scan",
+    )
 
     # Motion options
     motion_group = parser.add_argument_group("Motion")
-    motion_group.add_argument("--speed-mm", type=float, default=40,
-                             help="Scan speed in mm/s for X scanning and Y jogs (default: 40)")
-    motion_group.add_argument("--move-speed-mm", type=float, default=40,
-                             help="Move speed in mm/s for positioning moves (default: 40)")
-    motion_group.add_argument("--z", type=float, metavar="Z",
-                             help="Initial Z position in µm (moved before scan, e.g. 24690)")
-    motion_group.add_argument("--auto-focus-pos", type=str, metavar="X,Y",
-                             help="XY position for autofocus calibration before scan (µm)")
+    motion_group.add_argument(
+        "--speed-mm",
+        type=float,
+        default=40,
+        help="Scan speed in mm/s for X scanning and Y jogs (default: 40)",
+    )
+    motion_group.add_argument(
+        "--move-speed-mm",
+        type=float,
+        default=40,
+        help="Move speed in mm/s for positioning moves (default: 40)",
+    )
+    motion_group.add_argument(
+        "--z",
+        type=float,
+        metavar="Z",
+        help="Initial Z position in µm (moved before scan, e.g. 24690)",
+    )
+    motion_group.add_argument(
+        "--auto-focus-pos",
+        type=str,
+        metavar="X,Y",
+        help="XY position for autofocus calibration before scan (µm)",
+    )
 
     # Frame options
     frame_group = parser.add_argument_group("Frame capture")
-    frame_group.add_argument("--y-overlap-percent", type=float, default=12,
-                            help="Y overlap between rows as %% of frame height (default: 12)")
-    frame_group.add_argument("--downsample", type=int, default=1,
-                            help="Downsample factor (2 = half dims)")
-    frame_group.add_argument("--white-balance", type=str, default="2.51,1.02,1.41",
-                            help="White balance as B,G,R gains (default: 2.51,1.02,1.41)")
+    frame_group.add_argument(
+        "--y-overlap-percent",
+        type=float,
+        default=12,
+        help="Y overlap between rows as %% of frame height (default: 12)",
+    )
+    frame_group.add_argument(
+        "--downsample", type=int, default=1, help="Downsample factor (2 = half dims)"
+    )
+    frame_group.add_argument(
+        "--white-balance",
+        type=str,
+        default="2.51,1.02,1.41",
+        help="White balance as B,G,R gains (default: 2.51,1.02,1.41)",
+    )
     frame_group.add_argument("--gamma", type=float, default=1.0, help="Gamma level (default: 1.0)")
-    frame_group.add_argument("--binning", type=int, default=3, choices=[1, 2, 3],
-                            help="Camera binning NxN (1=full res, 2=2x2, 3=3x3, default: 3)")
-    frame_group.add_argument("--exposure-ms", type=float, default=1.0,
-                            help="Exposure time in milliseconds (default: 1.0)")
-    frame_group.add_argument("--gain", type=float, default=1.0,
-                            help="Camera gain multiplier (default: 1.0)")
-    frame_group.add_argument("--warmup-frames", type=int, default=3,
-                            help="Warmup captures before each row (default: 3, 0 to disable)")
+    frame_group.add_argument(
+        "--binning",
+        type=int,
+        default=3,
+        choices=[1, 2, 3],
+        help="Camera binning NxN (1=full res, 2=2x2, 3=3x3, default: 3)",
+    )
+    frame_group.add_argument(
+        "--exposure-ms",
+        type=float,
+        default=1.0,
+        help="Exposure time in milliseconds (default: 1.0)",
+    )
+    frame_group.add_argument(
+        "--gain", type=float, default=1.0, help="Camera gain multiplier (default: 1.0)"
+    )
+    frame_group.add_argument(
+        "--warmup-frames",
+        type=int,
+        default=3,
+        help="Warmup captures before each row (default: 3, 0 to disable)",
+    )
 
     # Output options
     output_group = parser.add_argument_group("Output")
-    output_group.add_argument("--compress", action="store_true", help="Create .zip of output directory")
-    output_group.add_argument("--clean", action="store_true", help="Wipe output directory if it exists")
-    output_group.add_argument("--write-threads", type=int, default=2,
-                             help="Number of image writer threads (default: 2)")
+    output_group.add_argument(
+        "--compress", action="store_true", help="Create .zip of output directory"
+    )
+    output_group.add_argument(
+        "--clean", action="store_true", help="Wipe output directory if it exists"
+    )
+    output_group.add_argument(
+        "--write-threads", type=int, default=2, help="Number of image writer threads (default: 2)"
+    )
 
     args = parser.parse_args()
 
@@ -199,7 +259,9 @@ Examples:
                 obj_mag = float(obj_match.group(1))
                 frame_size = compute_frame_size_um(desc.camera, obj_mag, binning_idx=binning_idx)
                 if frame_size:
-                    print(f"Pre-check: {obj_mag}x objective @ {args.binning}x{args.binning} binning, frame ~{frame_size[0]:.0f} x {frame_size[1]:.0f} µm")
+                    print(
+                        f"Pre-check: {obj_mag}x objective @ {args.binning}x{args.binning} binning, frame ~{frame_size[0]:.0f} x {frame_size[1]:.0f} µm"  # noqa: E501
+                    )
     else:
         print("Note: No microscope description found, skipping pre-validation")
 
@@ -210,20 +272,23 @@ Examples:
         if args.clean:
             shutil.rmtree(args.output)
         else:
-            print(f"Error: Output directory '{args.output}' already exists. Use --clean to wipe it.")
+            print(
+                f"Error: Output directory '{args.output}' already exists. Use --clean to wipe it."
+            )
             return 1
     os.makedirs(args.output)
 
-    from flakefinder.leica import LeicaConnection, Stage, ZDrive, Lamp, Shutter, Nosepiece
+    from flakefinder.leica import Lamp, LeicaConnection, Nosepiece, Shutter, Stage, ZDrive
     from flakefinder.leica.camera import Camera
-    from flakefinder.leica.enums import UCAPI_IID
     from flakefinder.leica.core import get_interface_required
+    from flakefinder.leica.enums import UCAPI_IID
 
     print("Area Scan v1 (Snake Pattern)")
     print("=" * 50)
 
     with LeicaConnection() as conn:
         from LeicaMicrosystems.HardwareModel import Extensions
+
         Extensions.ExUCAPI.Register()
 
         # Set up stage
@@ -368,7 +433,7 @@ Examples:
         # Build readout info string
         readout_fps = ""
         if readout_time:
-            readout_fps = f", Readout: {readout_time*1000:.1f}ms ({1/readout_time:.0f} fps)"
+            readout_fps = f", Readout: {readout_time * 1000:.1f}ms ({1 / readout_time:.0f} fps)"
 
         # Compute frame size in µm
         # The SDK's "logical pixel size" doesn't account for objective magnification
@@ -390,8 +455,10 @@ Examples:
                 frame_height_um = frame_height_px * sample_pixel_y_um
 
         print(f"Camera: {camera.name}")
-        exp_str = f"{actual_exposure*1000:.1f}ms" if actual_exposure else "?"
-        print(f"  Trigger: CONTINUOUS, Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}{readout_fps}")
+        exp_str = f"{actual_exposure * 1000:.1f}ms" if actual_exposure else "?"
+        print(
+            f"  Trigger: CONTINUOUS, Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}{readout_fps}"
+        )
         print(f"  White balance (B,G,R): {wb_blue}, {wb_green}, {wb_red}")
         print(f"  Gamma: {args.gamma}")
         if frame_width_px and frame_height_px:
@@ -438,7 +505,9 @@ Examples:
                     super_fine_pass=True,
                 )
                 print(f"  Z: {af_result.initial_z_um:.1f} -> {af_result.selected_z_um:.1f} µm")
-                print(f"  Range: {af_result.z_range_um:.0f}µm, Sharpness: {af_result.initial_sharpness:.1f} -> {af_result.selected_sharpness:.1f}")
+                print(
+                    f"  Range: {af_result.z_range_um:.0f}µm, Sharpness: {af_result.initial_sharpness:.1f} -> {af_result.selected_sharpness:.1f}"  # noqa: E501
+                )
             except ValueError as e:
                 print(f"  Autofocus error: {e}")
                 return 1
@@ -452,16 +521,24 @@ Examples:
                 x_min, x_max, y_min, y_max = parse_area_rect(args.area_rect)
                 # Validate against stage limits (hard fail, no clamping)
                 if x_min < stage.x.min_um:
-                    print(f"Error: x_min ({x_min:.0f}) is below stage minimum ({stage.x.min_um:.0f})")
+                    print(
+                        f"Error: x_min ({x_min:.0f}) is below stage minimum ({stage.x.min_um:.0f})"
+                    )
                     return 1
                 if x_max > stage.x.max_um:
-                    print(f"Error: x_max ({x_max:.0f}) exceeds stage maximum ({stage.x.max_um:.0f})")
+                    print(
+                        f"Error: x_max ({x_max:.0f}) exceeds stage maximum ({stage.x.max_um:.0f})"
+                    )
                     return 1
                 if y_min < stage.y.min_um:
-                    print(f"Error: y_min ({y_min:.0f}) is below stage minimum ({stage.y.min_um:.0f})")
+                    print(
+                        f"Error: y_min ({y_min:.0f}) is below stage minimum ({stage.y.min_um:.0f})"
+                    )
                     return 1
                 if y_max > stage.y.max_um:
-                    print(f"Error: y_max ({y_max:.0f}) exceeds stage maximum ({stage.y.max_um:.0f})")
+                    print(
+                        f"Error: y_max ({y_max:.0f}) exceeds stage maximum ({stage.y.max_um:.0f})"
+                    )
                     return 1
             except ValueError as e:
                 print(f"Error: {e}")
@@ -541,18 +618,24 @@ Examples:
                 x_start_interp = interpolate_position(t_start, row_x_samples)
                 x_end_interp = interpolate_position(t_end, row_x_samples)
                 dt = t_end - t_start
-                x_vel = (x_end_interp - x_start_interp) / dt if dt > 0 and x_start_interp and x_end_interp else 0
+                x_vel = (
+                    (x_end_interp - x_start_interp) / dt
+                    if dt > 0 and x_start_interp and x_end_interp
+                    else 0
+                )
 
-                saved_frames_meta.append({
-                    "n": frame_idx,
-                    "row": row_idx,
-                    "t_start": t_start - t0,
-                    "t_end": t_end - t0,
-                    "x_start": x_start_interp,
-                    "x_end": x_end_interp,
-                    "x_vel": x_vel,
-                    "y_um": row_y,
-                })
+                saved_frames_meta.append(
+                    {
+                        "n": frame_idx,
+                        "row": row_idx,
+                        "t_start": t_start - t0,
+                        "t_end": t_end - t0,
+                        "x_start": x_start_interp,
+                        "x_end": x_end_interp,
+                        "x_vel": x_vel,
+                        "y_um": row_y,
+                    }
+                )
 
                 save_queue.task_done()
 
@@ -592,21 +675,34 @@ Examples:
                 "objective_position": af_result.objective_position if af_result else None,
                 "scan_duration_s": af_result.scan_duration_s if af_result else None,
                 "frame_count": af_result.frame_count if af_result else None,
-            } if auto_focus_pos else None,
+            }
+            if auto_focus_pos
+            else None,
             # Camera and optics metadata
             "camera": CameraMeta(
-                name=camera.name, exposure_s=actual_exposure, gain=args.gain,
-                binning=actual_binning, readout_time_s=readout_time,
-                frame_width_px=frame_width_px, frame_height_px=frame_height_px,
-                pixel_size_x_um=pixel_size_x_um, pixel_size_y_um=pixel_size_y_um,
-                sensor_width_px=sensor_width_px, sensor_height_px=sensor_height_px,
-                physical_pixel_x_um=physical_pixel_x_um, physical_pixel_y_um=physical_pixel_y_um,
-                white_balance_bgr=[wb_blue, wb_green, wb_red], gamma=args.gamma,
+                name=camera.name,
+                exposure_s=actual_exposure,
+                gain=args.gain,
+                binning=actual_binning,
+                readout_time_s=readout_time,
+                frame_width_px=frame_width_px,
+                frame_height_px=frame_height_px,
+                pixel_size_x_um=pixel_size_x_um,
+                pixel_size_y_um=pixel_size_y_um,
+                sensor_width_px=sensor_width_px,
+                sensor_height_px=sensor_height_px,
+                physical_pixel_x_um=physical_pixel_x_um,
+                physical_pixel_y_um=physical_pixel_y_um,
+                white_balance_bgr=[wb_blue, wb_green, wb_red],
+                gamma=args.gamma,
             ),
             "optics": OpticsMeta(
-                objective_mag=objective_mag, objective_idx=objective_idx,
-                sample_pixel_x_um=sample_pixel_x_um, sample_pixel_y_um=sample_pixel_y_um,
-                frame_width_um=frame_width_um, frame_height_um=frame_height_um,
+                objective_mag=objective_mag,
+                objective_idx=objective_idx,
+                sample_pixel_x_um=sample_pixel_x_um,
+                sample_pixel_y_um=sample_pixel_y_um,
+                frame_width_um=frame_width_um,
+                frame_height_um=frame_height_um,
             ),
             "lighting": build_lighting_meta(lamp=lamp, shutter=shutter),
             "rows": [],
@@ -623,7 +719,7 @@ Examples:
                 x_start_pos, x_end_pos = x_max, x_min
                 dir_str = "-X"
 
-            print(f"Row {row_idx}/{num_rows-1}: Y={row_y:.0f}µm, {dir_str}")
+            print(f"Row {row_idx}/{num_rows - 1}: Y={row_y:.0f}µm, {dir_str}")
 
             # Move to row start if not already there
             if row_idx > 0:
@@ -669,10 +765,18 @@ Examples:
 
                 if current_image[0] is not None:
                     # Queue frame immediately for background saving
-                    save_queue.put((
-                        global_frame_idx, row_idx, t_start, t_end, current_image[0],
-                        row_y, x_samples, total_scan_start
-                    ))
+                    save_queue.put(
+                        (
+                            global_frame_idx,
+                            row_idx,
+                            t_start,
+                            t_end,
+                            current_image[0],
+                            row_y,
+                            x_samples,
+                            total_scan_start,
+                        )
+                    )
                     global_frame_idx += 1
                     row_frame_count += 1
 
@@ -686,30 +790,39 @@ Examples:
             row_duration = row_end - row_start
 
             # Filter position samples to row scan period
-            row_x_samples = [(t_before, t_after, x) for t_before, t_after, x in x_samples
-                            if row_start <= t_before <= row_end]
+            row_x_samples = [
+                (t_before, t_after, x)
+                for t_before, t_after, x in x_samples
+                if row_start <= t_before <= row_end
+            ]
 
-            print(f"  {row_frame_count} frames, {len(row_x_samples)} pos samples, {row_duration:.2f}s")
+            print(
+                f"  {row_frame_count} frames, {len(row_x_samples)} pos samples, {row_duration:.2f}s"
+            )
 
             # Add position samples to global list (with adjusted timestamps)
             for t_before, t_after, x_um in row_x_samples:
-                all_position_samples.append({
-                    "t_before": t_before - total_scan_start,
-                    "t_after": t_after - total_scan_start,
-                    "x_um": x_um,
-                    "row": row_idx,
-                })
+                all_position_samples.append(
+                    {
+                        "t_before": t_before - total_scan_start,
+                        "t_after": t_after - total_scan_start,
+                        "x_um": x_um,
+                        "row": row_idx,
+                    }
+                )
 
             # Record row metadata
-            meta["rows"].append({
-                "row_idx": row_idx,
-                "y_um": row_y,
-                "direction": direction,
-                "frame_start": row_frame_start,
-                "frame_end": global_frame_idx,
-                "duration_s": row_duration,
-                "position_samples": len(row_x_samples),
-            })
+            meta["rows"].append(
+                {
+                    "row_idx": row_idx,
+                    "y_um": row_y,
+                    "direction": direction,
+                    "frame_start": row_frame_start,
+                    "frame_end": global_frame_idx,
+                    "duration_s": row_duration,
+                    "position_samples": len(row_x_samples),
+                }
+            )
 
         total_scan_end = time.perf_counter()
         total_duration = total_scan_end - total_scan_start
@@ -747,7 +860,7 @@ Examples:
         # Compress if requested
         if args.compress:
             print(f"Creating {args.output}.zip...")
-            shutil.make_archive(args.output, 'zip', args.output)
+            shutil.make_archive(args.output, "zip", args.output)
             print(f"Created {args.output}.zip")
 
         # Summary stats
@@ -764,9 +877,11 @@ Examples:
         if meta["rows"]:
             row_frame_counts = [r["frame_end"] - r["frame_start"] for r in meta["rows"]]
             row_durations = [r["duration_s"] for r in meta["rows"]]
-            print(f"  Frames/row: avg={sum(row_frame_counts)/len(row_frame_counts):.0f}, "
-                  f"min={min(row_frame_counts)}, max={max(row_frame_counts)}")
-            print(f"  Row duration: avg={sum(row_durations)/len(row_durations):.2f}s")
+            print(
+                f"  Frames/row: avg={sum(row_frame_counts) / len(row_frame_counts):.0f}, "
+                f"min={min(row_frame_counts)}, max={max(row_frame_counts)}"
+            )
+            print(f"  Row duration: avg={sum(row_durations) / len(row_durations):.2f}s")
 
         # Wait for return
         return_handle_x.wait()

@@ -5,7 +5,6 @@ and generates mosaics from debug frames if available.
 """
 
 import argparse
-import glob
 import json
 import os
 import re
@@ -77,7 +76,6 @@ def normalize_summary(summary: dict) -> dict:
     if "params" not in summary:
         scan = summary.get("scan", {})
         initial = summary.get("initial", {})
-        coarse = summary.get("coarse", {})
         out["params"] = {
             "z_initial_um": initial.get("z_um"),
             "range_um": scan.get("z_range_um"),
@@ -179,6 +177,7 @@ def interpolate_sharpness(z: float, curve: list[dict]) -> float | None:
 
 
 ## -- Sharpness metrics for multi-metric comparison --
+
 
 def _to_gray(img: np.ndarray) -> np.ndarray:
     if len(img.shape) == 3:
@@ -285,8 +284,10 @@ def plot_metrics_comparison(
         if all_curves and "metrics" in all_curves[0]:
             # Map from summary metric names to display names
             name_map = {
-                "tenengrad": "Tenengrad", "laplacian": "Laplacian",
-                "brenner": "Brenner", "normalized_variance": "NormVar",
+                "tenengrad": "Tenengrad",
+                "laplacian": "Laplacian",
+                "brenner": "Brenner",
+                "normalized_variance": "NormVar",
                 "vollath_f4": "Vollath F4",
             }
             live_metrics = {display: [] for display in name_map.values()}
@@ -301,10 +302,10 @@ def plot_metrics_comparison(
 
     # Style: tenengrad (the default metric) is thicker/bolder
     styles = {
-        "Tenengrad":  {"color": "#4488cc", "linewidth": 2.5, "marker": "o", "markersize": 5},
-        "Laplacian":  {"color": "#ee8833", "linewidth": 1.5, "marker": "s", "markersize": 4},
-        "Brenner":    {"color": "#44bb66", "linewidth": 1.5, "marker": "^", "markersize": 4},
-        "NormVar":    {"color": "#cc4488", "linewidth": 1.5, "marker": "D", "markersize": 4},
+        "Tenengrad": {"color": "#4488cc", "linewidth": 2.5, "marker": "o", "markersize": 5},
+        "Laplacian": {"color": "#ee8833", "linewidth": 1.5, "marker": "s", "markersize": 4},
+        "Brenner": {"color": "#44bb66", "linewidth": 1.5, "marker": "^", "markersize": 4},
+        "NormVar": {"color": "#cc4488", "linewidth": 1.5, "marker": "D", "markersize": 4},
         "Vollath F4": {"color": "#8844cc", "linewidth": 1.5, "marker": "v", "markersize": 4},
     }
 
@@ -328,9 +329,15 @@ def plot_metrics_comparison(
 
         style = styles.get(name, {"color": "gray", "linewidth": 1, "marker": ".", "markersize": 3})
         suffix = " *" if name == "Tenengrad" else ""
-        ax.plot(z_arr, normed, "-",
-                label=f'{name}{suffix}  (DR={dynamic_ranges[name]:.0f}%, best={best_zs[name]:.0f})',
-                **style, alpha=0.85, zorder=3)
+        ax.plot(
+            z_arr,
+            normed,
+            "-",
+            label=f"{name}{suffix}  (DR={dynamic_ranges[name]:.0f}%, best={best_zs[name]:.0f})",
+            **style,
+            alpha=0.85,
+            zorder=3,
+        )
 
     # Mark best Z per metric with thin vertical lines
     for name, bz in best_zs.items():
@@ -341,15 +348,27 @@ def plot_metrics_comparison(
     best_z_list = list(best_zs.values())
     z_spread = max(best_z_list) - min(best_z_list)
     if z_spread > 10:
-        ax.text(0.02, 0.97,
-                f"Best Z spread: {z_spread:.0f} µm (>10 µm disagreement)",
-                transform=ax.transAxes, fontsize=9, verticalalignment='top',
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.7))
+        ax.text(
+            0.02,
+            0.97,
+            f"Best Z spread: {z_spread:.0f} µm (>10 µm disagreement)",
+            transform=ax.transAxes,
+            fontsize=9,
+            verticalalignment="top",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.7),
+        )
 
     # Pick-Z marker
     if pick_z is not None:
-        ax.axvline(pick_z, color="green", linestyle="--", linewidth=1.5,
-                   alpha=0.9, label=f"Pick Z = {pick_z:.1f}", zorder=4)
+        ax.axvline(
+            pick_z,
+            color="green",
+            linestyle="--",
+            linewidth=1.5,
+            alpha=0.9,
+            label=f"Pick Z = {pick_z:.1f}",
+            zorder=4,
+        )
 
     ax.set_xlabel("Z position (µm)")
     ax.set_ylabel("Normalized sharpness [0-1]")
@@ -374,16 +393,20 @@ def plot_metrics_comparison(
         print()
         if live_best_zs:
             print(f"  {'Metric':<12} {'Dyn.Range':>9} {'Best Z':>10} {'Live Best Z':>12}")
-            print(f"  {'-'*12} {'-'*9} {'-'*10} {'-'*12}")
+            print(f"  {'-' * 12} {'-' * 9} {'-' * 10} {'-' * 12}")
             for name, _ in METRICS:
                 marker = " *" if name == "Tenengrad" else ""
-                live_str = f"{live_best_zs[name]:>11.1f}" if name in live_best_zs else "         n/a"
+                live_str = (
+                    f"{live_best_zs[name]:>11.1f}" if name in live_best_zs else "         n/a"
+                )
                 diff = abs(best_zs[name] - live_best_zs.get(name, best_zs[name]))
                 warn = " !" if diff > 10 else ""
-                print(f"  {name:<12} {dynamic_ranges[name]:>8.1f}% {best_zs[name]:>9.1f}{marker} {live_str}{warn}")
+                print(
+                    f"  {name:<12} {dynamic_ranges[name]:>8.1f}% {best_zs[name]:>9.1f}{marker} {live_str}{warn}"
+                )
         else:
             print(f"  {'Metric':<12} {'Dyn.Range':>9} {'Best Z':>10}")
-            print(f"  {'-'*12} {'-'*9} {'-'*10}")
+            print(f"  {'-' * 12} {'-' * 9} {'-' * 10}")
             for name, _ in METRICS:
                 marker = " *" if name == "Tenengrad" else ""
                 print(f"  {name:<12} {dynamic_ranges[name]:>8.1f}% {best_zs[name]:>9.1f}{marker}")
@@ -392,7 +415,9 @@ def plot_metrics_comparison(
         if live_best_zs:
             diffs = {n: abs(best_zs[n] - live_best_zs[n]) for n in best_zs if n in live_best_zs}
             if any(d > 10 for d in diffs.values()):
-                print(f"  ! = recomputed vs live best Z differ >10 µm (JPEG compression artifact on flat curves)")
+                print(
+                    "  ! = recomputed vs live best Z differ >10 µm (JPEG compression artifact on flat curves)"
+                )
 
 
 def plot_sharpness_curve(
@@ -443,22 +468,46 @@ def plot_sharpness_curve(
     if coarse_curve:
         coarse_z = [r["z_um"] for r in coarse_curve]
         coarse_s = [r["sharpness"] for r in coarse_curve]
-        ax.plot(coarse_z, coarse_s, "o-", color="#4488cc", markersize=4,
-                linewidth=1.2, label="Coarse", zorder=3)
+        ax.plot(
+            coarse_z,
+            coarse_s,
+            "o-",
+            color="#4488cc",
+            markersize=4,
+            linewidth=1.2,
+            label="Coarse",
+            zorder=3,
+        )
 
     # Plot fine data
     if fine_curve:
         fine_z = [r["z_um"] for r in fine_curve]
         fine_s = [r["sharpness"] for r in fine_curve]
-        ax.plot(fine_z, fine_s, "o-", color="#ee8833", markersize=4,
-                linewidth=1.2, label="Fine", zorder=3)
+        ax.plot(
+            fine_z,
+            fine_s,
+            "o-",
+            color="#ee8833",
+            markersize=4,
+            linewidth=1.2,
+            label="Fine",
+            zorder=3,
+        )
 
     # Plot super_fine data
     if super_fine_curve:
         sf_z = [r["z_um"] for r in super_fine_curve]
         sf_s = [r["sharpness"] for r in super_fine_curve]
-        ax.plot(sf_z, sf_s, "o-", color="#cc4488", markersize=3,
-                linewidth=1.2, label="Super fine", zorder=3)
+        ax.plot(
+            sf_z,
+            sf_s,
+            "o-",
+            color="#cc4488",
+            markersize=3,
+            linewidth=1.2,
+            label="Super fine",
+            zorder=3,
+        )
 
     # Shaded scan ranges
     y_min, y_max = ax.get_ylim()
@@ -476,17 +525,39 @@ def plot_sharpness_curve(
         ax.axvspan(z_lo, z_hi, alpha=0.15, color="#cc4488", zorder=1)
 
     # Marker lines
-    ax.axvline(before["z_um"], color="red", linestyle="--", linewidth=1.2,
-               alpha=0.8, label=f'Initial Z = {before["z_um"]:.1f}', zorder=2)
+    ax.axvline(
+        before["z_um"],
+        color="red",
+        linestyle="--",
+        linewidth=1.2,
+        alpha=0.8,
+        label=f"Initial Z = {before['z_um']:.1f}",
+        zorder=2,
+    )
 
-    ax.plot(best["z_um"], best["sharpness"], "*", color="gold", markersize=16,
-            markeredgecolor="black", markeredgewidth=0.8,
-            label=f'Best Z = {best["z_um"]:.1f}', zorder=5)
+    ax.plot(
+        best["z_um"],
+        best["sharpness"],
+        "*",
+        color="gold",
+        markersize=16,
+        markeredgecolor="black",
+        markeredgewidth=0.8,
+        label=f"Best Z = {best['z_um']:.1f}",
+        zorder=5,
+    )
 
     # Only show final Z line if it differs from best Z
     if abs(after["z_um"] - best["z_um"]) > 0.1:
-        ax.axvline(after["z_um"], color="purple", linestyle="--", linewidth=1.2,
-                   alpha=0.8, label=f'After Z = {after["z_um"]:.1f}', zorder=2)
+        ax.axvline(
+            after["z_um"],
+            color="purple",
+            linestyle="--",
+            linewidth=1.2,
+            alpha=0.8,
+            label=f"After Z = {after['z_um']:.1f}",
+            zorder=2,
+        )
 
     # Pick-Z marker
     if pick_z is not None:
@@ -495,8 +566,9 @@ def plot_sharpness_curve(
         label = f"Pick Z = {pick_z:.1f}"
         if interp_s is not None:
             label += f" (~S={interp_s:.1f})"
-        ax.axvline(pick_z, color="green", linestyle="--", linewidth=1.5,
-                   alpha=0.9, label=label, zorder=4)
+        ax.axvline(
+            pick_z, color="green", linestyle="--", linewidth=1.5, alpha=0.9, label=label, zorder=4
+        )
 
     ax.set_xlabel("Z position (µm)")
     ax.set_ylabel("Sharpness")
@@ -518,9 +590,9 @@ def plot_sharpness_curve(
     # Inset images panel
     if has_insets:
         inset_order = [
-            ("before", f'Before (Z={before["z_um"]:.1f}, S={before["sharpness"]:.1f})'),
-            ("best_scan_frame", f'Best scan (Z={best["z_um"]:.1f}, S={best["sharpness"]:.1f})'),
-            ("after", f'After (Z={after["z_um"]:.1f}, S={after["sharpness"]:.1f})'),
+            ("before", f"Before (Z={before['z_um']:.1f}, S={before['sharpness']:.1f})"),
+            ("best_scan_frame", f"Best scan (Z={best['z_um']:.1f}, S={best['sharpness']:.1f})"),
+            ("after", f"After (Z={after['z_um']:.1f}, S={after['sharpness']:.1f})"),
         ]
         available = [(key, label) for key, label in inset_order if key in inset_images]
         n_insets = len(available)
@@ -614,7 +686,7 @@ def make_frame_mosaic(
         x = col_i * (thumb_w + margin)
         y = row_i * (thumb_h + margin)
 
-        label = f'#{info["frame"]:03d} Z={info["z_um"]:.1f} S={info["sharpness"]:.1f}'
+        label = f"#{info['frame']:03d} Z={info['z_um']:.1f} S={info['sharpness']:.1f}"
         tx = x + pad
         ty = y + pad
         bbox = draw.textbbox((tx, ty), label, font=font)
@@ -638,7 +710,7 @@ def main():
         "dir",
         type=Path,
         help="Autofocus output directory (must contain summary.json), "
-             "or focus map JSON when used with --focus-map-point",
+        "or focus map JSON when used with --focus-map-point",
     )
     parser.add_argument(
         "--focus-map-point",
@@ -660,7 +732,8 @@ def main():
         help="Mark a user-picked Z on the sharpness curve (green dashed line)",
     )
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         type=Path,
         default=None,
         help="Output directory for generated files (default: same as DIR)",
@@ -676,7 +749,8 @@ def main():
         help="Recompute sharpness with multiple metrics and plot comparison (requires debug frames)",
     )
     parser.add_argument(
-        "--quiet", "-q",
+        "--quiet",
+        "-q",
         action="store_true",
         help="Suppress verbose output",
     )
@@ -716,7 +790,9 @@ def main():
     else:
         dir_path = input_path
         if not dir_path.is_dir():
-            print(f"Error: Expected a directory (or use --focus-map-point with a JSON file): {dir_path}")
+            print(
+                f"Error: Expected a directory (or use --focus-map-point with a JSON file): {dir_path}"
+            )
             return 1
         try:
             summary = load_summary(dir_path)
@@ -839,9 +915,13 @@ def main():
             if coarse_paths or fine_paths or sf_paths:
                 metrics_path = output_dir / "metrics_comparison.png"
                 plot_metrics_comparison(
-                    coarse_paths, fine_paths, metrics_path,
-                    pick_z=args.pick_z, summary=summary,
-                    quiet=args.quiet, super_fine_paths=sf_paths,
+                    coarse_paths,
+                    fine_paths,
+                    metrics_path,
+                    pick_z=args.pick_z,
+                    summary=summary,
+                    quiet=args.quiet,
+                    super_fine_paths=sf_paths,
                 )
             elif not args.quiet:
                 print("No debug frames found, skipping metrics comparison.")

@@ -54,11 +54,11 @@ def z_error_color(z_error: float | None) -> tuple[int, int, int]:
 
     abs_err = abs(z_error)
     if abs_err < 0.5:
-        return (0, 200, 0)      # Green
+        return (0, 200, 0)  # Green
     elif abs_err < 1.7:
-        return (0, 200, 200)    # Yellow
+        return (0, 200, 200)  # Yellow
     else:
-        return (0, 0, 200)      # Red
+        return (0, 0, 200)  # Red
 
 
 def create_filmstrip(
@@ -103,8 +103,13 @@ def create_filmstrip(
         # Add colored border
         color = z_error_color(frame.get("z_error"))
         bordered = cv2.copyMakeBorder(
-            thumb_arr, border_width, border_width, border_width, border_width,
-            cv2.BORDER_CONSTANT, value=color[::-1]  # RGB for PIL
+            thumb_arr,
+            border_width,
+            border_width,
+            border_width,
+            border_width,
+            cv2.BORDER_CONSTANT,
+            value=color[::-1],  # RGB for PIL
         )
 
         thumbnails.append(bordered)
@@ -138,21 +143,47 @@ def create_comparison(
 
     # Add labels
     font = cv2.FONT_HERSHEY_SIMPLEX
-    cv2.putText(best_img, f"BEST: frame {best_frame['n']}", (20, 50),
-                font, 1.5, (0, 255, 0), 3)
-    cv2.putText(best_img, f"tenengrad={best_frame['tenengrad']:.1f}", (20, 100),
-                font, 1.0, (255, 255, 255), 2)
-    if best_frame.get('z_error') is not None:
-        cv2.putText(best_img, f"z_error={best_frame['z_error']:+.2f}um", (20, 140),
-                    font, 1.0, (255, 255, 255), 2)
+    cv2.putText(best_img, f"BEST: frame {best_frame['n']}", (20, 50), font, 1.5, (0, 255, 0), 3)
+    cv2.putText(
+        best_img,
+        f"tenengrad={best_frame['tenengrad']:.1f}",
+        (20, 100),
+        font,
+        1.0,
+        (255, 255, 255),
+        2,
+    )
+    if best_frame.get("z_error") is not None:
+        cv2.putText(
+            best_img,
+            f"z_error={best_frame['z_error']:+.2f}um",
+            (20, 140),
+            font,
+            1.0,
+            (255, 255, 255),
+            2,
+        )
 
-    cv2.putText(worst_img, f"WORST: frame {worst_frame['n']}", (20, 50),
-                font, 1.5, (0, 0, 255), 3)
-    cv2.putText(worst_img, f"tenengrad={worst_frame['tenengrad']:.1f}", (20, 100),
-                font, 1.0, (255, 255, 255), 2)
-    if worst_frame.get('z_error') is not None:
-        cv2.putText(worst_img, f"z_error={worst_frame['z_error']:+.2f}um", (20, 140),
-                    font, 1.0, (255, 255, 255), 2)
+    cv2.putText(worst_img, f"WORST: frame {worst_frame['n']}", (20, 50), font, 1.5, (0, 0, 255), 3)
+    cv2.putText(
+        worst_img,
+        f"tenengrad={worst_frame['tenengrad']:.1f}",
+        (20, 100),
+        font,
+        1.0,
+        (255, 255, 255),
+        2,
+    )
+    if worst_frame.get("z_error") is not None:
+        cv2.putText(
+            worst_img,
+            f"z_error={worst_frame['z_error']:+.2f}um",
+            (20, 140),
+            font,
+            1.0,
+            (255, 255, 255),
+            2,
+        )
 
     # Stack horizontally
     comparison = np.hstack([best_img, worst_img])
@@ -161,13 +192,15 @@ def create_comparison(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Analyze focus quality from scan with Z tracking"
-    )
+    parser = argparse.ArgumentParser(description="Analyze focus quality from scan with Z tracking")
     parser.add_argument("scan_dir", type=Path, help="Scan output directory")
     parser.add_argument("--show", action="store_true", help="Display plots interactively")
-    parser.add_argument("--dof", type=float, default=1.7,
-                       help="DOF threshold in µm for flagging (default: 1.7 for 20x)")
+    parser.add_argument(
+        "--dof",
+        type=float,
+        default=1.7,
+        help="DOF threshold in µm for flagging (default: 1.7 for 20x)",
+    )
     args = parser.parse_args()
 
     scan_dir = args.scan_dir
@@ -198,15 +231,17 @@ def main():
 
         metrics = analyze_frame(frame_path)
 
-        frames_data.append({
-            "n": frame["n"],
-            "x_um": frame.get("x_start"),
-            "z_actual": frame.get("z_actual"),
-            "z_ideal": frame.get("z_ideal"),
-            "z_error": frame.get("z_error"),
-            "tenengrad": metrics["tenengrad"],
-            "laplacian": metrics["laplacian"],
-        })
+        frames_data.append(
+            {
+                "n": frame["n"],
+                "x_um": frame.get("x_start"),
+                "z_actual": frame.get("z_actual"),
+                "z_ideal": frame.get("z_ideal"),
+                "z_error": frame.get("z_error"),
+                "tenengrad": metrics["tenengrad"],
+                "laplacian": metrics["laplacian"],
+            }
+        )
 
         if (i + 1) % 20 == 0:
             print(f"  Processed {i + 1}/{len(frames_meta)} frames")
@@ -216,9 +251,9 @@ def main():
     # Write CSV
     csv_path = scan_dir / "focus_quality.csv"
     with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "n", "x_um", "z_actual", "z_ideal", "z_error", "tenengrad", "laplacian"
-        ])
+        writer = csv.DictWriter(
+            f, fieldnames=["n", "x_um", "z_actual", "z_ideal", "z_error", "tenengrad", "laplacian"]
+        )
         writer.writeheader()
         writer.writerows(frames_data)
     print(f"Saved CSV: {csv_path}")
@@ -230,18 +265,22 @@ def main():
 
     print("\nSharpness Statistics:")
     if tenengrad_vals:
-        print(f"  Tenengrad: mean={np.mean(tenengrad_vals):.1f}, "
-              f"std={np.std(tenengrad_vals):.1f}, "
-              f"min={np.min(tenengrad_vals):.1f}, max={np.max(tenengrad_vals):.1f}")
+        print(
+            f"  Tenengrad: mean={np.mean(tenengrad_vals):.1f}, "
+            f"std={np.std(tenengrad_vals):.1f}, "
+            f"min={np.min(tenengrad_vals):.1f}, max={np.max(tenengrad_vals):.1f}"
+        )
     if laplacian_vals:
-        print(f"  Laplacian: mean={np.mean(laplacian_vals):.1f}, "
-              f"std={np.std(laplacian_vals):.1f}, "
-              f"min={np.min(laplacian_vals):.1f}, max={np.max(laplacian_vals):.1f}")
+        print(
+            f"  Laplacian: mean={np.mean(laplacian_vals):.1f}, "
+            f"std={np.std(laplacian_vals):.1f}, "
+            f"min={np.min(laplacian_vals):.1f}, max={np.max(laplacian_vals):.1f}"
+        )
 
     # Z error statistics
     if z_errors:
         abs_errors = [abs(e) for e in z_errors]
-        print(f"\nZ Tracking Error:")
+        print("\nZ Tracking Error:")
         print(f"  Mean: {np.mean(z_errors):+.3f} µm")
         print(f"  Std: {np.std(z_errors):.3f} µm")
         print(f"  Max |error|: {np.max(abs_errors):.3f} µm")
@@ -252,8 +291,9 @@ def main():
     if flagged:
         print(f"\nFlagged frames (|z_error| > {args.dof} µm): {len(flagged)}")
         for f in flagged[:10]:  # Show first 10
-            print(f"  Frame {f['n']}: z_error={f['z_error']:+.2f}µm, "
-                  f"tenengrad={f['tenengrad']:.1f}")
+            print(
+                f"  Frame {f['n']}: z_error={f['z_error']:+.2f}µm, tenengrad={f['tenengrad']:.1f}"
+            )
         if len(flagged) > 10:
             print(f"  ... and {len(flagged) - 10} more")
     else:
@@ -269,6 +309,7 @@ def main():
 
     # Create visualizations
     import matplotlib
+
     if not args.show:
         matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -316,8 +357,14 @@ def main():
         # Compute correlation
         if len(z_err) > 2:
             corr = np.corrcoef(np.abs(z_err), ten_vals)[0, 1]
-            ax3.text(0.05, 0.95, f"corr(|z_err|, sharpness) = {corr:.3f}",
-                    transform=ax3.transAxes, fontsize=10, verticalalignment='top')
+            ax3.text(
+                0.05,
+                0.95,
+                f"corr(|z_err|, sharpness) = {corr:.3f}",
+                transform=ax3.transAxes,
+                fontsize=10,
+                verticalalignment="top",
+            )
     ax3.set_xlabel("Z error (µm)")
     ax3.set_ylabel("Tenengrad sharpness")
     ax3.set_title("Sharpness vs Z Error")
@@ -329,8 +376,14 @@ def main():
     ten_vals = [f["tenengrad"] for f in frames_data if f["tenengrad"]]
     if frame_nums:
         # Normalize sharpness for comparison
-        ten_norm = (np.array(ten_vals) - np.mean(ten_vals)) / np.std(ten_vals) if np.std(ten_vals) > 0 else ten_vals
-        ax4.plot(frame_nums, ten_norm, "b-", linewidth=0.8, alpha=0.7, label="Sharpness (normalized)")
+        ten_norm = (
+            (np.array(ten_vals) - np.mean(ten_vals)) / np.std(ten_vals)
+            if np.std(ten_vals) > 0
+            else ten_vals
+        )
+        ax4.plot(
+            frame_nums, ten_norm, "b-", linewidth=0.8, alpha=0.7, label="Sharpness (normalized)"
+        )
 
     z_err = [f["z_error"] for f in frames_data if f["z_error"] is not None]
     frame_nums_z = [f["n"] for f in frames_data if f["z_error"] is not None]
@@ -400,7 +453,7 @@ def main():
     if success:
         print("\nPASS: Focus tracking appears successful")
     else:
-        print(f"\nISSUES DETECTED:")
+        print("\nISSUES DETECTED:")
         for issue in issues:
             print(f"  - {issue}")
 

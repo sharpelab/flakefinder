@@ -16,13 +16,13 @@ import sys
 from PIL import Image as PILImage
 
 from flakefinder.leica import (
-    LeicaConnection,
     Camera,
-    Shutter,
     Lamp,
+    LeicaConnection,
+    Nosepiece,
+    Shutter,
     Stage,
     ZDrive,
-    Nosepiece,
 )
 
 
@@ -69,36 +69,47 @@ def report_status(conn: LeicaConnection, camera: Camera) -> None:
     binning_str = binning_map.get(camera.binning, str(camera.binning))
     w, h = camera.frame_size_px
     r, g, b = camera.gain_rgb
-    print(f"Camera: {w}x{h} @ {binning_str} binning, {camera.exposure_time*1000:.1f}ms exposure")
+    print(f"Camera: {w}x{h} @ {binning_str} binning, {camera.exposure_time * 1000:.1f}ms exposure")
     print(f"White balance: R={r:.2f} G={g:.2f} B={b:.2f}")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Capture an image from the microscope"
-    )
+    parser = argparse.ArgumentParser(description="Capture an image from the microscope")
     parser.add_argument("output", help="Output file path (jpg, png, tiff)")
-    parser.add_argument("--lamp", type=int, default=255,
-                        help="Lamp intensity (default: 255)")
-    parser.add_argument("--binning", type=int, choices=[0, 1, 2],
-                        help="Binning level: 0=1x1, 1=2x2, 2=3x3 (default: 2)")
-    parser.add_argument("--downsample", type=int, default=1,
-                        help="Downsample factor after capture (default: 1)")
-    parser.add_argument("--exposure", type=float, default=0.001,
-                        help="Exposure time in seconds (default: 0.001 = 1ms)")
-    parser.add_argument("--wb", type=str, default="1.41,1.02,2.51",
-                        help="White balance as R,G,B (default: '1.41,1.02,2.51')")
+    parser.add_argument("--lamp", type=int, default=255, help="Lamp intensity (default: 255)")
+    parser.add_argument(
+        "--binning",
+        type=int,
+        choices=[0, 1, 2],
+        help="Binning level: 0=1x1, 1=2x2, 2=3x3 (default: 2)",
+    )
+    parser.add_argument(
+        "--downsample", type=int, default=1, help="Downsample factor after capture (default: 1)"
+    )
+    parser.add_argument(
+        "--exposure",
+        type=float,
+        default=0.001,
+        help="Exposure time in seconds (default: 0.001 = 1ms)",
+    )
+    parser.add_argument(
+        "--wb",
+        type=str,
+        default="1.41,1.02,2.51",
+        help="White balance as R,G,B (default: '1.41,1.02,2.51')",
+    )
     parser.add_argument("--wb-red", type=float, help="Red channel gain")
     parser.add_argument("--wb-green", type=float, help="Green channel gain")
     parser.add_argument("--wb-blue", type=float, help="Blue channel gain")
-    parser.add_argument("--gain", type=float,
-                        help="Camera gain (e.g., 4.0)")
-    parser.add_argument("--quality", type=int, default=95,
-                        help="JPEG quality (default: 95)")
-    parser.add_argument("--xy", type=str, metavar="X,Y",
-                        help="Move to X,Y position in µm before capture (e.g., '5000,14441')")
-    parser.add_argument("--z", type=float,
-                        help="Move to Z position in µm before capture")
+    parser.add_argument("--gain", type=float, help="Camera gain (e.g., 4.0)")
+    parser.add_argument("--quality", type=int, default=95, help="JPEG quality (default: 95)")
+    parser.add_argument(
+        "--xy",
+        type=str,
+        metavar="X,Y",
+        help="Move to X,Y position in µm before capture (e.g., '5000,14441')",
+    )
+    parser.add_argument("--z", type=float, help="Move to Z position in µm before capture")
     args = parser.parse_args()
 
     # Parse white balance
@@ -197,13 +208,13 @@ def main() -> int:
         binning_map = {0: "1x1", 1: "2x2", 2: "3x3"}
         binning_str = binning_map.get(camera.binning, str(camera.binning))
         r, g, b = camera.gain_rgb
-        print(f"Exposure: {camera.exposure_time*1000:.2f} ms")
+        print(f"Exposure: {camera.exposure_time * 1000:.2f} ms")
         print(f"Binning: {binning_str}")
         print(f"White balance: R={r:.2f} G={g:.2f} B={b:.2f}")
         print()
 
         # Capture
-        print(f"Capturing...")
+        print("Capturing...")
         image = camera.capture()
 
         # Convert to PIL

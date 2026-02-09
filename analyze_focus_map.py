@@ -9,11 +9,9 @@ import json
 from pathlib import Path
 
 import cv2
-import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
+import numpy as np
 from scipy.interpolate import griddata
-from PIL import Image
 
 
 def sharpness_tenengrad(image: np.ndarray) -> float:
@@ -191,16 +189,24 @@ def plot_focus_map(data: dict, analysis: dict, output_path: Path, quiet: bool = 
     coeffs = analysis["plane_coeffs"]
 
     # Build point labels like "c01", "g11"
-    labels = [f"{'c' if t == 'contour' else 'g'}{idx:02d}"
-              for t, idx in zip(analysis["types"], analysis["indices"])]
+    labels = [
+        f"{'c' if t == 'contour' else 'g'}{idx:02d}"
+        for t, idx in zip(analysis["types"], analysis["indices"], strict=True)
+    ]
 
     def annotate_points(ax, x, y, labels, fontsize=6):
-        for xi, yi, label in zip(x, y, labels):
-            ax.annotate(label, (xi, yi), textcoords="offset points",
-                       xytext=(4, 4), fontsize=fontsize, alpha=0.8)
+        for xi, yi, label in zip(x, y, labels, strict=True):
+            ax.annotate(
+                label,
+                (xi, yi),
+                textcoords="offset points",
+                xytext=(4, 4),
+                fontsize=fontsize,
+                alpha=0.8,
+            )
 
     # 1. 3D interpolated surface from sample points
-    ax1 = fig.add_subplot(2, 3, 1, projection='3d')
+    ax1 = fig.add_subplot(2, 3, 1, projection="3d")
 
     # Create interpolated surface
     x_grid = np.linspace(x.min(), x.max(), 50)
@@ -208,59 +214,64 @@ def plot_focus_map(data: dict, analysis: dict, output_path: Path, quiet: bool = 
     X_surf, Y_surf = np.meshgrid(x_grid, y_grid)
 
     # Interpolate Z values onto grid
-    Z_surf = griddata((x, y), z, (X_surf, Y_surf), method='cubic')
+    Z_surf = griddata((x, y), z, (X_surf, Y_surf), method="cubic")
 
     # Plot interpolated surface
-    surf = ax1.plot_surface(X_surf, Y_surf, Z_surf, cmap='viridis', alpha=0.8,
-                            linewidth=0, antialiased=True)
+    surf = ax1.plot_surface(
+        X_surf, Y_surf, Z_surf, cmap="viridis", alpha=0.8, linewidth=0, antialiased=True
+    )
 
     # Overlay sample points
-    colors = ['red' if t == 'contour' else 'white' for t in analysis["types"]]
-    ax1.scatter(x, y, z, c=colors, s=30, edgecolors='black', linewidths=0.5, zorder=5)
+    colors = ["red" if t == "contour" else "white" for t in analysis["types"]]
+    ax1.scatter(x, y, z, c=colors, s=30, edgecolors="black", linewidths=0.5, zorder=5)
 
-    ax1.set_xlabel('X (mm)')
-    ax1.set_ylabel('Y (mm)')
-    ax1.set_zlabel('Z (µm)')
-    ax1.set_title('Interpolated Focus Surface')
-    fig.colorbar(surf, ax=ax1, shrink=0.5, label='Z (µm)')
+    ax1.set_xlabel("X (mm)")
+    ax1.set_ylabel("Y (mm)")
+    ax1.set_zlabel("Z (µm)")
+    ax1.set_title("Interpolated Focus Surface")
+    fig.colorbar(surf, ax=ax1, shrink=0.5, label="Z (µm)")
 
     # 2. 3D points with fitted plane
-    ax2 = fig.add_subplot(2, 3, 2, projection='3d')
+    ax2 = fig.add_subplot(2, 3, 2, projection="3d")
 
     # Color by type
-    colors = ['blue' if t == 'contour' else 'green' for t in analysis["types"]]
+    colors = ["blue" if t == "contour" else "green" for t in analysis["types"]]
     ax2.scatter(x, y, z, c=colors, s=50, alpha=0.8)
 
     # Plot fitted plane
     Z_plane = coeffs[0] * X_surf * 1000 + coeffs[1] * Y_surf * 1000 + coeffs[2]
-    ax2.plot_surface(X_surf, Y_surf, Z_plane, alpha=0.3, color='red')
+    ax2.plot_surface(X_surf, Y_surf, Z_plane, alpha=0.3, color="red")
 
-    ax2.set_xlabel('X (mm)')
-    ax2.set_ylabel('Y (mm)')
-    ax2.set_zlabel('Z (µm)')
-    ax2.set_title(f'Fitted Plane (R²={analysis["plane_r_squared"]:.3f})\n'
-                  f'Tilt: {analysis["tilt_magnitude_um_per_mm"]:.1f} µm/mm @ {analysis["tilt_direction_deg"]:.0f}°')
+    ax2.set_xlabel("X (mm)")
+    ax2.set_ylabel("Y (mm)")
+    ax2.set_zlabel("Z (µm)")
+    ax2.set_title(
+        f"Fitted Plane (R²={analysis['plane_r_squared']:.3f})\n"
+        f"Tilt: {analysis['tilt_magnitude_um_per_mm']:.1f} µm/mm @ {analysis['tilt_direction_deg']:.0f}°"
+    )
 
     # 3. Interpolated surface - top-down heatmap view
     ax3 = fig.add_subplot(2, 3, 3)
-    im = ax3.pcolormesh(X_surf, Y_surf, Z_surf, cmap='viridis', shading='auto')
-    ax3.scatter(x, y, c='white', s=30, edgecolors='black', linewidths=0.5)
-    plt.colorbar(im, ax=ax3, label='Z (µm)')
-    ax3.set_xlabel('X (mm)')
-    ax3.set_ylabel('Y (mm)')
-    ax3.set_title('Interpolated Surface (top view)')
-    ax3.set_aspect('equal')
+    im = ax3.pcolormesh(X_surf, Y_surf, Z_surf, cmap="viridis", shading="auto")
+    ax3.scatter(x, y, c="white", s=30, edgecolors="black", linewidths=0.5)
+    plt.colorbar(im, ax=ax3, label="Z (µm)")
+    ax3.set_xlabel("X (mm)")
+    ax3.set_ylabel("Y (mm)")
+    ax3.set_title("Interpolated Surface (top view)")
+    ax3.set_aspect("equal")
     ax3.invert_yaxis()
     annotate_points(ax3, x, y, labels)
 
     # 4. Sharpness heatmap
     ax4 = fig.add_subplot(2, 3, 4)
-    scatter = ax4.scatter(x, y, c=sharpness, cmap='plasma', s=100, edgecolors='black')
-    plt.colorbar(scatter, ax=ax4, label='Sharpness')
-    ax4.set_xlabel('X (mm)')
-    ax4.set_ylabel('Y (mm)')
-    ax4.set_title(f'Sharpness Map (mean={analysis["sharpness_mean"]:.1f}, std={analysis["sharpness_std"]:.1f})')
-    ax4.set_aspect('equal')
+    scatter = ax4.scatter(x, y, c=sharpness, cmap="plasma", s=100, edgecolors="black")
+    plt.colorbar(scatter, ax=ax4, label="Sharpness")
+    ax4.set_xlabel("X (mm)")
+    ax4.set_ylabel("Y (mm)")
+    ax4.set_title(
+        f"Sharpness Map (mean={analysis['sharpness_mean']:.1f}, std={analysis['sharpness_std']:.1f})"
+    )
+    ax4.set_aspect("equal")
     ax4.invert_yaxis()
     annotate_points(ax4, x, y, labels)
 
@@ -268,30 +279,45 @@ def plot_focus_map(data: dict, analysis: dict, output_path: Path, quiet: bool = 
     if len(analysis["outlier_indices"]) > 0:
         out_x = x[analysis["outlier_indices"]]
         out_y = y[analysis["outlier_indices"]]
-        ax4.scatter(out_x, out_y, s=200, facecolors='none', edgecolors='cyan',
-                   linewidths=2, label='Z outliers')
+        ax4.scatter(
+            out_x,
+            out_y,
+            s=200,
+            facecolors="none",
+            edgecolors="cyan",
+            linewidths=2,
+            label="Z outliers",
+        )
         ax4.legend()
 
     # 5. Residuals from plane fit
     ax5 = fig.add_subplot(2, 3, 5)
-    scatter = ax5.scatter(x, y, c=residuals, cmap='coolwarm', s=100, edgecolors='black',
-                         vmin=-3*analysis["residual_std"], vmax=3*analysis["residual_std"])
-    plt.colorbar(scatter, ax=ax5, label='Residual (µm)')
-    ax5.set_xlabel('X (mm)')
-    ax5.set_ylabel('Y (mm)')
-    ax5.set_title(f'Residuals from Plane Fit (std={analysis["residual_std"]:.1f} µm)')
-    ax5.set_aspect('equal')
+    scatter = ax5.scatter(
+        x,
+        y,
+        c=residuals,
+        cmap="coolwarm",
+        s=100,
+        edgecolors="black",
+        vmin=-3 * analysis["residual_std"],
+        vmax=3 * analysis["residual_std"],
+    )
+    plt.colorbar(scatter, ax=ax5, label="Residual (µm)")
+    ax5.set_xlabel("X (mm)")
+    ax5.set_ylabel("Y (mm)")
+    ax5.set_title(f"Residuals from Plane Fit (std={analysis['residual_std']:.1f} µm)")
+    ax5.set_aspect("equal")
     ax5.invert_yaxis()
     annotate_points(ax5, x, y, labels)
 
     # 6. Z heatmap (top-down view)
     ax6 = fig.add_subplot(2, 3, 6)
-    scatter = ax6.scatter(x, y, c=z, cmap='viridis', s=100, edgecolors='black')
-    plt.colorbar(scatter, ax=ax6, label='Z (µm)')
-    ax6.set_xlabel('X (mm)')
-    ax6.set_ylabel('Y (mm)')
-    ax6.set_title('Z Position Map')
-    ax6.set_aspect('equal')
+    scatter = ax6.scatter(x, y, c=z, cmap="viridis", s=100, edgecolors="black")
+    plt.colorbar(scatter, ax=ax6, label="Z (µm)")
+    ax6.set_xlabel("X (mm)")
+    ax6.set_ylabel("Y (mm)")
+    ax6.set_title("Z Position Map")
+    ax6.set_aspect("equal")
     ax6.invert_yaxis()
     annotate_points(ax6, x, y, labels)
 
@@ -299,8 +325,15 @@ def plot_focus_map(data: dict, analysis: dict, output_path: Path, quiet: bool = 
     if len(analysis["low_sharpness_indices"]) > 0:
         low_x = x[analysis["low_sharpness_indices"]]
         low_y = y[analysis["low_sharpness_indices"]]
-        ax6.scatter(low_x, low_y, s=200, facecolors='none', edgecolors='red',
-                   linewidths=2, label='Low sharpness')
+        ax6.scatter(
+            low_x,
+            low_y,
+            s=200,
+            facecolors="none",
+            edgecolors="red",
+            linewidths=2,
+            label="Low sharpness",
+        )
         ax6.legend()
 
     plt.tight_layout()
@@ -320,16 +353,18 @@ def print_report(data: dict, analysis: dict) -> None:
     print(f"Chip ID: {data.get('chip_id', 'unknown')}")
     print(f"Duration: {data.get('duration_s', 0):.1f}s")
 
-    print(f"\n--- Points ---")
+    print("\n--- Points ---")
     print(f"Total points: {analysis['n_points']}")
     print(f"Valid points: {analysis['n_valid']}")
 
-    print(f"\n--- Z Statistics ---")
-    print(f"Z range: {analysis['z_min']:.1f} - {analysis['z_max']:.1f} µm ({analysis['z_range']:.1f} µm total)")
+    print("\n--- Z Statistics ---")
+    print(
+        f"Z range: {analysis['z_min']:.1f} - {analysis['z_max']:.1f} µm ({analysis['z_range']:.1f} µm total)"
+    )
     print(f"Z mean: {analysis['z_mean']:.1f} µm")
     print(f"Z std: {analysis['z_std']:.1f} µm")
 
-    print(f"\n--- Tilt Analysis ---")
+    print("\n--- Tilt Analysis ---")
     print(f"Plane fit R²: {analysis['plane_r_squared']:.3f}")
     print(f"Tilt X: {analysis['tilt_x_um_per_mm']:.2f} µm/mm")
     print(f"Tilt Y: {analysis['tilt_y_um_per_mm']:.2f} µm/mm")
@@ -337,12 +372,12 @@ def print_report(data: dict, analysis: dict) -> None:
     print(f"Tilt direction: {analysis['tilt_direction_deg']:.1f}°")
     print(f"Residual std: {analysis['residual_std']:.1f} µm (surface roughness/error)")
 
-    print(f"\n--- Sharpness Statistics ---")
+    print("\n--- Sharpness Statistics ---")
     print(f"Sharpness range: {analysis['sharpness_min']:.1f} - {analysis['sharpness_max']:.1f}")
     print(f"Sharpness mean: {analysis['sharpness_mean']:.1f}")
     print(f"Sharpness std: {analysis['sharpness_std']:.1f}")
 
-    print(f"\n--- Potential Issues ---")
+    print("\n--- Potential Issues ---")
 
     low_sharp = analysis["low_sharpness_indices"]
     if len(low_sharp) > 0:
@@ -351,8 +386,10 @@ def print_report(data: dict, analysis: dict) -> None:
         for idx in low_sharp:
             p = points[idx]
             sharpness = get_sharpness(p) or 0
-            print(f"  {p['type']} {p['index']}: sharpness={sharpness:.1f}, "
-                  f"pos=({p['x_um']/1000:.2f}, {p['y_um']/1000:.2f}) mm")
+            print(
+                f"  {p['type']} {p['index']}: sharpness={sharpness:.1f}, "
+                f"pos=({p['x_um'] / 1000:.2f}, {p['y_um'] / 1000:.2f}) mm"
+            )
     else:
         print("No low sharpness points detected.")
 
@@ -364,8 +401,10 @@ def print_report(data: dict, analysis: dict) -> None:
         for idx in outliers:
             p = valid_points[idx]
             res = analysis["residuals"][idx]
-            print(f"  {p['type']} {p['index']}: Z={p['selected']['z_um']:.1f} µm, "
-                  f"residual={res:+.1f} µm")
+            print(
+                f"  {p['type']} {p['index']}: Z={p['selected']['z_um']:.1f} µm, "
+                f"residual={res:+.1f} µm"
+            )
     else:
         print("No Z outliers detected.")
 
@@ -378,17 +417,21 @@ def print_report(data: dict, analysis: dict) -> None:
             sel = get_sharpness(p) or 0
             final = p.get("final_sharpness", 0)
             drift_pct = abs(sel - final) / sel * 100 if sel > 0 else 0
-            print(f"  {p['type']} {p['index']}: selected={sel:.1f}, final={final:.1f} "
-                  f"({drift_pct:+.0f}%)")
+            print(
+                f"  {p['type']} {p['index']}: selected={sel:.1f}, final={final:.1f} "
+                f"({drift_pct:+.0f}%)"
+            )
     else:
         print("No sharpness drift detected.")
 
     # DOF warning
     dof_20x = 4  # µm, approximate for 20x
     if analysis["z_range"] > 5 * dof_20x:
-        print(f"\n⚠️  WARNING: Z range ({analysis['z_range']:.0f} µm) is ~{analysis['z_range']/dof_20x:.0f}x "
-              f"the DOF of a 20x objective (~{dof_20x} µm)")
-        print(f"   Consider leveling the sample or using focus tracking during scans.")
+        print(
+            f"\n⚠️  WARNING: Z range ({analysis['z_range']:.0f} µm) is ~{analysis['z_range'] / dof_20x:.0f}x "
+            f"the DOF of a 20x objective (~{dof_20x} µm)"
+        )
+        print("   Consider leveling the sample or using focus tracking during scans.")
 
     print("\n" + "=" * 60)
 
@@ -568,8 +611,9 @@ def create_mosaic(
         # Also flag if significant drift between best and final
         sel = get_sharpness(point)
         final = point.get("final_sharpness")
-        has_drift = (sel is not None and final is not None and sel > 0 and
-                     abs(sel - final) / sel > 0.2)
+        has_drift = (  # noqa: F841 — TODO: use to color drift points
+            sel is not None and final is not None and sel > 0 and abs(sel - final) / sel > 0.2
+        )
         text_color = (0, 0, 255) if low_sharpness else (255, 255, 255)  # BGR: red if low sharpness
 
         # Draw background rectangle for readability
@@ -588,15 +632,24 @@ def create_mosaic(
 
         # Draw semi-transparent background
         overlay = canvas.copy()
-        cv2.rectangle(overlay, (x0 + 2, y0 + 2), (x0 + bg_width + 2, y0 + bg_height + 2),
-                     (0, 0, 0), -1)
+        cv2.rectangle(
+            overlay, (x0 + 2, y0 + 2), (x0 + bg_width + 2, y0 + bg_height + 2), (0, 0, 0), -1
+        )
         cv2.addWeighted(overlay, 0.6, canvas, 0.4, 0, canvas)
 
         # Draw text lines
         for i, line in enumerate(label_lines):
             text_y = y0 + 6 + line_height * (i + 1)
-            cv2.putText(canvas, line, (x0 + 5, text_y), font, font_scale,
-                       text_color, font_thickness, cv2.LINE_AA)
+            cv2.putText(
+                canvas,
+                line,
+                (x0 + 5, text_y),
+                font,
+                font_scale,
+                text_color,
+                font_thickness,
+                cv2.LINE_AA,
+            )
 
     # Grid interior starts after contour column + contour_margin
     grid_x_start = thumb_w + contour_margin
@@ -630,7 +683,7 @@ def create_mosaic(
         x0 = grid_x_start + grid_col * (thumb_w + grid_margin)
         y0 = grid_y_start + grid_row * (thumb_h + grid_margin)
 
-        canvas[y0:y0+thumb_h, x0:x0+thumb_w] = img
+        canvas[y0 : y0 + thumb_h, x0 : x0 + thumb_w] = img
         draw_label(canvas, x0, y0, p, z_mean, img)
 
     # Place contour images on outer edge at continuous positions
@@ -680,35 +733,35 @@ def create_mosaic(
             min_dist = min(dist_left, dist_right, dist_top, dist_bottom)
 
             if min_dist == dist_left:
-                edge = 'left'
+                edge = "left"
             elif min_dist == dist_right:
-                edge = 'right'
+                edge = "right"
             elif min_dist == dist_top:
-                edge = 'top'
+                edge = "top"
             else:
-                edge = 'bottom'
+                edge = "bottom"
         elif max_outside == outside_left:
-            edge = 'left'
+            edge = "left"
         elif max_outside == outside_right:
-            edge = 'right'
+            edge = "right"
         elif max_outside == outside_top:
-            edge = 'top'
+            edge = "top"
         else:
-            edge = 'bottom'
+            edge = "bottom"
 
         # Calculate continuous position along the edge
         # Clamp normalized coords for positioning along edge
         nx_clamped = max(0, min(1, nx))
         ny_clamped = max(0, min(1, ny))
 
-        if edge == 'left':
+        if edge == "left":
             x0 = 0  # Left column
             # Map ny to interior Y range
             y0 = int(interior_y_start + ny_clamped * (interior_y_end - interior_y_start - thumb_h))
-        elif edge == 'right':
+        elif edge == "right":
             x0 = canvas_w - thumb_w  # Right column
             y0 = int(interior_y_start + ny_clamped * (interior_y_end - interior_y_start - thumb_h))
-        elif edge == 'top':
+        elif edge == "top":
             # Map nx to interior X range
             x0 = int(interior_x_start + nx_clamped * (interior_x_end - interior_x_start - thumb_w))
             y0 = 0  # Top row
@@ -720,7 +773,7 @@ def create_mosaic(
         x0 = max(0, min(canvas_w - thumb_w, x0))
         y0 = max(0, min(canvas_h - thumb_h, y0))
 
-        canvas[y0:y0+thumb_h, x0:x0+thumb_w] = img
+        canvas[y0 : y0 + thumb_h, x0 : x0 + thumb_w] = img
         draw_label(canvas, x0, y0, p, z_mean, img)
 
     # Draw legend in bottom right
@@ -747,17 +800,29 @@ def create_mosaic(
 
     # Draw legend background
     overlay = canvas.copy()
-    cv2.rectangle(overlay, (legend_x, legend_y),
-                  (legend_x + legend_width, legend_y + legend_height),
-                  (40, 40, 40), -1)
+    cv2.rectangle(
+        overlay,
+        (legend_x, legend_y),
+        (legend_x + legend_width, legend_y + legend_height),
+        (40, 40, 40),
+        -1,
+    )
     cv2.addWeighted(overlay, 0.85, canvas, 0.15, 0, canvas)
 
     # Draw legend text
     for i, line in enumerate(legend_lines):
         text_y = legend_y + 8 + legend_line_height * (i + 1)
         color = (200, 200, 200) if i == 0 else (255, 255, 255)
-        cv2.putText(canvas, line, (legend_x + 8, text_y), font, legend_font_scale,
-                    color, font_thickness, cv2.LINE_AA)
+        cv2.putText(
+            canvas,
+            line,
+            (legend_x + 8, text_y),
+            font,
+            legend_font_scale,
+            color,
+            font_thickness,
+            cv2.LINE_AA,
+        )
 
     # Draw notes in bottom left if present
     notes = data.get("notes")
@@ -779,23 +844,40 @@ def create_mosaic(
 
         # Draw notes background
         overlay = canvas.copy()
-        cv2.rectangle(overlay, (notes_x, notes_y),
-                      (notes_x + notes_width, notes_y + notes_height),
-                      (0, 0, 0), -1)
+        cv2.rectangle(
+            overlay,
+            (notes_x, notes_y),
+            (notes_x + notes_width, notes_y + notes_height),
+            (0, 0, 0),
+            -1,
+        )
         cv2.addWeighted(overlay, 0.7, canvas, 0.3, 0, canvas)
 
         # Draw notes text
         for i, line in enumerate(notes_lines):
             text_y_pos = notes_y + 8 + notes_line_height * (i + 1)
-            cv2.putText(canvas, line, (notes_x + 8, text_y_pos), font, notes_font_scale,
-                        (255, 255, 200), font_thickness, cv2.LINE_AA)
+            cv2.putText(
+                canvas,
+                line,
+                (notes_x + 8, text_y_pos),
+                font,
+                notes_font_scale,
+                (255, 255, 200),
+                font_thickness,
+                cv2.LINE_AA,
+            )
 
     cv2.imwrite(str(output_path), canvas, [cv2.IMWRITE_JPEG_QUALITY, 95])
     if not quiet:
         print(f"Mosaic saved to {output_path}")
 
 
-def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_margin_um: float = 5000.0, min_sharpness: float = 0.0) -> dict:
+def compute_robust_plane_fit(
+    data: dict,
+    cf_threshold: float = 20.0,
+    corner_margin_um: float = 5000.0,
+    min_sharpness: float = 0.0,
+) -> dict:
     """Compute robust plane fit with outlier rejection and coverage analysis.
 
     Uses coarse-fine disagreement and sharpness floor as quality metrics.
@@ -825,7 +907,9 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
 
     # Compute quality metrics
     drift_pct = np.clip((sel_sharpness - final_sharpness) / sel_sharpness * 100, 0, 100)
-    coarse_best_z = np.array([p.get("coarse", {}).get("best_z_um", p["selected"]["z_um"]) for p in points])
+    coarse_best_z = np.array(
+        [p.get("coarse", {}).get("best_z_um", p["selected"]["z_um"]) for p in points]
+    )
     coarse_fine_diff = np.abs(coarse_best_z - z)
 
     # High-confidence mask: low coarse-fine disagreement AND above sharpness floor
@@ -848,7 +932,7 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
     # Compute residuals and R²
     z_pred = a * x_hc + b * y_hc + c
     residuals = z_hc - z_pred
-    ss_res = np.sum(residuals ** 2)
+    ss_res = np.sum(residuals**2)
     ss_tot = np.sum((z_hc - np.mean(z_hc)) ** 2)
     r_squared = 1 - ss_res / ss_tot if ss_tot > 0 else 0
 
@@ -868,9 +952,8 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
 
     for corner_name, (cx, cy) in corners.items():
         # Check if any high-confidence point is near this corner
-        near_corner = (
-            (np.abs(x_hc - cx) < corner_margin_um) &
-            (np.abs(y_hc - cy) < corner_margin_um)
+        near_corner = (np.abs(x_hc - cx) < corner_margin_um) & (
+            np.abs(y_hc - cy) < corner_margin_um
         )
         if near_corner.any():
             corners_covered.append(corner_name)
@@ -883,7 +966,7 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
             "a": float(a),
             "b": float(b),
             "c": float(c),
-            "equation": f"Z = {a*1000:.4f}*X_mm + {b*1000:.4f}*Y_mm + {c:.2f}",
+            "equation": f"Z = {a * 1000:.4f}*X_mm + {b * 1000:.4f}*Y_mm + {c:.2f}",
         },
         "units": "um",
         "quality": {
@@ -918,7 +1001,8 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
                 "coarse_fine_diff_um": float(coarse_fine_diff[i]),
                 "drift_pct": float(drift_pct[i]),
             }
-            for i in range(len(points)) if high_conf_mask[i]
+            for i in range(len(points))
+            if high_conf_mask[i]
         ],
         "points_dropped": [
             {
@@ -928,9 +1012,12 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
                 "y_um": float(y[i]),
                 "z_um": float(z[i]),
                 "selected_sharpness": float(sel_sharpness[i]),
-                "reason": "low_sharpness" if sel_sharpness[i] < min_sharpness else "cf_disagreement",
+                "reason": "low_sharpness"
+                if sel_sharpness[i] < min_sharpness
+                else "cf_disagreement",
             }
-            for i in range(len(points)) if not high_conf_mask[i]
+            for i in range(len(points))
+            if not high_conf_mask[i]
         ],
     }
 
@@ -941,7 +1028,7 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
     G_x, G_y = np.meshgrid(grid_x, grid_y)
 
     # Use cubic interpolation from good points, fall back to plane for extrapolation
-    Z_interp = griddata((x_hc, y_hc), z_hc, (G_x, G_y), method='cubic')
+    Z_interp = griddata((x_hc, y_hc), z_hc, (G_x, G_y), method="cubic")
     # Fill NaN (extrapolated regions) with plane values
     nan_mask = np.isnan(Z_interp)
     Z_interp[nan_mask] = a * G_x[nan_mask] + b * G_y[nan_mask] + c
@@ -954,10 +1041,14 @@ def compute_robust_plane_fit(data: dict, cf_threshold: float = 20.0, corner_marg
 
     # Store arrays for plotting (not serialized)
     result["_plot_data"] = {
-        "all_x": x, "all_y": y, "all_z": z,
+        "all_x": x,
+        "all_y": y,
+        "all_z": z,
         "all_sharpness": sel_sharpness,
         "high_conf_mask": high_conf_mask,
-        "G_x": G_x, "G_y": G_y, "Z_interp": Z_interp,
+        "G_x": G_x,
+        "G_y": G_y,
+        "Z_interp": Z_interp,
     }
 
     return result
@@ -976,19 +1067,35 @@ def plot_contour_map(result: dict, output_path: Path, quiet: bool = False) -> No
     fig, ax = plt.subplots(figsize=(10, 8))
 
     # Filled contour
-    cf = ax.contourf(G_x, G_y, Z_interp, levels=20, cmap='viridis')
+    cf = ax.contourf(G_x, G_y, Z_interp, levels=20, cmap="viridis")
     # Contour lines
-    cl = ax.contour(G_x, G_y, Z_interp, levels=10, colors='white', linewidths=0.5, alpha=0.5)
-    ax.clabel(cl, inline=True, fontsize=7, fmt='%.0f')
+    cl = ax.contour(G_x, G_y, Z_interp, levels=10, colors="white", linewidths=0.5, alpha=0.5)
+    ax.clabel(cl, inline=True, fontsize=7, fmt="%.0f")
 
-    plt.colorbar(cf, ax=ax, label='Z (µm)')
+    plt.colorbar(cf, ax=ax, label="Z (µm)")
 
     # Good points (white)
-    ax.scatter(all_x[mask], all_y[mask], c='white', s=60, edgecolors='black',
-               linewidths=1, zorder=5, label=f'Used ({mask.sum()})')
+    ax.scatter(
+        all_x[mask],
+        all_y[mask],
+        c="white",
+        s=60,
+        edgecolors="black",
+        linewidths=1,
+        zorder=5,
+        label=f"Used ({mask.sum()})",
+    )
     # Dropped points (red X)
-    ax.scatter(all_x[~mask], all_y[~mask], c='red', s=60, marker='x',
-               linewidths=2, zorder=5, label=f'Dropped ({(~mask).sum()})')
+    ax.scatter(
+        all_x[~mask],
+        all_y[~mask],
+        c="red",
+        s=60,
+        marker="x",
+        linewidths=2,
+        zorder=5,
+        label=f"Dropped ({(~mask).sum()})",
+    )
 
     # Label all points
     points_used = result["points_used"]
@@ -996,21 +1103,29 @@ def plot_contour_map(result: dict, output_path: Path, quiet: bool = False) -> No
     all_labeled = points_used + points_dropped
     for p in all_labeled:
         label = f"{'c' if p['type'] == 'contour' else 'g'}{p['index']:02d}"
-        ax.annotate(label, (p['x_um'] / 1000, p['y_um'] / 1000),
-                   textcoords="offset points", xytext=(5, 5), fontsize=7, alpha=0.8)
+        ax.annotate(
+            label,
+            (p["x_um"] / 1000, p["y_um"] / 1000),
+            textcoords="offset points",
+            xytext=(5, 5),
+            fontsize=7,
+            alpha=0.8,
+        )
 
     q = result["quality"]
     t = result["tilt"]
-    ax.set_title(f'Interpolated Focus Surface (R²={q["r_squared"]:.3f}, '
-                 f'{q["points_used"]}/{q["points_total"]} pts, '
-                 f'tilt={t["magnitude_um_per_mm"]:.1f} µm/mm)\n'
-                 f'Residual std={q["residual_std_um"]:.1f} µm, '
-                 f'min_sharpness={q["min_sharpness"]:.0f}')
-    ax.set_xlabel('X (mm)')
-    ax.set_ylabel('Y (mm)')
-    ax.set_aspect('equal')
+    ax.set_title(
+        f"Interpolated Focus Surface (R²={q['r_squared']:.3f}, "
+        f"{q['points_used']}/{q['points_total']} pts, "
+        f"tilt={t['magnitude_um_per_mm']:.1f} µm/mm)\n"
+        f"Residual std={q['residual_std_um']:.1f} µm, "
+        f"min_sharpness={q['min_sharpness']:.0f}"
+    )
+    ax.set_xlabel("X (mm)")
+    ax.set_ylabel("Y (mm)")
+    ax.set_aspect("equal")
     ax.invert_yaxis()
-    ax.legend(loc='lower right')
+    ax.legend(loc="lower right")
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
@@ -1019,7 +1134,9 @@ def plot_contour_map(result: dict, output_path: Path, quiet: bool = False) -> No
         print(f"Contour map saved to {output_path}")
 
 
-def export_plane(data: dict, output_path: Path, cf_threshold: float = 20.0, min_sharpness: float = 0.0) -> dict:
+def export_plane(
+    data: dict, output_path: Path, cf_threshold: float = 20.0, min_sharpness: float = 0.0
+) -> dict:
     """Export robust plane fit to JSON file.
 
     Args:
@@ -1106,7 +1223,8 @@ def main():
         help="Minimum selected_sharpness to include in plane fit (default: 20)",
     )
     parser.add_argument(
-        "--quiet", "-q",
+        "--quiet",
+        "-q",
         action="store_true",
         help="Suppress verbose output (just generate files)",
     )
@@ -1128,9 +1246,7 @@ def main():
 
     # Generate plot
     if not args.no_plot:
-        output_path = args.output or args.focus_map.with_name(
-            args.focus_map.stem + "_analysis.png"
-        )
+        output_path = args.output or args.focus_map.with_name(args.focus_map.stem + "_analysis.png")
         plot_focus_map(data, analysis, output_path, quiet=args.quiet)
 
     # Generate mosaic
@@ -1154,7 +1270,12 @@ def main():
 
     # Export plane fit
     if args.export_plane:
-        result = export_plane(data, args.export_plane, cf_threshold=args.cf_threshold, min_sharpness=args.min_sharpness)
+        result = export_plane(
+            data,
+            args.export_plane,
+            cf_threshold=args.cf_threshold,
+            min_sharpness=args.min_sharpness,
+        )
 
         if not args.quiet:
             q = result["quality"]
@@ -1165,7 +1286,9 @@ def main():
             print("=" * 60)
             print("ROBUST PLANE FIT EXPORT")
             print("=" * 60)
-            print(f"Points used: {q['points_used']}/{q['points_total']} (CF <= {q['cf_threshold_um']} um)")
+            print(
+                f"Points used: {q['points_used']}/{q['points_total']} (CF <= {q['cf_threshold_um']} um)"
+            )
             print(f"R²: {q['r_squared']:.4f}")
             print(f"Residual std: {q['residual_std_um']:.2f} um")
             print(f"Residual max: {q['residual_max_um']:.2f} um")
@@ -1173,8 +1296,12 @@ def main():
             print(f"Plane: {result['plane']['equation']}")
             print(f"Tilt: {t['magnitude_um_per_mm']:.2f} um/mm")
             print()
-            print(f"Coverage X: {c['x_range_um'][0]/1000:.1f} - {c['x_range_um'][1]/1000:.1f} mm")
-            print(f"Coverage Y: {c['y_range_um'][0]/1000:.1f} - {c['y_range_um'][1]/1000:.1f} mm")
+            print(
+                f"Coverage X: {c['x_range_um'][0] / 1000:.1f} - {c['x_range_um'][1] / 1000:.1f} mm"
+            )
+            print(
+                f"Coverage Y: {c['y_range_um'][0] / 1000:.1f} - {c['y_range_um'][1] / 1000:.1f} mm"
+            )
             print(f"Corners covered: {', '.join(c['corners_covered']) or 'none'}")
             print(f"Corners extrapolated: {', '.join(c['corners_extrapolated']) or 'none'}")
             print()
