@@ -210,6 +210,7 @@ Once Step 3 lands (autofocus takes `scope`), `context` disappears from `run_focu
 ### Step 5: Discovered improvements
 
 - **`Stage.wait_all()` is a misplaced static method.** `run_focus_map` and scan scripts import `Stage` just for this utility. Should be a standalone function (e.g. in `units.py` module-level or a `utils` module).
+- **`desc` (MicroscopeDescription) used inconsistently.** `scan_area_v1.py` guards `desc` with `if desc:` for pre-validation but later uses `desc.camera` unconditionally for frame size computation. Low risk (JSON always exists) but should either fail hard early if `desc` is None or guard consistently.
 
 ### What doesn't need to change
 
