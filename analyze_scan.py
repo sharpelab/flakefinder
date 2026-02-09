@@ -67,10 +67,11 @@ def compute_z_tracking_stats(meta: dict) -> dict:
 
         direction = row["direction"]
 
-        # Initial jump: abs(mean z_error of first 2 frames)
-        init_frames = row_frames[: min(2, len(row_frames))]
-        init_errors = [f["z_error"] for f in init_frames]
-        init_jump = float(np.abs(np.mean(init_errors)))
+        # Initial jump: |z_error[frame 1] - z_error[frame 0]|
+        if len(row_frames) >= 2:
+            init_jump = abs(row_frames[1]["z_error"] - row_frames[0]["z_error"])
+        else:
+            init_jump = 0.0
 
         per_row.append(
             {
