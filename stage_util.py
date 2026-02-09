@@ -19,7 +19,7 @@ Usage:
 import argparse
 import sys
 
-from flakefinder.leica import Microscope, Stage
+from flakefinder.leica import Microscope, wait_all
 
 # =============================================================================
 # Axis Conventions
@@ -142,7 +142,7 @@ def park_microscope(scope: Microscope) -> None:
 
     # 2. XY to origin
     hx, hy = scope.stage.move_to_async(0.0, 0.0)
-    Stage.wait_all([hx, hy])
+    wait_all([hx, hy])
     hx.dispose()
     hy.dispose()
     print(f"  X -> {scope.stage.x.position_um:.0f} um [ok]")
@@ -265,7 +265,7 @@ def main() -> int:
             print(f"XY: ({x_before:.1f}, {y_before:.1f}) -> ({x_target:.1f}, {y_target:.1f}) µm")
 
             hx, hy = scope.stage.move_to_async(x_target, y_target)
-            Stage.wait_all([hx, hy])
+            wait_all([hx, hy])
             hx.dispose()
             hy.dispose()
 
@@ -281,7 +281,7 @@ def main() -> int:
             print(f"XY: ({x_before:.1f}, {y_before:.1f}) + ({dx:+.1f}, {dy:+.1f}) µm")
 
             hx, hy = scope.stage.move_rel_async(dx, dy)
-            Stage.wait_all([hx, hy])
+            wait_all([hx, hy])
             hx.dispose()
             hy.dispose()
 

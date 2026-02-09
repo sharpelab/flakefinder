@@ -386,7 +386,7 @@ Examples:
     from PIL import Image as PILImage
 
     from flakefinder.image_utils import sdk_image_to_numpy
-    from flakefinder.leica import Microscope, Stage
+    from flakefinder.leica import Microscope, wait_all
 
     with Microscope() as scope:
         stage = scope.stage
@@ -999,7 +999,7 @@ Examples:
         # Cleanup (camera disposed by Microscope.__exit__)
         with contextlib.suppress(Exception):
             context.Dispose()
-        Stage.wait_all([hx, hy])
+        wait_all([hx, hy])
         hx.dispose()
         hy.dispose()
         z_drive.move_to_corrected(initial_z)

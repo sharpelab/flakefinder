@@ -270,7 +270,7 @@ Examples:
     os.makedirs(args.output)
 
     from flakefinder.image_utils import sdk_image_to_numpy
-    from flakefinder.leica import Microscope, Stage
+    from flakefinder.leica import Microscope, wait_all
 
     print("Area Scan v1 (Snake Pattern)")
     print("=" * 50)
@@ -419,7 +419,7 @@ Examples:
 
             # Move to autofocus position
             hx, hy = stage.move_to_async(auto_focus_pos[0], auto_focus_pos[1])
-            Stage.wait_all([hx, hy])
+            wait_all([hx, hy])
             hx.dispose()
             hy.dispose()
 

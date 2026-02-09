@@ -244,7 +244,7 @@ def run_focus_map(
         List of FocusMapSample (one per point).
     """
     from flakefinder.autofocus_util import save_debug_frames
-    from flakefinder.leica import Stage
+    from flakefinder.leica import wait_all
     from flakefinder.leica.autofocus import continuous_autofocus
 
     stage = scope.stage
@@ -264,7 +264,7 @@ def run_focus_map(
 
         # Move to position
         hx, hy = stage.move_to_async(pt.x_um, pt.y_um)
-        Stage.wait_all([hx, hy])
+        wait_all([hx, hy])
         hx.dispose()
         hy.dispose()
         if move_settle_s > 0:
@@ -516,7 +516,7 @@ def main():
     stem = f"focus_map_chip{args.chip}_{args.suffix}" if args.suffix else f"focus_map_chip{args.chip}"
 
     # Import hardware libraries (after dry-run check)
-    from flakefinder.leica import Stage
+    from flakefinder.leica import wait_all
     from flakefinder.leica.autofocus import continuous_autofocus
 
     start_time = time.perf_counter()
@@ -544,7 +544,7 @@ def main():
             cx_mm, cy_mm = cx / 1000, cy / 1000
             print(f"\nNo --z provided, autofocusing at centroid ({cx_mm:.2f}, {cy_mm:.2f}) mm...")
             hx, hy = scope.stage.move_to_async(cx, cy)
-            Stage.wait_all([hx, hy])
+            wait_all([hx, hy])
             hx.dispose()
             hy.dispose()
             centroid_af = continuous_autofocus(

@@ -152,7 +152,7 @@ def main():
         return 1
 
     # Import hardware libraries
-    from flakefinder.leica import Microscope, Stage
+    from flakefinder.leica import Microscope, wait_all
 
     with Microscope() as scope:
         stage = scope.stage
@@ -220,7 +220,7 @@ def main():
         # === Step 1: Move to XY position ===
         vprint(f"Moving to X={target_x:.1f}, Y={target_y:.1f}...")
         hx, hy = stage.move_to_async(target_x, target_y)
-        Stage.wait_all([hx, hy])
+        wait_all([hx, hy])
         hx.dispose()
         hy.dispose()
 

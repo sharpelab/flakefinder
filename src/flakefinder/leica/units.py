@@ -26,6 +26,29 @@ from .types import (
 )
 
 
+def wait_all(
+    handles: list["MoveHandle"],
+    timeout: float | None = None,
+    poll_interval: float = 0.01,
+) -> bool:
+    """Wait for multiple moves to complete.
+
+    Args:
+        handles: List of MoveHandles to wait for.
+        timeout: Maximum seconds to wait (None = forever).
+        poll_interval: Seconds between state checks.
+
+    Returns:
+        True if all completed, False if timed out.
+    """
+    start = time.monotonic()
+    while not all(h.is_complete for h in handles):
+        if timeout is not None and (time.monotonic() - start) > timeout:
+            return False
+        time.sleep(poll_interval)
+    return True
+
+
 class MoveHandle:
     """Handle to track and control an async move operation.
 
@@ -1040,29 +1063,6 @@ class Stage:
             self.x.halt()
         if self.y.supports_halt:
             self.y.halt()
-
-    @staticmethod
-    def wait_all(
-        handles: list[MoveHandle],
-        timeout: float | None = None,
-        poll_interval: float = 0.01,
-    ) -> bool:
-        """Wait for multiple moves to complete.
-
-        Args:
-            handles: List of MoveHandles to wait for.
-            timeout: Maximum seconds to wait (None = forever).
-            poll_interval: Seconds between state checks.
-
-        Returns:
-            True if all completed, False if timed out.
-        """
-        start = time.monotonic()
-        while not all(h.is_complete for h in handles):
-            if timeout is not None and (time.monotonic() - start) > timeout:
-                return False
-            time.sleep(poll_interval)
-        return True
 
     def __repr__(self) -> str:
         x, y = self.position_um
