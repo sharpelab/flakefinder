@@ -13,17 +13,15 @@
 - **Don't call `GetObject()` on the same SDK interface twice.** Redundant `get_interface_required` calls can interfere with existing sessions. Delegate to the object that already owns the interface.
 - `Camera.__init__` handles UCAPI registration internally — callers don't need `Extensions.ExUCAPI.Register()`.
 
-## Facade Migration Pattern
-- Replace `LeicaConnection` + manual subsystem init with `Microscope() as scope`
-- `scope.light_on()` replaces separate shutter.open() + lamp.full()
-- `scope.camera` triggers lazy init; `scope.acquisition` delegates to camera's own interface
-- `scope.create_acquisition_context()` replaces raw `Extensions.UCAPI...SystemMemoryFactory`
-- `continuous_autofocus` still takes raw `(conn, camera, acquisition, context)` — pass `scope.conn`, `scope.camera`, `scope.acquisition` until Step 3
-- Prefer explicit keyword params over passing opaque `args` namespace to library functions
-
-## Nosepiece Switching
-- Use `Microscope.switch_objective_pos(pos)` or `switch_objective_mag("20x")` — handles z-speed maxing internally.
-- `Nosepiece.set_position(pos, z=z)` is deprecated. Legacy scan scripts still use it (Step 2 migration).
+## Microscope Facade API
+- `with Microscope() as scope:` — owns connection, all subsystems, acquisition context
+- `scope.camera` / `scope.acquisition` — lazy init on first access
+- `scope.context` — shared acquisition context, lazily created, auto-disposed in `__exit__`. For non-streaming use.
+- `scope.create_acquisition_context()` — creates a NEW context caller must dispose. For streaming/per-thread use.
+- `scope.light_on()` / `scope.light_off()` — shutter + lamp combined
+- `scope.switch_objective_pos(pos)` / `switch_objective_mag("20x")` — handles z-speed maxing internally
+- `wait_all(handles)` — module-level function in `units.py` (not on `Stage`)
+- `require_microscope_description(path)` — raises on failure (not `| None`)
 
 ## Scope Discipline
 - **Only do what was explicitly approved.** "go for X" means X only — do NOT batch in additional scripts/files without asking. Stop after each approved unit and check in.
