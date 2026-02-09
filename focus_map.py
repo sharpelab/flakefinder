@@ -6,12 +6,13 @@ runs autofocus at each point, and outputs a focus map with best Z positions.
 
 import argparse
 import json
+import time
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-import time
-from typing import NamedTuple, Sequence
+from typing import NamedTuple
 
 import numpy as np
 from PIL import Image as PILImage
@@ -65,7 +66,7 @@ def hull_perimeter_um(convex_hull: Sequence[Point2F]) -> float:
     hull = np.array(convex_hull)
     hull_closed = np.vstack([hull, hull[0:1]])
     diffs = np.diff(hull_closed, axis=0)
-    return float(np.sum(np.sqrt((diffs ** 2).sum(axis=1))))
+    return float(np.sum(np.sqrt((diffs**2).sum(axis=1))))
 
 
 def sample_contour_points(
@@ -89,7 +90,7 @@ def sample_contour_points(
     hull_closed = np.vstack([hull, hull[0:1]])
 
     diffs = np.diff(hull_closed, axis=0)
-    segment_lengths = np.sqrt((diffs ** 2).sum(axis=1))
+    segment_lengths = np.sqrt((diffs**2).sum(axis=1))
     cumulative_dist = np.concatenate([[0], np.cumsum(segment_lengths)])
     total_perimeter = cumulative_dist[-1]
 
@@ -152,10 +153,12 @@ def sample_grid_points(
             scale = (min_dist - inset_um) / min_dist
         else:
             scale = 1.0
-        inset_hull = np.column_stack([
-            cx + (hull[:, 0] - cx) * scale,
-            cy + (hull[:, 1] - cy) * scale,
-        ])
+        inset_hull = np.column_stack(
+            [
+                cx + (hull[:, 0] - cx) * scale,
+                cy + (hull[:, 1] - cy) * scale,
+            ]
+        )
     else:
         inset_hull = hull
 
@@ -173,8 +176,8 @@ def sample_grid_points(
         return inside
 
     # Bounding box of full hull
-    x_min, x_max = hull[:, 0].min(), hull[:, 0].max()
-    y_min, y_max = hull[:, 1].min(), hull[:, 1].max()
+    x_max = hull[:, 0].max()
+    y_max = hull[:, 1].max()
 
     # Generate grid centered on centroid
     # Expand outward from centroid in both directions
@@ -192,9 +195,9 @@ def sample_grid_points(
 
     # Ensure centroid is included (deduplicate if already present)
     centroid = (float(cx), float(cy))
-    min_dist_to_existing = min(
-        ((p[0] - cx) ** 2 + (p[1] - cy) ** 2) for p in points
-    ) if points else float('inf')
+    min_dist_to_existing = (
+        min(((p[0] - cx) ** 2 + (p[1] - cy) ** 2) for p in points) if points else float("inf")
+    )
     if min_dist_to_existing > (spacing_um / 4) ** 2:
         points.append(centroid)
 
@@ -230,9 +233,9 @@ def run_focus_map(
     Returns:
         List of FocusMapSample (one per point).
     """
+    from flakefinder.autofocus_util import save_debug_frames
     from flakefinder.leica import Stage as StageClass
     from flakefinder.leica.autofocus import continuous_autofocus
-    from flakefinder.autofocus_util import save_debug_frames
 
     sample_results = []
     save_futures = []
@@ -241,8 +244,12 @@ def run_focus_map(
     print(f"\nRunning autofocus at {total_points} points...")
 
     for i, pt in enumerate(all_points):
-        print(f"  [{i+1}/{total_points}] {pt.type} {pt.index}: "
-              f"({pt.x_um/1000:.2f}, {pt.y_um/1000:.2f}) mm ... ", end="", flush=True)
+        print(
+            f"  [{i + 1}/{total_points}] {pt.type} {pt.index}: "
+            f"({pt.x_um / 1000:.2f}, {pt.y_um / 1000:.2f}) mm ... ",
+            end="",
+            flush=True,
+        )
 
         # Move to position
         hx, hy = stage.move_to_async(pt.x_um, pt.y_um)
@@ -275,7 +282,10 @@ def run_focus_map(
             best_z = af_result.selected_z_um
             selected_sharpness = af_result.selected_sharpness
             final_sharpness = af_result.final_sharpness
-            print(f"Z={best_z:.1f} µm, sharpness={selected_sharpness:.1f}/{final_sharpness:.1f}", end="")
+            print(
+                f"Z={best_z:.1f} µm, sharpness={selected_sharpness:.1f}/{final_sharpness:.1f}",
+                end="",
+            )
 
             # Capture after image while still at this position (needs camera)
             after_img = None
@@ -314,11 +324,13 @@ def run_focus_map(
             print(f"FAILED: {e}")
             af_result = None
 
-        sample_results.append(FocusMapSample(
-            point=pt,
-            af_result=af_result,
-            image=str(image_path.name) if image_path else None,
-        ))
+        sample_results.append(
+            FocusMapSample(
+                point=pt,
+                af_result=af_result,
+                image=str(image_path.name) if image_path else None,
+            )
+        )
 
     # Wait for background saves to finish
     if save_executor:
@@ -349,7 +361,8 @@ def main():
         "--contour-spacing-mm",
         type=float,
         default=5.0,
-        help="Target spacing between contour points in mm (count = perimeter/spacing, clamped to 4-24)",
+        help="Target spacing between contour points in mm "
+        "(count = perimeter/spacing, clamped to 4-24)",
     )
     parser.add_argument(
         "--grid-spacing-um",
@@ -469,8 +482,10 @@ def main():
     contour_points = sample_contour_points(convex_hull, contour_samples)
     grid_points = sample_grid_points(convex_hull, args.grid_spacing_um)
 
-    print(f"Sample points (perimeter={perimeter_mm:.1f} mm, spacing={args.contour_spacing_mm:.1f} mm):")
-    print(f"  Contour: {len(contour_points)} points ({perimeter_mm/len(contour_points):.1f} mm apart)")
+    spacing_mm = args.contour_spacing_mm
+    actual_mm = perimeter_mm / len(contour_points)
+    print(f"Sample points (perimeter={perimeter_mm:.1f} mm, spacing={spacing_mm:.1f} mm):")
+    print(f"  Contour: {len(contour_points)} points ({actual_mm:.1f} mm apart)")
     print(f"  Grid: {len(grid_points)} points")
     print(f"  Total: {len(contour_points) + len(grid_points)} points")
 
@@ -484,27 +499,29 @@ def main():
     if args.dry_run:
         print("\n[DRY RUN] Would autofocus at these points:")
         for pt in all_points:
-            print(f"  {pt.type:7} {pt.index:2}: ({pt.x_um/1000:.2f}, {pt.y_um/1000:.2f}) mm")
+            print(f"  {pt.type:7} {pt.index:2}: ({pt.x_um / 1000:.2f}, {pt.y_um / 1000:.2f}) mm")
         return 0
 
     # Output directory and stem
     output_dir = args.output_dir or args.chips_meta.parent
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"focus_map_chip{args.chip}_{args.suffix}" if args.suffix else f"focus_map_chip{args.chip}"
+    stem = (
+        f"focus_map_chip{args.chip}_{args.suffix}" if args.suffix else f"focus_map_chip{args.chip}"
+    )
 
     # Import hardware libraries (after dry-run check)
-    from flakefinder.leica import LeicaConnection, Stage, Lamp, Shutter, ZDrive
-    from flakefinder.leica.camera import Camera
-    from flakefinder.leica.enums import UCAPI_IID
-    from flakefinder.leica.core import get_interface_required
+    from flakefinder.leica import Lamp, LeicaConnection, Shutter, Stage, ZDrive
     from flakefinder.leica.autofocus import continuous_autofocus
-    from flakefinder.autofocus_util import save_debug_frames
+    from flakefinder.leica.camera import Camera
+    from flakefinder.leica.core import get_interface_required
+    from flakefinder.leica.enums import UCAPI_IID
 
     start_time = time.perf_counter()
 
     with LeicaConnection() as conn:
         from LeicaMicrosystems.HardwareModel import Extensions
+
         Extensions.ExUCAPI.Register()
 
         # Set up hardware
@@ -540,7 +557,7 @@ def main():
 
         # Configure camera for fast capture
         camera.trigger_mode = 0  # CONTINUOUS
-        camera.binning = 2       # 3x3 binning for speed
+        camera.binning = 2  # 3x3 binning for speed
         camera.exposure_time = 0.001  # 1ms
 
         print(f"Camera: {camera.name}")
@@ -555,7 +572,8 @@ def main():
             reference_z_um = args.z
         else:
             cx, cy = chip_geo.centroid
-            print(f"\nNo --z provided, autofocusing at chip centroid ({cx/1000:.2f}, {cy/1000:.2f}) mm...")
+            cx_mm, cy_mm = cx / 1000, cy / 1000
+            print(f"\nNo --z provided, autofocusing at centroid ({cx_mm:.2f}, {cy_mm:.2f}) mm...")
             hx, hy = stage.move_to_async(cx, cy)
             Stage.wait_all([hx, hy])
             hx.dispose()
@@ -573,7 +591,8 @@ def main():
                 sharpness_method=args.sharpness_method,
             )
             reference_z_um = centroid_af.selected_z_um
-            print(f"  Centroid AF: Z={reference_z_um:.1f} µm, sharpness={centroid_af.selected_sharpness:.1f}")
+            sharpness = centroid_af.selected_sharpness
+            print(f"  Centroid AF: Z={reference_z_um:.1f} µm, sharpness={sharpness:.1f}")
 
         # Create images directory if saving images
         images_dir = None
@@ -582,7 +601,9 @@ def main():
             images_dir.mkdir(parents=True, exist_ok=True)
             print(f"Saving images to {images_dir}")
 
-        save_executor = ThreadPoolExecutor(max_workers=1) if (args.debug_dir or args.save_images) else None
+        save_executor = (
+            ThreadPoolExecutor(max_workers=1) if (args.debug_dir or args.save_images) else None
+        )
 
         sample_results = run_focus_map(
             all_points=all_points,
@@ -649,7 +670,7 @@ def main():
     selected_sharpness_values = [s.af_result.selected_sharpness for s in successful]
     final_sharpness_values = [s.af_result.final_sharpness for s in successful]
 
-    print(f"\nSummary:")
+    print("\nSummary:")
     print(f"  Duration: {duration_s:.1f}s")
     print(f"  Points sampled: {len(sample_results)}")
     print(f"  Successful: {len(successful)}")
@@ -658,8 +679,10 @@ def main():
         print(f"  Z range: {min(z_values):.1f} - {max(z_values):.1f} µm")
         print(f"  Z mean: {np.mean(z_values):.1f} µm")
         print(f"  Z std: {np.std(z_values):.1f} µm")
-        print(f"  Sharpness (selected): {np.mean(selected_sharpness_values):.1f} ± {np.std(selected_sharpness_values):.1f}")
-        print(f"  Sharpness (final): {np.mean(final_sharpness_values):.1f} ± {np.std(final_sharpness_values):.1f}")
+        sel_mean, sel_std = np.mean(selected_sharpness_values), np.std(selected_sharpness_values)
+        fin_mean, fin_std = np.mean(final_sharpness_values), np.std(final_sharpness_values)
+        print(f"  Sharpness (selected): {sel_mean:.1f} ± {sel_std:.1f}")
+        print(f"  Sharpness (final): {fin_mean:.1f} ± {fin_std:.1f}")
 
     return 0
 
