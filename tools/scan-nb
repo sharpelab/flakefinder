@@ -1,0 +1,111 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Append a timestamped entry to a scan notebook.
+
+Finds "Scan Notebook - <slug>.md" in ~/Documents/Primer/Sharpelab/.
+Auto-prepends **MM-DD HH:MM** timestamp. Appends before <!-- end-of-log --> sentinel.
+
+Usage:
+  scan-nb <slug> "entry text"
+  scan-nb <slug> --attach src.png "text with ![[src.png]]"
+  scan-nb <slug> --attach src.png:dest.png "text with ![[dest.png]]"
+  echo "text" | scan-nb <slug>
+
+Attachments:
+  --attach src[:dest]   Copy src to attachments/ dir (optionally renamed to dest).
+                        Repeatable. Entry must reference each attachment as ![[name]]
+                        or the command errors (gmail-style validation).
+                        Fails if dest already exists in attachments/.
+
+Errors:
+  - Notebook not found for given slug
+  - <!-- end-of-log --> sentinel missing from notebook
+  - Attachment source file not found
+  - Attachment not referenced in entry text
+"""
+
+import shutil
+import sys
+from datetime import datetime
+from pathlib import Path
+
+NB_DIR = Path.home() / "Documents" / "Primer" / "Sharpelab"
+ATTACH_DIR = NB_DIR / "attachments"
+SENTINEL = "<!-- end-of-log -->"
+
+
+def die(msg):
+    print(f"Error: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        sys.exit(0 if args else 1)
+
+    slug = args.pop(0)
+    nb = NB_DIR / f"Scan Notebook - {slug}.md"
+    if not nb.exists():
+        die(f"{nb} not found")
+
+    # Parse --attach flags and entry text
+    attachments = []  # list of (src_path, dest_name)
+    text = None
+
+    i = 0
+    while i < len(args):
+        if args[i] == "--attach":
+            i += 1
+            if i >= len(args):
+                die("--attach requires an argument")
+            spec = args[i]
+            if ":" in spec:
+                src, dest = spec.rsplit(":", 1)
+            else:
+                src = spec
+                dest = Path(spec).name
+            src_path = Path(src)
+            if not src_path.exists():
+                die(f"attachment not found: {src_path}")
+            attachments.append((src_path, dest))
+        else:
+            text = args[i]
+        i += 1
+
+    if text is None:
+        if not sys.stdin.isatty():
+            text = sys.stdin.read().rstrip()
+        else:
+            die("no entry text provided")
+
+    # Validate all attachments are referenced in entry
+    for _, dest in attachments:
+        if f"![[{dest}]]" not in text:
+            die(f"attachment '{dest}' not referenced in entry (expected ![[{dest}]])")
+
+    # Copy attachments (fail if dest already exists)
+    if attachments:
+        ATTACH_DIR.mkdir(exist_ok=True)
+    for src_path, dest in attachments:
+        dest_path = ATTACH_DIR / dest
+        if dest_path.exists():
+            die(f"attachment already exists: {dest_path}")
+        shutil.copy2(src_path, dest_path)
+
+    # Build entry
+    ts = datetime.now().strftime("%m-%d %H:%M")
+    entry = f"**{ts}**\n{text}\n\n---\n\n{SENTINEL}"
+
+    # Append to notebook
+    content = nb.read_text()
+    if SENTINEL not in content:
+        die(f"sentinel not found in {nb}")
+    nb.write_text(content.replace(SENTINEL, entry))
+
+
+if __name__ == "__main__":
+    main()

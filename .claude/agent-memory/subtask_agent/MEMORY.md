@@ -29,10 +29,21 @@
 ## Summary Files
 - Keep summaries to 2-3 sentences max. Root cause, fix approach, sync status. No technical details like method signatures or try/finally mechanics.
 
-## Linting
-- Pre-commit hook handles ruff check + format (`git config core.hooksPath hooks/`)
+## Linting & Type Checking
+- Pre-commit hook: ruff check + format, then `uvx ty check src/flakefinder/`
 - Line length limit: 120 chars. Break long f-strings into multi-line or intermediate vars.
 - Ruff catches unused variables — don't create lookups/dicts you never reference.
+- **ty** (Astral's type checker): `uvx ty check src/flakefinder/` — config in pyproject.toml
+  - `[tool.ty.src] exclude` only works on directory scans, NOT direct file args
+  - ty narrows through `if x is not None:` but NOT through intermediate bool variables
+  - For type narrowing past None guards: assign to local var, check, then assign to self
+  - Prefer union types (`IID | UCAPI_IID`) over `int` when widening — preserves `.name`
+
+## SDK Protocol Notes
+- BasicControlValueVelocity is an empty subclass of BasicControlValue (same methods, different IID)
+- .NET wrapper uses PascalCase: GetControlValue, SetControlValue, MinControlValue, MaxControlValue
+- All DM6M axes (X, Y, Z) have velocity — required in Axis.__init__
+- SDK headers at ~/sharpelab/leica_sdk/AHM_SDK_V2020.3.3.10693/C++/include/
 
 ## Microscope
 - Do NOT run hardware commands (scans, autofocus, stage moves) — only the main scan session does that.

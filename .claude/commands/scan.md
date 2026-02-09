@@ -31,12 +31,11 @@ At the start of each session:
   - Use `### Headings` to group entries by phase of work (e.g. "5x overview", "Z tracking investigation"), not per-entry.
   - **Log user decisions immediately** — when the user picks a value, makes a judgment call, or decides on a plan, write it to the notebook right away. Don't wait to be reminded.
   - **The log is strictly append-only.** Never edit or strike through existing entries — if something was wrong, append a correction.
-  - **Appending to the log:** Always use the `<!-- end-of-log -->` sentinel. Match it with Edit and replace with `<new entry>\n\n---\n\n<!-- end-of-log -->`. Never match other log content to insert entries.
-  - Timestamp each entry: `**MM-DD HH:MM**` on its own line before the entry content.
+  - **Appending to the log:** Use `scan-nb <slug>` — auto-timestamps and appends before the sentinel. Use `--attach src[:dest]` for images (Obsidian `![[file]]` syntax, validates all attachments are referenced).
   - **Always include durations for chip scans** and record the commands used.
 - **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `rsync -a --quiet` for bulk transfers. Use `rm -r` before `scp -r` if using scp to avoid stale file issues. Download one-off files (manual AF images, etc.) into `downloads/`, not the project root. Scan data goes in `scans/`.
 - **Images**: `show` results for the user automatically after analysis runs. "show" = open file for the user.
-- **Images in notebook**: When embedding images, copy them to the notebook's `attachments/` folder first, then link with `![description](attachments/filename.jpg)`.
+- **Images in notebook**: Use `scan-nb --attach`, not manual copy + link.
 - **After every microscope run or analysis**: (1) show results to the user, (2) update the notebook. Every time. No exceptions. Do both before moving on.
 - **Errors**: When something fails, diagnose before re-running. Check the code path, don't just retry.  Retries after updates require another explicit go.
 

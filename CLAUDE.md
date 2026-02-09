@@ -14,6 +14,12 @@ FlakeFinder is a microscope automation system for the Sharpe Lab's Leica DM6M mi
 | `stage_util.py` | Stage/objective control utility |
 | `capture_util.py` | Single image capture utility |
 
+## Tools
+
+| Tool | Purpose |
+|------|---------|
+| `tools/scan-nb` | Append timestamped entries to scan notebooks. Setup: `ln -sf ~/sharpelab/flakefinder/tools/scan-nb ~/.local/bin/scan-nb` |
+
 ## Library (`src/flakefinder/leica/`)
 
 | Module | Purpose |
