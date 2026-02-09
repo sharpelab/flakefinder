@@ -3,7 +3,7 @@ name = "flakefinder"
 version = "0.1.0"
 description = "Automated 2D material flake detection system for Leica DM6M microscope"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "pythonnet>=3.0.0",
     "numpy>=1.24.0",
@@ -33,7 +33,7 @@ dev = [
 
 [tool.ruff]
 line-length = 120
-target-version = "py312"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
@@ -44,7 +44,7 @@ ignore = [
 ]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.14"
 strict = true
 warn_return_any = true
 warn_unused_ignores = true
