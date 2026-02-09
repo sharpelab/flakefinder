@@ -9,8 +9,7 @@ import contextlib
 from flakefinder.types import Point3F
 
 from .camera import Camera
-from .core import LeicaConnection, get_interface_required
-from .enums import UCAPI_IID
+from .core import LeicaConnection
 from .units import Lamp, Nosepiece, Shutter, Stage, ZDrive
 
 
@@ -41,7 +40,6 @@ class Microscope:
         self._shutter: Shutter | None = None
         self._lamp: Lamp | None = None
         self._camera: Camera | None = None
-        self._acquisition = None
         self._camera_initialized = False
 
     def __enter__(self) -> "Microscope":
@@ -114,16 +112,15 @@ class Microscope:
     # --- Camera (lazy init) ---
 
     def _init_camera(self) -> None:
-        """Initialize camera and acquisition interface.
+        """Initialize camera (lazily on first access).
 
-        Called lazily on first access to camera or acquisition properties.
-        Camera.__init__ handles UCAPI registration internally.
+        Camera.__init__ handles UCAPI registration and acquires the
+        acquisition interface internally — no need to duplicate that here.
         """
         if self._camera_initialized:
             return
         self._camera_initialized = True
         self._camera = Camera.from_connection(self._conn)
-        self._acquisition = get_interface_required(self._camera._unit, UCAPI_IID.IID_IMAGE_ACQUISITION)
 
     @property
     def camera(self) -> Camera:
@@ -140,9 +137,12 @@ class Microscope:
         """Raw image acquisition interface for scan loops.
 
         Use with create_acquisition_context() for direct capture control.
+        Delegates to Camera's own acquisition interface to avoid a redundant
+        GetObject() call on the SDK interface node.
         """
         self._init_camera()
-        return self._acquisition
+        assert self._camera is not None
+        return self._camera._acquisition
 
     # --- Computed properties ---
 
