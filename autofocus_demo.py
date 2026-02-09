@@ -152,23 +152,14 @@ def main():
         return 1
 
     # Import hardware libraries
-    from flakefinder.leica import Lamp, LeicaConnection, Shutter, Stage, ZDrive
-    from flakefinder.leica.camera import Camera
-    from flakefinder.leica.core import get_interface_required
-    from flakefinder.leica.enums import UCAPI_IID
+    from flakefinder.leica import Microscope, Stage
 
-    with LeicaConnection() as conn:
-        from LeicaMicrosystems.HardwareModel import Extensions
-
-        Extensions.ExUCAPI.Register()
-
-        # Set up stage (X, Y) and Z
-        stage = Stage.from_connection(conn)
-        z_drive = ZDrive.from_connection(conn)
+    with Microscope() as scope:
+        stage = scope.stage
 
         # Read current positions
         current_x, current_y = stage.position_um
-        current_z = z_drive.position_um
+        current_z = scope.z.position_um
 
         vprint(f"Current position: X={current_x:.1f} um, Y={current_y:.1f} um, Z={current_z:.1f} um")
         vprint()
@@ -189,29 +180,9 @@ def main():
         if args.output:
             os.makedirs(args.output)
 
-        # Set up lighting
-        try:
-            shutter = Shutter.from_connection(conn)
-            shutter.open()
-        except LookupError:
-            pass
-
-        lamp = None
-        try:
-            lamp = Lamp.from_connection(conn)
-            lamp.full()
-        except LookupError:
-            pass
-
-        # Set up camera
-        try:
-            camera = Camera.from_connection(conn)
-        except LookupError:
-            print("Error: Camera not found")
-            return 1
-
-        # Get acquisition interface for raw capture loop
-        acquisition = get_interface_required(camera._unit, UCAPI_IID.IID_IMAGE_ACQUISITION)
+        # Lighting and camera
+        scope.light_on()
+        camera = scope.camera
 
         # Configure camera for fast capture
         camera.trigger_mode = 0  # CONTINUOUS
@@ -243,12 +214,8 @@ def main():
         exp_ms = camera.exposure_time * 1000 if camera.exposure_time else 1.0
         vprint(f"Camera: {camera.name}")
         vprint(f"  Binning: 3x3, Exposure: {exp_ms:.2f}ms")
-        if lamp:
-            vprint(f"Lamp: {lamp.name}, intensity={lamp.intensity}/{lamp.max_intensity}")
+        vprint(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
         vprint()
-
-        # Set up acquisition context
-        context = Extensions.UCAPI.CancellableImageAcquisitionContext.SystemMemoryFactory
 
         # === Step 1: Move to XY position ===
         vprint(f"Moving to X={target_x:.1f}, Y={target_y:.1f}...")
@@ -259,9 +226,9 @@ def main():
 
         # === Step 2: Move to initial Z ===
         # Set Z speed for positioning (restores sane default if a previous crash left it slow)
-        z_drive.set_velocity_um_s(args.z_speed if args.z_speed else z_drive.max_velocity_um_s)
+        scope.z.set_velocity_um_s(args.z_speed if args.z_speed else scope.z.max_velocity_um_s)
         vprint(f"Moving Z to {target_z:.1f} um...")
-        z_drive.move_to_corrected(target_z)
+        scope.z.move_to_corrected(target_z)
 
         # === Step 3: Capture 'before' photo ===
         vprint("Capturing 'before' photo...")
@@ -283,10 +250,7 @@ def main():
 
         try:
             af_result = continuous_autofocus(
-                conn=conn,
-                camera=camera,
-                acquisition=acquisition,
-                context=context,
+                scope,
                 z_range_um=args.range,
                 z_start_um=target_z,
                 z_speed_um_s=args.z_speed,

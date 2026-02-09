@@ -9,16 +9,20 @@ working distance if not specified.
 """
 
 import bisect
+import contextlib
 import threading
 import time
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 
-from .camera import Camera
-from .core import LeicaConnection
-from .units import Axis, Nosepiece, ZDrive
+from ..image_utils import sdk_image_to_numpy
+from .units import Axis, Nosepiece
+
+if TYPE_CHECKING:
+    from .microscope import Microscope
 
 # Working distances in µm by objective position (from stage_util.py)
 # Position 1-indexed as used by the Nosepiece class.
@@ -249,11 +253,11 @@ class AutofocusResult:
         }
 
 
-def _get_safe_range(conn: "LeicaConnection", z_range_um: float | None) -> tuple[float, int | None]:
-    """Query microscope and calculate safe Z range.
+def _get_safe_range(nosepiece: Nosepiece, z_range_um: float | None) -> tuple[float, int | None]:
+    """Calculate safe Z range from current objective.
 
     Args:
-        conn: Active LeicaConnection for querying objective.
+        nosepiece: Nosepiece instance for querying objective position.
         z_range_um: Explicit range if provided, or None for auto-calculation.
 
     Returns:
@@ -262,7 +266,6 @@ def _get_safe_range(conn: "LeicaConnection", z_range_um: float | None) -> tuple[
     Raises:
         ValueError: If explicit z_range_um exceeds safe limit for objective.
     """
-    nosepiece = Nosepiece.from_connection(conn)
     objective_position = nosepiece.position
     working_distance = WORKING_DISTANCES_UM[objective_position]
 
@@ -308,7 +311,6 @@ def _run_z_scan(
     z_end: float,
     acquisition,
     context,
-    camera_class,
     store_frames: bool,
     sharpness_method: str = "tenengrad",
     compute_all_metrics: bool = False,
@@ -321,7 +323,6 @@ def _run_z_scan(
         z_end: Ending Z position in µm.
         acquisition: SDK acquisition interface.
         context: SDK acquisition context.
-        camera_class: Camera class for image conversion.
         store_frames: Whether to store images in result.
         sharpness_method: "tenengrad" or "laplacian".
         compute_all_metrics: If True, compute all 5 sharpness metrics per frame.
@@ -378,7 +379,7 @@ def _run_z_scan(
 
         if current_image[0] is not None:
             # Convert immediately and dispose .NET object
-            img_arr = camera_class._image_to_numpy(current_image[0])
+            img_arr = sdk_image_to_numpy(current_image[0])
             current_image[0].Dispose()
             frame_data.append((t_capture, img_arr))
 
@@ -413,10 +414,8 @@ def _run_z_scan(
 
 
 def continuous_autofocus(
-    conn: "LeicaConnection",
-    camera: "Camera",
-    acquisition,
-    context,  # TODO: create context internally instead of requiring caller to pass it
+    scope: "Microscope",
+    *,
     z_range_um: float | None = None,
     z_start_um: float | None = None,
     z_max_safe_um: float | None = None,
@@ -446,10 +445,7 @@ def continuous_autofocus(
     - If scan finds nothing better than initial sharpness, stays at initial Z
 
     Args:
-        conn: Active LeicaConnection (used to query objective for safety).
-        camera: Camera instance for image capture.
-        acquisition: SDK acquisition interface (from get_interface_required).
-        context: SDK CancellableImageAcquisitionContext.
+        scope: Microscope facade instance.
         z_range_um: Z scan range in µm. None = auto from objective
             (working_distance / 3, max 500µm).
         z_start_um: Starting Z position in µm. None = current position.
@@ -485,8 +481,12 @@ def continuous_autofocus(
     Raises:
         ValueError: If Z range/position exceeds safety limits.
     """
-    # Get Z axis
-    z_axis = ZDrive.from_connection(conn)
+    # Extract subsystems from facade
+    z_axis = scope.z
+    camera = scope.camera
+    acquisition = scope.acquisition
+    context = scope.create_acquisition_context()
+
     current_z = z_axis.position_um
 
     # Save original speed for restoration after scan
@@ -497,7 +497,7 @@ def continuous_autofocus(
         z_axis.set_velocity_um_s(z_speed_um_s)
 
     # Get safe range based on objective
-    safe_range, objective_position = _get_safe_range(conn, z_range_um)
+    safe_range, objective_position = _get_safe_range(scope.nosepiece, z_range_um)
 
     # Calculate scan bounds (centered on current/specified position, scan downward)
     initial_z = z_start_um if z_start_um is not None else current_z
@@ -522,7 +522,6 @@ def continuous_autofocus(
         z_end=z_end,
         acquisition=acquisition,
         context=context,
-        camera_class=Camera,
         store_frames=store_frames,
         sharpness_method=sharpness_method,
         compute_all_metrics=compute_all_metrics,
@@ -579,7 +578,6 @@ def continuous_autofocus(
             z_end=fine_z_end,
             acquisition=acquisition,
             context=context,
-            camera_class=Camera,
             store_frames=store_frames,
             sharpness_method=sharpness_method,
             compute_all_metrics=compute_all_metrics,
@@ -625,7 +623,6 @@ def continuous_autofocus(
             z_end=sf_z_end,
             acquisition=acquisition,
             context=context,
-            camera_class=Camera,
             store_frames=store_frames,
             sharpness_method=sharpness_method,
             compute_all_metrics=compute_all_metrics,
@@ -674,6 +671,10 @@ def continuous_autofocus(
     final_image = camera.capture()
     final_sharpness = sharpness(final_image, method=sharpness_method)
     stored_final_image = final_image if store_frames else None
+
+    # Dispose context (owned by this function)
+    with contextlib.suppress(Exception):
+        context.Dispose()
 
     return AutofocusResult(
         selected_z_um=best_z,

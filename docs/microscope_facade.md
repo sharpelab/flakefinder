@@ -21,7 +21,7 @@ Supporting changes:
 
 **Step 2 (done):** All scan scripts migrated: `focus_map.py`, `scan_chip.py`, `scan_area_v1.py`, `scan_area_with_focus.py`, `capture_flatfield.py`. Also extracted `sdk_image_to_numpy` to `src/flakefinder/image_utils.py` (was `Camera._image_to_numpy` private static).
 
-**Step 3 (not started):** `continuous_autofocus()` signature refactor.
+**Step 3 (done):** `continuous_autofocus()` refactored to take `scope: Microscope` instead of `(conn, camera, acquisition, context)`. Creates and disposes its own acquisition context internally. `_get_safe_range` takes `Nosepiece` instead of `LeicaConnection`. `_run_z_scan` uses `sdk_image_to_numpy` directly. `autofocus_demo.py` also migrated to facade. `run_focus_map` no longer takes a `context` parameter.
 
 ---
 
@@ -197,7 +197,7 @@ with Microscope() as scope:
 
 ### Step 3: Refactor autofocus library
 
-Change `continuous_autofocus()` signature from `(conn, camera, acquisition, context, ...)` to `(scope, context, ...)`.
+Changed `continuous_autofocus()` signature from `(conn, camera, acquisition, context, ...)` to `(scope: Microscope, *, ...params)`. Context is now created and disposed internally. Also migrated `autofocus_demo.py` to facade.
 
 ### Step 4: Facade-owned acquisition context
 

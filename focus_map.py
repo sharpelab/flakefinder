@@ -5,7 +5,6 @@ runs autofocus at each point, and outputs a focus map with best Z positions.
 """
 
 import argparse
-import contextlib
 import json
 import time
 from collections.abc import Sequence
@@ -208,7 +207,6 @@ def run_focus_map(
     all_points: list[SamplePoint],
     reference_z_um: float,
     scope: Microscope,
-    context,
     *,
     z_range_um: float | None = None,
     z_speed_um_s: float | None = None,
@@ -229,7 +227,6 @@ def run_focus_map(
         all_points: Sample points to autofocus at.
         reference_z_um: Starting Z position for each autofocus sweep.
         scope: Microscope facade instance.
-        context: Acquisition context.
         z_range_um: Z scan range in µm (None = auto from objective).
         z_speed_um_s: Z axis speed in µm/s (None = use current).
         fine_pass: Enable two-pass autofocus (coarse + fine).
@@ -250,9 +247,7 @@ def run_focus_map(
     from flakefinder.leica import Stage
     from flakefinder.leica.autofocus import continuous_autofocus
 
-    # Extract subsystems for continuous_autofocus (still takes raw args)
     stage = scope.stage
-    camera = scope.camera
 
     sample_results = []
     save_futures = []
@@ -281,10 +276,7 @@ def run_focus_map(
 
         try:
             af_result = continuous_autofocus(
-                conn=scope.conn,
-                camera=camera,
-                acquisition=scope.acquisition,
-                context=context,
+                scope,
                 z_start_um=reference_z_um,
                 z_range_um=z_range_um,
                 z_speed_um_s=z_speed_um_s,
@@ -544,9 +536,6 @@ def main():
         print(f"Camera: {camera.name}")
         print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
 
-        # Acquisition context
-        context = scope.create_acquisition_context()
-
         # Resolve reference Z
         if args.z is not None:
             reference_z_um = args.z
@@ -559,10 +548,7 @@ def main():
             hx.dispose()
             hy.dispose()
             centroid_af = continuous_autofocus(
-                conn=scope.conn,
-                camera=camera,
-                acquisition=scope.acquisition,
-                context=context,
+                scope,
                 z_range_um=args.z_range,
                 z_speed_um_s=args.z_speed,
                 fine_pass=not args.no_fine_pass,
@@ -587,7 +573,6 @@ def main():
             all_points=all_points,
             reference_z_um=reference_z_um,
             scope=scope,
-            context=context,
             z_range_um=args.z_range,
             z_speed_um_s=args.z_speed,
             fine_pass=not args.no_fine_pass,
@@ -605,10 +590,6 @@ def main():
         # Wait for background saves to finish
         if save_executor:
             save_executor.shutdown(wait=True)
-
-        # Dispose acquisition context before connection closes
-        with contextlib.suppress(Exception):
-            context.Dispose()
 
     duration_s = time.perf_counter() - start_time
 

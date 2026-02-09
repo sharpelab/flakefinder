@@ -425,10 +425,7 @@ Examples:
 
             try:
                 af_result = continuous_autofocus(
-                    conn=scope.conn,
-                    camera=scope.camera,
-                    acquisition=scope.acquisition,
-                    context=context,
+                    scope,
                     fine_pass=True,
                     super_fine_pass=True,
                 )
