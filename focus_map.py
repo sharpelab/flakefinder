@@ -20,6 +20,7 @@ from PIL import Image as PILImage
 
 from flakefinder.data_utils import load_chip_geometry
 from flakefinder.leica.autofocus import ALL_SHARPNESS_METRICS, AutofocusResult
+from flakefinder.leica.microscope import Microscope
 from flakefinder.types import Point2F
 
 
@@ -206,35 +207,52 @@ def sample_grid_points(
 def run_focus_map(
     all_points: list[SamplePoint],
     reference_z_um: float,
-    conn,
-    stage,
-    camera,
-    acquisition,
+    scope: Microscope,
     context,
-    args,
-    images_dir: "Path | None",
-    save_executor: "ThreadPoolExecutor | None",
+    *,
+    z_range_um: float | None = None,
+    z_speed_um_s: float | None = None,
+    fine_pass: bool = True,
+    fine_range_um: float = 50.0,
+    super_fine_pass: bool = True,
+    sharpness_method: str = "tenengrad",
+    all_metrics: bool = False,
+    move_settle_s: float = 0,
+    af_settle_s: float = 0,
+    images_dir: "Path | None" = None,
+    debug_dir: "Path | None" = None,
+    save_executor: "ThreadPoolExecutor | None" = None,
 ) -> list[FocusMapSample]:
     """Run autofocus at each sample point and return results.
 
     Args:
         all_points: Sample points to autofocus at.
         reference_z_um: Starting Z position for each autofocus sweep.
-        conn: LeicaConnection.
-        stage: Stage instance.
-        camera: Camera instance.
-        acquisition: Image acquisition interface.
+        scope: Microscope facade instance.
         context: Acquisition context.
-        args: Parsed CLI arguments (read-only, used for AF tuning params).
+        z_range_um: Z scan range in µm (None = auto from objective).
+        z_speed_um_s: Z axis speed in µm/s (None = use current).
+        fine_pass: Enable two-pass autofocus (coarse + fine).
+        fine_range_um: Fine pass range in µm.
+        super_fine_pass: Enable super fine third pass.
+        sharpness_method: Sharpness metric name.
+        all_metrics: Compute all sharpness metrics per frame.
+        move_settle_s: Settle time after XY move.
+        af_settle_s: Settle time after autofocus (before image capture).
         images_dir: Directory for after-images, or None.
+        debug_dir: Directory for AF debug frames, or None.
         save_executor: ThreadPoolExecutor for background disk writes, or None.
 
     Returns:
         List of FocusMapSample (one per point).
     """
     from flakefinder.autofocus_util import save_debug_frames
-    from flakefinder.leica import Stage as StageClass
+    from flakefinder.leica import Stage
     from flakefinder.leica.autofocus import continuous_autofocus
+
+    # Extract subsystems for continuous_autofocus (still takes raw args)
+    stage = scope.stage
+    camera = scope.camera
 
     sample_results = []
     save_futures = []
@@ -251,11 +269,11 @@ def run_focus_map(
 
         # Move to position
         hx, hy = stage.move_to_async(pt.x_um, pt.y_um)
-        StageClass.wait_all([hx, hy])
+        Stage.wait_all([hx, hy])
         hx.dispose()
         hy.dispose()
-        if args.move_settle > 0:
-            time.sleep(args.move_settle)
+        if move_settle_s > 0:
+            time.sleep(move_settle_s)
 
         # Run autofocus
         image_path = None
@@ -263,19 +281,19 @@ def run_focus_map(
 
         try:
             af_result = continuous_autofocus(
-                conn=conn,
+                conn=scope.conn,
                 camera=camera,
-                acquisition=acquisition,
+                acquisition=scope.acquisition,
                 context=context,
                 z_start_um=reference_z_um,
-                z_range_um=args.z_range,
-                z_speed_um_s=args.z_speed,
-                fine_pass=not args.no_fine_pass,
-                fine_range_um=args.fine_range,
-                super_fine_pass=not args.no_super_fine,
-                sharpness_method=args.sharpness_method,
-                store_frames=bool(args.debug_dir),
-                compute_all_metrics=args.all_metrics,
+                z_range_um=z_range_um,
+                z_speed_um_s=z_speed_um_s,
+                fine_pass=fine_pass,
+                fine_range_um=fine_range_um,
+                super_fine_pass=super_fine_pass,
+                sharpness_method=sharpness_method,
+                store_frames=bool(debug_dir),
+                compute_all_metrics=all_metrics,
             )
             best_z = af_result.selected_z_um
             selected_sharpness = af_result.selected_sharpness
@@ -288,8 +306,8 @@ def run_focus_map(
             # Capture after image while still at this position (needs camera)
             after_img = None
             if images_dir is not None:
-                if args.af_settle > 0:
-                    time.sleep(args.af_settle)
+                if af_settle_s > 0:
+                    time.sleep(af_settle_s)
                 after_img = camera.capture()
                 if after_img is not None:
                     fname = f"{pt.type}_{pt.index:02d}.jpg"
@@ -302,7 +320,7 @@ def run_focus_map(
                 _after = after_img
                 _label = label
                 _image_path = image_path
-                _debug_dir = args.debug_dir
+                _debug_dir = debug_dir
 
                 def _save(af=_af, after=_after, lbl=_label, img_path=_image_path, dbg=_debug_dir):
                     if dbg and af.frames:
@@ -506,61 +524,28 @@ def main():
     stem = f"focus_map_chip{args.chip}_{args.suffix}" if args.suffix else f"focus_map_chip{args.chip}"
 
     # Import hardware libraries (after dry-run check)
-    from flakefinder.leica import Lamp, LeicaConnection, Shutter, Stage, ZDrive
+    from flakefinder.leica import Stage
     from flakefinder.leica.autofocus import continuous_autofocus
-    from flakefinder.leica.camera import Camera
-    from flakefinder.leica.core import get_interface_required
-    from flakefinder.leica.enums import UCAPI_IID
 
     start_time = time.perf_counter()
 
-    with LeicaConnection() as conn:
-        from LeicaMicrosystems.HardwareModel import Extensions
+    with Microscope() as scope:
+        scope.light_on()
 
-        Extensions.ExUCAPI.Register()
-
-        # Set up hardware
-        stage = Stage.from_connection(conn)
-        z_drive = ZDrive.from_connection(conn)
-
-        current_x, current_y = stage.position_um
-        current_z = z_drive.position_um
-
-        print(f"\nCurrent position: X={current_x:.1f}, Y={current_y:.1f}, Z={current_z:.1f} µm")
-
-        # Lighting
-        try:
-            shutter = Shutter.from_connection(conn)
-            shutter.open()
-        except LookupError:
-            pass
-
-        try:
-            lamp = Lamp.from_connection(conn)
-            lamp.full()
-        except LookupError:
-            lamp = None
-
-        # Camera
-        try:
-            camera = Camera.from_connection(conn)
-        except LookupError:
-            print("Error: Camera not found")
-            return 1
-
-        acquisition = get_interface_required(camera._unit, UCAPI_IID.IID_IMAGE_ACQUISITION)
+        x, y = scope.stage.position_um
+        print(f"\nCurrent position: X={x:.1f}, Y={y:.1f}, Z={scope.z.position_um:.1f} µm")
 
         # Configure camera for fast capture
+        camera = scope.camera
         camera.trigger_mode = 0  # CONTINUOUS
         camera.binning = 2  # 3x3 binning for speed
         camera.exposure_time = 0.001  # 1ms
 
         print(f"Camera: {camera.name}")
-        if lamp:
-            print(f"Lamp: {lamp.name}, intensity={lamp.intensity}/{lamp.max_intensity}")
+        print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
 
         # Acquisition context
-        context = Extensions.UCAPI.CancellableImageAcquisitionContext.SystemMemoryFactory
+        context = scope.create_acquisition_context()
 
         # Resolve reference Z
         if args.z is not None:
@@ -569,14 +554,14 @@ def main():
             cx, cy = chip_geo.centroid
             cx_mm, cy_mm = cx / 1000, cy / 1000
             print(f"\nNo --z provided, autofocusing at centroid ({cx_mm:.2f}, {cy_mm:.2f}) mm...")
-            hx, hy = stage.move_to_async(cx, cy)
+            hx, hy = scope.stage.move_to_async(cx, cy)
             Stage.wait_all([hx, hy])
             hx.dispose()
             hy.dispose()
             centroid_af = continuous_autofocus(
-                conn=conn,
+                conn=scope.conn,
                 camera=camera,
-                acquisition=acquisition,
+                acquisition=scope.acquisition,
                 context=context,
                 z_range_um=args.z_range,
                 z_speed_um_s=args.z_speed,
@@ -601,13 +586,19 @@ def main():
         sample_results = run_focus_map(
             all_points=all_points,
             reference_z_um=reference_z_um,
-            conn=conn,
-            stage=stage,
-            camera=camera,
-            acquisition=acquisition,
+            scope=scope,
             context=context,
-            args=args,
+            z_range_um=args.z_range,
+            z_speed_um_s=args.z_speed,
+            fine_pass=not args.no_fine_pass,
+            fine_range_um=args.fine_range,
+            super_fine_pass=not args.no_super_fine,
+            sharpness_method=args.sharpness_method,
+            all_metrics=args.all_metrics,
+            move_settle_s=args.move_settle,
+            af_settle_s=args.af_settle,
             images_dir=images_dir,
+            debug_dir=args.debug_dir,
             save_executor=save_executor,
         )
 
@@ -615,10 +606,9 @@ def main():
         if save_executor:
             save_executor.shutdown(wait=True)
 
-        # Dispose resources before connection closes
+        # Dispose acquisition context before connection closes
         with contextlib.suppress(Exception):
             context.Dispose()
-        camera.dispose()
 
     duration_s = time.perf_counter() - start_time
 

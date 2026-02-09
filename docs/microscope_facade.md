@@ -19,7 +19,7 @@ Supporting changes:
 
 **Step 1 (done):** `stage_util.py` and `capture_util.py` migrated. All None guards removed.
 
-**Step 2 (not started):** `focus_map.py`, `scan_area_v1.py`, `scan_chip.py`, `scan_area_with_focus.py`, `capture_flatfield.py` still use raw `LeicaConnection` + `Nosepiece.set_position()`.
+**Step 2 (in progress):** `focus_map.py` migrated. `scan_area_v1.py`, `scan_chip.py`, `scan_area_with_focus.py`, `capture_flatfield.py` still use raw `LeicaConnection` + `Nosepiece.set_position()`.
 
 **Step 3 (not started):** `continuous_autofocus()` signature refactor.
 
@@ -198,6 +198,18 @@ with Microscope() as scope:
 ### Step 3: Refactor autofocus library
 
 Change `continuous_autofocus()` signature from `(conn, camera, acquisition, context, ...)` to `(scope, context, ...)`.
+
+### Step 4: Facade-owned acquisition context
+
+`create_acquisition_context()` currently returns a raw factory that callers must manage and dispose. Make `Microscope` own a default context via lazy `scope.context` property, auto-disposed in `__exit__`.
+
+This works for single-shot capture (`camera.capture()`) and autofocus (`continuous_autofocus`), which share one context. `FrameStream` and `DeferredFrameStream` already create their own per-thread contexts in `_acquire_loop` — they must, since each needs independent cancellation. So facade-owned context = default for non-streaming use; streams self-manage as today.
+
+Once Step 3 lands (autofocus takes `scope`), `context` disappears from `run_focus_map` and `continuous_autofocus` signatures entirely — the facade provides it implicitly.
+
+### Step 5: Discovered improvements
+
+- **`Stage.wait_all()` is a misplaced static method.** `run_focus_map` and scan scripts import `Stage` just for this utility. Should be a standalone function (e.g. in `units.py` module-level or a `utils` module).
 
 ### What doesn't need to change
 
