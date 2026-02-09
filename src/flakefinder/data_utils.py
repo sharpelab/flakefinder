@@ -5,62 +5,103 @@ from __future__ import annotations
 import json
 import os
 
-from flakefinder.types import BBox, ChipGeometry
+from flakefinder.types import (
+    AxisDescription,
+    BBox,
+    BinningLevel,
+    CameraDescription,
+    ChipGeometry,
+    MicroscopeDescription,
+    ObjectiveDescription,
+    Point2F,
+    StageDescription,
+)
 
 
-def load_microscope_description(path: str) -> dict | None:
-    """Load microscope hardware description JSON.
+def load_microscope_description(path: str) -> MicroscopeDescription | None:
+    """Load and parse microscope hardware description JSON.
 
     Args:
         path: Path to microscope_description.json.
 
     Returns:
-        Dict with hardware specs, or None if file doesn't exist.
+        MicroscopeDescription, or None if file doesn't exist or is invalid.
     """
     if not os.path.exists(path):
         return None
     try:
         with open(path) as f:
-            return json.load(f)
+            raw = json.load(f)
     except (json.JSONDecodeError, IOError):
         return None
 
+    raw_camera = raw.get("camera", {})
+    raw_binning = raw_camera.get("binning_levels", {})
+    binning_levels: dict[int, BinningLevel] = {}
+    for idx_str, bl in raw_binning.items():
+        binning_levels[int(idx_str)] = BinningLevel(
+            name=bl["name"],
+            factor=bl["factor"],
+            frame_width_px=bl["frame_width_px"],
+            frame_height_px=bl["frame_height_px"],
+        )
+
+    camera = CameraDescription(
+        name=raw_camera.get("name", ""),
+        sensor_width_px=raw_camera.get("sensor_width_px", 0),
+        sensor_height_px=raw_camera.get("sensor_height_px", 0),
+        physical_pixel_x_um=raw_camera.get("physical_pixel_x_um", 0.0),
+        physical_pixel_y_um=raw_camera.get("physical_pixel_y_um", 0.0),
+        binning_levels=binning_levels,
+    )
+
+    objectives: dict[int, ObjectiveDescription] = {}
+    for pos_str, obj in raw.get("objectives", {}).items():
+        objectives[int(pos_str)] = ObjectiveDescription(
+            position=int(pos_str),
+            magnification=obj["magnification"],
+            name=obj["name"],
+        )
+
+    raw_stage = raw.get("stage", {})
+    stage = StageDescription(
+        x=_parse_axis(raw_stage.get("x", {})),
+        y=_parse_axis(raw_stage.get("y", {})),
+        z=_parse_axis(raw_stage.get("z", {})),
+    )
+
+    return MicroscopeDescription(camera=camera, objectives=objectives, stage=stage)
+
+
+def _parse_axis(raw: dict) -> AxisDescription:
+    return AxisDescription(
+        min_um=raw.get("min_um", 0.0),
+        max_um=raw.get("max_um", 0.0),
+        max_speed_mm_s=raw.get("max_speed_mm_s", 0.0),
+    )
+
 
 def compute_frame_size_um(
-    desc: dict, objective_mag: float, binning_idx: int = 2,
-) -> tuple[float, float] | None:
-    """Compute frame size in µm from microscope description.
+    camera: CameraDescription, objective_mag: float, binning_idx: int = 2,
+) -> Point2F | None:
+    """Compute frame size in µm from camera description and objective.
 
     Args:
-        desc: Loaded microscope description.
+        camera: Camera hardware description.
         objective_mag: Objective magnification (e.g., 5, 10, 20).
         binning_idx: Binning index (0=1x1, 1=2x2, 2=3x3).
 
     Returns:
-        (frame_width_um, frame_height_um) or None if can't compute.
+        (frame_width_um, frame_height_um) or None if binning level not found.
     """
-    camera = desc.get("camera", {})
-    binning_info = camera.get("binning_levels", {}).get(str(binning_idx))
-    if not binning_info:
+    bl = camera.binning_levels.get(binning_idx)
+    if bl is None:
         return None
 
-    physical_pixel_x: float | None = camera.get("physical_pixel_x_um")
-    physical_pixel_y: float | None = camera.get("physical_pixel_y_um")
-    if not physical_pixel_x or not physical_pixel_y:
-        return None
+    sample_pixel_x = camera.physical_pixel_x_um * bl.factor / objective_mag
+    sample_pixel_y = camera.physical_pixel_y_um * bl.factor / objective_mag
 
-    frame_width_px: int | None = binning_info.get("frame_width_px")
-    frame_height_px: int | None = binning_info.get("frame_height_px")
-    binning_factor: int = binning_info.get("factor", 1)
-
-    if not frame_width_px or not frame_height_px:
-        return None
-
-    # sample_pixel = physical_pixel × binning / magnification
-    sample_pixel_x = physical_pixel_x * binning_factor / objective_mag
-    sample_pixel_y = physical_pixel_y * binning_factor / objective_mag
-
-    return (frame_width_px * sample_pixel_x, frame_height_px * sample_pixel_y)
+    return (bl.frame_width_px * sample_pixel_x, bl.frame_height_px * sample_pixel_y)
 
 
 def load_chip_geometry(chips_path: str, chip_index: int) -> ChipGeometry:

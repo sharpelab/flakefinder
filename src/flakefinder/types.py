@@ -5,6 +5,70 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
+# Geometric point aliases
+type Point2F = tuple[float, float]
+type Point3F = tuple[float, float, float]
+
+
+# ============================================================================
+# Microscope description
+# ============================================================================
+
+@dataclass
+class BinningLevel:
+    """Camera binning level from microscope description."""
+    name: str
+    factor: int
+    frame_width_px: int
+    frame_height_px: int
+
+
+@dataclass
+class CameraDescription:
+    """Camera hardware description."""
+    name: str
+    sensor_width_px: int
+    sensor_height_px: int
+    physical_pixel_x_um: float
+    physical_pixel_y_um: float
+    binning_levels: dict[int, BinningLevel]
+
+
+@dataclass
+class ObjectiveDescription:
+    """Objective lens description."""
+    position: int
+    magnification: float
+    name: str
+
+
+@dataclass
+class AxisDescription:
+    """Stage axis description."""
+    min_um: float
+    max_um: float
+    max_speed_mm_s: float
+
+
+@dataclass
+class StageDescription:
+    """Stage hardware description."""
+    x: AxisDescription
+    y: AxisDescription
+    z: AxisDescription
+
+
+@dataclass
+class MicroscopeDescription:
+    """Parsed microscope hardware description."""
+    camera: CameraDescription
+    objectives: dict[int, ObjectiveDescription]
+    stage: StageDescription
+
+
+# ============================================================================
+# Chip geometry
+# ============================================================================
 
 class BBox(TypedDict):
     """Bounding box from chip detection JSON."""
@@ -19,15 +83,19 @@ class ChipGeometry:
     """Chip geometry from find_chips.py output."""
     chip_index: int
     bbox: BBox
-    polygon: list[tuple[float, float]]
-    centroid: tuple[float, float]
+    polygon: list[Point2F]
+    centroid: Point2F
     area_um2: float
 
+
+# ============================================================================
+# Scan planning
+# ============================================================================
 
 @dataclass
 class PlanarScanPlan:
     """Computed scan plan from chip geometry and focus plane."""
-    rows: list[tuple[float, float, float]]  # [(y_um, x_min_um, x_max_um), ...]
+    rows: list[Point3F]  # [(y_um, x_min_um, x_max_um), ...]
     target_advance_um: float
     y_step_um: float
     validated_z_min_um: float
@@ -39,6 +107,10 @@ class PlanarScanPlan:
     frame_height_um: float
     inputs: dict[str, Any] = field(default_factory=dict)
 
+
+# ============================================================================
+# Scan output metadata
+# ============================================================================
 
 class CameraMeta(TypedDict):
     """Camera metadata block for scan output."""

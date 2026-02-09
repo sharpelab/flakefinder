@@ -261,17 +261,17 @@ Examples:
     obj_mag_for_plan = None
     if args.objective_mag is not None:
         mag_str = args.objective_mag.lower().rstrip("x")
-        for pos, obj in desc["objectives"].items():
-            if str(obj["magnification"]) == mag_str:
-                obj_mag_for_plan = obj["magnification"]
+        for obj in desc.objectives.values():
+            if str(obj.magnification) == mag_str:
+                obj_mag_for_plan = obj.magnification
                 break
         if obj_mag_for_plan is None:
             print(f"Error: Unknown objective magnification '{args.objective_mag}'")
             return 1
     elif args.objective_pos is not None:
-        obj_info = desc["objectives"].get(str(args.objective_pos))
+        obj_info = desc.objectives.get(args.objective_pos)
         if obj_info:
-            obj_mag_for_plan = obj_info["magnification"]
+            obj_mag_for_plan = obj_info.magnification
         else:
             print(f"Error: Unknown objective position {args.objective_pos}")
             return 1
@@ -279,7 +279,7 @@ Examples:
         print("Error: --objective-mag or --objective-pos required")
         return 1
 
-    frame_size = compute_frame_size_um(desc, obj_mag_for_plan, binning_idx)
+    frame_size = compute_frame_size_um(desc.camera, obj_mag_for_plan, binning_idx)
     if frame_size is None:
         print("Error: Could not compute frame size from microscope description")
         return 1

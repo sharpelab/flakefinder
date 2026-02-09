@@ -5,7 +5,7 @@ from __future__ import annotations
 import bisect
 from typing import Any, Sequence
 
-from flakefinder.types import BBox, LightingMeta, PlanarScanPlan
+from flakefinder.types import BBox, LightingMeta, PlanarScanPlan, Point2F, Point3F
 
 
 # ============================================================================
@@ -13,7 +13,7 @@ from flakefinder.types import BBox, LightingMeta, PlanarScanPlan
 # ============================================================================
 
 def interpolate_position(
-    t: float, samples: list[tuple[float, float, float]],
+    t: float, samples: list[Point3F],
 ) -> float | None:
     """Interpolate position at time t from (t_before, t_after, x_um) samples.
 
@@ -45,8 +45,8 @@ def interpolate_position(
 # ============================================================================
 
 def intersect_polygon_with_y(
-    polygon: Sequence[tuple[float, float]], y: float,
-) -> tuple[float, float] | None:
+    polygon: Sequence[Point2F], y: float,
+) -> Point2F | None:
     """Find X extent where horizontal line y intersects a convex polygon.
 
     Args:
@@ -84,7 +84,7 @@ def compute_plane_z(a: float, b: float, c: float, x_um: float, y_um: float) -> f
 # ============================================================================
 
 def compute_planar_scan_plan(
-    bbox: BBox, polygon: Sequence[tuple[float, float]], *,
+    bbox: BBox, polygon: Sequence[Point2F], *,
     plane_a: float, plane_b: float, plane_c: float,
     frame_width_um: float, frame_height_um: float,
     x_overlap_pct: float, y_overlap_pct: float,
@@ -97,7 +97,7 @@ def compute_planar_scan_plan(
     target_advance = frame_width_um * (1 - x_overlap_pct / 100)
     y_step = frame_height_um * (1 - y_overlap_pct / 100)
 
-    rows: list[tuple[float, float, float]] = []
+    rows: list[Point3F] = []
     y = bbox["y_min"]
     while y <= bbox["y_max"]:
         extent = intersect_polygon_with_y(polygon, y)

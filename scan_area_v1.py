@@ -167,18 +167,14 @@ Examples:
     # Pre-validation using microscope description (avoids slow hardware connection)
     desc = load_microscope_description(MICROSCOPE_DESCRIPTION)
     if desc:
-        stage_desc = desc.get("stage", {})
-
         # Validate area-rect against stage limits
         if args.area_rect:
             try:
                 x_min, x_max, y_min, y_max = parse_area_rect(args.area_rect)
-                x_desc = stage_desc.get("x", {})
-                y_desc = stage_desc.get("y", {})
-                desc_x_min = x_desc.get("min_um", 0)
-                desc_x_max = x_desc.get("max_um", float("inf"))
-                desc_y_min = y_desc.get("min_um", 0)
-                desc_y_max = y_desc.get("max_um", float("inf"))
+                desc_x_min = desc.stage.x.min_um
+                desc_x_max = desc.stage.x.max_um
+                desc_y_min = desc.stage.y.min_um
+                desc_y_max = desc.stage.y.max_um
 
                 if x_min < desc_x_min:
                     print(f"Error: x_min ({x_min:.0f}) is below stage minimum ({desc_x_min:.0f})")
@@ -201,7 +197,7 @@ Examples:
             obj_match = re.match(r"^(\d+(?:\.\d+)?)[xX]?$", args.objective_mag.strip())
             if obj_match:
                 obj_mag = float(obj_match.group(1))
-                frame_size = compute_frame_size_um(desc, obj_mag, binning_idx=binning_idx)
+                frame_size = compute_frame_size_um(desc.camera, obj_mag, binning_idx=binning_idx)
                 if frame_size:
                     print(f"Pre-check: {obj_mag}x objective @ {args.binning}x{args.binning} binning, frame ~{frame_size[0]:.0f} x {frame_size[1]:.0f} µm")
     else:
