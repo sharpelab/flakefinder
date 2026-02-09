@@ -21,6 +21,7 @@ Usage:
 
 import argparse
 import bisect
+import contextlib
 import json
 import os
 import queue
@@ -384,91 +385,46 @@ Examples:
     # ---- Connect to hardware ----
     from PIL import Image as PILImage
 
-    from flakefinder.leica import Lamp, LeicaConnection, Nosepiece, Shutter, Stage, ZDrive
-    from flakefinder.leica.camera import Camera
-    from flakefinder.leica.core import get_interface_required
-    from flakefinder.leica.enums import UCAPI_IID
+    from flakefinder.image_utils import sdk_image_to_numpy
+    from flakefinder.leica import Microscope, Stage
 
-    with LeicaConnection() as conn:
-        from LeicaMicrosystems.HardwareModel import Extensions
-
-        Extensions.ExUCAPI.Register()
-
-        # Set up hardware
-        stage = Stage.from_connection(conn)
-        z_drive = ZDrive.from_connection(conn)
+    with Microscope() as scope:
+        stage = scope.stage
+        z_drive = scope.z
 
         # Fast position readers
         x_bcv = stage.x.bcv
         x_converter = stage.x.converter
         z_converter = z_drive.converter
-        z_bcv_hysteresis = getattr(z_drive, "bcv_hysteresis", None) or z_drive.bcv
-
-        # Nosepiece
-        nosepiece = None
-        objective_mag = None
-        objective_idx = None
-        try:
-            nosepiece = Nosepiece.from_connection(conn)
-            objective_idx = nosepiece.position
-            objective_mag = nosepiece.magnification
-        except LookupError:
-            pass
+        z_bcv_hysteresis = z_drive.bcv_hysteresis or z_drive.bcv
 
         # Switch objective if requested
-        target_pos = None
         if args.objective_mag is not None:
-            if nosepiece is None:
-                print("Error: Nosepiece not available, cannot switch objective")
-                return 1
-            try:
-                target_pos = nosepiece.parse_magnification(args.objective_mag)
-            except ValueError as e:
-                print(f"Error: {e}")
-                return 1
-        elif args.objective_pos is not None:
-            if nosepiece is None:
-                print("Error: Nosepiece not available, cannot switch objective")
-                return 1
-            try:
-                target_pos = nosepiece.validate_position(args.objective_pos)
-            except ValueError as e:
-                print(f"Error: {e}")
-                return 1
-
-        if target_pos is not None:
-            if target_pos != objective_idx:
-                target_mag = nosepiece.magnifications.get(target_pos)
-                print(f"Switching objective: {objective_mag}x -> {target_mag}x...")
-                nosepiece.set_position(target_pos, z=z_drive)
-                objective_idx = nosepiece.position
-                objective_mag = nosepiece.magnification
-                print(f"Objective: now at {objective_mag}x")
+            current_mag = scope.nosepiece.magnification
+            scope.switch_objective_mag(args.objective_mag)
+            new_mag = scope.nosepiece.magnification
+            if new_mag != current_mag:
+                print(f"Switched objective: {current_mag}x -> {new_mag}x")
             else:
-                print(f"Objective: already at {objective_mag}x")
+                print(f"Objective: already at {new_mag}x")
+        elif args.objective_pos is not None:
+            current_pos = scope.nosepiece.position
+            scope.switch_objective_pos(args.objective_pos)
+            new_mag = scope.nosepiece.magnification
+            if args.objective_pos != current_pos:
+                print(f"Switched objective to position {args.objective_pos} ({new_mag}x)")
+            else:
+                print(f"Objective: already at {new_mag}x")
+
+        objective_mag = scope.nosepiece.magnification
+        objective_idx = scope.nosepiece.position
 
         # Lighting
-        shutter = None
-        lamp = None
-        try:
-            shutter = Shutter.from_connection(conn)
-            shutter.open()
-        except LookupError:
-            pass
-        try:
-            lamp = Lamp.from_connection(conn)
-            lamp.full()
-        except LookupError:
-            pass
+        scope.light_on()
 
         # Camera
-        try:
-            camera = Camera.from_connection(conn)
-        except LookupError:
-            print("Camera not found!")
-            return 1
-
-        acquisition = get_interface_required(camera._unit, UCAPI_IID.IID_IMAGE_ACQUISITION)
+        camera = scope.camera
+        acquisition = scope.acquisition
 
         # Configure camera
         camera.trigger_mode = 0  # CONTINUOUS
@@ -489,25 +445,15 @@ Examples:
         binning_map = {0: 1, 1: 2, 2: 3}
         actual_binning = binning_map.get(actual_binning_idx, actual_binning_idx)
 
-        # Compute frame size in µm and validate against plan
-        sample_pixel_x_um = None
-        sample_pixel_y_um = None
-        frame_width_um = None
-        frame_height_um = None
-        if physical_pixel_x_um and actual_binning and objective_mag:
-            sample_pixel_x_um = physical_pixel_x_um * actual_binning / objective_mag
-            if frame_width_px:
-                frame_width_um = frame_width_px * sample_pixel_x_um
-        if physical_pixel_y_um and actual_binning and objective_mag:
-            sample_pixel_y_um = physical_pixel_y_um * actual_binning / objective_mag
-            if frame_height_px:
-                frame_height_um = frame_height_px * sample_pixel_y_um
-
-        if not frame_height_um:
-            print("Error: Could not determine frame height. Check objective/camera.")
+        # Validate frame size against plan using actual binning
+        actual_frame_size = compute_frame_size_um(desc.camera, objective_mag, actual_binning_idx)
+        if actual_frame_size is None:
+            print("Error: Could not determine frame size. Check objective/camera.")
             return 1
+        frame_width_um, frame_height_um = actual_frame_size
+        sample_pixel_x_um = frame_width_um / frame_width_px if frame_width_px else None
+        sample_pixel_y_um = frame_height_um / frame_height_px if frame_height_px else None
 
-        # Assert camera dimensions match the plan
         if abs(frame_width_um - plan.frame_width_um) > 1.0:
             print(f"ABORT: Camera frame width {frame_width_um:.1f} != plan {plan.frame_width_um:.1f} µm")
             return 1
@@ -518,6 +464,7 @@ Examples:
         exp_str = f"{actual_exposure * 1000:.2f}ms" if actual_exposure else "?"
         print(f"Camera: {camera.name}")
         print(f"  Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}, Gain: {args.gain}")
+        print(f"  Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
         if frame_width_px and frame_height_px:
             print(f"  Frame: {frame_width_px}x{frame_height_px} px")
         if frame_width_um and frame_height_um:
@@ -527,7 +474,9 @@ Examples:
         print()
 
         # ---- Set up acquisition context ----
-        context = Extensions.UCAPI.CancellableImageAcquisitionContext.SystemMemoryFactory
+        from LeicaMicrosystems.HardwareModel import Extensions
+
+        context = scope.create_acquisition_context()
         current_image = [None]
 
         def on_image(image):
@@ -557,7 +506,7 @@ Examples:
                     t0,
                 ) = item
 
-                arr = Camera._image_to_numpy(image)
+                arr = sdk_image_to_numpy(image)
                 image.Dispose()
 
                 img = PILImage.fromarray(arr)
@@ -1007,7 +956,7 @@ Examples:
                 frame_width_um=frame_width_um,
                 frame_height_um=frame_height_um,
             ),
-            "lighting": build_lighting_meta(lamp=lamp, shutter=shutter),
+            "lighting": build_lighting_meta(lamp=scope.lamp, shutter=scope.shutter),
             "rows": rows_meta,
             "position_stream": all_position_samples,
             "frames": saved_frames_meta,
@@ -1047,12 +996,13 @@ Examples:
         print()
         print("Done.")
 
-        # Cleanup (may crash with AccessViolationException on Dispose)
+        # Cleanup (camera disposed by Microscope.__exit__)
+        with contextlib.suppress(Exception):
+            context.Dispose()
         Stage.wait_all([hx, hy])
         hx.dispose()
         hy.dispose()
         z_drive.move_to_corrected(initial_z)
-        camera.dispose()
 
         return 0
 

@@ -319,24 +319,14 @@ class Camera:
 
     @staticmethod
     def _image_to_numpy(image) -> np.ndarray:
-        """Convert SDK Image to numpy array."""
-        import System
+        """Convert SDK Image to numpy array.
 
-        image.LockPixelData()
-        try:
-            fmt = image.Format()
-            width = fmt.Width()
-            height = fmt.Height()
-            buffer_size = fmt.PixelBufferSize()
+        Delegates to flakefinder.image_utils.sdk_image_to_numpy.
+        Kept for backward compatibility with callers using Camera._image_to_numpy.
+        """
+        from flakefinder.image_utils import sdk_image_to_numpy
 
-            # Copy from .NET memory to Python
-            bytes_array = System.Array[System.Byte](buffer_size)
-            System.Runtime.InteropServices.Marshal.Copy(image.PixelData(), bytes_array, 0, buffer_size)
-
-            # Convert to numpy
-            return np.frombuffer(bytes_array, dtype=np.uint8).reshape((height, width, -1))
-        finally:
-            image.UnlockPixelData()
+        return sdk_image_to_numpy(image)
 
     def capture(self) -> np.ndarray:
         """Capture a single image (blocking).
