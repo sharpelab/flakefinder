@@ -18,7 +18,6 @@ Usage:
 
 import argparse
 import bisect
-import contextlib
 import json
 import os
 import queue
@@ -467,7 +466,7 @@ Examples:
         # Set up image acquisition context
         from LeicaMicrosystems.HardwareModel import Extensions
 
-        context = scope.create_acquisition_context()
+        context = scope.context
         current_image = [None]
 
         def on_image(image):
@@ -933,10 +932,6 @@ Examples:
             print(f"Creating {args.output}.zip...")
             shutil.make_archive(args.output, "zip", args.output)
             print(f"Created {args.output}.zip")
-
-        # Cleanup (camera disposed by Microscope.__exit__)
-        with contextlib.suppress(Exception):
-            context.Dispose()
 
         print("\nDone.")
         return 0

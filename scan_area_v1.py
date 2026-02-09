@@ -5,7 +5,6 @@ See docs/maskterial_integration.md for 20x scanning context.
 """
 
 import argparse
-import contextlib
 import json
 import os
 import queue
@@ -403,7 +402,7 @@ Examples:
         # Set up acquisition context
         from LeicaMicrosystems.HardwareModel import Extensions
 
-        context = scope.create_acquisition_context()
+        context = scope.context
         current_image = [None]
 
         def on_image(image):
@@ -791,10 +790,6 @@ Examples:
         return_handle_y.wait()
         return_handle_x.dispose()
         return_handle_y.dispose()
-
-        # Cleanup (camera disposed by Microscope.__exit__)
-        with contextlib.suppress(Exception):
-            context.Dispose()
 
         print()
         print("Done.")
