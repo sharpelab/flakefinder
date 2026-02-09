@@ -67,11 +67,11 @@ def compute_z_tracking_stats(meta: dict) -> dict:
 
         direction = row["direction"]
 
-        # Initial jump: |z_error[frame 1] - z_error[frame 0]|
+        # Z-jump: |z_error[frame 1] - z_error[frame 0]|
         if len(row_frames) >= 2:
-            init_jump = abs(row_frames[1]["z_error"] - row_frames[0]["z_error"])
+            z_jump = abs(row_frames[1]["z_error"] - row_frames[0]["z_error"])
         else:
-            init_jump = 0.0
+            z_jump = 0.0
 
         per_row.append(
             {
@@ -82,7 +82,7 @@ def compute_z_tracking_stats(meta: dict) -> dict:
                 "std_um": float(np.std(row_errors)),
                 "max_abs_um": float(np.max(row_abs)),
                 "direction": direction,
-                "init_jump_um": init_jump,
+                "z_jump_um": z_jump,
             }
         )
 
@@ -440,14 +440,14 @@ def print_summary(
 
     # Per-row Z table
     print("\n--- Per-Row Z Error ---")
-    print(f"{'Row':>3}  {'Dir':>3}  {'Frames':>6}  {'Mean err':>9}  {'Max |err|':>9}  {'Init jump':>9}")
+    print(f"{'Row':>3}  {'Dir':>3}  {'Frames':>6}  {'Mean err':>9}  {'Max |err|':>9}  {'Z-jump':>9}")
     print(f"{'---':>3}  {'---':>3}  {'------':>6}  {'---------':>9}  {'---------':>9}  {'---------':>9}")
     for r in z_stats["per_row"]:
         dir_str = "+X" if r["direction"] > 0 else "-X"
-        init_str = f"{r['init_jump_um']:.3f}"
+        zjump_str = f"{r['z_jump_um']:.3f}"
         me = r["mean_error_um"]
         mx = r["max_abs_um"]
-        print(f"{r['row_idx']:3d}   {dir_str:>2}  {r['n_frames']:6d}  {me:+9.3f}  {mx:9.3f}  {init_str:>9}")
+        print(f"{r['row_idx']:3d}   {dir_str:>2}  {r['n_frames']:6d}  {me:+9.3f}  {mx:9.3f}  {zjump_str:>9}")
 
     # Directional bias summary
     pos_rows = [r for r in z_stats["per_row"] if r["direction"] > 0]
@@ -455,12 +455,12 @@ def print_summary(
     print("\n--- Directional Bias ---")
     if pos_rows:
         pos_mean = np.mean([r["mean_error_um"] for r in pos_rows])
-        pos_init = np.mean([r["init_jump_um"] for r in pos_rows])
-        print(f"+X rows ({len(pos_rows):2d}):  mean Z err = {pos_mean:+.3f} um,  mean init jump = {pos_init:.3f} um")
+        pos_zjump = np.mean([r["z_jump_um"] for r in pos_rows])
+        print(f"+X rows ({len(pos_rows):2d}):  mean Z err = {pos_mean:+.3f} um,  mean z-jump = {pos_zjump:.3f} um")
     if neg_rows:
         neg_mean = np.mean([r["mean_error_um"] for r in neg_rows])
-        neg_init = np.mean([r["init_jump_um"] for r in neg_rows])
-        print(f"-X rows ({len(neg_rows):2d}):  mean Z err = {neg_mean:+.3f} um,  mean init jump = {neg_init:.3f} um")
+        neg_zjump = np.mean([r["z_jump_um"] for r in neg_rows])
+        print(f"-X rows ({len(neg_rows):2d}):  mean Z err = {neg_mean:+.3f} um,  mean z-jump = {neg_zjump:.3f} um")
     if pos_rows and neg_rows:
         print(f"Directional split:  {pos_mean - neg_mean:+.3f} um (+X minus -X)")
 
@@ -544,7 +544,7 @@ def print_comparison(
             return None, None
         return (
             float(np.mean([r["mean_error_um"] for r in matched])),
-            float(np.mean([r["init_jump_um"] for r in matched])) if matched else None,
+            float(np.mean([r["z_jump_um"] for r in matched])) if matched else None,
         )
 
     print(f"\n{'Directional bias':<20}  {label_a:>{wa}}  {label_b:>{wb}}")
@@ -555,11 +555,11 @@ def print_comparison(
         va = f"{mean_a:+.3f}" if mean_a is not None else "N/A"
         vb = f"{mean_b:+.3f}" if mean_b is not None else "N/A"
         print(f"{dir_name:<20}  {va:>{wa}}  {vb:>{wb}}")
-    for dir_name, sign in [("+X init jump", 1), ("-X init jump", -1)]:
-        _, init_a = _dir_stats(z_stats_a["per_row"], sign)
-        _, init_b = _dir_stats(z_stats_b["per_row"], sign)
-        va = f"{init_a:.3f}" if init_a is not None else "N/A"
-        vb = f"{init_b:.3f}" if init_b is not None else "N/A"
+    for dir_name, sign in [("+X z-jump", 1), ("-X z-jump", -1)]:
+        _, zjump_a = _dir_stats(z_stats_a["per_row"], sign)
+        _, zjump_b = _dir_stats(z_stats_b["per_row"], sign)
+        va = f"{zjump_a:.3f}" if zjump_a is not None else "N/A"
+        vb = f"{zjump_b:.3f}" if zjump_b is not None else "N/A"
         print(f"{dir_name:<20}  {va:>{wa}}  {vb:>{wb}}")
 
     # Per-row comparison (paired by row index)
