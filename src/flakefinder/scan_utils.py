@@ -6,7 +6,14 @@ import bisect
 from collections.abc import Sequence
 from typing import Any
 
-from flakefinder.types import BBox, LightingMeta, PlanarScanPlan, Point2F, Point3F
+from flakefinder.types import (
+    BBox,
+    LightingMeta,
+    PlanarScanPlan,
+    Point2F,
+    PositionSample,
+    ScanRow,
+)
 
 # ============================================================================
 # Position interpolation
@@ -15,7 +22,7 @@ from flakefinder.types import BBox, LightingMeta, PlanarScanPlan, Point2F, Point
 
 def interpolate_position(
     t: float,
-    samples: list[Point3F],
+    samples: list[PositionSample],
 ) -> float | None:
     """Interpolate position at time t from (t_before, t_after, x_um) samples.
 
@@ -111,7 +118,7 @@ def compute_planar_scan_plan(
     target_advance = frame_width_um * (1 - x_overlap_pct / 100)
     y_step = frame_height_um * (1 - y_overlap_pct / 100)
 
-    rows: list[Point3F] = []
+    rows: list[ScanRow] = []
     y = bbox["y_min"]
     while y <= bbox["y_max"]:
         extent = intersect_polygon_with_y(polygon, y)
@@ -124,7 +131,7 @@ def compute_planar_scan_plan(
             # Apply padding — extends X range beyond hull intersection
             x_min -= padding
             x_max += padding
-            rows.append((y, x_min, x_max))
+            rows.append(ScanRow(y, x_min, x_max))
         y += y_step
 
     if row_limit:

@@ -38,6 +38,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from flakefinder.data_utils import (
     compute_frame_size_um,
     load_chip_geometry,
@@ -49,7 +51,7 @@ from flakefinder.scan_utils import (
     compute_plane_z,
     interpolate_position,
 )
-from flakefinder.types import CameraMeta, OpticsMeta
+from flakefinder.types import CameraMeta, OpticsMeta, PositionSample
 
 MICROSCOPE_DESCRIPTION = os.path.join(os.path.dirname(__file__), "microscope_description.json")
 
@@ -112,6 +114,7 @@ class RowConfig:
     row_settle_s: float
     warmup_frames: int
     z_max: float
+    quiet: bool
 
 
 @dataclass
@@ -184,11 +187,12 @@ def scan_row(
     z_vel_um_s = cfg.plane_a * direction * cfg.x_speed_um_s
 
     row_width_mm = (row_x_max - row_x_min) / 1000
-    print(
-        f"Row {row_idx}/{total_rows - 1}: Y={row_y:.0f}um, {dir_str}, "
-        f"X=[{row_x_min:.0f},{row_x_max:.0f}] ({row_width_mm:.1f}mm), "
-        f"Z={z_start:.0f}->{z_end:.0f}"
-    )
+    if not cfg.quiet:
+        print(
+            f"Row {row_idx}/{total_rows - 1}: Y={row_y:.0f}um, {dir_str}, "
+            f"X=[{row_x_min:.0f},{row_x_max:.0f}] ({row_width_mm:.1f}mm), "
+            f"Z={z_start:.0f}->{z_end:.0f}"
+        )
 
     # Runtime Z safety check
     if max(z_start, z_end) > cfg.z_max:
@@ -221,7 +225,7 @@ def scan_row(
     t_settle_end = time.perf_counter()
 
     # ---- 3. Start per-row polling threads ----
-    x_samples: list[tuple[float, float, float]] = []
+    x_samples: list[PositionSample] = []
     z_samples: list[tuple[float, float]] = []
     stop_polling = threading.Event()
 
@@ -236,7 +240,7 @@ def scan_row(
             x_native = x_bcv.GetControlValue()
             t_after = time.perf_counter()
             x_um = x_converter.GetMetricsValue(x_native)
-            x_samples.append((t_before, t_after, x_um))
+            x_samples.append(PositionSample(t_before, t_after, x_um))
 
     def z_poll_fn() -> None:
         while not stop_polling.is_set():
@@ -278,7 +282,7 @@ def scan_row(
         t_end = time.perf_counter()
 
         if hw.current_image[0] is not None:
-            x_now = x_samples[-1][2] if x_samples else None
+            x_now = x_samples[-1].x_um if x_samples else None
 
             # Start Z tracking when X approaches chip edge
             if not z_started and x_now is not None:
@@ -347,18 +351,19 @@ def scan_row(
     }
 
     # Console summary
-    prepos_ms = 1000 * (t_preposition_end - t_preposition_start)
-    settle_ms = 1000 * (t_settle_end - t_preposition_end)
-    warmup_ms = 1000 * (t_warmup_end - t_settle_end)
-    x_start_ms = 1000 * (t_x_started - t_warmup_end)
-    z_wait_ms = 1000 * (t_z_started - t_x_started) if t_z_started else 0
-    z_start_str = f"Zstart={z_wait_ms:.0f}ms @X={z_start_x_um:.0f}" if z_start_x_um else "Zstart=N/A"
+    if not cfg.quiet:
+        prepos_ms = 1000 * (t_preposition_end - t_preposition_start)
+        settle_ms = 1000 * (t_settle_end - t_preposition_end)
+        warmup_ms = 1000 * (t_warmup_end - t_settle_end)
+        x_start_ms = 1000 * (t_x_started - t_warmup_end)
+        z_wait_ms = 1000 * (t_z_started - t_x_started) if t_z_started else 0
+        z_start_str = f"Zstart={z_wait_ms:.0f}ms @X={z_start_x_um:.0f}" if z_start_x_um else "Zstart=N/A"
 
-    print(f"  {row_frame_count} saved, {row_skip_count} skipped, {len(row_x_samples)} pos, {row_duration:.2f}s")
-    print(
-        f"  Startup: prepos={prepos_ms:.0f}ms settle={settle_ms:.0f}ms "
-        f"warmup={warmup_ms:.0f}ms Xstart={x_start_ms:.0f}ms {z_start_str}"
-    )
+        print(f"  {row_frame_count} saved, {row_skip_count} skipped, {len(row_x_samples)} pos, {row_duration:.2f}s")
+        print(
+            f"  Startup: prepos={prepos_ms:.0f}ms settle={settle_ms:.0f}ms "
+            f"warmup={warmup_ms:.0f}ms Xstart={x_start_ms:.0f}ms {z_start_str}"
+        )
 
     # Build position samples for global list
     position_samples = [
@@ -503,6 +508,7 @@ Examples:
     output_group.add_argument("--clean", action="store_true", help="Wipe output directory if exists")
     output_group.add_argument("--write-threads", type=int, default=2, help="Image writer threads")
     output_group.add_argument("--compress", action="store_true", help="Create .zip of output")
+    output_group.add_argument("--quiet", action="store_true", help="Suppress per-row progress output")
 
     args = parser.parse_args()
 
@@ -882,6 +888,7 @@ Examples:
             row_settle_s=args.row_settle,
             warmup_frames=args.warmup_frames,
             z_max=args.z_max,
+            quiet=args.quiet,
         )
 
         # ---- Scan loop ----
@@ -940,8 +947,6 @@ Examples:
         saved_frames_meta.sort(key=lambda f: f["n"])
 
         # Z tracking error stats
-        import numpy as np
-
         z_errors = [f["z_error"] for f in saved_frames_meta if f["z_error"] is not None]
         if z_errors:
             z_error_arr = np.array(z_errors)
@@ -1006,10 +1011,10 @@ Examples:
         # Build metadata (scan_area_v1.py compatible for stitching)
         meta = {
             "timestamp": datetime.now().isoformat(),
-            "x_min_um": min(r[1] for r in plan.rows),
-            "x_max_um": max(r[2] for r in plan.rows),
-            "y_min_um": plan.rows[0][0],
-            "y_max_um": plan.rows[-1][0],
+            "x_min_um": min(r.x_min_um for r in plan.rows),
+            "x_max_um": max(r.x_max_um for r in plan.rows),
+            "y_min_um": plan.rows[0].y_um,
+            "y_max_um": plan.rows[-1].y_um,
             "y_step_um": plan.y_step_um,
             "y_overlap_percent": args.y_overlap_percent,
             "downsample": args.downsample,

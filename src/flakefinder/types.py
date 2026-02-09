@@ -3,11 +3,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, TypedDict
+from typing import Any, NamedTuple, TypedDict
 
 # Geometric point aliases
 type Point2F = tuple[float, float]
 type Point3F = tuple[float, float, float]
+
+
+class ScanRow(NamedTuple):
+    """A single row in a scan plan: (y_um, x_min_um, x_max_um)."""
+
+    y_um: float
+    x_min_um: float
+    x_max_um: float
+
+
+class PositionSample(NamedTuple):
+    """A single polled position sample: (t_before, t_after, x_um)."""
+
+    t_before: float
+    t_after: float
+    x_um: float
 
 
 # ============================================================================
@@ -107,7 +123,7 @@ class ChipGeometry:
 class PlanarScanPlan:
     """Computed scan plan from chip geometry and focus plane."""
 
-    rows: list[Point3F]  # [(y_um, x_min_um, x_max_um), ...]
+    rows: list[ScanRow]
     target_advance_um: float
     y_step_um: float
     validated_z_min_um: float
