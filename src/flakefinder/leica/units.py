@@ -199,16 +199,15 @@ class Axis:
         self._bcv_async: BasicControlValueAsync | None = get_interface(unit, IID.IID_BASIC_CONTROL_VALUE_ASYNC)
         self._halt: HaltControlValue | None = get_interface(unit, IID.IID_HALT_CONTROL_VALUE)
         self._state: BasicControlState | None = get_interface(unit, IID.IID_BASIC_CONTROL_STATE)
-        self._velocity: BasicControlValueVelocity | None = get_interface(unit, IID.IID_BASIC_CONTROL_VALUE_VELOCITY)
-        self._velocity_converter: MetricsConverter | None = None
-        if self._velocity is not None:
-            try:
-                vel_converters = self._velocity.GetMetricsConverters()
-                self._velocity_converter = vel_converters.FindMetricsConverter(
-                    int(EMetricsId.METRICS_MICRONS_PER_SECOND)
-                )
-            except Exception:
-                pass  # No velocity converter available
+
+        # Required: all DM6M axes (X, Y, Z) have velocity control
+        self._velocity: BasicControlValueVelocity = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE_VELOCITY)
+        vel_converters = self._velocity.GetMetricsConverters()
+        self._velocity_converter: MetricsConverter = vel_converters.FindMetricsConverter(
+            int(EMetricsId.METRICS_MICRONS_PER_SECOND)
+        )
+        if self._velocity_converter is None:
+            raise LookupError(f"No velocity converter for {self._name}")
 
         self._calibration: AutoCalibration | None = get_interface(unit, IID.IID_AUTO_CALIBRATION)
         self._directed_velocity = get_interface(unit, IID.IID_DIRECTED_CONTROL_VALUE_ASYNC_VELOCITY)
@@ -383,15 +382,8 @@ class Axis:
     # --- Velocity ---
 
     @property
-    def supports_velocity(self) -> bool:
-        """Check if axis supports velocity control."""
-        return self._velocity is not None
-
-    @property
-    def velocity_native(self) -> int | None:
-        """Current velocity in native units, or None if not supported."""
-        if self._velocity is None:
-            return None
+    def velocity_native(self) -> int:
+        """Current velocity in native units."""
         return self._velocity.GetControlValue()
 
     def set_velocity_native(self, velocity: int) -> None:
@@ -399,65 +391,40 @@ class Axis:
 
         Args:
             velocity: Velocity in native units.
-
-        Raises:
-            RuntimeError: If axis doesn't support velocity control.
         """
-        if self._velocity is None:
-            raise RuntimeError(f"Axis {self._name} doesn't support velocity control")
         self._velocity.SetControlValue(velocity)
 
     @property
-    def min_velocity_native(self) -> int | None:
+    def min_velocity_native(self) -> int:
         """Minimum velocity in native units."""
-        if self._velocity is None:
-            return None
         return self._velocity.MinControlValue()
 
     @property
-    def max_velocity_native(self) -> int | None:
+    def max_velocity_native(self) -> int:
         """Maximum velocity in native units."""
-        if self._velocity is None:
-            return None
         return self._velocity.MaxControlValue()
 
     @property
-    def velocity_um_s(self) -> float | None:
-        """Current velocity in µm/s, or None if not supported."""
-        if self._velocity is None or self._velocity_converter is None:
-            return None
-        native = self._velocity.GetControlValue()
-        return self._velocity_converter.GetMetricsValue(native)
+    def velocity_um_s(self) -> float:
+        """Current velocity in µm/s."""
+        return self._velocity_converter.GetMetricsValue(self._velocity.GetControlValue())
 
     @property
-    def max_velocity_um_s(self) -> float | None:
-        """Maximum velocity in µm/s, or None if not supported."""
-        if self._velocity is None or self._velocity_converter is None:
-            return None
-        native = self._velocity.MaxControlValue()
-        return self._velocity_converter.GetMetricsValue(native)
+    def max_velocity_um_s(self) -> float:
+        """Maximum velocity in µm/s."""
+        return self._velocity_converter.GetMetricsValue(self._velocity.MaxControlValue())
 
     @property
-    def min_velocity_um_s(self) -> float | None:
-        """Minimum velocity in µm/s, or None if not supported."""
-        if self._velocity is None or self._velocity_converter is None:
-            return None
-        native = self._velocity.MinControlValue()
-        return self._velocity_converter.GetMetricsValue(native)
+    def min_velocity_um_s(self) -> float:
+        """Minimum velocity in µm/s."""
+        return self._velocity_converter.GetMetricsValue(self._velocity.MinControlValue())
 
     def set_velocity_um_s(self, velocity_um_s: float) -> None:
         """Set velocity in µm/s.
 
         Args:
             velocity_um_s: Velocity in microns per second.
-
-        Raises:
-            RuntimeError: If axis doesn't support velocity control or conversion.
         """
-        if self._velocity is None:
-            raise RuntimeError(f"Axis {self._name} doesn't support velocity control")
-        if self._velocity_converter is None:
-            raise RuntimeError(f"Axis {self._name} doesn't have velocity converter")
         native = self._velocity_converter.GetControlValue(velocity_um_s)
         self._velocity.SetControlValue(native)
 
@@ -1000,7 +967,7 @@ class Stage:
     @property
     def position_um(self) -> Point2F:
         """Current (X, Y) position in microns."""
-        return (self.x.position_um, self.y.position_um)
+        return Point2F(self.x.position_um, self.y.position_um)
 
     @property
     def position_native(self) -> tuple[int, int]:

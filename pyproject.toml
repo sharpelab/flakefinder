@@ -44,6 +44,19 @@ ignore = [
     "F821",    # forward-ref annotations — waiting on pythonnet 3.14 support
 ]
 
+[tool.ty.src]
+exclude = [
+    "src/flakefinder/driver/",  # legacy package, not worth typing
+    "src/flakefinder/cli.py",   # unmaintained, pending rewrite
+]
+
+[tool.ty.rules]
+unresolved-reference = "ignore"  # forward-ref string annotations — same as ruff F821
+
+[tool.ty.analysis]
+# .NET SDK modules only resolve on the microscope PC (pythonnet runtime)
+allowed-unresolved-imports = ["LeicaMicrosystems.**", "System.**"]
+
 [tool.mypy]
 python_version = "3.13"
 strict = true

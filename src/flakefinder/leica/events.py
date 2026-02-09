@@ -120,9 +120,10 @@ class AxisEvents:
             LookupError: If unit doesn't have EventSource interface.
         """
         self._unit = unit
-        self._event_source: EventSource | None = get_interface(unit, IID.IID_EVENT_SOURCE)
-        if self._event_source is None:
+        event_source: EventSource | None = get_interface(unit, IID.IID_EVENT_SOURCE)
+        if event_source is None:
             raise LookupError(f"Unit {unit.GetName()} doesn't support events")
+        self._event_source: EventSource = event_source
 
         # Keep references to prevent GC of callbacks
         self._handlers: list[Any] = []

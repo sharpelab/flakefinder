@@ -1,5 +1,5 @@
 #!/bin/sh
-# Pre-commit hook: run ruff on staged Python files
+# Pre-commit hook: run ruff and ty on staged Python files
 # Setup: git config core.hooksPath hooks/
 
 STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$')
@@ -9,3 +9,6 @@ uv run ruff check --fix $STAGED && uv run ruff format $STAGED
 
 # Re-stage files that ruff modified
 echo "$STAGED" | xargs git add
+
+# Type check (project-wide so [tool.ty.src] excludes apply)
+uvx ty check src/flakefinder/

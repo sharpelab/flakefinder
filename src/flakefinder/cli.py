@@ -97,7 +97,7 @@ def cmd_test_axis(args: argparse.Namespace) -> int:
             print(f"  Range: {z.min_um:.2f} - {z.max_um:.2f} µm")
             print(f"  Supports async: {z.supports_async}")
             print(f"  Supports halt: {z.supports_halt}")
-            print(f"  Supports velocity: {z.supports_velocity}")
+            print(f"  Velocity: {z.velocity_um_s:.1f} µm/s")
             print(f"  Calibrated: {z.is_calibrated}")
             print()
 

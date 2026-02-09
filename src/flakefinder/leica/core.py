@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TypeVar
 
-from .enums import IID, TID
+from .enums import IID, TID, UCAPI_IID, UCAPI_TID
 from .types import HardwareModel, Unit
 
 # DLLs are in shared location: flakefinder/dlls/
@@ -31,9 +31,9 @@ def _init_sdk() -> None:
 
     import clr
 
-    clr.AddReference(os.path.join(_DLL_DIR, "hwmodel2.dll"))
-    clr.AddReference(os.path.join(_DLL_DIR, "hwmodel2exucapi.dll"))
-    clr.AddReference("System")
+    clr.AddReference(os.path.join(_DLL_DIR, "hwmodel2.dll"))  # ty: ignore[unresolved-attribute]
+    clr.AddReference(os.path.join(_DLL_DIR, "hwmodel2exucapi.dll"))  # ty: ignore[unresolved-attribute]
+    clr.AddReference("System")  # ty: ignore[unresolved-attribute]
 
     _sdk_initialized = True
 
@@ -50,7 +50,7 @@ def _get_hardware_model(config_dir: str | None = None) -> "HardwareModel":
     """
     _init_sdk()
 
-    from LeicaMicrosystems.HardwareModel import HardwareModel  # type: ignore
+    from LeicaMicrosystems.HardwareModel import HardwareModel
 
     if config_dir:
         return HardwareModel.TheHardwareModelInDirectory(config_dir)
@@ -133,7 +133,7 @@ class LeicaConnection:
             raise RuntimeError("Not connected")
         return self._root
 
-    def find_unit(self, tid: TID) -> "Unit | None":
+    def find_unit(self, tid: TID | UCAPI_TID) -> "Unit | None":
         """Find a unit by type ID in the device tree.
 
         Args:
@@ -149,7 +149,7 @@ class LeicaConnection:
             raise RuntimeError("Not connected")
         return find_unit(self._root, tid)
 
-    def find_unit_required(self, tid: TID) -> "Unit":
+    def find_unit_required(self, tid: TID | UCAPI_TID) -> "Unit":
         """Find a unit by type ID, raising if not found.
 
         Args:
@@ -199,7 +199,7 @@ def leica_connection(config_dir: str | None = None) -> Iterator[LeicaConnection]
         conn.disconnect()
 
 
-def find_unit(root: "Unit", tid: TID) -> "Unit | None":
+def find_unit(root: "Unit", tid: TID | UCAPI_TID) -> "Unit | None":
     """Recursively search for a unit by type ID.
 
     Args:
@@ -265,7 +265,7 @@ def find_all_units(root: "Unit", tid: TID) -> list["Unit"]:
 T = TypeVar("T")
 
 
-def get_interface[T](unit: "Unit", iid: IID, expected_type: type[T] | None = None) -> T | None:
+def get_interface[T](unit: "Unit", iid: IID | UCAPI_IID, expected_type: type[T] | None = None) -> T | None:
     """Get an interface from a unit by interface ID.
 
     Args:
@@ -287,7 +287,7 @@ def get_interface[T](unit: "Unit", iid: IID, expected_type: type[T] | None = Non
     return iface.GetObject()
 
 
-def get_interface_required[T](unit: "Unit", iid: IID, expected_type: type[T] | None = None) -> T:
+def get_interface_required[T](unit: "Unit", iid: IID | UCAPI_IID, expected_type: type[T] | None = None) -> T:
     """Get an interface from a unit, raising if not found.
 
     Args:

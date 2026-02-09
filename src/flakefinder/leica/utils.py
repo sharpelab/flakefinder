@@ -80,9 +80,10 @@ class UnitConverter:
         Raises:
             ValueError: If unit doesn't support the requested metrics.
         """
-        self._converter = get_metrics_converter(unit, metrics_id)
-        if self._converter is None:
+        converter = get_metrics_converter(unit, metrics_id)
+        if converter is None:
             raise ValueError(f"Unit {unit.GetName()} does not support metrics {metrics_id.name}")
+        self._converter = converter
         self._metrics_id = metrics_id
 
     def to_microns(self, native_value: int) -> float:

@@ -18,7 +18,7 @@ import cv2
 import numpy as np
 
 from ..image_utils import sdk_image_to_numpy
-from .units import Axis, Nosepiece
+from .units import Axis, Nosepiece, ZDrive
 
 if TYPE_CHECKING:
     from .microscope import Microscope
@@ -305,7 +305,7 @@ def _validate_z_limits(
 
 
 def _run_z_scan(
-    z_axis: Axis,
+    z_axis: ZDrive,
     z_start: float,
     z_end: float,
     acquisition,
@@ -397,6 +397,8 @@ def _run_z_scan(
 
     for i, (t_capture, img) in enumerate(frame_data):
         z_interp = interpolate_position(t_capture, z_samples)
+        if z_interp is None:
+            raise RuntimeError(f"Frame {i}: Z interpolation failed at t={t_capture:.6f}s")
         s = sharpness(img, method=sharpness_method)
         entry = {
             "frame": i,
@@ -407,6 +409,7 @@ def _run_z_scan(
             entry["metrics"] = {name: float(fn(img)) for name, fn in ALL_SHARPNESS_METRICS.items()}
         sharpness_curve.append(entry)
         if store_frames:
+            assert frames is not None
             frames.append(AutofocusFrame(z_um=z_interp, sharpness=s, image=img))
 
     return sharpness_curve, frames, scan_duration, len(frame_data), len(z_samples)

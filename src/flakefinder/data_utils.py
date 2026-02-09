@@ -101,7 +101,7 @@ def compute_frame_size_um(
     sample_pixel_x = camera.physical_pixel_x_um * bl.factor / objective_mag
     sample_pixel_y = camera.physical_pixel_y_um * bl.factor / objective_mag
 
-    return (bl.frame_width_px * sample_pixel_x, bl.frame_height_px * sample_pixel_y)
+    return Point2F(bl.frame_width_px * sample_pixel_x, bl.frame_height_px * sample_pixel_y)
 
 
 def load_chip_geometry(chips_path: str, chip_index: int) -> ChipGeometry:
@@ -138,7 +138,7 @@ def load_chip_geometry(chips_path: str, chip_index: int) -> ChipGeometry:
             y_min=raw_bbox["y_min"],
             y_max=raw_bbox["y_max"],
         ),
-        polygon=[(v[0], v[1]) for v in raw_polygon],
-        centroid=(raw_centroid[0], raw_centroid[1]),
+        polygon=[Point2F(v[0], v[1]) for v in raw_polygon],
+        centroid=Point2F(raw_centroid[0], raw_centroid[1]),
         area_um2=chip["area_um2"],
     )

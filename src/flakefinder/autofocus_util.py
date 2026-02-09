@@ -73,12 +73,12 @@ def save_debug_frames(
         if verbose:
             print(f"  Saving {len(af.frames)} coarse frames to {coarse_dir}/...")
         save_pass_frames(af.frames, af.sharpness_curve, coarse_dir)
-        if has_fine:
+        if af.fine_frames is not None and len(af.fine_frames) > 0:
             fine_dir = out_dir / "fine"
             if verbose:
                 print(f"  Saving {len(af.fine_frames)} fine frames to {fine_dir}/...")
             save_pass_frames(af.fine_frames, af.fine_sharpness_curve, fine_dir)
-        if has_super_fine:
+        if af.super_fine_frames is not None and len(af.super_fine_frames) > 0:
             sf_dir = out_dir / "super_fine"
             if verbose:
                 print(f"  Saving {len(af.super_fine_frames)} super fine frames to {sf_dir}/...")

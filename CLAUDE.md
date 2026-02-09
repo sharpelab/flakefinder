@@ -43,11 +43,12 @@ From `microscope_description.json`:
 - **Stitch metadata:** `*_stitch_meta.json` - coordinate mapping for stitched images
 - **Chip detection:** `*_chips.json` - detected chip bounding boxes in stage coordinates
 
-## Linting
+## Linting & Type Checking
 
 Run before committing:
 ```bash
 uv run ruff check --fix . && uv run ruff format .
+uvx ty check src/flakefinder/
 ```
 
 Pre-commit hook setup (one-time per clone):
@@ -55,7 +56,8 @@ Pre-commit hook setup (one-time per clone):
 git config core.hooksPath hooks/
 ```
 
-Config is in `pyproject.toml` under `[tool.ruff]`. Rules: E, F, I, UP, B, SIM.
+- **Ruff** config: `pyproject.toml` under `[tool.ruff]`. Rules: E, F, I, UP, B, SIM.
+- **ty** config: `pyproject.toml` under `[tool.ty]`. Excludes `driver/` and `cli.py`; suppresses `unresolved-reference` (forward-ref string annotations) and .NET SDK imports.
 
 ## Microscope Operations
 

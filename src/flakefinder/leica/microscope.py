@@ -171,7 +171,7 @@ class Microscope:
     def position(self) -> Point3F:
         """Current (X, Y, Z) position in microns."""
         x, y = self.stage.position_um
-        return (x, y, self.z.position_um)
+        return Point3F(x, y, self.z.position_um)
 
     # --- High-level operations ---
 

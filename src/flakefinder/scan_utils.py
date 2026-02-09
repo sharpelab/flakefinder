@@ -88,7 +88,7 @@ def intersect_polygon_with_y(
     if len(intersections) < 2:
         return None
 
-    return (min(intersections), max(intersections))
+    return Point2F(min(intersections), max(intersections))
 
 
 def compute_plane_z(a: float, b: float, c: float, x_um: float, y_um: float) -> float:

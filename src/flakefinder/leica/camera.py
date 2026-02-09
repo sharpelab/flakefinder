@@ -16,6 +16,7 @@ from flakefinder.types import Point2F
 
 from .core import find_unit, get_interface_required
 from .enums import IID, UCAPI_IID, UCAPI_PROP, UCAPI_TID
+from .types import Image as SdkImage
 from .types import Unit
 
 
@@ -328,16 +329,30 @@ class Camera:
 
         return sdk_image_to_numpy(image)
 
-    def capture(self) -> np.ndarray:
-        """Capture a single image (blocking).
+    def capture_maybe(self) -> np.ndarray | None:
+        """Capture a single image (blocking), returning None on failure.
 
         Returns:
-            Image as numpy array (H, W, C).
+            Image as numpy array (H, W, C), or None if acquisition failed.
         """
         self._ensure_context()
         self._image_ready.clear()
         self._acquisition.Acquire(self._context, None)
         return self._current_image
+
+    def capture(self) -> np.ndarray:
+        """Capture a single image (blocking).
+
+        Returns:
+            Image as numpy array (H, W, C).
+
+        Raises:
+            RuntimeError: If acquisition failed to produce an image.
+        """
+        image = self.capture_maybe()
+        if image is None:
+            raise RuntimeError("Capture failed: no image acquired")
+        return image
 
     def stream(self, stage: "Stage | None" = None) -> "FrameStream":
         """Start continuous frame acquisition.
@@ -625,7 +640,7 @@ class DeferredFrameStream:
         self._context = None
 
         # Store raw .NET images with timestamps
-        self._raw_frames: list[tuple[float, object]] = []  # (timestamp, .NET Image)
+        self._raw_frames: list[tuple[float, SdkImage]] = []  # (timestamp, .NET Image)
         self._lock = threading.Lock()
 
         # Stats
