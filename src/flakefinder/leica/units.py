@@ -7,6 +7,9 @@ with both blocking (sync) and non-blocking (async) operations.
 import contextlib
 import re
 import time
+import warnings
+
+from flakefinder.types import Point2F
 
 from .core import find_unit, get_interface, get_interface_required
 from .enums import IID, TID, EMetricsId, MoveState
@@ -636,6 +639,22 @@ class Lamp:
         """Maximum intensity value."""
         return self._max
 
+    @property
+    def intensity_pct(self) -> float:
+        """Current intensity as percentage (0-100)."""
+        range_ = self._max - self._min
+        if range_ == 0:
+            return 0.0
+        return (self.intensity - self._min) / range_ * 100
+
+    @intensity_pct.setter
+    def intensity_pct(self, value: float) -> None:
+        """Set intensity as percentage (0-100), clamped to valid range."""
+        value = max(0.0, min(100.0, value))
+        range_ = self._max - self._min
+        native = self._min + round(value / 100 * range_)
+        self.intensity = native
+
     def off(self) -> None:
         """Turn lamp off."""
         self.intensity = self._min
@@ -725,18 +744,19 @@ class Nosepiece:
     def set_position(self, value: int, z: "ZDrive") -> None:
         """Set objective position, temporarily maxing Z speed to avoid SDK timeout.
 
-        The SDK's nosepiece SetControlValue performs an internal z-hop
-        (retract, rotate, return). If Z speed is set low (e.g. from
-        autofocus), this can exceed the SDK's internal timeout. This method
-        temporarily sets Z to max velocity for the switch, then restores it.
-
-        TODO: Move to a higher-level Microscope class that owns both the
-        nosepiece and ZDrive, so callers don't need to pass z explicitly.
+        .. deprecated::
+            Use ``Microscope.switch_objective_pos()`` instead, which owns
+            both the nosepiece and ZDrive internally.
 
         Args:
             value: Target position (1-indexed).
             z: ZDrive instance for temporary velocity override.
         """
+        warnings.warn(
+            "Nosepiece.set_position() is deprecated, use Microscope.switch_objective_pos()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         saved = z.velocity_native
         z.set_velocity_native(z.max_velocity_native)
         try:
@@ -955,7 +975,7 @@ class Stage:
         return cls(Axis(x_unit), Axis(y_unit))
 
     @property
-    def position_um(self) -> tuple[float, float]:
+    def position_um(self) -> Point2F:
         """Current (X, Y) position in microns."""
         return (self.x.position_um, self.y.position_um)
 

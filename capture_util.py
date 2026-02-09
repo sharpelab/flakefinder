@@ -5,7 +5,7 @@ Usage:
     python capture_util.py output.jpg                    # Basic capture
     python capture_util.py output.png --binning 0        # Full resolution (1x1)
     python capture_util.py output.jpg --downsample 2     # Downsample 2x
-    python capture_util.py output.jpg --lamp 80          # Set lamp first
+    python capture_util.py output.jpg --lamp 80          # Set lamp to 80%
     python capture_util.py output.jpg --exposure 0.05    # 50ms exposure
     python capture_util.py output.jpg --wb 1.2,1.0,0.9   # White balance (R,G,B)
 """
@@ -15,56 +15,35 @@ import sys
 
 from PIL import Image as PILImage
 
-from flakefinder.leica import (
-    Camera,
-    Lamp,
-    LeicaConnection,
-    Nosepiece,
-    Shutter,
-    Stage,
-    ZDrive,
-)
+from flakefinder.leica import Microscope
 
 
-def report_status(conn: LeicaConnection, camera: Camera) -> None:
+def report_status(scope: Microscope) -> None:
     """Print current microscope status."""
     # Stage XY
-    stage = Stage.from_connection(conn)
-    x, y = stage.position_um
-    print(f"Stage X: {x:.1f} µm ({stage.x.min_um:.0f} - {stage.x.max_um:.0f})")
-    print(f"Stage Y: {y:.1f} µm ({stage.y.min_um:.0f} - {stage.y.max_um:.0f})")
+    x, y = scope.stage.position_um
+    print(f"Stage X: {x:.1f} µm ({scope.stage.x.min_um:.0f} - {scope.stage.x.max_um:.0f})")
+    print(f"Stage Y: {y:.1f} µm ({scope.stage.y.min_um:.0f} - {scope.stage.y.max_um:.0f})")
 
     # Z axis
-    z = ZDrive.from_connection(conn)
-    print(f"Stage Z: {z.position_um:.1f} µm ({z.min_um:.0f} - {z.max_um:.0f})")
+    print(f"Stage Z: {scope.z.position_um:.1f} µm ({scope.z.min_um:.0f} - {scope.z.max_um:.0f})")
 
     # Nosepiece/objective
-    try:
-        nosepiece = Nosepiece.from_connection(conn)
-        mag = nosepiece.magnification
-        if mag:
-            print(f"Objective: position {nosepiece.position} ({mag}x)")
-        else:
-            print(f"Objective: position {nosepiece.position}")
-    except LookupError:
-        pass
+    mag = scope.nosepiece.magnification
+    if mag:
+        print(f"Objective: position {scope.nosepiece.position} ({mag}x)")
+    else:
+        print(f"Objective: position {scope.nosepiece.position}")
 
     # Lamp
-    try:
-        lamp = Lamp.from_connection(conn)
-        print(f"Lamp: {lamp.intensity}/{lamp.max_intensity}")
-    except LookupError:
-        pass
+    print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
 
     # Shutter
-    try:
-        shutter = Shutter.from_connection(conn)
-        state = "open" if shutter.is_open else "closed"
-        print(f"Shutter: {state}")
-    except LookupError:
-        pass
+    state = "open" if scope.shutter.is_open else "closed"
+    print(f"Shutter: {state}")
 
     # Camera settings
+    camera = scope.camera
     binning_map = {0: "1x1", 1: "2x2", 2: "3x3"}
     binning_str = binning_map.get(camera.binning, str(camera.binning))
     w, h = camera.frame_size_px
@@ -76,7 +55,7 @@ def report_status(conn: LeicaConnection, camera: Camera) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Capture an image from the microscope")
     parser.add_argument("output", help="Output file path (jpg, png, tiff)")
-    parser.add_argument("--lamp", type=int, default=255, help="Lamp intensity (default: 255)")
+    parser.add_argument("--lamp", type=float, default=100, help="Lamp intensity 0-100%% (default: 100)")
     parser.add_argument(
         "--binning",
         type=int,
@@ -125,24 +104,9 @@ def main() -> int:
     if args.wb_blue is not None:
         wb_b = args.wb_blue
 
-    with LeicaConnection() as conn:
-        # Set lamp if specified
-        if args.lamp is not None:
-            try:
-                lamp = Lamp.from_connection(conn)
-                lamp.intensity = args.lamp
-                print(f"Lamp: set to {lamp.intensity}")
-            except LookupError:
-                print("Warning: Lamp not available")
-
-        # Ensure shutter is open
-        try:
-            shutter = Shutter.from_connection(conn)
-            if not shutter.is_open:
-                shutter.open()
-                print("Shutter: opened")
-        except LookupError:
-            pass  # No shutter
+    with Microscope() as scope:
+        # Set lamp and open shutter
+        scope.light_on(args.lamp)
 
         # Move to XY position if specified
         if args.xy:
@@ -151,23 +115,20 @@ def main() -> int:
                 print("Error: --xy must be X,Y (e.g., '5000,14441')")
                 return 1
             target_x, target_y = float(parts[0]), float(parts[1])
-            stage = Stage.from_connection(conn)
             print(f"Moving to X={target_x:.0f}, Y={target_y:.0f} µm...")
-            stage.move_to(target_x, target_y)
-            x, y = stage.position_um
+            scope.stage.move_to(target_x, target_y)
+            x, y = scope.stage.position_um
             print(f"Arrived at X={x:.1f}, Y={y:.1f} µm")
 
         # Move Z if specified
         if args.z is not None:
-            z_drive = ZDrive.from_connection(conn)
             print(f"Moving Z to {args.z:.1f} µm...")
-            z_drive.move_to(args.z)
-            print(f"Z at {z_drive.position_um:.1f} µm")
-
-        # Initialize camera
-        camera = Camera.from_connection(conn)
+            scope.z.move_to(args.z)
+            print(f"Z at {scope.z.position_um:.1f} µm")
 
         # Configure camera
+        camera = scope.camera
+
         if args.binning is not None:
             camera.binning = args.binning
 
@@ -186,22 +147,10 @@ def main() -> int:
             )
 
         # Report capture settings
-        stage = Stage.from_connection(conn)
-        x, y = stage.position_um
-        z = ZDrive.from_connection(conn)
-        print(f"Position: X={x:.1f} Y={y:.1f} Z={z.position_um:.1f} µm")
-
-        try:
-            lamp = Lamp.from_connection(conn)
-            print(f"Lamp: {lamp.intensity}/{lamp.max_intensity}")
-        except LookupError:
-            print("Lamp: N/A")
-
-        try:
-            shutter = Shutter.from_connection(conn)
-            print(f"Shutter: {'open' if shutter.is_open else 'closed'}")
-        except LookupError:
-            print("Shutter: N/A")
+        x, y = scope.stage.position_um
+        print(f"Position: X={x:.1f} Y={y:.1f} Z={scope.z.position_um:.1f} µm")
+        print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
+        print(f"Shutter: {'open' if scope.shutter.is_open else 'closed'}")
 
         binning_map = {0: "1x1", 1: "2x2", 2: "3x3"}
         binning_str = binning_map.get(camera.binning, str(camera.binning))
@@ -233,15 +182,9 @@ def main() -> int:
 
         print(f"Saved: {args.output} ({img.width}x{img.height})")
 
-        # Dispose camera before reporting status (avoids issues)
-        camera.dispose()
-
         # Report full status
         print()
-        # Re-create camera just for status (read-only)
-        camera2 = Camera.from_connection(conn)
-        report_status(conn, camera2)
-        camera2.dispose()
+        report_status(scope)
 
     return 0
 

@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from flakefinder.types import Point2F
+
 from .core import find_unit, get_interface_required
 from .enums import IID, UCAPI_IID, UCAPI_PROP, UCAPI_TID
 from .types import Unit
@@ -23,7 +25,7 @@ class Frame:
 
     image: np.ndarray
     timestamp: float  # time.monotonic() when frame was received
-    position: tuple[float, float] | None = None  # (x_um, y_um) if stage provided
+    position: Point2F | None = None  # (x_um, y_um) if stage provided
     frame_number: int = 0
 
 

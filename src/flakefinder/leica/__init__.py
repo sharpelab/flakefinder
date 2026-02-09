@@ -75,6 +75,7 @@ from .enums import (
     MoveState,
 )
 from .events import AxisEvents, EventQueue, PositionMonitor, Subscription
+from .microscope import Microscope
 from .units import Axis, Lamp, MoveHandle, Nosepiece, Shutter, Stage, ZDrive
 from .utils import (
     UnitConverter,
@@ -107,6 +108,8 @@ __all__ = [
     "UCAPI_TID",
     "UCAPI_IID",
     "UCAPI_PROP",
+    # Microscope facade
+    "Microscope",
     # Units
     "Axis",
     "Stage",

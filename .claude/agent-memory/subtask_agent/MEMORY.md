@@ -10,7 +10,8 @@
 - If microscope has local changes from previous version, `git stash && git pull` is fine.
 
 ## Nosepiece Switching
-- Always use `Nosepiece.set_position(pos, z=z)` (not `.position = pos`) — it maxes Z speed to avoid SDK timeout during the internal z-hop.
+- Use `Microscope.switch_objective_pos(pos)` or `switch_objective_mag("20x")` — handles z-speed maxing internally.
+- `Nosepiece.set_position(pos, z=z)` is deprecated. Legacy scan scripts still use it (Step 2 migration).
 
 ## Summary Files
 - Keep summaries to 2-3 sentences max. Root cause, fix approach, sync status. No technical details like method signatures or try/finally mechanics.
