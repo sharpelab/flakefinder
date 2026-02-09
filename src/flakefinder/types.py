@@ -5,9 +5,22 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple, TypedDict
 
-# Geometric point aliases
-type Point2F = tuple[float, float]
-type Point3F = tuple[float, float, float]
+# Geometric points
+
+
+class Point2F(NamedTuple):
+    """2D point (x, y)."""
+
+    x: float
+    y: float
+
+
+class Point3F(NamedTuple):
+    """3D point (x, y, z)."""
+
+    x: float
+    y: float
+    z: float
 
 
 class ScanRow(NamedTuple):
