@@ -7,6 +7,7 @@ runs autofocus at each point, and outputs a focus map with best Z positions.
 import argparse
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import time
@@ -16,7 +17,7 @@ import numpy as np
 from PIL import Image as PILImage
 
 from flakefinder.data_utils import load_chip_geometry
-from flakefinder.leica.autofocus import ALL_SHARPNESS_METRICS
+from flakefinder.leica.autofocus import ALL_SHARPNESS_METRICS, AutofocusResult
 from flakefinder.types import Point2F
 
 
@@ -25,6 +26,31 @@ class SamplePoint(NamedTuple):
     y_um: float
     type: str  # "contour" or "grid"
     index: int
+
+
+@dataclass
+class FocusMapSample:
+    point: SamplePoint
+    af_result: AutofocusResult | None = None  # None on error
+    image: str | None = None  # filename only
+
+    @property
+    def error(self) -> bool:
+        return self.af_result is None
+
+    def to_dict(self) -> dict:
+        d: dict = {
+            "x_um": self.point.x_um,
+            "y_um": self.point.y_um,
+            "type": self.point.type,
+            "index": self.point.index,
+        }
+        if self.error:
+            d["error"] = True
+        else:
+            d.update(self.af_result.to_dict())
+            d["image"] = self.image
+        return d
 
 
 def hull_perimeter_um(convex_hull: Sequence[Point2F]) -> float:
@@ -173,6 +199,133 @@ def sample_grid_points(
         points.append(centroid)
 
     return points
+
+
+def run_focus_map(
+    all_points: list[SamplePoint],
+    reference_z_um: float,
+    conn,
+    stage,
+    camera,
+    acquisition,
+    context,
+    args,
+    images_dir: "Path | None",
+    save_executor: "ThreadPoolExecutor | None",
+) -> list[FocusMapSample]:
+    """Run autofocus at each sample point and return results.
+
+    Args:
+        all_points: Sample points to autofocus at.
+        reference_z_um: Starting Z position for each autofocus sweep.
+        conn: LeicaConnection.
+        stage: Stage instance.
+        camera: Camera instance.
+        acquisition: Image acquisition interface.
+        context: Acquisition context.
+        args: Parsed CLI arguments (read-only, used for AF tuning params).
+        images_dir: Directory for after-images, or None.
+        save_executor: ThreadPoolExecutor for background disk writes, or None.
+
+    Returns:
+        List of FocusMapSample (one per point).
+    """
+    from flakefinder.leica import Stage as StageClass
+    from flakefinder.leica.autofocus import continuous_autofocus
+    from flakefinder.autofocus_util import save_debug_frames
+
+    sample_results = []
+    save_futures = []
+    total_points = len(all_points)
+
+    print(f"\nRunning autofocus at {total_points} points...")
+
+    for i, pt in enumerate(all_points):
+        print(f"  [{i+1}/{total_points}] {pt.type} {pt.index}: "
+              f"({pt.x_um/1000:.2f}, {pt.y_um/1000:.2f}) mm ... ", end="", flush=True)
+
+        # Move to position
+        hx, hy = stage.move_to_async(pt.x_um, pt.y_um)
+        StageClass.wait_all([hx, hy])
+        hx.dispose()
+        hy.dispose()
+        if args.move_settle > 0:
+            time.sleep(args.move_settle)
+
+        # Run autofocus
+        image_path = None
+        label = f"{'c' if pt.type == 'contour' else 'g'}{pt.index:02d}"
+
+        try:
+            af_result = continuous_autofocus(
+                conn=conn,
+                camera=camera,
+                acquisition=acquisition,
+                context=context,
+                z_start_um=reference_z_um,
+                z_range_um=args.z_range,
+                z_speed_um_s=args.z_speed,
+                fine_pass=not args.no_fine_pass,
+                fine_range_um=args.fine_range,
+                super_fine_pass=not args.no_super_fine,
+                sharpness_method=args.sharpness_method,
+                store_frames=bool(args.debug_dir),
+                compute_all_metrics=args.all_metrics,
+            )
+            best_z = af_result.selected_z_um
+            selected_sharpness = af_result.selected_sharpness
+            final_sharpness = af_result.final_sharpness
+            print(f"Z={best_z:.1f} µm, sharpness={selected_sharpness:.1f}/{final_sharpness:.1f}", end="")
+
+            # Capture after image while still at this position (needs camera)
+            after_img = None
+            if images_dir is not None:
+                if args.af_settle > 0:
+                    time.sleep(args.af_settle)
+                after_img = camera.capture()
+                if after_img is not None:
+                    fname = f"{pt.type}_{pt.index:02d}.jpg"
+                    image_path = images_dir / fname
+                    print(f" -> {fname}", end="")
+
+            # Queue all disk writes to background thread
+            if save_executor and (af_result.frames is not None or after_img is not None):
+                _af = af_result
+                _after = after_img
+                _label = label
+                _image_path = image_path
+                _debug_dir = args.debug_dir
+
+                def _save(af=_af, after=_after, lbl=_label, img_path=_image_path, dbg=_debug_dir):
+                    if dbg and af.frames:
+                        save_debug_frames(af, dbg / lbl)
+                    if after is not None:
+                        if img_path:
+                            PILImage.fromarray(after).save(str(img_path), quality=95)
+                        if dbg:
+                            point_dir = dbg / lbl
+                            point_dir.mkdir(parents=True, exist_ok=True)
+                            PILImage.fromarray(after).save(str(point_dir / "after.png"))
+
+                save_futures.append(save_executor.submit(_save))
+
+            print()
+        except Exception as e:
+            print(f"FAILED: {e}")
+            af_result = None
+
+        sample_results.append(FocusMapSample(
+            point=pt,
+            af_result=af_result,
+            image=str(image_path.name) if image_path else None,
+        ))
+
+    # Wait for background saves to finish
+    if save_executor:
+        for fut in save_futures:
+            fut.result()  # raises if any save failed
+
+    return sample_results
 
 
 def main():
@@ -397,8 +550,10 @@ def main():
         # Acquisition context
         context = Extensions.UCAPI.CancellableImageAcquisitionContext.SystemMemoryFactory
 
-        # Determine reference Z (autofocus at centroid if not provided)
-        if args.z is None:
+        # Resolve reference Z
+        if args.z is not None:
+            reference_z_um = args.z
+        else:
             cx, cy = chip_geo.centroid
             print(f"\nNo --z provided, autofocusing at chip centroid ({cx/1000:.2f}, {cy/1000:.2f}) mm...")
             hx, hy = stage.move_to_async(cx, cy)
@@ -417,8 +572,8 @@ def main():
                 super_fine_pass=not args.no_super_fine,
                 sharpness_method=args.sharpness_method,
             )
-            args.z = centroid_af.selected_z_um
-            print(f"  Centroid AF: Z={args.z:.1f} µm, sharpness={centroid_af.selected_sharpness:.1f}")
+            reference_z_um = centroid_af.selected_z_um
+            print(f"  Centroid AF: Z={reference_z_um:.1f} µm, sharpness={centroid_af.selected_sharpness:.1f}")
 
         # Create images directory if saving images
         images_dir = None
@@ -427,111 +582,23 @@ def main():
             images_dir.mkdir(parents=True, exist_ok=True)
             print(f"Saving images to {images_dir}")
 
-        # Collect results
-        sample_results = []
-        total_points = len(all_points)
         save_executor = ThreadPoolExecutor(max_workers=1) if (args.debug_dir or args.save_images) else None
-        save_futures = []
 
-        print(f"\nRunning autofocus at {total_points} points...")
-
-        for i, pt in enumerate(all_points):
-            print(f"  [{i+1}/{total_points}] {pt.type} {pt.index}: "
-                  f"({pt.x_um/1000:.2f}, {pt.y_um/1000:.2f}) mm ... ", end="", flush=True)
-
-            # Move to position
-            hx, hy = stage.move_to_async(pt.x_um, pt.y_um)
-            Stage.wait_all([hx, hy])
-            hx.dispose()
-            hy.dispose()
-            if args.move_settle > 0:
-                time.sleep(args.move_settle)
-
-            # Run autofocus
-            image_path = None
-            label = f"{'c' if pt.type == 'contour' else 'g'}{pt.index:02d}"
-
-            try:
-                af_result = continuous_autofocus(
-                    conn=conn,
-                    camera=camera,
-                    acquisition=acquisition,
-                    context=context,
-                    z_start_um=args.z,
-                    z_range_um=args.z_range,
-                    z_speed_um_s=args.z_speed,
-                    fine_pass=not args.no_fine_pass,
-                    fine_range_um=args.fine_range,
-                    super_fine_pass=not args.no_super_fine,
-                    sharpness_method=args.sharpness_method,
-                    store_frames=bool(args.debug_dir),
-                    compute_all_metrics=args.all_metrics,
-                )
-                best_z = af_result.selected_z_um
-                selected_sharpness = af_result.selected_sharpness
-                final_sharpness = af_result.final_sharpness
-                print(f"Z={best_z:.1f} µm, sharpness={selected_sharpness:.1f}/{final_sharpness:.1f}", end="")
-
-                # Capture after image while still at this position (needs camera)
-                after_img = None
-                if images_dir is not None:
-                    if args.af_settle > 0:
-                        time.sleep(args.af_settle)
-                    after_img = camera.capture()
-                    if after_img is not None:
-                        fname = f"{pt.type}_{pt.index:02d}.jpg"
-                        image_path = images_dir / fname
-                        print(f" -> {fname}", end="")
-
-                # Queue all disk writes to background thread
-                if save_executor and (af_result.frames is not None or after_img is not None):
-                    _af = af_result
-                    _after = after_img
-                    _label = label
-                    _image_path = image_path
-                    _debug_dir = args.debug_dir
-
-                    def _save(af=_af, after=_after, lbl=_label, img_path=_image_path, dbg=_debug_dir):
-                        if dbg and af.frames:
-                            save_debug_frames(af, dbg / lbl)
-                        if after is not None:
-                            if img_path:
-                                PILImage.fromarray(after).save(str(img_path), quality=95)
-                            if dbg:
-                                point_dir = dbg / lbl
-                                point_dir.mkdir(parents=True, exist_ok=True)
-                                PILImage.fromarray(after).save(str(point_dir / "after.png"))
-
-                    save_futures.append(save_executor.submit(_save))
-
-                print()
-            except Exception as e:
-                print(f"FAILED: {e}")
-                af_result = None
-
-            if af_result is None:
-                sample_results.append({
-                    "x_um": pt.x_um,
-                    "y_um": pt.y_um,
-                    "type": pt.type,
-                    "index": pt.index,
-                    "error": True,
-                })
-            else:
-                result_dict = af_result.to_dict()
-                result_dict.update({
-                    "x_um": pt.x_um,
-                    "y_um": pt.y_um,
-                    "type": pt.type,
-                    "index": pt.index,
-                    "image": str(image_path.name) if image_path else None,
-                })
-                sample_results.append(result_dict)
+        sample_results = run_focus_map(
+            all_points=all_points,
+            reference_z_um=reference_z_um,
+            conn=conn,
+            stage=stage,
+            camera=camera,
+            acquisition=acquisition,
+            context=context,
+            args=args,
+            images_dir=images_dir,
+            save_executor=save_executor,
+        )
 
         # Wait for background saves to finish
         if save_executor:
-            for fut in save_futures:
-                fut.result()  # raises if any save failed
             save_executor.shutdown(wait=True)
 
         # Dispose resources before connection closes
@@ -554,7 +621,7 @@ def main():
             "contour_samples": contour_samples,
             "contour_spacing_mm": args.contour_spacing_mm,
             "grid_spacing_um": args.grid_spacing_um,
-            "z_start_um": args.z,
+            "z_start_um": reference_z_um,
             "z_range_um": args.z_range,
             "z_speed_um_s": args.z_speed,
             "fine_pass": not args.no_fine_pass,
@@ -566,7 +633,7 @@ def main():
             "save_images": args.save_images,
             "debug_dir": str(args.debug_dir) if args.debug_dir else None,
         },
-        "sample_points": sample_results,
+        "sample_points": [s.to_dict() for s in sample_results],
     }
 
     # Save
@@ -577,10 +644,10 @@ def main():
     print(f"\nFocus map saved to {output_path}")
 
     # Summary
-    successful = [r for r in sample_results if "selected" in r]
-    z_values = [r["selected"]["z_um"] for r in successful]
-    selected_sharpness_values = [r["selected"]["sharpness"] for r in successful]
-    final_sharpness_values = [r["final_sharpness"] for r in successful]
+    successful = [s for s in sample_results if not s.error]
+    z_values = [s.af_result.selected_z_um for s in successful]
+    selected_sharpness_values = [s.af_result.selected_sharpness for s in successful]
+    final_sharpness_values = [s.af_result.final_sharpness for s in successful]
 
     print(f"\nSummary:")
     print(f"  Duration: {duration_s:.1f}s")
