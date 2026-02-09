@@ -15,6 +15,9 @@
 ## Summary Files
 - Keep summaries to 2-3 sentences max. Root cause, fix approach, sync status. No technical details like method signatures or try/finally mechanics.
 
+## Linting
+- Pre-commit hook handles ruff check + format (`git config core.hooksPath hooks/`)
+
 ## Microscope
 - Do NOT run hardware commands (scans, autofocus, stage moves) — only the main scan session does that.
 - SSH reads, git pulls, and file checks are fine.

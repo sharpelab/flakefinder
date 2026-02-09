@@ -1,0 +1,11 @@
+#!/bin/sh
+# Pre-commit hook: run ruff on staged Python files
+# Setup: git config core.hooksPath hooks/
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$')
+[ -z "$STAGED" ] && exit 0
+
+uv run ruff check --fix $STAGED && uv run ruff format $STAGED
+
+# Re-stage files that ruff modified
+echo "$STAGED" | xargs git add
