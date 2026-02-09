@@ -270,51 +270,36 @@ Examples:
 
     # Import microscope modules (slow, so do after arg validation)
     print("Connecting to microscope...")
-    from flakefinder.leica import Lamp, LeicaConnection, Nosepiece, Shutter, Stage, ZDrive
-    from flakefinder.leica.camera import Camera
+    from flakefinder.leica import Microscope
 
-    with LeicaConnection() as conn:
-        from LeicaMicrosystems.HardwareModel import Extensions
+    with Microscope() as scope:
+        stage = scope.stage
+        camera = scope.camera
 
-        Extensions.ExUCAPI.Register()
-
-        # Set up components
-        stage = Stage.from_connection(conn)
-        z = ZDrive.from_connection(conn)
-        camera = Camera.from_connection(conn)
-
-        # Set up nosepiece and switch objective
-        try:
-            nosepiece = Nosepiece.from_connection(conn)
-            current_mag = nosepiece.magnification
-
-            if args.objective_mag is not None:
-                target_pos = nosepiece.parse_magnification(args.objective_mag)
-            else:
-                target_pos = nosepiece.validate_position(args.objective_pos)
-
-            if nosepiece.position != target_pos:
-                print(f"Switching objective: {current_mag}x -> {objective_mag}x...")
-                nosepiece.set_position(target_pos, z=z)
+        # Switch objective if needed
+        if args.objective_mag is not None:
+            current_mag = scope.nosepiece.magnification
+            scope.switch_objective_mag(args.objective_mag)
+            new_mag = scope.nosepiece.magnification
+            if new_mag != current_mag:
+                print(f"Switched objective: {current_mag}x -> {new_mag}x")
                 time.sleep(0.5)  # Let it settle
-        except LookupError:
-            print("Warning: Nosepiece not found, assuming correct objective is in place")
+            else:
+                print(f"Objective: already at {new_mag}x")
+        elif args.objective_pos is not None:
+            current_pos = scope.nosepiece.position
+            scope.switch_objective_pos(args.objective_pos)
+            new_mag = scope.nosepiece.magnification
+            if args.objective_pos != current_pos:
+                print(f"Switched objective to position {args.objective_pos} ({new_mag}x)")
+                time.sleep(0.5)
+            else:
+                print(f"Objective: already at {new_mag}x")
 
-        # Set up lighting
-        try:
-            lamp = Lamp.from_connection(conn)
-            lamp.full()
-            lamp_intensity = lamp.intensity
-            print(f"Lamp: {lamp.name}, intensity={lamp_intensity}/{lamp.max_intensity}")
-        except LookupError:
-            lamp_intensity = None
-            print("Warning: Lamp not found")
-
-        try:
-            shutter = Shutter.from_connection(conn)
-            shutter.open()
-        except LookupError:
-            pass
+        # Lighting
+        scope.light_on()
+        lamp_intensity = scope.lamp.intensity
+        print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({lamp_intensity}/{scope.lamp.max_intensity})")
 
         # Parse white balance
         wb_parts = args.wb.split(",")
