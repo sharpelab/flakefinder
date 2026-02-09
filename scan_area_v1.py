@@ -14,14 +14,9 @@ import shutil
 import threading
 import time
 
-from flakefinder.scan import (
-    CameraMeta,
-    OpticsMeta,
-    build_lighting_meta,
-    compute_frame_size_um,
-    interpolate_position,
-    load_microscope_description,
-)
+from flakefinder.data_utils import compute_frame_size_um, load_microscope_description
+from flakefinder.scan_utils import build_lighting_meta, interpolate_position
+from flakefinder.types import CameraMeta, OpticsMeta
 
 MICROSCOPE_DESCRIPTION = os.path.join(os.path.dirname(__file__), "microscope_description.json")
 

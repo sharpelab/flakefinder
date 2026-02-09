@@ -30,16 +30,18 @@ import threading
 import time
 from pathlib import Path
 
-from flakefinder.scan import (
-    CameraMeta,
-    OpticsMeta,
-    build_lighting_meta,
+from flakefinder.data_utils import (
     compute_frame_size_um,
+    load_chip_geometry,
+    load_microscope_description,
+)
+from flakefinder.scan_utils import (
+    build_lighting_meta,
     compute_plane_z,
     compute_planar_scan_plan,
     interpolate_position,
-    load_microscope_description,
 )
+from flakefinder.types import CameraMeta, OpticsMeta
 
 MICROSCOPE_DESCRIPTION = os.path.join(os.path.dirname(__file__), "microscope_description.json")
 
@@ -191,18 +193,14 @@ Examples:
         print(f"Error: Chips file not found: {chips_path}")
         return 1
 
-    with open(chips_path) as f:
-        chips_data = json.load(f)
-
-    chips = chips_data.get("chips", [])
-    if args.chip < 0 or args.chip >= len(chips):
-        print(f"Error: Chip index {args.chip} out of range (0-{len(chips)-1})")
+    try:
+        chip_geo = load_chip_geometry(str(chips_path), args.chip)
+    except ValueError as e:
+        print(f"Error: {e}")
         return 1
-
-    chip = chips[args.chip]
-    polygon = chip["convex_hull_stage_um"]
-    bbox = chip["bbox_stage_um"]
-    centroid = chip["centroid_stage_um"]
+    bbox = chip_geo.bbox
+    polygon = chip_geo.polygon
+    centroid = chip_geo.centroid
 
     # ---- Load plane data ----
     plane_path = Path(args.plane)
@@ -294,7 +292,7 @@ Examples:
     print(f"  BBox: X=[{bbox['x_min']:.0f}, {bbox['x_max']:.0f}], Y=[{bbox['y_min']:.0f}, {bbox['y_max']:.0f}] µm")
     print(f"  Centroid: ({centroid[0]:.0f}, {centroid[1]:.0f}) µm")
     print(f"  Hull vertices: {len(polygon)}")
-    print(f"  Area: {chip['area_um2']/1e6:.1f} mm²")
+    print(f"  Area: {chip_geo.area_um2/1e6:.1f} mm²")
     print()
     print(f"Focus plane: Z = {plane_a*1000:.4f}*X_mm + {plane_b*1000:.4f}*Y_mm + {plane_c:.2f}")
     print(f"  Expected Z range: {z_min_expected:.0f} - {z_max_expected:.0f} µm")
@@ -886,10 +884,10 @@ Examples:
             },
             "chip_info": {
                 "chips_meta": str(chips_path),
-                "chip_index": args.chip,
+                "chip_index": chip_geo.chip_index,
                 "bbox_stage_um": bbox,
                 "centroid_stage_um": centroid,
-                "area_um2": chip["area_um2"],
+                "area_um2": chip_geo.area_um2,
                 "hull_vertices": len(polygon),
             },
             "focus_plane": {

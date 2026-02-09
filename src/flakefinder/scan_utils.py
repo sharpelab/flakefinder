@@ -1,75 +1,11 @@
-"""Shared scan utilities for scan_chip.py and scan_area_v1.py.
-
-Geometry helpers, scan planning, position interpolation, microscope
-description loading, and metadata type definitions.
-"""
+"""Scan planning, geometry helpers, and position interpolation."""
 
 from __future__ import annotations
 
 import bisect
-import json
-import os
-from dataclasses import dataclass, field
-from typing import Any, Sequence, TypedDict
+from typing import Any, Sequence
 
-
-# ============================================================================
-# Microscope description
-# ============================================================================
-
-def load_microscope_description(path: str) -> dict | None:
-    """Load microscope hardware description JSON.
-
-    Args:
-        path: Path to microscope_description.json.
-
-    Returns:
-        Dict with hardware specs, or None if file doesn't exist.
-    """
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return None
-
-
-def compute_frame_size_um(
-    desc: dict, objective_mag: float, binning_idx: int = 2,
-) -> tuple[float, float] | None:
-    """Compute frame size in µm from microscope description.
-
-    Args:
-        desc: Loaded microscope description.
-        objective_mag: Objective magnification (e.g., 5, 10, 20).
-        binning_idx: Binning index (0=1x1, 1=2x2, 2=3x3).
-
-    Returns:
-        (frame_width_um, frame_height_um) or None if can't compute.
-    """
-    camera = desc.get("camera", {})
-    binning_info = camera.get("binning_levels", {}).get(str(binning_idx))
-    if not binning_info:
-        return None
-
-    physical_pixel_x: float | None = camera.get("physical_pixel_x_um")
-    physical_pixel_y: float | None = camera.get("physical_pixel_y_um")
-    if not physical_pixel_x or not physical_pixel_y:
-        return None
-
-    frame_width_px: int | None = binning_info.get("frame_width_px")
-    frame_height_px: int | None = binning_info.get("frame_height_px")
-    binning_factor: int = binning_info.get("factor", 1)
-
-    if not frame_width_px or not frame_height_px:
-        return None
-
-    # sample_pixel = physical_pixel × binning / magnification
-    sample_pixel_x = physical_pixel_x * binning_factor / objective_mag
-    sample_pixel_y = physical_pixel_y * binning_factor / objective_mag
-
-    return (frame_width_px * sample_pixel_x, frame_height_px * sample_pixel_y)
+from flakefinder.types import BBox, LightingMeta, PlanarScanPlan
 
 
 # ============================================================================
@@ -109,12 +45,12 @@ def interpolate_position(
 # ============================================================================
 
 def intersect_polygon_with_y(
-    polygon: Sequence[Sequence[float]], y: float,
+    polygon: Sequence[tuple[float, float]], y: float,
 ) -> tuple[float, float] | None:
     """Find X extent where horizontal line y intersects a convex polygon.
 
     Args:
-        polygon: List of [x, y] vertices.
+        polygon: List of (x, y) vertices.
         y: Y coordinate of the horizontal line.
 
     Returns:
@@ -123,8 +59,8 @@ def intersect_polygon_with_y(
     intersections: list[float] = []
     n = len(polygon)
     for i in range(n):
-        x1, y1 = polygon[i][0], polygon[i][1]
-        x2, y2 = polygon[(i + 1) % n][0], polygon[(i + 1) % n][1]
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % n]
 
         # Check if edge crosses this Y (half-open interval to avoid double-counting vertices)
         if (y1 <= y < y2) or (y2 <= y < y1):
@@ -147,31 +83,8 @@ def compute_plane_z(a: float, b: float, c: float, x_um: float, y_um: float) -> f
 # Scan planning
 # ============================================================================
 
-class BBox(TypedDict):
-    """Bounding box from chip detection JSON."""
-    x_min: float
-    x_max: float
-    y_min: float
-    y_max: float
-
-@dataclass
-class PlanarScanPlan:
-    """Computed scan plan from chip geometry and focus plane."""
-    rows: list[tuple[float, float, float]]  # [(y_um, x_min_um, x_max_um), ...]
-    target_advance_um: float
-    y_step_um: float
-    validated_z_min_um: float
-    validated_z_max_um: float
-    plane_a: float
-    plane_b: float
-    plane_c: float
-    frame_width_um: float
-    frame_height_um: float
-    inputs: dict[str, Any] = field(default_factory=dict)
-
-
 def compute_planar_scan_plan(
-    bbox: BBox, polygon: Sequence[Sequence[float]], *,
+    bbox: BBox, polygon: Sequence[tuple[float, float]], *,
     plane_a: float, plane_b: float, plane_c: float,
     frame_width_um: float, frame_height_um: float,
     x_overlap_pct: float, y_overlap_pct: float,
@@ -245,47 +158,8 @@ def compute_planar_scan_plan(
 
 
 # ============================================================================
-# Metadata types
+# Metadata helpers
 # ============================================================================
-
-class CameraMeta(TypedDict):
-    """Camera metadata block for scan output."""
-    name: str
-    exposure_s: float | None
-    gain: float | None
-    binning: int
-    readout_time_s: float | None
-    frame_width_px: int | None
-    frame_height_px: int | None
-    pixel_size_x_um: float | None
-    pixel_size_y_um: float | None
-    sensor_width_px: int | None
-    sensor_height_px: int | None
-    physical_pixel_x_um: float | None
-    physical_pixel_y_um: float | None
-    white_balance_bgr: list[float]
-    gamma: float
-
-
-class OpticsMeta(TypedDict):
-    """Optics metadata block for scan output."""
-    objective_mag: float | None
-    objective_idx: int | None
-    sample_pixel_x_um: float | None
-    sample_pixel_y_um: float | None
-    frame_width_um: float | None
-    frame_height_um: float | None
-
-
-class LightingMeta(TypedDict):
-    """Lighting metadata block for scan output."""
-    lamp_name: str | None
-    lamp_intensity: float | None
-    lamp_max_intensity: float | None
-    shutter_name: str | None
-    shutter_open: bool | None
-
-
 
 def build_lighting_meta(
     *, lamp: Any = None, shutter: Any = None,
