@@ -8,12 +8,18 @@ from typing import Any
 
 from flakefinder.types import (
     BBox,
+    CameraMeta,
     LightingMeta,
+    MicroscopeMeta,
+    OpticsMeta,
     PlanarScanPlan,
     Point2F,
     PositionSample,
     ScanRow,
 )
+
+# Binning index (SDK) -> binning factor (NxN)
+_BINNING_FACTOR = {0: 1, 1: 2, 2: 3}
 
 # ============================================================================
 # Position interpolation
@@ -199,4 +205,88 @@ def build_lighting_meta(
         lamp_max_intensity=lamp.max_intensity if lamp else None,
         shutter_name=shutter.name if shutter else None,
         shutter_open=shutter.is_open if shutter else None,
+    )
+
+
+def build_camera_meta(camera: Any) -> CameraMeta:
+    """Build camera metadata entirely from live hardware state.
+
+    Reads all values (gain, white balance, gamma, exposure, binning,
+    frame size, sensor size, pixel sizes) from the camera object.
+    """
+    frame_width_px, frame_height_px = camera.frame_size_px
+    sensor_width_px, sensor_height_px = camera.sensor_size_px
+    pixel_size_x_um, pixel_size_y_um = camera.pixel_size_um
+    physical_pixel_x_um, physical_pixel_y_um = camera.physical_pixel_size_um
+    r, g, b = camera.gain_rgb
+    return CameraMeta(
+        name=camera.name,
+        exposure_s=camera.exposure_time,
+        gain=camera.gain,
+        binning=_BINNING_FACTOR.get(camera.binning, camera.binning),
+        readout_time_s=camera.readout_time_s,
+        frame_width_px=frame_width_px,
+        frame_height_px=frame_height_px,
+        pixel_size_x_um=pixel_size_x_um,
+        pixel_size_y_um=pixel_size_y_um,
+        sensor_width_px=sensor_width_px,
+        sensor_height_px=sensor_height_px,
+        physical_pixel_x_um=physical_pixel_x_um,
+        physical_pixel_y_um=physical_pixel_y_um,
+        white_balance_bgr=[b, g, r],
+        gamma=camera.gamma,
+    )
+
+
+def build_optics_meta(
+    *,
+    nosepiece: Any,
+    camera: Any,
+) -> OpticsMeta:
+    """Build optics metadata from nosepiece and camera.
+
+    Computes frame FOV in µm from physical pixel size, binning, and
+    objective magnification. All values read from live hardware.
+    """
+    mag = nosepiece.magnification
+    binning_factor = _BINNING_FACTOR.get(camera.binning, camera.binning)
+    physical_pixel_x_um, physical_pixel_y_um = camera.physical_pixel_size_um
+    frame_width_px, frame_height_px = camera.frame_size_px
+
+    if mag:
+        sample_pixel_x_um = physical_pixel_x_um * binning_factor / mag
+        sample_pixel_y_um = physical_pixel_y_um * binning_factor / mag
+    else:
+        sample_pixel_x_um = None
+        sample_pixel_y_um = None
+
+    frame_width_um = sample_pixel_x_um * frame_width_px if sample_pixel_x_um and frame_width_px else None
+    frame_height_um = sample_pixel_y_um * frame_height_px if sample_pixel_y_um and frame_height_px else None
+
+    return OpticsMeta(
+        objective_mag=mag,
+        objective_idx=nosepiece.position,
+        sample_pixel_x_um=sample_pixel_x_um,
+        sample_pixel_y_um=sample_pixel_y_um,
+        frame_width_um=frame_width_um,
+        frame_height_um=frame_height_um,
+    )
+
+
+def build_microscope_meta(scope: Any) -> MicroscopeMeta:
+    """Build combined microscope metadata from live hardware.
+
+    Reads camera, optics, and lighting state from the Microscope facade.
+    Frame FOV is computed from camera pixel size + objective magnification.
+
+    Args:
+        scope: Microscope facade instance.
+
+    Returns:
+        MicroscopeMeta with camera, optics, and lighting sub-dicts.
+    """
+    return MicroscopeMeta(
+        camera=build_camera_meta(scope.camera),
+        optics=build_optics_meta(nosepiece=scope.nosepiece, camera=scope.camera),
+        lighting=build_lighting_meta(lamp=scope.lamp, shutter=scope.shutter),
     )

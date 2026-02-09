@@ -180,3 +180,11 @@ class LightingMeta(TypedDict):
     lamp_max_intensity: float | None
     shutter_name: str | None
     shutter_open: bool | None
+
+
+class MicroscopeMeta(TypedDict):
+    """Combined microscope metadata from live hardware."""
+
+    camera: CameraMeta
+    optics: OpticsMeta
+    lighting: LightingMeta

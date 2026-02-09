@@ -46,12 +46,12 @@ from flakefinder.data_utils import (
     require_microscope_description,
 )
 from flakefinder.scan_utils import (
-    build_lighting_meta,
+    build_microscope_meta,
     compute_planar_scan_plan,
     compute_plane_z,
     interpolate_position,
 )
-from flakefinder.types import CameraMeta, OpticsMeta, PositionSample
+from flakefinder.types import PositionSample
 
 MICROSCOPE_DESCRIPTION = os.path.join(os.path.dirname(__file__), "microscope_description.json")
 
@@ -708,9 +708,6 @@ Examples:
             else:
                 print(f"Objective: already at {new_mag}x")
 
-        objective_mag = scope.nosepiece.magnification
-        objective_idx = scope.nosepiece.position
-
         # Lighting
         scope.light_on()
 
@@ -726,26 +723,17 @@ Examples:
         camera.gain_rgb = (wb_red, wb_green, wb_blue)
         camera.gamma = args.gamma
 
-        # Read camera properties
-        frame_width_px, frame_height_px = camera.frame_size_px
-        sensor_width_px, sensor_height_px = camera.sensor_size_px
-        pixel_size_x_um, pixel_size_y_um = camera.pixel_size_um
-        physical_pixel_x_um, physical_pixel_y_um = camera.physical_pixel_size_um
-        readout_time = camera.readout_time_s
-        actual_exposure = camera.exposure_time
-        actual_binning_idx = camera.binning
-        binning_map = {0: 1, 1: 2, 2: 3}
-        actual_binning = binning_map.get(actual_binning_idx, actual_binning_idx)
+        # ---- Build microscope metadata (reads all values back from hardware) ----
+        micro_meta = build_microscope_meta(scope)
+        cam_meta = micro_meta["camera"]
+        optics_meta = micro_meta["optics"]
 
-        # Validate frame size against plan using actual binning
-        actual_frame_size = compute_frame_size_um(desc.camera, objective_mag, actual_binning_idx)
-        if actual_frame_size is None:
+        # Validate frame size against plan
+        frame_width_um = optics_meta["frame_width_um"]
+        frame_height_um = optics_meta["frame_height_um"]
+        if frame_width_um is None or frame_height_um is None:
             print("Error: Could not determine frame size. Check objective/camera.")
             return 1
-        frame_width_um, frame_height_um = actual_frame_size
-        sample_pixel_x_um = frame_width_um / frame_width_px if frame_width_px else None
-        sample_pixel_y_um = frame_height_um / frame_height_px if frame_height_px else None
-
         if abs(frame_width_um - plan.frame_width_um) > 1.0:
             print(f"ABORT: Camera frame width {frame_width_um:.1f} != plan {plan.frame_width_um:.1f} um")
             return 1
@@ -753,16 +741,16 @@ Examples:
             print(f"ABORT: Camera frame height {frame_height_um:.1f} != plan {plan.frame_height_um:.1f} um")
             return 1
 
-        exp_str = f"{actual_exposure * 1000:.2f}ms" if actual_exposure else "?"
-        print(f"Camera: {camera.name}")
-        print(f"  Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}, Gain: {args.gain}")
+        exp_str = f"{cam_meta['exposure_s'] * 1000:.2f}ms" if cam_meta["exposure_s"] else "?"
+        print(f"Camera: {cam_meta['name']}")
+        print(f"  Binning: {cam_meta['binning']}x{cam_meta['binning']}, Exposure: {exp_str}, Gain: {cam_meta['gain']}")
         print(f"  Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
-        if frame_width_px and frame_height_px:
-            print(f"  Frame: {frame_width_px}x{frame_height_px} px")
+        if cam_meta["frame_width_px"] and cam_meta["frame_height_px"]:
+            print(f"  Frame: {cam_meta['frame_width_px']}x{cam_meta['frame_height_px']} px")
         if frame_width_um and frame_height_um:
             print(f"  FOV: {frame_width_um:.1f} x {frame_height_um:.1f} um (matches plan)")
-        if objective_mag:
-            print(f"  Objective: {objective_mag}x")
+        if optics_meta["objective_mag"]:
+            print(f"  Objective: {optics_meta['objective_mag']}x")
         print()
 
         # ---- Set up acquisition context ----
@@ -1054,32 +1042,7 @@ Examples:
                     "z_jump_neg_um": dir_stats.get(-1, {}).get("z_jump_um"),
                 },
             },
-            "camera": CameraMeta(
-                name=camera.name,
-                exposure_s=actual_exposure,
-                gain=args.gain,
-                binning=actual_binning,
-                readout_time_s=readout_time,
-                frame_width_px=frame_width_px,
-                frame_height_px=frame_height_px,
-                pixel_size_x_um=pixel_size_x_um,
-                pixel_size_y_um=pixel_size_y_um,
-                sensor_width_px=sensor_width_px,
-                sensor_height_px=sensor_height_px,
-                physical_pixel_x_um=physical_pixel_x_um,
-                physical_pixel_y_um=physical_pixel_y_um,
-                white_balance_bgr=[wb_blue, wb_green, wb_red],
-                gamma=args.gamma,
-            ),
-            "optics": OpticsMeta(
-                objective_mag=objective_mag,
-                objective_idx=objective_idx,
-                sample_pixel_x_um=sample_pixel_x_um,
-                sample_pixel_y_um=sample_pixel_y_um,
-                frame_width_um=frame_width_um,
-                frame_height_um=frame_height_um,
-            ),
-            "lighting": build_lighting_meta(lamp=scope.lamp, shutter=scope.shutter),
+            **micro_meta,
             "rows": rows_meta,
             "position_stream": all_position_samples,
             "frames": saved_frames_meta,
