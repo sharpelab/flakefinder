@@ -281,6 +281,7 @@ Examples:
 
         # Set up components
         stage = Stage.from_connection(conn)
+        z = ZDrive.from_connection(conn)
         camera = Camera.from_connection(conn)
 
         # Set up nosepiece and switch objective
@@ -295,7 +296,7 @@ Examples:
 
             if nosepiece.position != target_pos:
                 print(f"Switching objective: {current_mag}x -> {objective_mag}x...")
-                nosepiece.position = target_pos
+                nosepiece.set_position(target_pos, z=z)
                 time.sleep(0.5)  # Let it settle
         except LookupError:
             print("Warning: Nosepiece not found, assuming correct objective is in place")

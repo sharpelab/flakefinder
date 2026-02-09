@@ -443,7 +443,7 @@ Examples:
             if target_pos != objective_idx:
                 target_mag = nosepiece.magnifications.get(target_pos)
                 print(f"Switching objective: {objective_mag}x -> {target_mag}x...")
-                nosepiece.position = target_pos
+                nosepiece.set_position(target_pos, z=z_drive)
                 objective_idx = nosepiece.position
                 objective_mag = nosepiece.magnification
                 print(f"Objective: now at {objective_mag}x")
