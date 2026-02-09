@@ -33,6 +33,10 @@ Wait for the user to explicitly approve before writing code.
 - Follow patterns in existing codebase
 - Minimal implementation — don't over-engineer
 
+## Coding Conventions
+
+- Prefer typed returns (NamedTuple/dataclass) over `list[dict]` for structured data; add `to_dict()` for serialization
+
 ## Continuation Tasks
 
 During your session, the user may paste a message starting with `# Operator Task`. This is a new task relayed from the scan operator.
