@@ -41,6 +41,7 @@ ignore = [
     "SIM108",  # if-else-block-instead-of-if-exp — prefer explicit if/else for readability
     "SIM102",  # collapsible-if — same
     "B023",    # function-uses-loop-variable — polling threads capture mutable containers intentionally
+    "F821",    # forward-ref annotations — waiting on pythonnet 3.14 support
 ]
 
 [tool.mypy]
