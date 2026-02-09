@@ -17,20 +17,18 @@ import cv2
 import numpy as np
 
 from .camera import Camera
-from .core import LeicaConnection, get_interface_required, find_unit
-from .enums import TID, UCAPI_IID
+from .core import LeicaConnection
 from .units import Axis, Nosepiece, ZDrive
-
 
 # Working distances in µm by objective position (from stage_util.py)
 # Position 1-indexed as used by the Nosepiece class.
 WORKING_DISTANCES_UM: dict[int, float] = {
-    1: 12700,   # 5x
-    2: 11000,   # 10x
-    3: 1900,    # 20x
-    4: 380,     # 50x
-    5: 210,     # 150x
-    6: 15000,   # 2.5x
+    1: 12700,  # 5x
+    2: 11000,  # 10x
+    3: 1900,  # 20x
+    4: 380,  # 50x
+    5: 210,  # 150x
+    6: 15000,  # 2.5x
 }
 
 
@@ -183,15 +181,15 @@ class AutofocusFrame:
 class AutofocusResult:
     """Result from autofocus operation."""
 
-    selected_z_um: float            # Selected Z position (may be initial if stayed_at_initial)
-    selected_sharpness: float      # Sharpness at the Z we actually went to
-    scan_best_z_um: float          # Best Z found during scanning (before stayed_at_initial override)
-    scan_best_sharpness: float     # Best sharpness from scanning (before stayed_at_initial override)
+    selected_z_um: float  # Selected Z position (may be initial if stayed_at_initial)
+    selected_sharpness: float  # Sharpness at the Z we actually went to
+    scan_best_z_um: float  # Best Z found during scanning (before stayed_at_initial override)
+    scan_best_sharpness: float  # Best sharpness from scanning (before stayed_at_initial override)
     initial_z_um: float
     initial_sharpness: float
     final_sharpness: float
-    dynamic_range: float           # (s_max - s_min) / s_mean of coarse curve
-    z_range_um: float              # Actual range used
+    dynamic_range: float  # (s_max - s_min) / s_mean of coarse curve
+    z_range_um: float  # Actual range used
     objective_position: int | None  # Queried from microscope
     scan_duration_s: float
     frame_count: int
@@ -213,7 +211,7 @@ class AutofocusResult:
     super_fine_sharpness_curve: list[dict] = field(default_factory=list)  # Super fine pass only
     super_fine_frames: list[AutofocusFrame] | None = None  # Super fine frames only (if store_frames=True)
     initial_image: np.ndarray | None = None  # Image at initial Z (if store_frames=True)
-    final_image: np.ndarray | None = None    # Image at selected Z after move (if store_frames=True)
+    final_image: np.ndarray | None = None  # Image at selected Z after move (if store_frames=True)
 
     def to_dict(self) -> dict:
         """Serialize to JSON-safe dict (excludes frames and images)."""
@@ -337,7 +335,7 @@ def _run_z_scan(
     stop_polling = threading.Event()
 
     # Get fast position reading interfaces (prefer hysteresis-corrected for accurate Z during motion)
-    z_bcv = getattr(z_axis, 'bcv_hysteresis', None) or z_axis.bcv
+    z_bcv = getattr(z_axis, "bcv_hysteresis", None) or z_axis.bcv
     z_converter = z_axis.converter
 
     current_image = [None]
@@ -347,6 +345,7 @@ def _run_z_scan(
 
     # Get delegate class from SDK (available after ExUCAPI.Register())
     from LeicaMicrosystems.HardwareModel import Extensions
+
     context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(on_image)
 
     def z_poll_thread():
@@ -405,9 +404,7 @@ def _run_z_scan(
             "sharpness": s,
         }
         if compute_all_metrics:
-            entry["metrics"] = {
-                name: float(fn(img)) for name, fn in ALL_SHARPNESS_METRICS.items()
-            }
+            entry["metrics"] = {name: float(fn(img)) for name, fn in ALL_SHARPNESS_METRICS.items()}
         sharpness_curve.append(entry)
         if store_frames:
             frames.append(AutofocusFrame(z_um=z_interp, sharpness=s, image=img))
@@ -505,7 +502,7 @@ def continuous_autofocus(
     # Calculate scan bounds (centered on current/specified position, scan downward)
     initial_z = z_start_um if z_start_um is not None else current_z
     z_start = initial_z + safe_range / 2  # Start high
-    z_end = initial_z - safe_range / 2    # End low (away from sample)
+    z_end = initial_z - safe_range / 2  # End low (away from sample)
 
     # Validate against limits
     _validate_z_limits(z_axis, z_start, z_end, z_max_safe_um)

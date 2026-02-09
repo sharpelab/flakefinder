@@ -32,7 +32,7 @@ def load_microscope_description(path: str) -> MicroscopeDescription | None:
     try:
         with open(path) as f:
             raw = json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except (OSError, json.JSONDecodeError):
         return None
 
     raw_camera = raw.get("camera", {})
@@ -82,7 +82,9 @@ def _parse_axis(raw: dict) -> AxisDescription:
 
 
 def compute_frame_size_um(
-    camera: CameraDescription, objective_mag: float, binning_idx: int = 2,
+    camera: CameraDescription,
+    objective_mag: float,
+    binning_idx: int = 2,
 ) -> Point2F | None:
     """Compute frame size in µm from camera description and objective.
 

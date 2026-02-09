@@ -4,7 +4,7 @@ These protocols define the expected interface of .NET objects returned by the SD
 They're used for type hints only - the actual objects come from pythonnet.
 """
 
-from typing import Protocol, Any
+from typing import Any, Protocol
 
 
 class UnitType(Protocol):

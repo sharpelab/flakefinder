@@ -49,15 +49,9 @@ class Axis(MicroscopeSubunit):
     def __init__(self, microscope_unit: Unit, axis_tid: TID):
         super().__init__(microscope_unit, axis_tid)
 
-        self.axis_basic_control_value = (
-            self.unit.GetInterfaces()
-            .FindInterface(IID.IID_BASIC_CONTROL_VALUE)
-            .GetObject()
-        )
+        self.axis_basic_control_value = self.unit.GetInterfaces().FindInterface(IID.IID_BASIC_CONTROL_VALUE).GetObject()
         self.autocalibration: AutoCalibration = (
-            self.unit.GetInterfaces()
-            .FindInterface(IID.IID_AUTO_CALIBRATION)
-            .GetObject()
+            self.unit.GetInterfaces().FindInterface(IID.IID_AUTO_CALIBRATION).GetObject()
         )
         self.metrics_converter = self._get_metrics_converter(EMetricsId.METRICS_MICRONS)
 
@@ -67,11 +61,7 @@ class Axis(MicroscopeSubunit):
         self.min_value = self.native_to_metric(self.min_native_value)
 
     def _get_metrics_converter(self, metrics_id: EMetricsId) -> MetricsConverter:
-        return (
-            self.axis_basic_control_value.GetMetricsConverters().FindMetricsConverter(
-                metrics_id
-            )
-        )
+        return self.axis_basic_control_value.GetMetricsConverters().FindMetricsConverter(metrics_id)
 
     def native_to_metric(self, native_value: int) -> float:
         return self.metrics_converter.GetMetricsValue(native_value)
@@ -124,9 +114,7 @@ class Lamp(MicroscopeSubunit):
         super().__init__(microscope_unit, lamp_tid)
 
         self.intensity_basic_control_value = (
-            self.unit.GetInterfaces()
-            .FindInterface(IID.IID_BASIC_CONTROL_VALUE)
-            .GetObject()
+            self.unit.GetInterfaces().FindInterface(IID.IID_BASIC_CONTROL_VALUE).GetObject()
         )
 
         self.max_intensity = self.intensity_basic_control_value.MaxControlValue()
@@ -166,50 +154,32 @@ class Camera(MicroscopeSubunit):
 
         # Set up the image acquisition contexts and handlers
         self.acquisition: ImageAcquisition = (
-            self.unit.GetInterfaces()
-            .FindInterface(UCAPI_IID.IID_IMAGE_ACQUISITION)
-            .GetObject()
+            self.unit.GetInterfaces().FindInterface(UCAPI_IID.IID_IMAGE_ACQUISITION).GetObject()
         )
 
         self.acquisition_context: CancellableImageAcquisitionContext = (
             Extensions.UCAPI.CancellableImageAcquisitionContext.SystemMemoryFactory
         )
-        self.acquisition_context.ImageAcquiredHandler = (
-            Extensions.UCAPI.DelegateOnImageAcquired(self._on_image_acquired)
+        self.acquisition_context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(
+            self._on_image_acquired
         )
 
         # Set up the property handlers
-        self.properties: Properties = (
-            self.unit.GetInterfaces().FindInterface(IID.IID_PROPERTIES).GetObject()
-        )
+        self.properties: Properties = self.unit.GetInterfaces().FindInterface(IID.IID_PROPERTIES).GetObject()
 
-        self.exposure_time_property_value = self.properties.FindProperty(
-            UCAPI_PROPERTY.PROP_EXPOSURE_TIME
-        ).GetValue()
+        self.exposure_time_property_value = self.properties.FindProperty(UCAPI_PROPERTY.PROP_EXPOSURE_TIME).GetValue()
         self.auto_brightness_enabled_property_value = self.properties.FindProperty(
             UCAPI_PROPERTY.PROP_AUTO_BRIGHTNESS_ENABLED
         ).GetValue()
-        self.gain_property_value = self.properties.FindProperty(
-            UCAPI_PROPERTY.PROP_GAIN
-        ).GetValue()
-        self.gain_blue_property_value = self.properties.FindProperty(
-            UCAPI_PROPERTY.PROP_GAIN_BLUE
-        ).GetValue()
-        self.gain_green_property_value = self.properties.FindProperty(
-            UCAPI_PROPERTY.PROP_GAIN_GREEN
-        ).GetValue()
-        self.gain_red_property_value = self.properties.FindProperty(
-            UCAPI_PROPERTY.PROP_GAIN_RED
-        ).GetValue()
+        self.gain_property_value = self.properties.FindProperty(UCAPI_PROPERTY.PROP_GAIN).GetValue()
+        self.gain_blue_property_value = self.properties.FindProperty(UCAPI_PROPERTY.PROP_GAIN_BLUE).GetValue()
+        self.gain_green_property_value = self.properties.FindProperty(UCAPI_PROPERTY.PROP_GAIN_GREEN).GetValue()
+        self.gain_red_property_value = self.properties.FindProperty(UCAPI_PROPERTY.PROP_GAIN_RED).GetValue()
         self.color_saturation_property_value = self.properties.FindProperty(
             UCAPI_PROPERTY.PROP_COLOUR_SATURATION
         ).GetValue()
-        self.gamma_level_property_value = self.properties.FindProperty(
-            UCAPI_PROPERTY.PROP_GAMMA_LEVEL
-        ).GetValue()
-        self.binning_level_property_value = self.properties.FindProperty(
-            UCAPI_PROPERTY.PROP_BINNING_LEVEL
-        ).GetValue()
+        self.gamma_level_property_value = self.properties.FindProperty(UCAPI_PROPERTY.PROP_GAMMA_LEVEL).GetValue()
+        self.binning_level_property_value = self.properties.FindProperty(UCAPI_PROPERTY.PROP_BINNING_LEVEL).GetValue()
 
         self.set_default()
 
@@ -220,9 +190,7 @@ class Camera(MicroscopeSubunit):
     @binning_level.setter
     def binning_level(self, value: Literal[0, 1, 2]):
         if value not in [0, 1, 2]:
-            raise ValueError(
-                f"Invalid binning level: {value}. Must be one of [0, 1, 2]."
-            )
+            raise ValueError(f"Invalid binning level: {value}. Must be one of [0, 1, 2].")
         self.binning_level_property_value.SetIndex(value)
 
     @property
@@ -291,7 +259,6 @@ class Camera(MicroscopeSubunit):
 
     @staticmethod
     def _image_to_numpy(image: Image):
-
         image.LockPixelData()
 
         try:
@@ -310,9 +277,7 @@ class Camera(MicroscopeSubunit):
                 buffer_size,
             )
 
-            numpy_image = np.frombuffer(bytes_array, dtype=np.uint8).reshape(
-                (height, width, -1)
-            )
+            numpy_image = np.frombuffer(bytes_array, dtype=np.uint8).reshape((height, width, -1))
 
         finally:
             image.UnlockPixelData()
@@ -353,11 +318,7 @@ class Nosepiece(MicroscopeSubunit):
     ):
         super().__init__(microscope_unit, nosepiece_tid)
 
-        self.basic_control_value = (
-            self.unit.GetInterfaces()
-            .FindInterface(IID.IID_BASIC_CONTROL_VALUE)
-            .GetObject()
-        )
+        self.basic_control_value = self.unit.GetInterfaces().FindInterface(IID.IID_BASIC_CONTROL_VALUE).GetObject()
 
         self.objectives = {"5": 1, "10": 2, "20": 3, "50": 4, "100": 5, "150": 6}
         self.objectives_reversed = {v: k for k, v in self.objectives.items()}
@@ -367,10 +328,7 @@ class Nosepiece(MicroscopeSubunit):
         return self.basic_control_value.GetControlValue()
 
     @current_objective.setter
-    def current_objective(
-        self, value: int | Literal["5", "10", "20", "50", "100", "150"]
-    ):
-
+    def current_objective(self, value: int | Literal["5", "10", "20", "50", "100", "150"]):
         if isinstance(value, str):
             value = self.objectives.get(value)
 
@@ -389,11 +347,7 @@ class Aperture(MicroscopeSubunit):
     ):
         super().__init__(microscope_unit, aperture_tid)
 
-        self.basic_control_value = (
-            self.unit.GetInterfaces()
-            .FindInterface(IID.IID_BASIC_CONTROL_VALUE)
-            .GetObject()
-        )
+        self.basic_control_value = self.unit.GetInterfaces().FindInterface(IID.IID_BASIC_CONTROL_VALUE).GetObject()
 
         self.max = self.basic_control_value.MaxControlValue()
         self.min = self.basic_control_value.MinControlValue()
@@ -420,11 +374,7 @@ class Shutter(MicroscopeSubunit):
     ):
         super().__init__(microscope_unit, shutter_tid)
 
-        self.basic_control_value = (
-            self.unit.GetInterfaces()
-            .FindInterface(IID.IID_BASIC_CONTROL_VALUE)
-            .GetObject()
-        )
+        self.basic_control_value = self.unit.GetInterfaces().FindInterface(IID.IID_BASIC_CONTROL_VALUE).GetObject()
 
         self.max = self.basic_control_value.MaxControlValue()
         self.min = self.basic_control_value.MinControlValue()

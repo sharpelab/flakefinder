@@ -5,11 +5,12 @@ and utilities for finding units in the device tree.
 """
 
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator, TypeVar, Callable
+from typing import TypeVar
 
-from .enums import TID, IID
-from .types import Unit, HardwareModel, Interface
+from .enums import IID, TID
+from .types import HardwareModel, Unit
 
 # DLLs are in shared location: flakefinder/dlls/
 _DLL_DIR = os.path.join(os.path.dirname(__file__), "..", "dlls")
@@ -83,8 +84,8 @@ class LeicaConnection:
             config_dir: Optional path to SDK configuration directory.
         """
         self._config_dir = config_dir
-        self._hwm: "HardwareModel | None" = None
-        self._root: "Unit | None" = None
+        self._hwm: HardwareModel | None = None
+        self._root: Unit | None = None
 
     def connect(self) -> "LeicaConnection":
         """Establish connection to microscope.
@@ -245,7 +246,7 @@ def find_all_units(root: "Unit", tid: TID) -> list["Unit"]:
     Returns:
         List of all matching units (may be empty).
     """
-    results: list["Unit"] = []
+    results: list[Unit] = []
 
     def search(unit: "Unit") -> None:
         if unit.GetUnitType().IsA(int(tid)):

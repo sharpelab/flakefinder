@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PIL import Image as PILImage
 
-from .leica.autofocus import AutofocusFrame, AutofocusResult, ALL_SHARPNESS_METRICS
+from .leica.autofocus import ALL_SHARPNESS_METRICS, AutofocusFrame, AutofocusResult
 
 METRIC_NAMES = list(ALL_SHARPNESS_METRICS.keys())
 

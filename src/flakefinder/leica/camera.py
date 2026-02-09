@@ -8,10 +8,11 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
+
 import numpy as np
 
-from .enums import IID, UCAPI_TID, UCAPI_IID, UCAPI_PROP
-from .core import get_interface, get_interface_required, find_unit
+from .core import find_unit, get_interface_required
+from .enums import IID, UCAPI_IID, UCAPI_PROP, UCAPI_TID
 from .types import Unit
 
 
@@ -59,6 +60,7 @@ class Camera:
 
         # Register UCAPI extensions (required for camera interfaces)
         from LeicaMicrosystems.HardwareModel import Extensions
+
         try:
             Extensions.ExUCAPI.Register()
         except Exception:
@@ -306,9 +308,7 @@ class Camera:
         from LeicaMicrosystems.HardwareModel import Extensions
 
         self._context = Extensions.UCAPI.CancellableImageAcquisitionContext.SystemMemoryFactory
-        self._context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(
-            self._on_image_acquired
-        )
+        self._context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(self._on_image_acquired)
 
     def _on_image_acquired(self, image) -> None:
         """Callback when image is acquired."""
@@ -330,9 +330,7 @@ class Camera:
 
             # Copy from .NET memory to Python
             bytes_array = System.Array[System.Byte](buffer_size)
-            System.Runtime.InteropServices.Marshal.Copy(
-                image.PixelData(), bytes_array, 0, buffer_size
-            )
+            System.Runtime.InteropServices.Marshal.Copy(image.PixelData(), bytes_array, 0, buffer_size)
 
             # Convert to numpy
             return np.frombuffer(bytes_array, dtype=np.uint8).reshape((height, width, -1))
@@ -487,9 +485,7 @@ class FrameStream:
 
         # Create context for this thread
         self._context = Extensions.UCAPI.CancellableImageAcquisitionContext.SystemMemoryFactory
-        self._context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(
-            self._on_frame
-        )
+        self._context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(self._on_frame)
 
         try:
             # This blocks until IsCancelled is set
@@ -685,9 +681,7 @@ class DeferredFrameStream:
         from LeicaMicrosystems.HardwareModel import Extensions
 
         self._context = Extensions.UCAPI.CancellableImageAcquisitionContext.SystemMemoryFactory
-        self._context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(
-            self._on_frame
-        )
+        self._context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(self._on_frame)
 
         try:
             self._camera._acquisition.AcquireContinuous(self._context, None)

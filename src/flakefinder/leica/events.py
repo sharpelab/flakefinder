@@ -11,14 +11,12 @@ Key classes:
 
 import queue
 import threading
-import weakref
-from typing import Callable, Any
-from contextlib import contextmanager
+from collections.abc import Callable
+from typing import Any
 
-from .enums import IID
 from .core import get_interface
-from .types import Unit, EventSource
-
+from .enums import IID
+from .types import EventSource, Unit
 
 # Type alias for position callback: (position_native: int) -> None
 PositionCallback = Callable[[int], None]
@@ -121,9 +119,7 @@ class AxisEvents:
             LookupError: If unit doesn't have EventSource interface.
         """
         self._unit = unit
-        self._event_source: "EventSource | None" = get_interface(
-            unit, IID.IID_EVENT_SOURCE
-        )
+        self._event_source: EventSource | None = get_interface(unit, IID.IID_EVENT_SOURCE)
         if self._event_source is None:
             raise LookupError(f"Unit {unit.GetName()} doesn't support events")
 
@@ -229,6 +225,7 @@ class PositionMonitor:
         if self._subscription is None:
             # Get initial position
             from .core import get_interface
+
             bcv = get_interface(self._unit, IID.IID_BASIC_CONTROL_VALUE)
             if bcv:
                 self._position = bcv.GetControlValue()

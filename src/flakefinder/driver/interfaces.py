@@ -219,7 +219,6 @@ class ImageAcquisition(ABC):
 
 
 class ImageAcquisitionContext(ABC):
-
     @abstractmethod
     def DoDelegateImageAcquired(
         self,
@@ -269,7 +268,6 @@ class ImageAcquisitionContext(ABC):
 
 
 class CancellableImageAcquisitionContext(ABC):
-
     @property
     @abstractmethod
     def SystemMemoryFactory(self) -> "CancellableImageAcquisitionContext":

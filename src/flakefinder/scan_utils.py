@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import bisect
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from flakefinder.types import BBox, LightingMeta, PlanarScanPlan, Point2F, Point3F
-
 
 # ============================================================================
 # Position interpolation
 # ============================================================================
 
+
 def interpolate_position(
-    t: float, samples: list[Point3F],
+    t: float,
+    samples: list[Point3F],
 ) -> float | None:
     """Interpolate position at time t from (t_before, t_after, x_um) samples.
 
@@ -44,8 +46,10 @@ def interpolate_position(
 # Geometry helpers
 # ============================================================================
 
+
 def intersect_polygon_with_y(
-    polygon: Sequence[Point2F], y: float,
+    polygon: Sequence[Point2F],
+    y: float,
 ) -> Point2F | None:
     """Find X extent where horizontal line y intersects a convex polygon.
 
@@ -83,12 +87,22 @@ def compute_plane_z(a: float, b: float, c: float, x_um: float, y_um: float) -> f
 # Scan planning
 # ============================================================================
 
+
 def compute_planar_scan_plan(
-    bbox: BBox, polygon: Sequence[Point2F], *,
-    plane_a: float, plane_b: float, plane_c: float,
-    frame_width_um: float, frame_height_um: float,
-    x_overlap_pct: float, y_overlap_pct: float,
-    padding: float, row_limit: int | None, speed_mm: float, z_max: float,
+    bbox: BBox,
+    polygon: Sequence[Point2F],
+    *,
+    plane_a: float,
+    plane_b: float,
+    plane_c: float,
+    frame_width_um: float,
+    frame_height_um: float,
+    x_overlap_pct: float,
+    y_overlap_pct: float,
+    padding: float,
+    row_limit: int | None,
+    speed_mm: float,
+    z_max: float,
 ) -> PlanarScanPlan:
     """Compute row plan from chip geometry and focus plane.
 
@@ -161,8 +175,11 @@ def compute_planar_scan_plan(
 # Metadata helpers
 # ============================================================================
 
+
 def build_lighting_meta(
-    *, lamp: Any = None, shutter: Any = None,
+    *,
+    lamp: Any = None,
+    shutter: Any = None,
 ) -> LightingMeta:
     """Build lighting metadata dict from hardware objects.
 

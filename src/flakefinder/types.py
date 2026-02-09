@@ -14,9 +14,11 @@ type Point3F = tuple[float, float, float]
 # Microscope description
 # ============================================================================
 
+
 @dataclass
 class BinningLevel:
     """Camera binning level from microscope description."""
+
     name: str
     factor: int
     frame_width_px: int
@@ -26,6 +28,7 @@ class BinningLevel:
 @dataclass
 class CameraDescription:
     """Camera hardware description."""
+
     name: str
     sensor_width_px: int
     sensor_height_px: int
@@ -37,6 +40,7 @@ class CameraDescription:
 @dataclass
 class ObjectiveDescription:
     """Objective lens description."""
+
     position: int
     magnification: float
     name: str
@@ -45,6 +49,7 @@ class ObjectiveDescription:
 @dataclass
 class AxisDescription:
     """Stage axis description."""
+
     min_um: float
     max_um: float
     max_speed_mm_s: float
@@ -53,6 +58,7 @@ class AxisDescription:
 @dataclass
 class StageDescription:
     """Stage hardware description."""
+
     x: AxisDescription
     y: AxisDescription
     z: AxisDescription
@@ -61,6 +67,7 @@ class StageDescription:
 @dataclass
 class MicroscopeDescription:
     """Parsed microscope hardware description."""
+
     camera: CameraDescription
     objectives: dict[int, ObjectiveDescription]
     stage: StageDescription
@@ -70,8 +77,10 @@ class MicroscopeDescription:
 # Chip geometry
 # ============================================================================
 
+
 class BBox(TypedDict):
     """Bounding box from chip detection JSON."""
+
     x_min: float
     x_max: float
     y_min: float
@@ -81,6 +90,7 @@ class BBox(TypedDict):
 @dataclass
 class ChipGeometry:
     """Chip geometry from find_chips.py output."""
+
     chip_index: int
     bbox: BBox
     polygon: list[Point2F]
@@ -92,9 +102,11 @@ class ChipGeometry:
 # Scan planning
 # ============================================================================
 
+
 @dataclass
 class PlanarScanPlan:
     """Computed scan plan from chip geometry and focus plane."""
+
     rows: list[Point3F]  # [(y_um, x_min_um, x_max_um), ...]
     target_advance_um: float
     y_step_um: float
@@ -112,8 +124,10 @@ class PlanarScanPlan:
 # Scan output metadata
 # ============================================================================
 
+
 class CameraMeta(TypedDict):
     """Camera metadata block for scan output."""
+
     name: str
     exposure_s: float | None
     gain: float | None
@@ -133,6 +147,7 @@ class CameraMeta(TypedDict):
 
 class OpticsMeta(TypedDict):
     """Optics metadata block for scan output."""
+
     objective_mag: float | None
     objective_idx: int | None
     sample_pixel_x_um: float | None
@@ -143,6 +158,7 @@ class OpticsMeta(TypedDict):
 
 class LightingMeta(TypedDict):
     """Lighting metadata block for scan output."""
+
     lamp_name: str | None
     lamp_intensity: float | None
     lamp_max_intensity: float | None

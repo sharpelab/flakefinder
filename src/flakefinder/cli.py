@@ -12,7 +12,7 @@ def cmd_connect(args: argparse.Namespace) -> int:
     print("=" * 40)
 
     try:
-        from .leica import LeicaConnection, TID, print_unit_tree
+        from .leica import TID, LeicaConnection, print_unit_tree
 
         config_dir = args.config_dir
         print(f"Config directory: {config_dir or '(default)'}")
@@ -79,7 +79,7 @@ def cmd_test_axis(args: argparse.Namespace) -> int:
     import time
 
     try:
-        from .leica import LeicaConnection, TID, Axis, Stage, PositionMonitor, AxisEvents, EventQueue
+        from .leica import TID, Axis, AxisEvents, EventQueue, LeicaConnection, Stage
 
         print("FlakeFinder - Axis Test")
         print("=" * 40)
@@ -166,7 +166,7 @@ def cmd_test_axis(args: argparse.Namespace) -> int:
                                 pos_um = converter.GetMetricsValue(pos)
                                 print(f"    [event {event_count}] pos={pos_um:.0f}µm", flush=True)
                         # Drain any remaining events
-                        for pos in eq.drain():
+                        for pos in eq.drain():  # noqa: B007
                             event_count += 1
                         print(f"  Final: {stage.x.position_um:.2f} µm ({event_count} events)")
                         print()
@@ -181,7 +181,7 @@ def cmd_test_axis(args: argparse.Namespace) -> int:
                                 event_count += 1
                                 pos_um = converter.GetMetricsValue(pos)
                                 print(f"    [event {event_count}] pos={pos_um:.0f}µm", flush=True)
-                        for pos in eq.drain():
+                        for pos in eq.drain():  # noqa: B007
                             event_count += 1
                         print(f"  Final: {stage.x.position_um:.2f} µm ({event_count} events)")
                         print()
@@ -231,6 +231,7 @@ def cmd_test_axis(args: argparse.Namespace) -> int:
         return 1
     except Exception as e:
         import traceback
+
         print(f"Error: {e}")
         traceback.print_exc()
         return 1
@@ -241,7 +242,7 @@ def cmd_test_camera(args: argparse.Namespace) -> int:
     import time
 
     try:
-        from .leica import LeicaConnection, Camera, Stage, Lamp, Shutter
+        from .leica import Camera, Lamp, LeicaConnection, Shutter, Stage
 
         print("FlakeFinder - Camera Test")
         print("=" * 40)
@@ -292,6 +293,7 @@ def cmd_test_camera(args: argparse.Namespace) -> int:
             # Streaming test
             if args.stream:
                 import os
+
                 from PIL import Image as PILImage
 
                 duration = args.stream_duration
@@ -300,10 +302,10 @@ def cmd_test_camera(args: argparse.Namespace) -> int:
                 # Get stage for position tagging if available
                 try:
                     stage = Stage.from_connection(conn)
-                    print(f"  Position tagging enabled (stage found)")
+                    print("  Position tagging enabled (stage found)")
                 except LookupError:
                     stage = None
-                    print(f"  No stage found, positions will be None")
+                    print("  No stage found, positions will be None")
 
                 # Prepare output directory if saving frames
                 save_frames = args.output is not None
@@ -323,14 +325,9 @@ def cmd_test_camera(args: argparse.Namespace) -> int:
                             # Only log first frame and every 10th unless quiet
                             if not args.quiet and (frame.frame_number == 0 or frame.frame_number % 10 == 0):
                                 pos_str = (
-                                    f"({frame.position[0]:.0f}, {frame.position[1]:.0f})"
-                                    if frame.position
-                                    else "None"
+                                    f"({frame.position[0]:.0f}, {frame.position[1]:.0f})" if frame.position else "None"
                                 )
-                                print(
-                                    f"  Frame {frame.frame_number}: "
-                                    f"{frame.image.shape} @ {pos_str}"
-                                )
+                                print(f"  Frame {frame.frame_number}: {frame.image.shape} @ {pos_str}")
                             if first_shape is None:
                                 first_shape = frame.image.shape
                             # Save frame if output specified
@@ -381,8 +378,8 @@ def cmd_scan_line(args: argparse.Namespace) -> int:
 
     try:
         from PIL import Image as PILImage
-        from .leica import LeicaConnection, Camera, Stage, Lamp, Shutter
-        from .leica.camera import DeferredFrameStream
+
+        from .leica import Camera, Lamp, LeicaConnection, Shutter, Stage
 
         print("FlakeFinder - Line Scan")
         print("=" * 40)
@@ -454,17 +451,19 @@ def cmd_scan_line(args: argparse.Namespace) -> int:
 
             print(f"  Captured {frame_count} frames in {scan_end - scan_start:.2f}s")
             print(f"  Acquisition FPS: {stream.frame_rate:.1f}")
-            print(f"\nConverting and saving frames...")
+            print("\nConverting and saving frames...")
 
             # Now bulk convert and save
             save_start = time.monotonic()
             for i, (timestamp, image) in enumerate(stream.get_all_frames()):
                 path = os.path.join(args.output, f"frame_{i:04d}.jpg")
                 PILImage.fromarray(image).save(path, quality=95)
-                meta["frames"].append({
-                    "n": i,
-                    "t": timestamp - scan_start,
-                })
+                meta["frames"].append(
+                    {
+                        "n": i,
+                        "t": timestamp - scan_start,
+                    }
+                )
                 if (i + 1) % 20 == 0:
                     print(f"  Saved {i + 1}/{frame_count}...")
 
@@ -481,7 +480,7 @@ def cmd_scan_line(args: argparse.Namespace) -> int:
             with open(meta_path, "w") as f:
                 json.dump(meta, f, indent=2)
 
-            print(f"\nScan complete:")
+            print("\nScan complete:")
             print(f"  Frames: {frame_count}")
             print(f"  Scan duration: {meta['duration_s']:.1f}s")
             print(f"  Acquisition FPS: {meta['fps']:.1f}")
@@ -497,6 +496,7 @@ def cmd_scan_line(args: argparse.Namespace) -> int:
 
     except Exception as e:
         import traceback
+
         print(f"Error: {e}")
         traceback.print_exc()
         return 1
@@ -533,7 +533,7 @@ def cmd_stitch(args: argparse.Namespace) -> int:
     from pathlib import Path
 
     try:
-        from .stitcher import stitch_scan, MIN_CRUISE_VELOCITY
+        from .stitcher import stitch_scan
 
         scan_dir = Path(args.scan_dir)
         if not scan_dir.exists():
@@ -561,9 +561,11 @@ def cmd_stitch(args: argparse.Namespace) -> int:
         )
 
         print()  # Clear progress line
-        print(f"\nStitch complete:")
+        print("\nStitch complete:")
         print(f"  Total frames: {report.total_frames}")
-        print(f"  Cruise frames: {report.cruise_frames} ({100*report.cruise_frames/max(1,report.total_frames):.1f}%)")
+        print(
+            f"  Cruise frames: {report.cruise_frames} ({100 * report.cruise_frames / max(1, report.total_frames):.1f}%)"
+        )
         print(f"  Acceleration padding: {report.padding_left} left, {report.padding_right} right frames")
         print(f"  Rows processed: {report.rows_processed}")
         print(f"  Output size: {report.output_width} x {report.output_height} px")
@@ -574,6 +576,7 @@ def cmd_stitch(args: argparse.Namespace) -> int:
 
     except Exception as e:
         import traceback
+
         print(f"Error: {e}")
         traceback.print_exc()
         return 1
@@ -600,7 +603,8 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
 
     try:
         from PIL import Image as PILImage
-        from .leica import LeicaConnection, Camera, Stage, Lamp, Shutter
+
+        from .leica import Camera, Lamp, LeicaConnection, Shutter, Stage
 
         print("FlakeFinder - Raster Scan")
         print("=" * 40)
@@ -843,6 +847,7 @@ def cmd_raster_scan(args: argparse.Namespace) -> int:
 
     except Exception as e:
         import traceback
+
         print(f"Error: {e}")
         traceback.print_exc()
         return 1

@@ -1,8 +1,8 @@
 """Utility functions for Leica SDK operations."""
 
-from .enums import EMetricsId, IID
 from .core import get_interface
-from .types import Unit, MetricsConverter, BasicControlValue
+from .enums import IID, EMetricsId
+from .types import BasicControlValue, MetricsConverter, Unit
 
 
 def get_metrics_converter(
@@ -18,7 +18,7 @@ def get_metrics_converter(
     Returns:
         MetricsConverter for the specified metrics, or None if not available.
     """
-    bcv: "BasicControlValue | None" = get_interface(unit, IID.IID_BASIC_CONTROL_VALUE)
+    bcv: BasicControlValue | None = get_interface(unit, IID.IID_BASIC_CONTROL_VALUE)
     if bcv is None:
         return None
 
@@ -82,9 +82,7 @@ class UnitConverter:
         """
         self._converter = get_metrics_converter(unit, metrics_id)
         if self._converter is None:
-            raise ValueError(
-                f"Unit {unit.GetName()} does not support metrics {metrics_id.name}"
-            )
+            raise ValueError(f"Unit {unit.GetName()} does not support metrics {metrics_id.name}")
         self._metrics_id = metrics_id
 
     def to_microns(self, native_value: int) -> float:

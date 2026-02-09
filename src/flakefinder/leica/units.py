@@ -6,19 +6,19 @@ with both blocking (sync) and non-blocking (async) operations.
 
 import re
 import time
-import threading
-from .enums import TID, IID, EMetricsId, MoveState
-from .core import get_interface, get_interface_required, find_unit
+
+from .core import find_unit, get_interface, get_interface_required
+from .enums import IID, TID, EMetricsId, MoveState
 from .types import (
-    Unit,
+    AsyncResult,
+    AutoCalibration,
+    BasicControlState,
     BasicControlValue,
     BasicControlValueAsync,
-    HaltControlValue,
-    BasicControlState,
     BasicControlValueVelocity,
-    AutoCalibration,
+    HaltControlValue,
     MetricsConverter,
-    AsyncResult,
+    Unit,
 )
 
 
@@ -162,31 +162,19 @@ class Axis:
         self._name = unit.GetName()
 
         # Required interfaces
-        self._bcv: "BasicControlValue" = get_interface_required(
-            unit, IID.IID_BASIC_CONTROL_VALUE
-        )
+        self._bcv: "BasicControlValue" = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE)
 
         # Get metrics converter for µm
         converters = self._bcv.GetMetricsConverters()
-        self._converter: "MetricsConverter" = converters.FindMetricsConverter(
-            int(EMetricsId.METRICS_MICRONS)
-        )
+        self._converter: "MetricsConverter" = converters.FindMetricsConverter(int(EMetricsId.METRICS_MICRONS))
         if self._converter is None:
             raise LookupError(f"No microns converter for {self._name}")
 
         # Optional interfaces
-        self._bcv_async: "BasicControlValueAsync | None" = get_interface(
-            unit, IID.IID_BASIC_CONTROL_VALUE_ASYNC
-        )
-        self._halt: "HaltControlValue | None" = get_interface(
-            unit, IID.IID_HALT_CONTROL_VALUE
-        )
-        self._state: "BasicControlState | None" = get_interface(
-            unit, IID.IID_BASIC_CONTROL_STATE
-        )
-        self._velocity: "BasicControlValueVelocity | None" = get_interface(
-            unit, IID.IID_BASIC_CONTROL_VALUE_VELOCITY
-        )
+        self._bcv_async: "BasicControlValueAsync | None" = get_interface(unit, IID.IID_BASIC_CONTROL_VALUE_ASYNC)
+        self._halt: "HaltControlValue | None" = get_interface(unit, IID.IID_HALT_CONTROL_VALUE)
+        self._state: "BasicControlState | None" = get_interface(unit, IID.IID_BASIC_CONTROL_STATE)
+        self._velocity: "BasicControlValueVelocity | None" = get_interface(unit, IID.IID_BASIC_CONTROL_VALUE_VELOCITY)
         self._velocity_converter: "MetricsConverter | None" = None
         if self._velocity is not None:
             try:
@@ -197,12 +185,8 @@ class Axis:
             except Exception:
                 pass  # No velocity converter available
 
-        self._calibration: "AutoCalibration | None" = get_interface(
-            unit, IID.IID_AUTO_CALIBRATION
-        )
-        self._directed_velocity = get_interface(
-            unit, IID.IID_DIRECTED_CONTROL_VALUE_ASYNC_VELOCITY
-        )
+        self._calibration: "AutoCalibration | None" = get_interface(unit, IID.IID_AUTO_CALIBRATION)
+        self._directed_velocity = get_interface(unit, IID.IID_DIRECTED_CONTROL_VALUE_ASYNC_VELOCITY)
         # Use regular velocity converter for directed velocity (same native units)
 
         # Cache limits
@@ -543,9 +527,7 @@ class Shutter:
         """
         self._unit = unit
         self._name = unit.GetName()
-        self._bcv: "BasicControlValue" = get_interface_required(
-            unit, IID.IID_BASIC_CONTROL_VALUE
-        )
+        self._bcv: "BasicControlValue" = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE)
 
     @classmethod
     def from_connection(cls, conn: "LeicaConnection", tid: TID = TID.MICROSCOPE_IL_SHUTTER) -> "Shutter":
@@ -609,9 +591,7 @@ class Lamp:
         """
         self._unit = unit
         self._name = unit.GetName()
-        self._bcv: "BasicControlValue" = get_interface_required(
-            unit, IID.IID_BASIC_CONTROL_VALUE
-        )
+        self._bcv: "BasicControlValue" = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE)
         self._min = self._bcv.MinControlValue()
         self._max = self._bcv.MaxControlValue()
 
@@ -702,9 +682,7 @@ class Nosepiece:
         """
         self._unit = unit
         self._name = unit.GetName()
-        self._bcv: "BasicControlValue" = get_interface_required(
-            unit, IID.IID_BASIC_CONTROL_VALUE
-        )
+        self._bcv: "BasicControlValue" = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE)
         self._magnifications = magnifications or self.DEFAULT_MAGNIFICATIONS.copy()
 
     @classmethod
@@ -814,9 +792,7 @@ class Nosepiece:
                     return pos
 
         valid = [f"{mag}x (pos {pos})" for pos, mag in sorted(self._magnifications.items())]
-        raise ValueError(
-            f"Unknown magnification '{value}'. Available: {', '.join(valid)}"
-        )
+        raise ValueError(f"Unknown magnification '{value}'. Available: {', '.join(valid)}")
 
     def validate_position(self, pos: int) -> int:
         """Validate turret position is in range, return it.
@@ -826,9 +802,7 @@ class Nosepiece:
         """
         if self.min_position <= pos <= self.max_position:
             return pos
-        raise ValueError(
-            f"Position {pos} out of range ({self.min_position}-{self.max_position})"
-        )
+        raise ValueError(f"Position {pos} out of range ({self.min_position}-{self.max_position})")
 
     def __repr__(self) -> str:
         mag = self.magnification
@@ -864,9 +838,7 @@ class ZDrive(Axis):
         super().__init__(unit)
 
         # Hysteresis-corrected interface for accurate position during motion
-        self._bcv_hysteresis = get_interface(
-            unit, IID.IID_BASIC_CONTROL_VALUE_HYSTERESIS_CORRECTED
-        )
+        self._bcv_hysteresis = get_interface(unit, IID.IID_BASIC_CONTROL_VALUE_HYSTERESIS_CORRECTED)
 
     @property
     def position_um_hysteresis_corrected(self) -> float | None:
@@ -923,7 +895,6 @@ class ZDrive(Axis):
         Raises:
             LookupError: If Z drive unit not found.
         """
-        from .core import LeicaConnection
 
         z_unit = conn.find_unit(TID.MICROSCOPE_ZDRIVE)
         if z_unit is None:
@@ -973,7 +944,6 @@ class Stage:
         Raises:
             LookupError: If X or Y unit not found.
         """
-        from .core import LeicaConnection
 
         x_unit = conn.find_unit(TID.MICROSCOPE_X_UNIT)
         y_unit = conn.find_unit(TID.MICROSCOPE_Y_UNIT)
@@ -1007,9 +977,7 @@ class Stage:
         self.x.move_to(x_um)
         self.y.move_to(y_um)
 
-    def move_to_async(
-        self, x_um: float, y_um: float
-    ) -> tuple[MoveHandle, MoveHandle]:
+    def move_to_async(self, x_um: float, y_um: float) -> tuple[MoveHandle, MoveHandle]:
         """Move to absolute XY position (non-blocking, parallel).
 
         Args:
@@ -1033,9 +1001,7 @@ class Stage:
         self.x.move_rel(dx_um)
         self.y.move_rel(dy_um)
 
-    def move_rel_async(
-        self, dx_um: float, dy_um: float
-    ) -> tuple[MoveHandle, MoveHandle]:
+    def move_rel_async(self, dx_um: float, dy_um: float) -> tuple[MoveHandle, MoveHandle]:
         """Move relative to current position (non-blocking, parallel).
 
         Args:
