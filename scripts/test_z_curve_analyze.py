@@ -12,10 +12,9 @@ import argparse
 import json
 from pathlib import Path
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from scipy.interpolate import CubicSpline
-
 
 # Surface data (duplicated from test_z_curve_tracking.py for standalone analysis)
 SURFACE_DATA = {
@@ -190,97 +189,102 @@ def plot_curve_tracking(data: dict, output_path: Path | None = None, title_suffi
     ax1_z = ax1.twinx()
     x_t = analysis["x_t"]
     z_t = analysis["z_t"]
-    ax1.plot(x_t * 1000, x_pos / 1000, 'b-', linewidth=0.5, alpha=0.8, label='X')
-    ax1_z.plot(z_t * 1000, analysis["z_pos"], 'r-', linewidth=0.5, alpha=0.8, label='Z')
-    ax1.set_xlabel('Time (ms)')
-    ax1.set_ylabel('X (mm)', color='b')
-    ax1_z.set_ylabel('Z (µm)', color='r')
-    ax1.set_title('Position vs Time')
+    ax1.plot(x_t * 1000, x_pos / 1000, "b-", linewidth=0.5, alpha=0.8, label="X")
+    ax1_z.plot(z_t * 1000, analysis["z_pos"], "r-", linewidth=0.5, alpha=0.8, label="Z")
+    ax1.set_xlabel("Time (ms)")
+    ax1.set_ylabel("X (mm)", color="b")
+    ax1_z.set_ylabel("Z (µm)", color="r")
+    ax1.set_title("Position vs Time")
 
     # 2. Actual vs ideal Z vs X
     ax2 = axes[0, 1]
-    ax2.plot(x_pos / 1000, z_at_x, 'b-', linewidth=0.8, alpha=0.7, label='Actual Z')
-    ax2.plot(x_pos / 1000, z_ideal, 'r--', linewidth=1.5, label='Ideal Z')
+    ax2.plot(x_pos / 1000, z_at_x, "b-", linewidth=0.8, alpha=0.7, label="Actual Z")
+    ax2.plot(x_pos / 1000, z_ideal, "r--", linewidth=1.5, label="Ideal Z")
 
     # Mark surface data points
     surface = SURFACE_DATA[params["surface_name"]]
-    z_offset = analysis["commanded"]["z_offset_um"]
-    for x_um, residual in surface["points"]:
+    analysis["commanded"]["z_offset_um"]
+    for x_um, _residual in surface["points"]:
         x_mm = x_um / 1000
-        ax2.axvline(x_mm, color='gray', linestyle=':', alpha=0.3)
+        ax2.axvline(x_mm, color="gray", linestyle=":", alpha=0.3)
 
-    ax2.set_xlabel('X (mm)')
-    ax2.set_ylabel('Z (µm)')
-    ax2.set_title('Actual vs Ideal Z Profile')
+    ax2.set_xlabel("X (mm)")
+    ax2.set_ylabel("Z (µm)")
+    ax2.set_title("Actual vs Ideal Z Profile")
     ax2.legend()
 
     # 3. Tracking error vs X
     ax3 = axes[0, 2]
-    ax3.scatter(x_pos[cv_mask] / 1000, z_error[cv_mask], s=2, alpha=0.5, c='blue', label='CV region')
-    ax3.scatter(x_pos[~cv_mask] / 1000, z_error[~cv_mask], s=2, alpha=0.3, c='gray', label='Accel/decel')
-    ax3.axhline(0, color='k', linestyle='-', linewidth=0.5)
-    ax3.axhline(4, color='r', linestyle='--', alpha=0.7, label='±4µm (20x DOF)')
-    ax3.axhline(-4, color='r', linestyle='--', alpha=0.7)
-    ax3.set_xlabel('X (mm)')
-    ax3.set_ylabel('Z error (µm)')
-    ax3.set_title(f'Tracking Error (max CV: {tracking["error_max_um"]:.2f}µm)')
+    ax3.scatter(x_pos[cv_mask] / 1000, z_error[cv_mask], s=2, alpha=0.5, c="blue", label="CV region")
+    ax3.scatter(x_pos[~cv_mask] / 1000, z_error[~cv_mask], s=2, alpha=0.3, c="gray", label="Accel/decel")
+    ax3.axhline(0, color="k", linestyle="-", linewidth=0.5)
+    ax3.axhline(4, color="r", linestyle="--", alpha=0.7, label="±4µm (20x DOF)")
+    ax3.axhline(-4, color="r", linestyle="--", alpha=0.7)
+    ax3.set_xlabel("X (mm)")
+    ax3.set_ylabel("Z error (µm)")
+    ax3.set_title(f"Tracking Error (max CV: {tracking['error_max_um']:.2f}µm)")
     ax3.legend()
 
     # 4. Z velocity commands vs time
     ax4 = axes[1, 0]
     if len(ctrl_z_vel) > 0:
-        ax4.plot(ctrl_t * 1000, ctrl_z_vel, 'g-', linewidth=0.8)
-        ax4.axhline(0, color='k', linestyle='-', linewidth=0.5)
-        ax4.set_xlabel('Time (ms)')
-        ax4.set_ylabel('Commanded Z velocity (µm/s)')
-        ax4.set_title(f'Z Velocity Commands ({len(ctrl_z_vel)} updates)')
+        ax4.plot(ctrl_t * 1000, ctrl_z_vel, "g-", linewidth=0.8)
+        ax4.axhline(0, color="k", linestyle="-", linewidth=0.5)
+        ax4.set_xlabel("Time (ms)")
+        ax4.set_ylabel("Commanded Z velocity (µm/s)")
+        ax4.set_title(f"Z Velocity Commands ({len(ctrl_z_vel)} updates)")
     else:
-        ax4.text(0.5, 0.5, 'No control log data', transform=ax4.transAxes,
-                ha='center', va='center')
-        ax4.set_title('Z Velocity Commands')
+        ax4.text(0.5, 0.5, "No control log data", transform=ax4.transAxes, ha="center", va="center")
+        ax4.set_title("Z Velocity Commands")
 
     # 5. Error histogram
     ax5 = axes[1, 1]
     z_error_cv = z_error[cv_mask]
-    ax5.hist(z_error_cv, bins=50, edgecolor='black', alpha=0.7)
-    ax5.axvline(0, color='k', linestyle='-', linewidth=1)
-    ax5.axvline(z_error_cv.mean(), color='r', linestyle='--', linewidth=2,
-                label=f'Mean: {z_error_cv.mean():.2f}µm')
-    ax5.axvline(4, color='orange', linestyle='--', alpha=0.7)
-    ax5.axvline(-4, color='orange', linestyle='--', alpha=0.7, label='±4µm DOF')
-    ax5.set_xlabel('Z error (µm)')
-    ax5.set_ylabel('Count')
-    ax5.set_title(f'Error Distribution (std: {tracking["error_std_um"]:.2f}µm)')
+    ax5.hist(z_error_cv, bins=50, edgecolor="black", alpha=0.7)
+    ax5.axvline(0, color="k", linestyle="-", linewidth=1)
+    ax5.axvline(z_error_cv.mean(), color="r", linestyle="--", linewidth=2, label=f"Mean: {z_error_cv.mean():.2f}µm")
+    ax5.axvline(4, color="orange", linestyle="--", alpha=0.7)
+    ax5.axvline(-4, color="orange", linestyle="--", alpha=0.7, label="±4µm DOF")
+    ax5.set_xlabel("Z error (µm)")
+    ax5.set_ylabel("Count")
+    ax5.set_title(f"Error Distribution (std: {tracking['error_std_um']:.2f}µm)")
     ax5.legend()
 
     # 6. Summary text
     ax6 = axes[1, 2]
-    ax6.axis('off')
+    ax6.axis("off")
 
     profile = data.get("profile", {})
     summary_text = f"""Curve Tracking Summary
-{'='*30}
+{"=" * 30}
 
-Surface: {params['surface_name']} (Y={profile.get('y_um', 'N/A')} µm)
-X speed: {params['x_speed_mm_s']:.1f} mm/s
-Control rate: {params['control_rate_hz']:.0f} Hz
+Surface: {params["surface_name"]} (Y={profile.get("y_um", "N/A")} µm)
+X speed: {params["x_speed_mm_s"]:.1f} mm/s
+Control rate: {params["control_rate_hz"]:.0f} Hz
 
 Profile stats:
-  Z range: {profile.get('z_range_um', ['N/A', 'N/A'])[0]:.1f} - {profile.get('z_range_um', ['N/A', 'N/A'])[1]:.1f} µm
-  Max gradient: {profile.get('max_gradient_um_per_mm', 'N/A'):.2f} µm/mm
+  Z range: {profile.get("z_range_um", ["N/A", "N/A"])[0]:.1f} - {profile.get("z_range_um", ["N/A", "N/A"])[1]:.1f} µm
+  Max gradient: {profile.get("max_gradient_um_per_mm", "N/A"):.2f} µm/mm
 
 Tracking (CV region):
-  Mean error: {tracking['error_mean_um']:+.2f} µm
-  Std error: {tracking['error_std_um']:.2f} µm
-  Max error: {tracking['error_max_um']:.2f} µm
-  95th pct: {tracking['error_p95_um']:.2f} µm
+  Mean error: {tracking["error_mean_um"]:+.2f} µm
+  Std error: {tracking["error_std_um"]:.2f} µm
+  Max error: {tracking["error_max_um"]:.2f} µm
+  95th pct: {tracking["error_p95_um"]:.2f} µm
 
-Result: {'✓ PASS' if tracking['within_20x_dof'] else '✗ FAIL'}
-  (max error {'<' if tracking['within_20x_dof'] else '>'} {tracking['dof_20x_um']} µm DOF)
+Result: {"✓ PASS" if tracking["within_20x_dof"] else "✗ FAIL"}
+  (max error {"<" if tracking["within_20x_dof"] else ">"} {tracking["dof_20x_um"]} µm DOF)
 """
-    ax6.text(0.05, 0.95, summary_text, transform=ax6.transAxes,
-             fontsize=10, family='monospace', verticalalignment='top',
-             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    ax6.text(
+        0.05,
+        0.95,
+        summary_text,
+        transform=ax6.transAxes,
+        fontsize=10,
+        family="monospace",
+        verticalalignment="top",
+        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+    )
 
     plt.tight_layout()
 
@@ -305,19 +309,19 @@ def print_report(data: dict, filename: str = "") -> None:
     print(f"Z CURVE TRACKING ANALYSIS{f': {filename}' if filename else ''}")
     print("=" * 60)
 
-    print(f"\nTest parameters:")
+    print("\nTest parameters:")
     print(f"  Surface: {params['surface_name']}")
     print(f"  X speed: {params['x_speed_mm_s']:.1f} mm/s")
     print(f"  Control rate: {params['control_rate_hz']:.0f} Hz")
 
-    print(f"\nProfile:")
+    print("\nProfile:")
     print(f"  Max gradient: {profile.get('max_gradient_um_per_mm', 'N/A'):.2f} µm/mm")
     print(f"  Max Z velocity: {profile.get('max_gradient_um_per_mm', 0) * params['x_speed_mm_s']:.1f} µm/s")
 
-    print(f"\nTiming:")
-    print(f"  Motion duration: {timing['motion_duration_s']*1000:.0f} ms")
+    print("\nTiming:")
+    print(f"  Motion duration: {timing['motion_duration_s'] * 1000:.0f} ms")
 
-    print(f"\nTracking error (constant velocity region):")
+    print("\nTracking error (constant velocity region):")
     print(f"  Mean: {tracking['error_mean_um']:+.2f} µm")
     print(f"  Std: {tracking['error_std_um']:.2f} µm")
     print(f"  Max: {tracking['error_max_um']:.2f} µm")
@@ -338,18 +342,9 @@ def main():
         description="Analyze Z curve tracking test data",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
-        "files", type=Path, nargs="+",
-        help="JSON file(s) from test_z_curve_tracking.py"
-    )
-    parser.add_argument(
-        "--no-plot", action="store_true",
-        help="Skip generating plots"
-    )
-    parser.add_argument(
-        "--show", action="store_true",
-        help="Show plots interactively instead of saving"
-    )
+    parser.add_argument("files", type=Path, nargs="+", help="JSON file(s) from test_z_curve_tracking.py")
+    parser.add_argument("--no-plot", action="store_true", help="Skip generating plots")
+    parser.add_argument("--show", action="store_true", help="Show plots interactively instead of saving")
     args = parser.parse_args()
 
     all_passed = True
@@ -372,7 +367,7 @@ def main():
             all_passed = False
 
         if not args.no_plot:
-            plot_path = None if args.show else filepath.with_suffix('.png')
+            plot_path = None if args.show else filepath.with_suffix(".png")
             plot_curve_tracking(data, plot_path, filepath.stem)
 
     return 0 if all_passed else 1

@@ -16,7 +16,6 @@ Usage:
 
 import argparse
 import json
-import os
 import re
 import time
 from datetime import datetime
@@ -35,8 +34,8 @@ def parse_position(value: str) -> tuple[float, float]:
         raise ValueError("Position must be X,Y (2 values)")
     try:
         return float(parts[0]), float(parts[1])
-    except ValueError:
-        raise ValueError("Position values must be numbers")
+    except ValueError as e:
+        raise ValueError("Position values must be numbers") from e
 
 
 def resolve_objective_mag(objective_mag: str | None, objective_pos: int | None) -> float:
@@ -188,8 +187,6 @@ def save_flatfield_16bit(image: np.ndarray, path: Path) -> None:
     pil_img.save(path)
 
 
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Capture flatfield reference for vignetting/WB correction",
@@ -207,30 +204,31 @@ Examples:
 
     # Add notes about the substrate
     python capture_flatfield.py --objective-mag 5x --notes "Blank SiO2/Si edge"
-"""
+""",
     )
-    parser.add_argument("--objective-mag", type=str, metavar="MAG",
-                        help="Objective by magnification (e.g., 5, 5x, 20, 2.5)")
-    parser.add_argument("--objective-pos", type=int, metavar="POS",
-                        help="Objective by turret position (1-6)")
-    parser.add_argument("--position", "-p", type=str, default=None,
-                        help="Stage position X,Y in µm (default: use current position)")
-    parser.add_argument("--frames", "-n", type=int, default=5,
-                        help="Number of frames to average (default: 5)")
-    parser.add_argument("--output", "-o", type=Path, default=DEFAULT_OUTPUT_DIR,
-                        help=f"Output directory (default: {DEFAULT_OUTPUT_DIR})")
-    parser.add_argument("--force", "-f", action="store_true",
-                        help="Overwrite existing calibration")
-    parser.add_argument("--notes", type=str, default=None,
-                        help="Notes about substrate/conditions")
-    parser.add_argument("--exposure", type=float, default=1.0,
-                        help="Exposure time in ms (default: 1.0)")
-    parser.add_argument("--gain", type=float, default=None,
-                        help="Camera gain (default: not set)")
-    parser.add_argument("--wb", type=str, default="1.0,1.0,1.0",
-                        help="White balance as R,G,B gains (default: 1.0,1.0,1.0)")
-    parser.add_argument("--skip-validation", action="store_true",
-                        help="Skip uniformity validation (use with caution)")
+    parser.add_argument(
+        "--objective-mag", type=str, metavar="MAG", help="Objective by magnification (e.g., 5, 5x, 20, 2.5)"
+    )
+    parser.add_argument("--objective-pos", type=int, metavar="POS", help="Objective by turret position (1-6)")
+    parser.add_argument(
+        "--position", "-p", type=str, default=None, help="Stage position X,Y in µm (default: use current position)"
+    )
+    parser.add_argument("--frames", "-n", type=int, default=5, help="Number of frames to average (default: 5)")
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
+        help=f"Output directory (default: {DEFAULT_OUTPUT_DIR})",
+    )
+    parser.add_argument("--force", "-f", action="store_true", help="Overwrite existing calibration")
+    parser.add_argument("--notes", type=str, default=None, help="Notes about substrate/conditions")
+    parser.add_argument("--exposure", type=float, default=1.0, help="Exposure time in ms (default: 1.0)")
+    parser.add_argument("--gain", type=float, default=None, help="Camera gain (default: not set)")
+    parser.add_argument(
+        "--wb", type=str, default="1.0,1.0,1.0", help="White balance as R,G,B gains (default: 1.0,1.0,1.0)"
+    )
+    parser.add_argument("--skip-validation", action="store_true", help="Skip uniformity validation (use with caution)")
 
     args = parser.parse_args()
 
@@ -267,16 +265,17 @@ Examples:
 
     if flatfield_json.exists() and not args.force:
         print(f"Error: Calibration already exists: {flatfield_json}")
-        print(f"  Use --force to overwrite.")
+        print("  Use --force to overwrite.")
         return 1
 
     # Import microscope modules (slow, so do after arg validation)
     print("Connecting to microscope...")
-    from flakefinder.leica import LeicaConnection, Stage, ZDrive, Lamp, Shutter, Nosepiece
+    from flakefinder.leica import Lamp, LeicaConnection, Nosepiece, Shutter, Stage, ZDrive
     from flakefinder.leica.camera import Camera
 
     with LeicaConnection() as conn:
         from LeicaMicrosystems.HardwareModel import Extensions
+
         Extensions.ExUCAPI.Register()
 
         # Set up components
@@ -354,7 +353,7 @@ Examples:
         for i in range(args.frames):
             img = camera.capture()
             frames.append(img.astype(np.float64))
-            print(f"  Frame {i+1}/{args.frames}")
+            print(f"  Frame {i + 1}/{args.frames}")
             time.sleep(0.05)  # Small delay between frames
 
         # Average frames
@@ -373,8 +372,10 @@ Examples:
 
         # Compute calibration values
         cal_values = compute_calibration(averaged)
-        print(f"Mean BGR: [{cal_values['mean_bgr'][0]:.1f}, {cal_values['mean_bgr'][1]:.1f}, {cal_values['mean_bgr'][2]:.1f}]")
-        print(f"Reference WB (BGR): [{cal_values['reference_wb_bgr'][0]:.3f}, {cal_values['reference_wb_bgr'][1]:.3f}, {cal_values['reference_wb_bgr'][2]:.3f}]")
+        bgr = cal_values["mean_bgr"]
+        wb = cal_values["reference_wb_bgr"]
+        print(f"Mean BGR: [{bgr[0]:.1f}, {bgr[1]:.1f}, {bgr[2]:.1f}]")
+        print(f"Reference WB (BGR): [{wb[0]:.3f}, {wb[1]:.3f}, {wb[2]:.3f}]")
 
         # Save flatfield image
         flatfield_path = args.output / flatfield_basename

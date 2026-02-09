@@ -23,13 +23,12 @@ import argparse
 import json
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 from scipy.interpolate import CubicSpline
-
 
 # Actual surface data from autofocus measurements
 # Format: (x_um, residual_um) where residual is deviation from plane fit
@@ -119,7 +118,7 @@ def build_z_profile(
     def dzdx_total(x_um: float) -> float:
         """Total dZ/dX = plane_slope + residual_slope (in µm/µm)."""
         plane_slope = a / 1000  # Convert µm/mm to µm/µm
-        residual_slope = float(spline_deriv(x_um)) / 1000  # spline is in µm/µm already
+        float(spline_deriv(x_um)) / 1000  # spline is in µm/µm already
         # Actually spline was built with x in µm, residual in µm
         # So spline_deriv is already in µm/µm, no need to divide
         return plane_slope + float(spline_deriv(x_um))
@@ -194,14 +193,14 @@ def run_curve_tracking_test(
     x_distance_um = x_end - x_start
     expected_duration_s = x_distance_um / x_speed_um_s
 
-    print(f"Z Curve Tracking Test")
-    print(f"=" * 60)
+    print("Z Curve Tracking Test")
+    print("=" * 60)
     print(f"Surface: {surface_name} (Y={surface['y_um']} µm)")
-    print(f"X range: {x_start:.0f} -> {x_end:.0f} µm ({x_distance_um/1000:.1f} mm)")
+    print(f"X range: {x_start:.0f} -> {x_end:.0f} µm ({x_distance_um / 1000:.1f} mm)")
     print(f"X speed: {x_speed_mm_s:.1f} mm/s")
     print(f"Expected duration: {expected_duration_s:.2f} s")
     print()
-    print(f"Profile info:")
+    print("Profile info:")
     print(f"  Z range: {profile_info['z_range_um'][0]:.1f} - {profile_info['z_range_um'][1]:.1f} µm")
     print(f"  Z delta: {profile_info['z_delta_um']:+.1f} µm")
     print(f"  Max gradient: {profile_info['max_gradient_um_per_mm']:.2f} µm/mm")
@@ -217,13 +216,13 @@ def run_curve_tracking_test(
     z_min_expected = float(z_test_values.min())
     z_max_expected = float(z_test_values.max())
 
-    print(f"SAFETY CHECK:")
+    print("SAFETY CHECK:")
     print(f"  Expected Z range: {z_min_expected:.0f} - {z_max_expected:.0f} µm")
     print(f"  Z hard limit: {z_max_um:.0f} µm")
 
     if z_max_expected > z_max_um:
         print(f"  ABORT: Expected max Z ({z_max_expected:.0f}) exceeds limit ({z_max_um:.0f})")
-        print(f"  Increase z_safe_um or z_max_um to proceed.")
+        print("  Increase z_safe_um or z_max_um to proceed.")
         return {"error": f"Pre-flight check failed: max Z {z_max_expected:.0f} > limit {z_max_um:.0f}"}
 
     margin = z_max_um - z_max_expected
@@ -376,7 +375,7 @@ def run_curve_tracking_test(
                         time.sleep(sleep_time)
 
             # Start polling threads
-            print(f"\nStarting position polling...")
+            print("\nStarting position polling...")
             x_thread = threading.Thread(target=poll_x, daemon=True)
             z_thread = threading.Thread(target=poll_z, daemon=True)
             x_thread.start()
@@ -384,11 +383,11 @@ def run_curve_tracking_test(
             time.sleep(0.1)
 
             # Record pre-motion samples
-            x_samples_at_start = len(x_samples)
-            z_samples_at_start = len(z_samples)
+            len(x_samples)
+            len(z_samples)
 
             # Start X and Z simultaneously - no prewarm!
-            print(f"\nStarting synchronized X+Z motion...")
+            print("\nStarting synchronized X+Z motion...")
             t_motion_start = time.perf_counter()
             stage.x.start_towards_max(x_speed_um_s)
 
@@ -420,8 +419,8 @@ def run_curve_tracking_test(
             z_drive.halt()
 
             motion_duration = t_motion_end - t_motion_start
-            print(f"\nMotion complete!")
-            print(f"  Duration: {motion_duration*1000:.0f} ms (expected: {expected_duration_s*1000:.0f} ms)")
+            print("\nMotion complete!")
+            print(f"  Duration: {motion_duration * 1000:.0f} ms (expected: {expected_duration_s * 1000:.0f} ms)")
 
             # Brief settling period
             time.sleep(0.1)
@@ -442,13 +441,13 @@ def run_curve_tracking_test(
 
         finally:
             # Restore position
-            print(f"\nRestoring initial position...")
+            print("\nRestoring initial position...")
             z_drive.move_to(initial_z)
             stage.x.move_to(initial_x)
             print(f"  Restored to: X={stage.x.position_um:.0f}, Z={z_drive.position_um:.0f} µm")
 
     # Analyze tracking error
-    print(f"\nAnalyzing tracking error...")
+    print("\nAnalyzing tracking error...")
 
     x_t = np.array([s[0] - t_motion_start for s in x_samples])
     x_pos = np.array([s[1] for s in x_samples])
@@ -475,13 +474,13 @@ def run_curve_tracking_test(
         error_max = float(np.max(np.abs(z_error_cv)))
         error_p95 = float(np.percentile(np.abs(z_error_cv), 95))
     else:
-        error_mean = error_std = error_max = error_p95 = float('nan')
+        error_mean = error_std = error_max = error_p95 = float("nan")
         print("  WARNING: Not enough samples in constant velocity region")
 
     dof_20x = 4.0  # µm
     within_dof = error_max < dof_20x
 
-    print(f"\nTracking Error (constant velocity region):")
+    print("\nTracking Error (constant velocity region):")
     print(f"  Mean: {error_mean:+.2f} µm")
     print(f"  Std: {error_std:.2f} µm")
     print(f"  Max: {error_max:.2f} µm")
@@ -537,10 +536,7 @@ def run_curve_tracking_test(
         },
         "x_samples": [{"t": s[0], "x_um": s[1]} for s in x_samples],
         "z_samples": [{"t": s[0], "z_um": s[1]} for s in z_samples],
-        "control_log": [
-            {"t": c[0], "x_um": c[1], "z_target_um": c[2], "z_vel_um_s": c[3]}
-            for c in control_log
-        ],
+        "control_log": [{"t": c[0], "x_um": c[1], "z_target_um": c[2], "z_vel_um_s": c[3]} for c in control_log],
     }
 
     if output_path:
@@ -556,34 +552,17 @@ def main():
         description="Test Z axis tracking of curved surface profiles",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    parser.add_argument("--surface", choices=["top", "middle"], default="top", help="Surface profile to track")
+    parser.add_argument("--x-speed", type=float, default=10.0, help="X velocity in mm/s")
     parser.add_argument(
-        "--surface", choices=["top", "middle"], default="top",
-        help="Surface profile to track"
+        "--z-safe", type=float, default=20000.0, help="Safe Z offset (µm) - shifts profile to start here"
     )
+    parser.add_argument("--z-max", type=float, default=22000.0, help="Hard Z limit (µm) - emergency halt if exceeded")
+    parser.add_argument("--control-rate", type=float, default=50.0, help="Z velocity update rate (Hz)")
     parser.add_argument(
-        "--x-speed", type=float, default=10.0,
-        help="X velocity in mm/s"
+        "--feedforward", type=float, default=50.0, help="Feedforward time (ms) to compensate for Z response lag"
     )
-    parser.add_argument(
-        "--z-safe", type=float, default=20000.0,
-        help="Safe Z offset (µm) - shifts profile to start here"
-    )
-    parser.add_argument(
-        "--z-max", type=float, default=22000.0,
-        help="Hard Z limit (µm) - emergency halt if exceeded"
-    )
-    parser.add_argument(
-        "--control-rate", type=float, default=50.0,
-        help="Z velocity update rate (Hz)"
-    )
-    parser.add_argument(
-        "--feedforward", type=float, default=50.0,
-        help="Feedforward time (ms) to compensate for Z response lag"
-    )
-    parser.add_argument(
-        "-o", "--output", type=Path, default=None,
-        help="Output JSON path"
-    )
+    parser.add_argument("-o", "--output", type=Path, default=None, help="Output JSON path")
     args = parser.parse_args()
 
     # Generate output path if not specified

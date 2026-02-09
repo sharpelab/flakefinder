@@ -27,33 +27,19 @@ def main():
         description="Continuous Z-scan autofocus demo",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
-        "--x", type=float, default=None, help="Stage X position (um), default: current"
-    )
-    parser.add_argument(
-        "--y", type=float, default=None, help="Stage Y position (um), default: current"
-    )
-    parser.add_argument(
-        "--z", type=float, default=None, help="Initial Z position (um), default: current"
-    )
-    parser.add_argument(
-        "--range", type=float, default=None, help="Z scan range (um), default: auto from objective"
-    )
+    parser.add_argument("--x", type=float, default=None, help="Stage X position (um), default: current")
+    parser.add_argument("--y", type=float, default=None, help="Stage Y position (um), default: current")
+    parser.add_argument("--z", type=float, default=None, help="Initial Z position (um), default: current")
+    parser.add_argument("--range", type=float, default=None, help="Z scan range (um), default: auto from objective")
     parser.add_argument(
         "--z-speed",
         type=float,
         default=None,
         help="Z axis speed (um/s), default: use current. Slower = more frames.",
     )
-    parser.add_argument(
-        "--output", "-o", type=str, default=None, help="Output directory for photos (optional)"
-    )
-    parser.add_argument(
-        "--debug-dir", type=str, default=None, help="Save all scan frames to this directory"
-    )
-    parser.add_argument(
-        "--fine", action="store_true", help="Two-pass: coarse scan then fine 50um scan"
-    )
+    parser.add_argument("--output", "-o", type=str, default=None, help="Output directory for photos (optional)")
+    parser.add_argument("--debug-dir", type=str, default=None, help="Save all scan frames to this directory")
+    parser.add_argument("--fine", action="store_true", help="Two-pass: coarse scan then fine 50um scan")
     parser.add_argument(
         "--fine-speed-factor",
         type=float,
@@ -77,9 +63,7 @@ def main():
         default=0.2,
         help="Settle time in seconds after final Z move (default: 0.2)",
     )
-    parser.add_argument(
-        "--dry-run", action="store_true", help="Print what would be done without moving"
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Print what would be done without moving")
     parser.add_argument(
         "--all-metrics",
         action="store_true",
@@ -90,9 +74,7 @@ def main():
         action="store_true",
         help="Remove existing output/debug directories before running",
     )
-    parser.add_argument(
-        "--exposure-ms", type=float, default=None, help="Exposure time in ms (default: 1.0)"
-    )
+    parser.add_argument("--exposure-ms", type=float, default=None, help="Exposure time in ms (default: 1.0)")
     parser.add_argument("--gain", type=float, default=None, help="Camera gain (default: unchanged)")
     parser.add_argument(
         "--white-balance",
@@ -100,9 +82,7 @@ def main():
         default=None,
         help="White balance as B,G,R gains (e.g., 2.51,1.02,1.41)",
     )
-    parser.add_argument(
-        "--gamma", type=float, default=None, help="Gamma correction (default: unchanged)"
-    )
+    parser.add_argument("--gamma", type=float, default=None, help="Gamma correction (default: unchanged)")
     parser.add_argument(
         "--quiet",
         "-q",
@@ -190,9 +170,7 @@ def main():
         current_x, current_y = stage.position_um
         current_z = z_drive.position_um
 
-        vprint(
-            f"Current position: X={current_x:.1f} um, Y={current_y:.1f} um, Z={current_z:.1f} um"
-        )
+        vprint(f"Current position: X={current_x:.1f} um, Y={current_y:.1f} um, Z={current_z:.1f} um")
         vprint()
 
         # Use current positions as defaults
@@ -202,11 +180,7 @@ def main():
 
         vprint(f"Target position: X={target_x:.1f} um, Y={target_y:.1f} um")
         vprint(f"Initial Z: {target_z:.1f} um")
-        vprint(
-            f"Scan range: {args.range:.1f} um"
-            if args.range
-            else "Scan range: auto (from objective)"
-        )
+        vprint(f"Scan range: {args.range:.1f} um" if args.range else "Scan range: auto (from objective)")
         if args.output:
             vprint(f"Output: {args.output}/")
         vprint()
@@ -335,9 +309,7 @@ def main():
 
         # Sharpness stats (combine coarse + fine + super_fine)
         all_sharpness = (
-            af_result.sharpness_curve
-            + af_result.fine_sharpness_curve
-            + af_result.super_fine_sharpness_curve
+            af_result.sharpness_curve + af_result.fine_sharpness_curve + af_result.super_fine_sharpness_curve
         )
         sharpness_values = [r["sharpness"] for r in all_sharpness]
         min_sharpness = min(sharpness_values) if sharpness_values else 0
@@ -350,9 +322,7 @@ def main():
         vprint(f"  Selected sharpness: {af_result.selected_sharpness:.2f}")
         if af_result.stayed_at_initial:
             vprint("  ** Stayed at initial (scan found nothing better) **")
-            vprint(
-                f"     Scan best: Z={af_result.scan_best_z_um:.2f}, sharpness={af_result.scan_best_sharpness:.2f}"
-            )
+            vprint(f"     Scan best: Z={af_result.scan_best_z_um:.2f}, sharpness={af_result.scan_best_sharpness:.2f}")
             vprint(f"     Dynamic range: {af_result.dynamic_range:.4f}")
 
         # Find best frame for saving — check coarse and fine separately
@@ -471,12 +441,8 @@ def main():
             vprint("AUTOFOCUS SUMMARY")
             vprint("=" * 50)
             vprint(f"Initial Z:    {target_z:.2f} um (sharpness: {before_sharpness:.2f})")
-            vprint(
-                f"Selected Z:   {af_result.selected_z_um:.2f} um (sharpness: {af_result.selected_sharpness:.2f})"
-            )
-            vprint(
-                f"After Z:      {af_result.selected_z_um:.2f} um (sharpness: {after_sharpness:.2f})"
-            )
+            vprint(f"Selected Z:   {af_result.selected_z_um:.2f} um (sharpness: {af_result.selected_sharpness:.2f})")
+            vprint(f"After Z:      {af_result.selected_z_um:.2f} um (sharpness: {after_sharpness:.2f})")
             vprint(f"Z adjustment: {af_result.selected_z_um - target_z:+.2f} um")
             if before_sharpness > 0:
                 improvement = after_sharpness - before_sharpness

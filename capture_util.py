@@ -83,9 +83,7 @@ def main() -> int:
         choices=[0, 1, 2],
         help="Binning level: 0=1x1, 1=2x2, 2=3x3 (default: 2)",
     )
-    parser.add_argument(
-        "--downsample", type=int, default=1, help="Downsample factor after capture (default: 1)"
-    )
+    parser.add_argument("--downsample", type=int, default=1, help="Downsample factor after capture (default: 1)")
     parser.add_argument(
         "--exposure",
         type=float,

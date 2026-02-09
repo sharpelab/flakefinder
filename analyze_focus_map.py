@@ -217,9 +217,7 @@ def plot_focus_map(data: dict, analysis: dict, output_path: Path, quiet: bool = 
     Z_surf = griddata((x, y), z, (X_surf, Y_surf), method="cubic")
 
     # Plot interpolated surface
-    surf = ax1.plot_surface(
-        X_surf, Y_surf, Z_surf, cmap="viridis", alpha=0.8, linewidth=0, antialiased=True
-    )
+    surf = ax1.plot_surface(X_surf, Y_surf, Z_surf, cmap="viridis", alpha=0.8, linewidth=0, antialiased=True)
 
     # Overlay sample points
     colors = ["red" if t == "contour" else "white" for t in analysis["types"]]
@@ -268,9 +266,7 @@ def plot_focus_map(data: dict, analysis: dict, output_path: Path, quiet: bool = 
     plt.colorbar(scatter, ax=ax4, label="Sharpness")
     ax4.set_xlabel("X (mm)")
     ax4.set_ylabel("Y (mm)")
-    ax4.set_title(
-        f"Sharpness Map (mean={analysis['sharpness_mean']:.1f}, std={analysis['sharpness_std']:.1f})"
-    )
+    ax4.set_title(f"Sharpness Map (mean={analysis['sharpness_mean']:.1f}, std={analysis['sharpness_std']:.1f})")
     ax4.set_aspect("equal")
     ax4.invert_yaxis()
     annotate_points(ax4, x, y, labels)
@@ -358,9 +354,7 @@ def print_report(data: dict, analysis: dict) -> None:
     print(f"Valid points: {analysis['n_valid']}")
 
     print("\n--- Z Statistics ---")
-    print(
-        f"Z range: {analysis['z_min']:.1f} - {analysis['z_max']:.1f} µm ({analysis['z_range']:.1f} µm total)"
-    )
+    print(f"Z range: {analysis['z_min']:.1f} - {analysis['z_max']:.1f} µm ({analysis['z_range']:.1f} µm total)")
     print(f"Z mean: {analysis['z_mean']:.1f} µm")
     print(f"Z std: {analysis['z_std']:.1f} µm")
 
@@ -401,10 +395,7 @@ def print_report(data: dict, analysis: dict) -> None:
         for idx in outliers:
             p = valid_points[idx]
             res = analysis["residuals"][idx]
-            print(
-                f"  {p['type']} {p['index']}: Z={p['selected']['z_um']:.1f} µm, "
-                f"residual={res:+.1f} µm"
-            )
+            print(f"  {p['type']} {p['index']}: Z={p['selected']['z_um']:.1f} µm, residual={res:+.1f} µm")
     else:
         print("No Z outliers detected.")
 
@@ -417,10 +408,7 @@ def print_report(data: dict, analysis: dict) -> None:
             sel = get_sharpness(p) or 0
             final = p.get("final_sharpness", 0)
             drift_pct = abs(sel - final) / sel * 100 if sel > 0 else 0
-            print(
-                f"  {p['type']} {p['index']}: selected={sel:.1f}, final={final:.1f} "
-                f"({drift_pct:+.0f}%)"
-            )
+            print(f"  {p['type']} {p['index']}: selected={sel:.1f}, final={final:.1f} ({drift_pct:+.0f}%)")
     else:
         print("No sharpness drift detected.")
 
@@ -632,9 +620,7 @@ def create_mosaic(
 
         # Draw semi-transparent background
         overlay = canvas.copy()
-        cv2.rectangle(
-            overlay, (x0 + 2, y0 + 2), (x0 + bg_width + 2, y0 + bg_height + 2), (0, 0, 0), -1
-        )
+        cv2.rectangle(overlay, (x0 + 2, y0 + 2), (x0 + bg_width + 2, y0 + bg_height + 2), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.6, canvas, 0.4, 0, canvas)
 
         # Draw text lines
@@ -907,9 +893,7 @@ def compute_robust_plane_fit(
 
     # Compute quality metrics
     drift_pct = np.clip((sel_sharpness - final_sharpness) / sel_sharpness * 100, 0, 100)
-    coarse_best_z = np.array(
-        [p.get("coarse", {}).get("best_z_um", p["selected"]["z_um"]) for p in points]
-    )
+    coarse_best_z = np.array([p.get("coarse", {}).get("best_z_um", p["selected"]["z_um"]) for p in points])
     coarse_fine_diff = np.abs(coarse_best_z - z)
 
     # High-confidence mask: low coarse-fine disagreement AND above sharpness floor
@@ -952,9 +936,7 @@ def compute_robust_plane_fit(
 
     for corner_name, (cx, cy) in corners.items():
         # Check if any high-confidence point is near this corner
-        near_corner = (np.abs(x_hc - cx) < corner_margin_um) & (
-            np.abs(y_hc - cy) < corner_margin_um
-        )
+        near_corner = (np.abs(x_hc - cx) < corner_margin_um) & (np.abs(y_hc - cy) < corner_margin_um)
         if near_corner.any():
             corners_covered.append(corner_name)
         else:
@@ -1012,9 +994,7 @@ def compute_robust_plane_fit(
                 "y_um": float(y[i]),
                 "z_um": float(z[i]),
                 "selected_sharpness": float(sel_sharpness[i]),
-                "reason": "low_sharpness"
-                if sel_sharpness[i] < min_sharpness
-                else "cf_disagreement",
+                "reason": "low_sharpness" if sel_sharpness[i] < min_sharpness else "cf_disagreement",
             }
             for i in range(len(points))
             if not high_conf_mask[i]
@@ -1134,9 +1114,7 @@ def plot_contour_map(result: dict, output_path: Path, quiet: bool = False) -> No
         print(f"Contour map saved to {output_path}")
 
 
-def export_plane(
-    data: dict, output_path: Path, cf_threshold: float = 20.0, min_sharpness: float = 0.0
-) -> dict:
+def export_plane(data: dict, output_path: Path, cf_threshold: float = 20.0, min_sharpness: float = 0.0) -> dict:
     """Export robust plane fit to JSON file.
 
     Args:
@@ -1286,9 +1264,7 @@ def main():
             print("=" * 60)
             print("ROBUST PLANE FIT EXPORT")
             print("=" * 60)
-            print(
-                f"Points used: {q['points_used']}/{q['points_total']} (CF <= {q['cf_threshold_um']} um)"
-            )
+            print(f"Points used: {q['points_used']}/{q['points_total']} (CF <= {q['cf_threshold_um']} um)")
             print(f"R²: {q['r_squared']:.4f}")
             print(f"Residual std: {q['residual_std_um']:.2f} um")
             print(f"Residual max: {q['residual_max_um']:.2f} um")
@@ -1296,21 +1272,15 @@ def main():
             print(f"Plane: {result['plane']['equation']}")
             print(f"Tilt: {t['magnitude_um_per_mm']:.2f} um/mm")
             print()
-            print(
-                f"Coverage X: {c['x_range_um'][0] / 1000:.1f} - {c['x_range_um'][1] / 1000:.1f} mm"
-            )
-            print(
-                f"Coverage Y: {c['y_range_um'][0] / 1000:.1f} - {c['y_range_um'][1] / 1000:.1f} mm"
-            )
+            print(f"Coverage X: {c['x_range_um'][0] / 1000:.1f} - {c['x_range_um'][1] / 1000:.1f} mm")
+            print(f"Coverage Y: {c['y_range_um'][0] / 1000:.1f} - {c['y_range_um'][1] / 1000:.1f} mm")
             print(f"Corners covered: {', '.join(c['corners_covered']) or 'none'}")
             print(f"Corners extrapolated: {', '.join(c['corners_extrapolated']) or 'none'}")
             print()
             print(f"Exported to: {args.export_plane}")
 
         # Generate contour map
-        contour_path = args.export_plane.with_name(
-            args.export_plane.stem.replace("_plane", "") + "_contour.png"
-        )
+        contour_path = args.export_plane.with_name(args.export_plane.stem.replace("_plane", "") + "_contour.png")
         plot_contour_map(result, contour_path, quiet=args.quiet)
 
     return 0

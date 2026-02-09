@@ -89,13 +89,15 @@ def main():
         print(f"    Range:    {min(regular_samples):.2f} - {max(regular_samples):.2f} um")
 
         print(f"\n  Hysteresis-corrected interface ({n_samples} reads):")
-        print(f"    Position: {statistics.mean(hysteresis_samples):.2f} ± {statistics.stdev(hysteresis_samples):.3f} um")
+        print(
+            f"    Position: {statistics.mean(hysteresis_samples):.2f} ± {statistics.stdev(hysteresis_samples):.3f} um"
+        )
         print(f"    Latency:  {statistics.mean(hysteresis_times):.2f} ± {statistics.stdev(hysteresis_times):.2f} ms")
         print(f"    Range:    {min(hysteresis_samples):.2f} - {max(hysteresis_samples):.2f} um")
 
         # Compute differences
-        diffs = [h - r for r, h in zip(regular_samples, hysteresis_samples)]
-        print(f"\n  Difference (hysteresis - regular):")
+        diffs = [h - r for r, h in zip(regular_samples, hysteresis_samples, strict=False)]
+        print("\n  Difference (hysteresis - regular):")
         print(f"    Mean:  {statistics.mean(diffs):+.3f} um")
         print(f"    Std:   {statistics.stdev(diffs):.3f} um")
         print(f"    Range: {min(diffs):+.3f} to {max(diffs):+.3f} um")
@@ -139,9 +141,9 @@ def main():
 
         if len(motion_regular) > 10:
             # Compute instantaneous differences
-            motion_diffs = [h - r for r, h in zip(motion_regular, motion_hysteresis)]
+            motion_diffs = [h - r for r, h in zip(motion_regular, motion_hysteresis, strict=False)]
 
-            print(f"\n  Difference during upward motion:")
+            print("\n  Difference during upward motion:")
             print(f"    Mean:  {statistics.mean(motion_diffs):+.3f} um")
             print(f"    Std:   {statistics.stdev(motion_diffs):.3f} um")
             print(f"    Range: {min(motion_diffs):+.3f} to {max(motion_diffs):+.3f} um")
@@ -172,9 +174,9 @@ def main():
         print(f"  Collected {len(motion_down_regular)} sample pairs during downward motion")
 
         if len(motion_down_regular) > 10:
-            motion_down_diffs = [h - r for r, h in zip(motion_down_regular, motion_down_hysteresis)]
+            motion_down_diffs = [h - r for r, h in zip(motion_down_regular, motion_down_hysteresis, strict=False)]
 
-            print(f"\n  Difference during downward motion:")
+            print("\n  Difference during downward motion:")
             print(f"    Mean:  {statistics.mean(motion_down_diffs):+.3f} um")
             print(f"    Std:   {statistics.stdev(motion_down_diffs):.3f} um")
             print(f"    Range: {min(motion_down_diffs):+.3f} to {max(motion_down_diffs):+.3f} um")
@@ -185,15 +187,15 @@ def main():
             down_mean = statistics.mean(motion_down_diffs)
             direction_shift = down_mean - up_mean
 
-            print(f"\n  Direction-dependent offset:")
+            print("\n  Direction-dependent offset:")
             print(f"    Upward mean diff:   {up_mean:+.3f} um")
             print(f"    Downward mean diff: {down_mean:+.3f} um")
             print(f"    Shift on reversal:  {direction_shift:+.3f} um")
 
             if abs(direction_shift) > 0.5:
-                print(f"    -> Hysteresis correction IS active (shift > 0.5 um)")
+                print("    -> Hysteresis correction IS active (shift > 0.5 um)")
             else:
-                print(f"    -> No significant hysteresis correction detected")
+                print("    -> No significant hysteresis correction detected")
 
         # =================================================================
         # Test 4: Rapid alternating reads (SDK contention test)
@@ -202,7 +204,6 @@ def main():
         print("-" * 60)
 
         n_pairs = 200
-        pair_times = []
 
         t0 = time.perf_counter()
         for _ in range(n_pairs):
@@ -217,7 +218,7 @@ def main():
         print(f"  {n_pairs} pairs (regular + hysteresis) in {total_ms:.0f} ms")
         print(f"  Per pair: {per_pair_ms:.2f} ms")
         print(f"  Effective rate: {effective_hz:.1f} pairs/s")
-        print(f"  -> Each interface call: ~{per_pair_ms/2:.2f} ms (no extra overhead)")
+        print(f"  -> Each interface call: ~{per_pair_ms / 2:.2f} ms (no extra overhead)")
 
         # =================================================================
         # Summary
@@ -229,24 +230,26 @@ def main():
         static_jitter_regular = statistics.stdev(regular_samples)
         static_jitter_hysteresis = statistics.stdev(hysteresis_samples)
 
-        print(f"\n  Static jitter:")
+        print("\n  Static jitter:")
         print(f"    Regular:    {static_jitter_regular:.3f} um")
         print(f"    Hysteresis: {static_jitter_hysteresis:.3f} um")
 
         if static_jitter_hysteresis < static_jitter_regular * 0.9:
-            print(f"    -> Hysteresis interface has {(1 - static_jitter_hysteresis/static_jitter_regular)*100:.0f}% less jitter")
+            print(
+                f"    -> Hysteresis interface has {(1 - static_jitter_hysteresis / static_jitter_regular) * 100:.0f}% less jitter"  # noqa: E501
+            )
         elif static_jitter_hysteresis > static_jitter_regular * 1.1:
-            print(f"    -> Hysteresis interface has MORE jitter (unexpected)")
+            print("    -> Hysteresis interface has MORE jitter (unexpected)")
         else:
-            print(f"    -> Similar jitter levels")
+            print("    -> Similar jitter levels")
 
-        print(f"\n  Latency:")
+        print("\n  Latency:")
         print(f"    Regular:    {statistics.mean(regular_times):.2f} ms")
         print(f"    Hysteresis: {statistics.mean(hysteresis_times):.2f} ms")
 
         latency_diff = statistics.mean(hysteresis_times) - statistics.mean(regular_times)
         if abs(latency_diff) < 0.5:
-            print(f"    -> Same latency (no extra overhead)")
+            print("    -> Same latency (no extra overhead)")
         else:
             print(f"    -> Hysteresis is {latency_diff:+.1f} ms different")
 

@@ -37,7 +37,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-
 # Defaults
 DEFAULT_AREA_RECT = "8000,95000,0,75000"
 DEFAULT_INITIAL_Z = 24690
@@ -170,51 +169,76 @@ Examples:
 """,
     )
     parser.add_argument(
-        "-o", "--output", type=str, default=None,
+        "-o",
+        "--output",
+        type=str,
+        default=None,
         help="Run directory (default: scans/run_YYYYMMDD_HHMM/)",
     )
     parser.add_argument(
-        "--area-rect", type=str, default=DEFAULT_AREA_RECT,
+        "--area-rect",
+        type=str,
+        default=DEFAULT_AREA_RECT,
         help=f"Scan area x_min,x_max,y_min,y_max in µm (default: {DEFAULT_AREA_RECT})",
     )
     parser.add_argument(
-        "--initial-z", type=float, default=DEFAULT_INITIAL_Z,
+        "--initial-z",
+        type=float,
+        default=DEFAULT_INITIAL_Z,
         help=f"Z position before overview in µm (default: {DEFAULT_INITIAL_Z})",
     )
     parser.add_argument(
-        "--chips", type=str, default=None,
+        "--chips",
+        type=str,
+        default=None,
         help="Comma-separated chip indices to process (default: all)",
     )
     parser.add_argument(
-        "--after", type=int, default=None, metavar="N",
+        "--after",
+        type=int,
+        default=None,
+        metavar="N",
         help="Skip chips with index <= N (applied after --chips filter)",
     )
     parser.add_argument(
-        "--limit", type=int, default=None, metavar="N",
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
         help="Process at most N chips (applied after --after filter)",
     )
     parser.add_argument(
-        "--scan-speed", type=float, default=DEFAULT_SCAN_SPEED,
+        "--scan-speed",
+        type=float,
+        default=DEFAULT_SCAN_SPEED,
         help=f"20x scan speed in mm/s (default: {DEFAULT_SCAN_SPEED})",
     )
     parser.add_argument(
-        "--scan-z-speed", type=float, default=DEFAULT_SCAN_Z_SPEED,
+        "--scan-z-speed",
+        type=float,
+        default=DEFAULT_SCAN_Z_SPEED,
         help=f"Focus map AF Z speed in µm/s (default: {DEFAULT_SCAN_Z_SPEED})",
     )
     parser.add_argument(
-        "--chip-padding", type=float, default=DEFAULT_CHIP_PADDING,
+        "--chip-padding",
+        type=float,
+        default=DEFAULT_CHIP_PADDING,
         help=f"Chip scan padding in µm (default: {DEFAULT_CHIP_PADDING})",
     )
     parser.add_argument(
-        "--notes", type=str, default=None,
+        "--notes",
+        type=str,
+        default=None,
         help="Free-text notes stored in checkpoint.json",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Print commands without running them",
     )
     parser.add_argument(
-        "--pause", action="store_true",
+        "--pause",
+        action="store_true",
         help="Prompt for confirmation before each step",
     )
     args = parser.parse_args()
@@ -231,7 +255,7 @@ Examples:
     # Stitch output is placed by stitch_area.py as <scan_dir>_stitch.jpg
     # in the parent of the scan dir, i.e. run_dir/overview_5x_stitch.jpg
     stitch_path = run_dir / "overview_5x_stitch.jpg"
-    stitch_meta_path = run_dir / "overview_5x_stitch_meta.json"
+    run_dir / "overview_5x_stitch_meta.json"
     chips_json_path = run_dir / "overview_5x_stitch_chips.json"
 
     # Parse chip filter
@@ -254,9 +278,9 @@ Examples:
     if args.limit is not None:
         print(f"Limit:         {args.limit}")
     if args.dry_run:
-        print(f"Mode:          DRY RUN")
+        print("Mode:          DRY RUN")
     if args.pause:
-        print(f"Mode:          PAUSE between steps")
+        print("Mode:          PAUSE between steps")
 
     # Create run directory
     if not args.dry_run:
@@ -282,17 +306,25 @@ Examples:
     # Step 1: 5x overview scan (includes initial Z move via --z)
     # ----------------------------------------------------------------
     if step_done(checkpoint, "overview_scan"):
-        print(f"\n  [checkpoint] Skipping 5x Overview Scan (already complete)")
+        print("\n  [checkpoint] Skipping 5x Overview Scan (already complete)")
     else:
         duration, _ = run_step(
             "5x Overview Scan",
             [
-                "uv", "run", "python", "scan_area_v1.py",
-                "-o", str(overview_dir),
-                "--objective-mag", "5x",
-                "--z", str(args.initial_z),
-                "--area-rect", args.area_rect,
-                "--downsample", "4",
+                "uv",
+                "run",
+                "python",
+                "scan_area_v1.py",
+                "-o",
+                str(overview_dir),
+                "--objective-mag",
+                "5x",
+                "--z",
+                str(args.initial_z),
+                "--area-rect",
+                args.area_rect,
+                "--downsample",
+                "4",
                 "--clean",
             ],
             dry_run=args.dry_run,
@@ -305,12 +337,15 @@ Examples:
     # Step 2: Stitch overview
     # ----------------------------------------------------------------
     if step_done(checkpoint, "stitch"):
-        print(f"\n  [checkpoint] Skipping Stitch Overview (already complete)")
+        print("\n  [checkpoint] Skipping Stitch Overview (already complete)")
     else:
         duration, _ = run_step(
             "Stitch Overview",
             [
-                "uv", "run", "python", "stitch_area.py",
+                "uv",
+                "run",
+                "python",
+                "stitch_area.py",
                 str(overview_dir),
             ],
             dry_run=args.dry_run,
@@ -323,12 +358,15 @@ Examples:
     # Step 3: Detect chips
     # ----------------------------------------------------------------
     if step_done(checkpoint, "detect_chips"):
-        print(f"\n  [checkpoint] Skipping Detect Chips (already complete)")
+        print("\n  [checkpoint] Skipping Detect Chips (already complete)")
     else:
         duration, _ = run_step(
             "Detect Chips",
             [
-                "uv", "run", "python", "find_chips.py",
+                "uv",
+                "run",
+                "python",
+                "find_chips.py",
                 str(stitch_path),
             ],
             dry_run=args.dry_run,
@@ -347,13 +385,17 @@ Examples:
     # Step 4: Switch to 20x for focus mapping and chip scans
     # ----------------------------------------------------------------
     if step_done(checkpoint, "switch_20x"):
-        print(f"\n  [checkpoint] Skipping Switch to 20x (already complete)")
+        print("\n  [checkpoint] Skipping Switch to 20x (already complete)")
     else:
         duration, _ = run_step(
             "Switch to 20x",
             [
-                "uv", "run", "python", "stage_util.py",
-                "--objective-mag", "20x",
+                "uv",
+                "run",
+                "python",
+                "stage_util.py",
+                "--objective-mag",
+                "20x",
             ],
             dry_run=args.dry_run,
             pause=args.pause,
@@ -369,7 +411,7 @@ Examples:
         if args.after is not None:
             chip_indices = [i for i in chip_indices if i > args.after]
         if args.limit is not None:
-            chip_indices = chip_indices[:args.limit]
+            chip_indices = chip_indices[: args.limit]
         print(f"\n  [dry-run] Would process chips: {chip_indices} (showing as example)")
     else:
         with open(chips_json_path) as f:
@@ -397,7 +439,7 @@ Examples:
 
         # 3. Apply --limit: cap count
         if args.limit is not None and len(chip_indices) > args.limit:
-            chip_indices = chip_indices[:args.limit]
+            chip_indices = chip_indices[: args.limit]
             print(f"  --limit {args.limit}: capped to {args.limit} chip(s)")
 
         print(f"Processing chips: {chip_indices}")
@@ -431,13 +473,21 @@ Examples:
             duration, _ = run_step(
                 f"Chip {chip_idx} - Focus Map",
                 [
-                    "uv", "run", "python", "focus_map.py",
-                    "--chips-meta", str(chips_json_path),
-                    "--chip", str(chip_idx),
+                    "uv",
+                    "run",
+                    "python",
+                    "focus_map.py",
+                    "--chips-meta",
+                    str(chips_json_path),
+                    "--chip",
+                    str(chip_idx),
                     "--save-images",
-                    "--z-speed", str(int(args.scan_z_speed)),
-                    "--af-settle", "0.2",
-                    "--output-dir", str(chip_dir),
+                    "--z-speed",
+                    str(int(args.scan_z_speed)),
+                    "--af-settle",
+                    "0.2",
+                    "--output-dir",
+                    str(chip_dir),
                 ],
                 dry_run=args.dry_run,
                 pause=args.pause,
@@ -452,10 +502,15 @@ Examples:
             duration, _ = run_step(
                 f"Chip {chip_idx} - Analyze Focus Map",
                 [
-                    "uv", "run", "python", "analyze_focus_map.py",
+                    "uv",
+                    "run",
+                    "python",
+                    "analyze_focus_map.py",
                     str(focus_map_path),
-                    "--export-plane", str(plane_path),
-                    "--min-sharpness", "20",
+                    "--export-plane",
+                    str(plane_path),
+                    "--min-sharpness",
+                    "20",
                     "-q",
                 ],
                 dry_run=args.dry_run,
@@ -471,14 +526,24 @@ Examples:
             duration, _ = run_step(
                 f"Chip {chip_idx} - 20x Scan",
                 [
-                    "uv", "run", "python", "scan_chip.py",
-                    "-o", str(scan_20x_dir),
-                    "--chips-meta", str(chips_json_path),
-                    "--chip", str(chip_idx),
-                    "--plane", str(plane_path),
-                    "--objective-mag", "20x",
-                    "--padding", str(int(args.chip_padding)),
-                    "--speed-mm", str(args.scan_speed),
+                    "uv",
+                    "run",
+                    "python",
+                    "scan_chip.py",
+                    "-o",
+                    str(scan_20x_dir),
+                    "--chips-meta",
+                    str(chips_json_path),
+                    "--chip",
+                    str(chip_idx),
+                    "--plane",
+                    str(plane_path),
+                    "--objective-mag",
+                    "20x",
+                    "--padding",
+                    str(int(args.chip_padding)),
+                    "--speed-mm",
+                    str(args.scan_speed),
                     "--clean",
                 ],
                 dry_run=args.dry_run,

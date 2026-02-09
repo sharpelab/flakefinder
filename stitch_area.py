@@ -159,9 +159,9 @@ def find_constant_velocity_frames(frames):
         return 0, len(frames), 0
 
     # Estimate velocity from median delta and frame timing
-    avg_dt = sum(
-        frames[i + 1]["t_start"] - frames[i]["t_start"] for i in range(first_cv, last_cv)
-    ) / max(1, last_cv - first_cv)
+    avg_dt = sum(frames[i + 1]["t_start"] - frames[i]["t_start"] for i in range(first_cv, last_cv)) / max(
+        1, last_cv - first_cv
+    )
     velocity = median_delta / avg_dt if avg_dt > 0 else 0
 
     return first_cv, last_cv + 1, velocity
@@ -327,9 +327,7 @@ def stitch_row_to_global(
         if blend:
             is_first = seq_i == 0
             is_last = seq_i == num_work - 1
-            alpha = create_blend_alpha(
-                frame_w, frame_h, blend_width_x, 0, is_first_x=is_first, is_last_x=is_last
-            )
+            alpha = create_blend_alpha(frame_w, frame_h, blend_width_x, 0, is_first_x=is_first, is_last_x=is_last)
         else:
             alpha = Image.new("L", img.size, 128)
         img.putalpha(alpha)
@@ -384,9 +382,7 @@ def main():
         default=1,
         help="Additional downsample factor (e.g., 2 = half resolution)",
     )
-    parser.add_argument(
-        "--rows", type=str, default=None, help="Row range to process (e.g., '0-5' or '10')"
-    )
+    parser.add_argument("--rows", type=str, default=None, help="Row range to process (e.g., '0-5' or '10')")
     # TODO: Investigate source of ~100 µm hysteresis between +X and -X scan directions.
     # Likely candidates: stage backlash, encoder offset, or position readout timing.
     parser.add_argument(
@@ -414,9 +410,7 @@ def main():
         default=4,
         help="Number of threads for parallel frame loading (default: 4)",
     )
-    parser.add_argument(
-        "--bg", type=str, default="black", help="Background color: name or #RRGGBB (default: black)"
-    )
+    parser.add_argument("--bg", type=str, default="black", help="Background color: name or #RRGGBB (default: black)")
     parser.add_argument(
         "--grid-spacing-um",
         type=float,
@@ -429,9 +423,7 @@ def main():
         default="#FFFFFF50",
         help="Grid line color: name or #RRGGBBAA (default: #FFFFFF50)",
     )
-    parser.add_argument(
-        "--grid-line-width", type=int, default=1, help="Grid line width in pixels (default: 1)"
-    )
+    parser.add_argument("--grid-line-width", type=int, default=1, help="Grid line width in pixels (default: 1)")
     parser.add_argument(
         "--smoothing",
         type=str,
@@ -458,9 +450,7 @@ def main():
         meta = json.load(f)
 
     if "rows" not in meta:
-        print(
-            "Error: scan_meta.json has no 'rows' array. Use stitch_position.py for single-row scans."
-        )
+        print("Error: scan_meta.json has no 'rows' array. Use stitch_position.py for single-row scans.")
         return
 
     rows = meta["rows"]
@@ -532,9 +522,7 @@ def main():
     print(f"Processing: {len(rows)} rows")
     print(f"Calibration: {um_per_px:.3f} µm/px (downsample {downsample}x{args.downsample})")
     print(f"Frame: {frame_w}x{frame_h} px = {fov_width_um:.0f}x{fov_height_um:.0f} µm")
-    print(
-        f"Y step: {y_step_um:.0f} µm, Y overlap: {y_overlap_um:.0f} µm ({y_overlap_um / fov_height_um * 100:.0f}%)"
-    )
+    print(f"Y step: {y_step_um:.0f} µm, Y overlap: {y_overlap_um:.0f} µm ({y_overlap_um / fov_height_um * 100:.0f}%)")
 
     # Process each row to find CV regions and global X bounds
     smooth_fn = smooth_positions_savgol if args.smoothing == "savgol" else fit_linear_positions
@@ -574,9 +562,7 @@ def main():
     global_x_max = max(r["x_max"] for r in row_results)
     global_x_range = global_x_max - global_x_min + fov_width_um
 
-    print(
-        f"\nGlobal X bounds: {global_x_min:.0f} - {global_x_max:.0f} µm ({global_x_range:.0f} µm total)"
-    )
+    print(f"\nGlobal X bounds: {global_x_min:.0f} - {global_x_max:.0f} µm ({global_x_range:.0f} µm total)")
 
     # Calculate final canvas dimensions
     n_rows = len(rows)

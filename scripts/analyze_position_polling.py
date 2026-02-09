@@ -88,9 +88,7 @@ def main():
 
     combined_rate = len(samples) / duration
     print(f"  Combined sample rate: {combined_rate:.1f} Hz")
-    print(
-        f"  Expected if no serialization: {combined_rate / num_threads:.1f} Hz × {num_threads} threads"
-    )
+    print(f"  Expected if no serialization: {combined_rate / num_threads:.1f} Hz × {num_threads} threads")
 
     # Check interleaving - compute gaps in the combined stream
     combined_gaps = []
@@ -101,21 +99,13 @@ def main():
 
     if combined_gaps:
         avg_combined_gap_ms = statistics.mean(combined_gaps) * 1000
-        std_combined_gap_ms = (
-            statistics.stdev(combined_gaps) * 1000 if len(combined_gaps) > 1 else 0
-        )
+        std_combined_gap_ms = statistics.stdev(combined_gaps) * 1000 if len(combined_gaps) > 1 else 0
         min_combined_gap_ms = min(combined_gaps) * 1000
         max_combined_gap_ms = max(combined_gaps) * 1000
         median_combined_gap_ms = statistics.median(combined_gaps) * 1000
 
-        print(
-            f"  Combined inter-sample gap: avg={avg_combined_gap_ms:.2f}ms, "
-            f"median={median_combined_gap_ms:.2f}ms"
-        )
-        print(
-            f"    std={std_combined_gap_ms:.2f}ms, min={min_combined_gap_ms:.2f}ms, "
-            f"max={max_combined_gap_ms:.2f}ms"
-        )
+        print(f"  Combined inter-sample gap: avg={avg_combined_gap_ms:.2f}ms, median={median_combined_gap_ms:.2f}ms")
+        print(f"    std={std_combined_gap_ms:.2f}ms, min={min_combined_gap_ms:.2f}ms, max={max_combined_gap_ms:.2f}ms")
 
     # Check for thread interleaving
     print()
@@ -154,11 +144,7 @@ def main():
 
     print(f"  Single thread rate: {single_thread_rate:.1f} Hz")
     print(f"  Combined rate: {combined_rate:.1f} Hz")
-    print(
-        f"  Speedup factor: {combined_rate / single_thread_rate:.2f}x"
-        if single_thread_rate > 0
-        else "  (no data)"
-    )
+    print(f"  Speedup factor: {combined_rate / single_thread_rate:.2f}x" if single_thread_rate > 0 else "  (no data)")
 
     theoretical_max = single_thread_rate * num_threads
     efficiency = (combined_rate / theoretical_max * 100) if theoretical_max > 0 else 0
@@ -197,9 +183,7 @@ def main():
 
             if nonzero_deltas:
                 avg_nonzero = statistics.mean(nonzero_deltas)
-                print(
-                    f"    non-zero avg={avg_nonzero:.1f}µm ({len(nonzero_deltas)}/{len(x_deltas)} samples)"
-                )
+                print(f"    non-zero avg={avg_nonzero:.1f}µm ({len(nonzero_deltas)}/{len(x_deltas)} samples)")
 
         # Compare single-thread vs combined resolution
         print()
@@ -223,12 +207,8 @@ def main():
 
         print()
         print(f"  Theoretical spatial resolution at {speed_um_s / 1000:.0f} mm/s:")
-        print(
-            f"    Single thread ({single_thread_rate:.0f} Hz): {single_resolution:.1f} µm between samples"
-        )
-        print(
-            f"    Combined ({combined_rate:.0f} Hz): {combined_resolution:.1f} µm between samples"
-        )
+        print(f"    Single thread ({single_thread_rate:.0f} Hz): {single_resolution:.1f} µm between samples")
+        print(f"    Combined ({combined_rate:.0f} Hz): {combined_resolution:.1f} µm between samples")
         print(f"    Improvement: {single_resolution / combined_resolution:.1f}x finer resolution")
 
     # Conclusion
@@ -238,19 +218,13 @@ def main():
 
     if efficiency > 80:
         print("  ✓ Multi-threading DOES improve effective sample rate")
-        print(
-            f"    {num_threads} threads achieved {combined_rate:.1f} Hz vs {single_thread_rate:.1f} Hz single-thread"
-        )
+        print(f"    {num_threads} threads achieved {combined_rate:.1f} Hz vs {single_thread_rate:.1f} Hz single-thread")
     elif efficiency > 50:
         print("  ~ Partial improvement from multi-threading")
-        print(
-            f"    Some SDK serialization detected, but still gaining {combined_rate / single_thread_rate:.1f}x"
-        )
+        print(f"    Some SDK serialization detected, but still gaining {combined_rate / single_thread_rate:.1f}x")
     else:
         print("  ✗ SDK appears to serialize access")
-        print(
-            f"    {num_threads} threads only achieved {combined_rate:.1f} Hz (~{efficiency:.0f}% of theoretical)"
-        )
+        print(f"    {num_threads} threads only achieved {combined_rate:.1f} Hz (~{efficiency:.0f}% of theoretical)")
         print(f"    Single thread at {single_thread_rate:.1f} Hz is sufficient")
 
     # Compare to 60Hz baseline

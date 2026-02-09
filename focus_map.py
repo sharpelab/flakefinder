@@ -5,6 +5,7 @@ runs autofocus at each point, and outputs a focus map with best Z positions.
 """
 
 import argparse
+import contextlib
 import json
 import time
 from collections.abc import Sequence
@@ -195,9 +196,7 @@ def sample_grid_points(
 
     # Ensure centroid is included (deduplicate if already present)
     centroid = (float(cx), float(cy))
-    min_dist_to_existing = (
-        min(((p[0] - cx) ** 2 + (p[1] - cy) ** 2) for p in points) if points else float("inf")
-    )
+    min_dist_to_existing = min(((p[0] - cx) ** 2 + (p[1] - cy) ** 2) for p in points) if points else float("inf")
     if min_dist_to_existing > (spacing_um / 4) ** 2:
         points.append(centroid)
 
@@ -245,8 +244,7 @@ def run_focus_map(
 
     for i, pt in enumerate(all_points):
         print(
-            f"  [{i + 1}/{total_points}] {pt.type} {pt.index}: "
-            f"({pt.x_um / 1000:.2f}, {pt.y_um / 1000:.2f}) mm ... ",
+            f"  [{i + 1}/{total_points}] {pt.type} {pt.index}: ({pt.x_um / 1000:.2f}, {pt.y_um / 1000:.2f}) mm ... ",
             end="",
             flush=True,
         )
@@ -361,8 +359,7 @@ def main():
         "--contour-spacing-mm",
         type=float,
         default=5.0,
-        help="Target spacing between contour points in mm "
-        "(count = perimeter/spacing, clamped to 4-24)",
+        help="Target spacing between contour points in mm (count = perimeter/spacing, clamped to 4-24)",
     )
     parser.add_argument(
         "--grid-spacing-um",
@@ -506,9 +503,7 @@ def main():
     output_dir = args.output_dir or args.chips_meta.parent
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    stem = (
-        f"focus_map_chip{args.chip}_{args.suffix}" if args.suffix else f"focus_map_chip{args.chip}"
-    )
+    stem = f"focus_map_chip{args.chip}_{args.suffix}" if args.suffix else f"focus_map_chip{args.chip}"
 
     # Import hardware libraries (after dry-run check)
     from flakefinder.leica import Lamp, LeicaConnection, Shutter, Stage, ZDrive
@@ -601,9 +596,7 @@ def main():
             images_dir.mkdir(parents=True, exist_ok=True)
             print(f"Saving images to {images_dir}")
 
-        save_executor = (
-            ThreadPoolExecutor(max_workers=1) if (args.debug_dir or args.save_images) else None
-        )
+        save_executor = ThreadPoolExecutor(max_workers=1) if (args.debug_dir or args.save_images) else None
 
         sample_results = run_focus_map(
             all_points=all_points,
@@ -623,10 +616,8 @@ def main():
             save_executor.shutdown(wait=True)
 
         # Dispose resources before connection closes
-        try:
+        with contextlib.suppress(Exception):
             context.Dispose()
-        except Exception:
-            pass
         camera.dispose()
 
     duration_s = time.perf_counter() - start_time

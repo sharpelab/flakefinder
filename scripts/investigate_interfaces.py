@@ -10,9 +10,10 @@ Run on microscope PC.
 """
 
 import time
+
 from flakefinder.leica import LeicaConnection, Stage, ZDrive
 from flakefinder.leica.core import get_interface, has_interface
-from flakefinder.leica.enums import IID, TID
+from flakefinder.leica.enums import IID
 
 
 def inspect_interface_object(obj, name: str, max_depth: int = 1):
@@ -23,7 +24,7 @@ def inspect_interface_object(obj, name: str, max_depth: int = 1):
     # Get all attributes
     attrs = []
     for attr in dir(obj):
-        if attr.startswith('_'):
+        if attr.startswith("_"):
             continue
         try:
             val = getattr(obj, attr)
@@ -58,9 +59,9 @@ def inspect_interface_object(obj, name: str, max_depth: int = 1):
 
 def test_snapshots_interface(unit, unit_name: str):
     """Test IID_SNAPSHOTS interface if available."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"IID_SNAPSHOTS (0x105) on {unit_name}")
-    print('='*60)
+    print("=" * 60)
 
     snapshots = get_interface(unit, IID.IID_SNAPSHOTS)
     if snapshots is None:
@@ -74,7 +75,7 @@ def test_snapshots_interface(unit, unit_name: str):
     print("\n  Attempting operations...")
 
     # Try to get a snapshot
-    for method_name in ['GetSnapshot', 'TakeSnapshot', 'CreateSnapshot', 'Snap']:
+    for method_name in ["GetSnapshot", "TakeSnapshot", "CreateSnapshot", "Snap"]:
         if hasattr(snapshots, method_name):
             try:
                 method = getattr(snapshots, method_name)
@@ -84,7 +85,7 @@ def test_snapshots_interface(unit, unit_name: str):
                 print(f"    {method_name}() failed: {e}")
 
     # Try to get count
-    for method_name in ['GetNumSnapshots', 'Count', 'NumSnapshots']:
+    for method_name in ["GetNumSnapshots", "Count", "NumSnapshots"]:
         if hasattr(snapshots, method_name):
             try:
                 method = getattr(snapshots, method_name)
@@ -99,9 +100,9 @@ def test_snapshots_interface(unit, unit_name: str):
 
 def test_advanced_event_source(unit, unit_name: str):
     """Test IID_ADVANCED_EVENT_SOURCE interface if available."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"IID_ADVANCED_EVENT_SOURCE (0x10F) on {unit_name}")
-    print('='*60)
+    print("=" * 60)
 
     adv_events = get_interface(unit, IID.IID_ADVANCED_EVENT_SOURCE)
     if adv_events is None:
@@ -120,9 +121,9 @@ def test_advanced_event_source(unit, unit_name: str):
 
 def test_timing_interface(unit, unit_name: str):
     """Test IID_BASIC_CONTROL_VALUE_TIMING interface if available."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"IID_BASIC_CONTROL_VALUE_TIMING (0x117) on {unit_name}")
-    print('='*60)
+    print("=" * 60)
 
     timing = get_interface(unit, IID.IID_BASIC_CONTROL_VALUE_TIMING)
     if timing is None:
@@ -134,8 +135,14 @@ def test_timing_interface(unit, unit_name: str):
 
     # Try to get timing info
     print("\n  Attempting operations...")
-    for method_name in ['GetTiming', 'GetTimestamp', 'GetLastUpdateTime',
-                        'GetUpdateRate', 'GetSampleRate', 'GetPeriod']:
+    for method_name in [
+        "GetTiming",
+        "GetTimestamp",
+        "GetLastUpdateTime",
+        "GetUpdateRate",
+        "GetSampleRate",
+        "GetPeriod",
+    ]:
         if hasattr(timing, method_name):
             try:
                 method = getattr(timing, method_name)
@@ -147,9 +154,9 @@ def test_timing_interface(unit, unit_name: str):
 
 def test_other_interfaces(unit, unit_name: str):
     """Check for any other potentially useful interfaces."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Other interfaces on {unit_name}")
-    print('='*60)
+    print("=" * 60)
 
     # List of potentially interesting interfaces from enums.py
     interesting = [
@@ -180,9 +187,9 @@ def test_other_interfaces(unit, unit_name: str):
 
 def benchmark_interface_latency(unit, unit_name: str):
     """Measure latency of different read methods."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Latency benchmark on {unit_name}")
-    print('='*60)
+    print("=" * 60)
 
     bcv = get_interface(unit, IID.IID_BASIC_CONTROL_VALUE)
     if not bcv:
@@ -203,6 +210,7 @@ def benchmark_interface_latency(unit, unit_name: str):
         times.append((t1 - t0) * 1000)
 
     import statistics
+
     print(f"\n  GetControlValue() over {n_samples} calls:")
     print(f"    Mean: {statistics.mean(times):.2f} ms")
     print(f"    Std:  {statistics.stdev(times):.2f} ms")
@@ -228,9 +236,9 @@ def main():
 
         # Test each interface on each unit
         for unit, name in units:
-            print(f"\n\n{'#'*60}")
+            print(f"\n\n{'#' * 60}")
             print(f"# {name}")
-            print('#'*60)
+            print("#" * 60)
 
             test_snapshots_interface(unit, name)
             test_advanced_event_source(unit, name)

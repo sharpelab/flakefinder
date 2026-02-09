@@ -1,7 +1,8 @@
 """Check what converters are available for directed velocity interface."""
+
 from flakefinder.leica import LeicaConnection, Stage, ZDrive
-from flakefinder.leica.enums import IID, EMetricsId
 from flakefinder.leica.core import get_interface
+from flakefinder.leica.enums import IID, EMetricsId
 
 with LeicaConnection() as conn:
     stage = Stage.from_connection(conn)

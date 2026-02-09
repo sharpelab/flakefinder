@@ -90,9 +90,7 @@ def change_objective(
 
     z_before = z.position_um
 
-    print(
-        f"Objective: {current_mag}x (pos {current_position}) -> {target_mag}x (pos {target_position})"
-    )
+    print(f"Objective: {current_mag}x (pos {current_position}) -> {target_mag}x (pos {target_position})")
     print(f"  Z before: {z_before:.1f} µm")
     print("  Switching (SDK handles z-hop)...")
 
@@ -187,15 +185,9 @@ def report_status(conn: LeicaConnection, verbose: bool = False) -> None:
     if verbose:
         print()
         print("Velocity (from SDK converter):")
-        print(
-            f"  X: {stage.x.velocity_um_s / 1000:.1f} mm/s (max: {stage.x.max_velocity_um_s / 1000:.1f} mm/s)"
-        )
-        print(
-            f"  Y: {stage.y.velocity_um_s / 1000:.1f} mm/s (max: {stage.y.max_velocity_um_s / 1000:.1f} mm/s)"
-        )
-        print(
-            f"  Z: {z.velocity_um_s / 1000:.1f} mm/s (max: {z.max_velocity_um_s / 1000:.1f} mm/s)"
-        )
+        print(f"  X: {stage.x.velocity_um_s / 1000:.1f} mm/s (max: {stage.x.max_velocity_um_s / 1000:.1f} mm/s)")
+        print(f"  Y: {stage.y.velocity_um_s / 1000:.1f} mm/s (max: {stage.y.max_velocity_um_s / 1000:.1f} mm/s)")
+        print(f"  Z: {z.velocity_um_s / 1000:.1f} mm/s (max: {z.max_velocity_um_s / 1000:.1f} mm/s)")
 
     # Nosepiece/objective
     try:
@@ -240,14 +232,10 @@ def main() -> int:
         metavar="MAG",
         help="Switch objective by magnification (e.g., 5, 5x, 20, 2.5)",
     )
-    parser.add_argument(
-        "--objective-pos", type=int, metavar="POS", help="Switch objective by turret position (1-6)"
-    )
+    parser.add_argument("--objective-pos", type=int, metavar="POS", help="Switch objective by turret position (1-6)")
     parser.add_argument("--z-speed", type=float, metavar="UM_S", help="Set Z velocity (µm/s)")
     parser.add_argument("--park", action="store_true", help="Park microscope in safe idle state")
-    parser.add_argument(
-        "-v", "--verbose", action="store_true", help="Show velocity limits and conversion factors"
-    )
+    parser.add_argument("-v", "--verbose", action="store_true", help="Show velocity limits and conversion factors")
     args = parser.parse_args()
 
     # Validate objective args are mutually exclusive

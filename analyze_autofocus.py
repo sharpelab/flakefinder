@@ -396,14 +396,10 @@ def plot_metrics_comparison(
             print(f"  {'-' * 12} {'-' * 9} {'-' * 10} {'-' * 12}")
             for name, _ in METRICS:
                 marker = " *" if name == "Tenengrad" else ""
-                live_str = (
-                    f"{live_best_zs[name]:>11.1f}" if name in live_best_zs else "         n/a"
-                )
+                live_str = f"{live_best_zs[name]:>11.1f}" if name in live_best_zs else "         n/a"
                 diff = abs(best_zs[name] - live_best_zs.get(name, best_zs[name]))
                 warn = " !" if diff > 10 else ""
-                print(
-                    f"  {name:<12} {dynamic_ranges[name]:>8.1f}% {best_zs[name]:>9.1f}{marker} {live_str}{warn}"
-                )
+                print(f"  {name:<12} {dynamic_ranges[name]:>8.1f}% {best_zs[name]:>9.1f}{marker} {live_str}{warn}")
         else:
             print(f"  {'Metric':<12} {'Dyn.Range':>9} {'Best Z':>10}")
             print(f"  {'-' * 12} {'-' * 9} {'-' * 10}")
@@ -415,9 +411,7 @@ def plot_metrics_comparison(
         if live_best_zs:
             diffs = {n: abs(best_zs[n] - live_best_zs[n]) for n in best_zs if n in live_best_zs}
             if any(d > 10 for d in diffs.values()):
-                print(
-                    "  ! = recomputed vs live best Z differ >10 µm (JPEG compression artifact on flat curves)"
-                )
+                print("  ! = recomputed vs live best Z differ >10 µm (JPEG compression artifact on flat curves)")
 
 
 def plot_sharpness_curve(
@@ -566,9 +560,7 @@ def plot_sharpness_curve(
         label = f"Pick Z = {pick_z:.1f}"
         if interp_s is not None:
             label += f" (~S={interp_s:.1f})"
-        ax.axvline(
-            pick_z, color="green", linestyle="--", linewidth=1.5, alpha=0.9, label=label, zorder=4
-        )
+        ax.axvline(pick_z, color="green", linestyle="--", linewidth=1.5, alpha=0.9, label=label, zorder=4)
 
     ax.set_xlabel("Z position (µm)")
     ax.set_ylabel("Sharpness")
@@ -790,9 +782,7 @@ def main():
     else:
         dir_path = input_path
         if not dir_path.is_dir():
-            print(
-                f"Error: Expected a directory (or use --focus-map-point with a JSON file): {dir_path}"
-            )
+            print(f"Error: Expected a directory (or use --focus-map-point with a JSON file): {dir_path}")
             return 1
         try:
             summary = load_summary(dir_path)

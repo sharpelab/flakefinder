@@ -11,8 +11,8 @@ import argparse
 import json
 from pathlib import Path
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def interpolate_z_at_x_times(x_times, x_positions, z_times, z_positions):
@@ -70,16 +70,14 @@ def analyze_z_ramp(data: dict) -> dict:
     motion_end_idx = moving_indices[-1] + 1
 
     # Extract motion period for X
-    x_times_motion = x_times[motion_start_idx:motion_end_idx+1]
-    x_positions_motion = x_positions[motion_start_idx:motion_end_idx+1]
+    x_times_motion = x_times[motion_start_idx : motion_end_idx + 1]
+    x_positions_motion = x_positions[motion_start_idx : motion_end_idx + 1]
 
     motion_duration = x_times_motion[-1] - x_times_motion[0]
     x_traveled = x_positions_motion[-1] - x_positions_motion[0]
 
     # Interpolate Z at X sample times during motion
-    t_matched, x_matched, z_matched = interpolate_z_at_x_times(
-        x_times_motion, x_positions_motion, z_times, z_positions
-    )
+    t_matched, x_matched, z_matched = interpolate_z_at_x_times(x_times_motion, x_positions_motion, z_times, z_positions)
 
     z_traveled = z_matched[-1] - z_matched[0]
 
@@ -106,7 +104,7 @@ def analyze_z_ramp(data: dict) -> dict:
     z_fit = np.polyval(coeffs, x_matched)
     fit_residuals = z_matched - z_fit
     ss_res = np.sum(fit_residuals**2)
-    ss_tot = np.sum((z_matched - np.mean(z_matched))**2)
+    ss_tot = np.sum((z_matched - np.mean(z_matched)) ** 2)
     fit_r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
 
     # DOF check
@@ -196,26 +194,32 @@ def print_report(analysis: dict, filename: str = "") -> None:
     print("=" * 60)
 
     params = analysis["params"]
-    print(f"\nTest parameters:")
+    print("\nTest parameters:")
     print(f"  X distance: {params['x_distance_mm']:.1f} mm")
     print(f"  X speed: {params['x_speed_mm_s']:.1f} mm/s")
     print(f"  Z delta: {params['z_delta_um']:+.1f} µm")
 
     timing = analysis["timing"]
-    print(f"\nTiming:")
+    print("\nTiming:")
     print(f"  Start command latency: {timing['start_command_latency_ms']:.1f} ms")
-    print(f"  X duration: {timing['x_duration_s']*1000:.1f} ms (expected: {timing['expected_duration_s']*1000:.1f} ms)")
-    print(f"  Z duration: {timing['z_duration_s']*1000:.1f} ms")
+    print(
+        f"  X duration: {timing['x_duration_s'] * 1000:.1f} ms (expected: {timing['expected_duration_s'] * 1000:.1f} ms)"  # noqa: E501
+    )
+    print(f"  Z duration: {timing['z_duration_s'] * 1000:.1f} ms")
     print(f"  Completion difference: {timing['completion_diff_ms']:.1f} ms")
 
     motion = analysis["motion"]
-    print(f"\nActual motion:")
+    print("\nActual motion:")
     print(f"  Duration: {motion['duration_s']:.3f} s")
-    print(f"  X velocity: {motion['actual_x_velocity_mm_s']:.2f} mm/s (commanded: {motion['commanded_x_velocity_mm_s']:.1f})")
-    print(f"  Z velocity: {motion['actual_z_velocity_um_s']:.2f} µm/s (commanded: {motion['commanded_z_velocity_um_s']:.2f})")
+    print(
+        f"  X velocity: {motion['actual_x_velocity_mm_s']:.2f} mm/s (commanded: {motion['commanded_x_velocity_mm_s']:.1f})"  # noqa: E501
+    )
+    print(
+        f"  Z velocity: {motion['actual_z_velocity_um_s']:.2f} µm/s (commanded: {motion['commanded_z_velocity_um_s']:.2f})"  # noqa: E501
+    )
 
     tracking = analysis["tracking"]
-    print(f"\nZ tracking error (vs ideal linear ramp):")
+    print("\nZ tracking error (vs ideal linear ramp):")
     print(f"  Mean: {tracking['z_error_mean_um']:+.2f} µm")
     print(f"  Std: {tracking['z_error_std_um']:.2f} µm")
     print(f"  Max absolute: {tracking['z_error_max_um']:.2f} µm")
@@ -228,16 +232,20 @@ def print_report(analysis: dict, filename: str = "") -> None:
         print(f"  ✗ Max error ({tracking['z_error_max_um']:.2f} µm) EXCEEDS 20x DOF ({dof} µm)")
 
     lin = analysis["linearity"]
-    print(f"\nLinearity (X vs Z fit):")
+    print("\nLinearity (X vs Z fit):")
     print(f"  Slope: {lin['slope_um_per_mm']:.4f} µm/mm (expected: {lin['expected_slope_um_per_mm']:.4f})")
     print(f"  Slope error: {lin['slope_error_percent']:.2f}%")
     print(f"  R²: {lin['r_squared']:.6f}")
     print(f"  Residual std: {lin['residual_std_um']:.3f} µm")
 
     poll = analysis["polling"]
-    print(f"\nPolling performance (parallel threads):")
-    print(f"  X: {poll['x_total_samples']} samples, {poll['x_poll_rate_hz']:.1f} Hz, interval {poll['x_interval_mean_ms']:.2f} ± {poll['x_interval_std_ms']:.2f} ms")
-    print(f"  Z: {poll['z_total_samples']} samples, {poll['z_poll_rate_hz']:.1f} Hz, interval {poll['z_interval_mean_ms']:.2f} ± {poll['z_interval_std_ms']:.2f} ms")
+    print("\nPolling performance (parallel threads):")
+    print(
+        f"  X: {poll['x_total_samples']} samples, {poll['x_poll_rate_hz']:.1f} Hz, interval {poll['x_interval_mean_ms']:.2f} ± {poll['x_interval_std_ms']:.2f} ms"  # noqa: E501
+    )
+    print(
+        f"  Z: {poll['z_total_samples']} samples, {poll['z_poll_rate_hz']:.1f} Hz, interval {poll['z_interval_mean_ms']:.2f} ± {poll['z_interval_std_ms']:.2f} ms"  # noqa: E501
+    )
     print(f"  SDK read time: X={poll['x_read_time_mean_ms']:.2f}ms, Z={poll['z_read_time_mean_ms']:.2f}ms")
     print(f"  Matched samples for analysis: {poll['matched_samples']}")
 
@@ -270,7 +278,7 @@ def plot_results(analysis: dict, output_path: Path | None = None, title_suffix: 
 
     fig, axes = plt.subplots(2, 3, figsize=(16, 10))
 
-    title = f"Z Ramp Test: {params['x_distance_mm']:.0f}mm @ {params['x_speed_mm_s']:.0f}mm/s, ΔZ={params['z_delta_um']:+.0f}µm"
+    title = f"Z Ramp Test: {params['x_distance_mm']:.0f}mm @ {params['x_speed_mm_s']:.0f}mm/s, ΔZ={params['z_delta_um']:+.0f}µm"  # noqa: E501
     if title_suffix:
         title += f" ({title_suffix})"
     fig.suptitle(title, fontsize=12)
@@ -279,64 +287,63 @@ def plot_results(analysis: dict, output_path: Path | None = None, title_suffix: 
     ax1 = axes[0, 0]
     ax1_z = ax1.twinx()
 
-    ax1.plot(x_times_rel * 1000, x_positions / 1000, 'b-', label='X', linewidth=0.5, alpha=0.8)
-    ax1_z.plot(z_times_rel * 1000, z_positions, 'r-', label='Z', linewidth=0.5, alpha=0.8)
+    ax1.plot(x_times_rel * 1000, x_positions / 1000, "b-", label="X", linewidth=0.5, alpha=0.8)
+    ax1_z.plot(z_times_rel * 1000, z_positions, "r-", label="Z", linewidth=0.5, alpha=0.8)
 
-    ax1.set_xlabel('Time (ms)')
-    ax1.set_ylabel('X (mm)', color='b')
-    ax1_z.set_ylabel('Z (µm)', color='r')
-    ax1.set_title(f'Position vs Time (X: {poll["x_poll_rate_hz"]:.0f}Hz, Z: {poll["z_poll_rate_hz"]:.0f}Hz)')
+    ax1.set_xlabel("Time (ms)")
+    ax1.set_ylabel("X (mm)", color="b")
+    ax1_z.set_ylabel("Z (µm)", color="r")
+    ax1.set_title(f"Position vs Time (X: {poll['x_poll_rate_hz']:.0f}Hz, Z: {poll['z_poll_rate_hz']:.0f}Hz)")
 
     # 2. X vs Z scatter (matched samples)
     ax2 = axes[0, 1]
-    ax2.scatter(x_matched / 1000, z_matched, s=3, alpha=0.5, label='Actual', zorder=2)
-    ax2.plot(x_matched / 1000, z_ideal, 'r-', linewidth=2, label='Ideal ramp', zorder=3)
-    ax2.set_xlabel('X (mm)')
-    ax2.set_ylabel('Z (µm)')
-    ax2.set_title(f'X vs Z (R² = {lin["r_squared"]:.6f})')
+    ax2.scatter(x_matched / 1000, z_matched, s=3, alpha=0.5, label="Actual", zorder=2)
+    ax2.plot(x_matched / 1000, z_ideal, "r-", linewidth=2, label="Ideal ramp", zorder=3)
+    ax2.set_xlabel("X (mm)")
+    ax2.set_ylabel("Z (µm)")
+    ax2.set_title(f"X vs Z (R² = {lin['r_squared']:.6f})")
     ax2.legend()
 
     # 3. Z error vs X
     ax3 = axes[0, 2]
-    ax3.scatter(x_matched / 1000, z_error, s=3, alpha=0.5, c='blue')
-    ax3.axhline(0, color='k', linestyle='-', linewidth=0.5)
-    ax3.axhline(4, color='r', linestyle='--', alpha=0.7, label='±4µm (20x DOF)')
-    ax3.axhline(-4, color='r', linestyle='--', alpha=0.7)
-    ax3.set_xlabel('X (mm)')
-    ax3.set_ylabel('Z error (µm)')
-    ax3.set_title(f'Z Tracking Error (max: {tracking["z_error_max_um"]:.2f} µm)')
+    ax3.scatter(x_matched / 1000, z_error, s=3, alpha=0.5, c="blue")
+    ax3.axhline(0, color="k", linestyle="-", linewidth=0.5)
+    ax3.axhline(4, color="r", linestyle="--", alpha=0.7, label="±4µm (20x DOF)")
+    ax3.axhline(-4, color="r", linestyle="--", alpha=0.7)
+    ax3.set_xlabel("X (mm)")
+    ax3.set_ylabel("Z error (µm)")
+    ax3.set_title(f"Z Tracking Error (max: {tracking['z_error_max_um']:.2f} µm)")
     ax3.legend()
 
     # 4. Z error histogram
     ax4 = axes[1, 0]
-    ax4.hist(z_error, bins=50, edgecolor='black', alpha=0.7)
-    ax4.axvline(0, color='k', linestyle='-', linewidth=1)
-    ax4.axvline(z_error.mean(), color='r', linestyle='--', linewidth=2,
-                label=f'Mean: {z_error.mean():.2f} µm')
-    ax4.axvline(4, color='orange', linestyle='--', alpha=0.7)
-    ax4.axvline(-4, color='orange', linestyle='--', alpha=0.7, label='±4µm DOF')
-    ax4.set_xlabel('Z error (µm)')
-    ax4.set_ylabel('Count')
-    ax4.set_title(f'Z Error Distribution (std: {tracking["z_error_std_um"]:.2f} µm)')
+    ax4.hist(z_error, bins=50, edgecolor="black", alpha=0.7)
+    ax4.axvline(0, color="k", linestyle="-", linewidth=1)
+    ax4.axvline(z_error.mean(), color="r", linestyle="--", linewidth=2, label=f"Mean: {z_error.mean():.2f} µm")
+    ax4.axvline(4, color="orange", linestyle="--", alpha=0.7)
+    ax4.axvline(-4, color="orange", linestyle="--", alpha=0.7, label="±4µm DOF")
+    ax4.set_xlabel("Z error (µm)")
+    ax4.set_ylabel("Count")
+    ax4.set_title(f"Z Error Distribution (std: {tracking['z_error_std_um']:.2f} µm)")
     ax4.legend()
 
     # 5. Z error vs time
     ax5 = axes[1, 1]
-    ax5.scatter(t_matched * 1000, z_error, s=3, alpha=0.5, c='blue')
-    ax5.axhline(0, color='k', linestyle='-', linewidth=0.5)
-    ax5.axhline(4, color='r', linestyle='--', alpha=0.7)
-    ax5.axhline(-4, color='r', linestyle='--', alpha=0.7)
-    ax5.set_xlabel('Time (ms)')
-    ax5.set_ylabel('Z error (µm)')
-    ax5.set_title('Z Error vs Time')
+    ax5.scatter(t_matched * 1000, z_error, s=3, alpha=0.5, c="blue")
+    ax5.axhline(0, color="k", linestyle="-", linewidth=0.5)
+    ax5.axhline(4, color="r", linestyle="--", alpha=0.7)
+    ax5.axhline(-4, color="r", linestyle="--", alpha=0.7)
+    ax5.set_xlabel("Time (ms)")
+    ax5.set_ylabel("Z error (µm)")
+    ax5.set_title("Z Error vs Time")
 
     # 6. Polling interval histograms (overlaid)
     ax6 = axes[1, 2]
-    ax6.hist(arr["x_intervals"], bins=50, alpha=0.5, label=f'X ({poll["x_interval_mean_ms"]:.1f}ms)', color='blue')
-    ax6.hist(arr["z_intervals"], bins=50, alpha=0.5, label=f'Z ({poll["z_interval_mean_ms"]:.1f}ms)', color='red')
-    ax6.set_xlabel('Sample interval (ms)')
-    ax6.set_ylabel('Count')
-    ax6.set_title('Polling Intervals')
+    ax6.hist(arr["x_intervals"], bins=50, alpha=0.5, label=f"X ({poll['x_interval_mean_ms']:.1f}ms)", color="blue")
+    ax6.hist(arr["z_intervals"], bins=50, alpha=0.5, label=f"Z ({poll['z_interval_mean_ms']:.1f}ms)", color="red")
+    ax6.set_xlabel("Sample interval (ms)")
+    ax6.set_ylabel("Count")
+    ax6.set_title("Polling Intervals")
     ax6.legend()
 
     # Summary text
@@ -349,9 +356,15 @@ def plot_results(analysis: dict, output_path: Path | None = None, title_suffix: 
         f"Result: {'✓ PASS' if tracking['within_20x_dof'] else '✗ FAIL'} "
         f"(max error {'<' if tracking['within_20x_dof'] else '>'} 4µm DOF)"
     )
-    fig.text(0.02, 0.02, summary, fontsize=10, family='monospace',
-             verticalalignment='bottom',
-             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    fig.text(
+        0.02,
+        0.02,
+        summary,
+        fontsize=10,
+        family="monospace",
+        verticalalignment="bottom",
+        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+    )
 
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.12)
@@ -370,18 +383,9 @@ def main():
         description="Analyze Z ramp measurement data",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
-        "files", type=Path, nargs="+",
-        help="JSON file(s) from test_z_ramp_measure.py"
-    )
-    parser.add_argument(
-        "--no-plot", action="store_true",
-        help="Skip generating plots"
-    )
-    parser.add_argument(
-        "--show", action="store_true",
-        help="Show plots interactively instead of saving"
-    )
+    parser.add_argument("files", type=Path, nargs="+", help="JSON file(s) from test_z_ramp_measure.py")
+    parser.add_argument("--no-plot", action="store_true", help="Skip generating plots")
+    parser.add_argument("--show", action="store_true", help="Show plots interactively instead of saving")
     args = parser.parse_args()
 
     all_passed = True
@@ -413,7 +417,7 @@ def main():
             if args.show:
                 plot_results(analysis, output_path=None, title_suffix=filepath.stem)
             else:
-                plot_path = filepath.with_suffix('.png')
+                plot_path = filepath.with_suffix(".png")
                 plot_results(analysis, output_path=plot_path, title_suffix=filepath.stem)
 
     return 0 if all_passed else 1

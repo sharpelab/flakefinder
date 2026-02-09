@@ -46,12 +46,12 @@ def run_z_ramp_measure(
     expected_duration_s = x_distance_um / x_speed_um_s
     z_speed_um_s = abs(z_delta_um) / expected_duration_s
 
-    print(f"Z Ramp Measurement (Directed Velocity)")
-    print(f"=" * 50)
+    print("Z Ramp Measurement (Directed Velocity)")
+    print("=" * 50)
     print(f"X distance: {x_distance_mm:.1f} mm")
     print(f"X speed: {x_speed_mm_s:.1f} mm/s")
     print(f"Z delta: {z_delta_um:+.1f} µm")
-    print(f"Z speed (calculated): {z_speed_um_s:.2f} µm/s ({z_speed_um_s/1000:.4f} mm/s)")
+    print(f"Z speed (calculated): {z_speed_um_s:.2f} µm/s ({z_speed_um_s / 1000:.4f} mm/s)")
     print(f"Expected duration: {expected_duration_s:.2f} s")
     print()
 
@@ -80,7 +80,7 @@ def run_z_ramp_measure(
             print("ERROR: Z axis does not support directed velocity")
             return {"error": "Z directed velocity not supported"}
 
-        print(f"Directed velocity: X=supported, Z=supported")
+        print("Directed velocity: X=supported, Z=supported")
 
         # Calculate start/end positions
         x_margin = 2000  # 2mm margin
@@ -98,9 +98,13 @@ def run_z_ramp_measure(
         x_towards_max = x_end > x_start
         z_towards_max = z_end > z_start
 
-        print(f"\nTest trajectory:")
-        print(f"  X: {x_start:.0f} -> {x_end:.0f} µm ({x_distance_mm:.1f} mm, {'towards_max' if x_towards_max else 'towards_min'})")
-        print(f"  Z: {z_start:.0f} -> {z_end:.0f} µm ({z_delta_um:+.1f} µm, {'towards_max' if z_towards_max else 'towards_min'})")
+        print("\nTest trajectory:")
+        print(
+            f"  X: {x_start:.0f} -> {x_end:.0f} µm ({x_distance_mm:.1f} mm, {'towards_max' if x_towards_max else 'towards_min'})"  # noqa: E501
+        )
+        print(
+            f"  Z: {z_start:.0f} -> {z_end:.0f} µm ({z_delta_um:+.1f} µm, {'towards_max' if z_towards_max else 'towards_min'})"  # noqa: E501
+        )
         print()
 
         try:
@@ -142,7 +146,7 @@ def run_z_ramp_measure(
                     z_samples.append((t_before, t_after, z_um))
 
             # Start polling threads
-            print(f"\nStarting position polling (parallel X and Z threads)...")
+            print("\nStarting position polling (parallel X and Z threads)...")
             x_thread = threading.Thread(target=poll_x, daemon=True)
             z_thread = threading.Thread(target=poll_z, daemon=True)
             x_thread.start()
@@ -152,10 +156,10 @@ def run_z_ramp_measure(
             time.sleep(0.2)
             warmup_x = len(x_samples)
             warmup_z = len(z_samples)
-            print(f"  Warmup X polling rate: {warmup_x/0.2:.1f} Hz ({warmup_x} samples)")
-            print(f"  Warmup Z polling rate: {warmup_z/0.2:.1f} Hz ({warmup_z} samples)")
+            print(f"  Warmup X polling rate: {warmup_x / 0.2:.1f} Hz ({warmup_x} samples)")
+            print(f"  Warmup Z polling rate: {warmup_z / 0.2:.1f} Hz ({warmup_z} samples)")
 
-            print(f"\nStarting synchronized ramp (directed velocity)...")
+            print("\nStarting synchronized ramp (directed velocity)...")
             print(f"  X: start_towards_{'max' if x_towards_max else 'min'}({x_speed_um_s:.0f} µm/s)")
             print(f"  Z: start_towards_{'max' if z_towards_max else 'min'}({z_speed_um_s:.2f} µm/s)")
 
@@ -185,9 +189,7 @@ def run_z_ramp_measure(
                     print(f"  TIMEOUT after {elapsed:.2f}s (limit: {timeout_s:.2f}s)")
                     break
                 current_x = stage.x.position_um
-                if x_towards_max and current_x >= x_end:
-                    target_reached = True
-                elif not x_towards_max and current_x <= x_end:
+                if x_towards_max and current_x >= x_end or not x_towards_max and current_x <= x_end:
                     target_reached = True
                 time.sleep(0.001)
 
@@ -219,22 +221,23 @@ def run_z_ramp_measure(
             x_poll_rate = x_samples_during_motion / motion_duration if motion_duration > 0 else 0
             z_poll_rate = z_samples_during_motion / motion_duration if motion_duration > 0 else 0
 
-            print(f"\nMotion complete!")
-            print(f"  Start command latency: {(t_after_start - t_before_start)*1000:.1f} ms")
-            print(f"  Motion duration: {motion_duration*1000:.1f} ms (expected: {expected_duration_s*1000:.1f} ms)")
-            print(f"  Halt latency: {(t_after_halt - t_halt)*1000:.1f} ms")
+            print("\nMotion complete!")
+            print(f"  Start command latency: {(t_after_start - t_before_start) * 1000:.1f} ms")
+            print(f"  Motion duration: {motion_duration * 1000:.1f} ms (expected: {expected_duration_s * 1000:.1f} ms)")
+            print(f"  Halt latency: {(t_after_halt - t_halt) * 1000:.1f} ms")
             print(f"  Final X: {final_x:.0f} µm (target: {x_end:.0f}, overshoot: {final_x - x_end:+.0f})")
             print(f"  Final Z: {final_z:.0f} µm (target: {z_end:.0f}, overshoot: {final_z - z_end:+.1f})")
-            print(f"\nPolling during motion (parallel threads):")
+            print("\nPolling during motion (parallel threads):")
             print(f"  X samples: {x_samples_during_motion} ({x_poll_rate:.1f} Hz)")
             print(f"  Z samples: {z_samples_during_motion} ({z_poll_rate:.1f} Hz)")
             print(f"  Total samples: X={len(x_samples)}, Z={len(z_samples)}")
 
             # Analyze per-sample timing
             import statistics
+
             if len(x_samples) > 1:
                 x_read_times = [(s[1] - s[0]) * 1000 for s in x_samples]
-                print(f"\nSDK call timing:")
+                print("\nSDK call timing:")
                 print(f"  X read: {statistics.mean(x_read_times):.2f} ± {statistics.stdev(x_read_times):.2f} ms")
             if len(z_samples) > 1:
                 z_read_times = [(s[1] - s[0]) * 1000 for s in z_samples]
@@ -242,7 +245,7 @@ def run_z_ramp_measure(
 
         finally:
             # Always restore position
-            print(f"\nRestoring initial position...")
+            print("\nRestoring initial position...")
             print(f"  Moving to Z={initial_z:.0f} µm...")
             z_drive.move_to(initial_z)
 
@@ -324,25 +327,14 @@ def main():
         description="Measure synchronized X+Z ramp motion using directed velocity",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    parser.add_argument("--x-distance", type=float, default=20.0, help="X travel distance in mm")
+    parser.add_argument("--x-speed", type=float, default=10.0, help="X velocity in mm/s")
     parser.add_argument(
-        "--x-distance", type=float, default=20.0,
-        help="X travel distance in mm"
+        "--z-delta", type=float, default=30.0, help="Z change during ramp in µm (positive = towards max)"
     )
+    parser.add_argument("--z-safe", type=float, default=20000.0, help="Safe Z position to start from (µm)")
     parser.add_argument(
-        "--x-speed", type=float, default=10.0,
-        help="X velocity in mm/s"
-    )
-    parser.add_argument(
-        "--z-delta", type=float, default=30.0,
-        help="Z change during ramp in µm (positive = towards max)"
-    )
-    parser.add_argument(
-        "--z-safe", type=float, default=20000.0,
-        help="Safe Z position to start from (µm)"
-    )
-    parser.add_argument(
-        "-o", "--output", type=Path, default=None,
-        help="Output JSON path (default: z_ramp_<timestamp>.json)"
+        "-o", "--output", type=Path, default=None, help="Output JSON path (default: z_ramp_<timestamp>.json)"
     )
     args = parser.parse_args()
 

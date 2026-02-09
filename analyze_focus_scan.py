@@ -251,9 +251,7 @@ def main():
     # Write CSV
     csv_path = scan_dir / "focus_quality.csv"
     with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(
-            f, fieldnames=["n", "x_um", "z_actual", "z_ideal", "z_error", "tenengrad", "laplacian"]
-        )
+        writer = csv.DictWriter(f, fieldnames=["n", "x_um", "z_actual", "z_ideal", "z_error", "tenengrad", "laplacian"])
         writer.writeheader()
         writer.writerows(frames_data)
     print(f"Saved CSV: {csv_path}")
@@ -291,9 +289,7 @@ def main():
     if flagged:
         print(f"\nFlagged frames (|z_error| > {args.dof} µm): {len(flagged)}")
         for f in flagged[:10]:  # Show first 10
-            print(
-                f"  Frame {f['n']}: z_error={f['z_error']:+.2f}µm, tenengrad={f['tenengrad']:.1f}"
-            )
+            print(f"  Frame {f['n']}: z_error={f['z_error']:+.2f}µm, tenengrad={f['tenengrad']:.1f}")
         if len(flagged) > 10:
             print(f"  ... and {len(flagged) - 10} more")
     else:
@@ -376,14 +372,8 @@ def main():
     ten_vals = [f["tenengrad"] for f in frames_data if f["tenengrad"]]
     if frame_nums:
         # Normalize sharpness for comparison
-        ten_norm = (
-            (np.array(ten_vals) - np.mean(ten_vals)) / np.std(ten_vals)
-            if np.std(ten_vals) > 0
-            else ten_vals
-        )
-        ax4.plot(
-            frame_nums, ten_norm, "b-", linewidth=0.8, alpha=0.7, label="Sharpness (normalized)"
-        )
+        ten_norm = (np.array(ten_vals) - np.mean(ten_vals)) / np.std(ten_vals) if np.std(ten_vals) > 0 else ten_vals
+        ax4.plot(frame_nums, ten_norm, "b-", linewidth=0.8, alpha=0.7, label="Sharpness (normalized)")
 
     z_err = [f["z_error"] for f in frames_data if f["z_error"] is not None]
     frame_nums_z = [f["n"] for f in frames_data if f["z_error"] is not None]

@@ -10,7 +10,6 @@ Usage:
 
 import argparse
 import json
-import statistics
 import threading
 import time
 from datetime import datetime
@@ -46,7 +45,7 @@ def run_single_test(
     expected_duration_s = x_distance_um / x_speed_um_s
     z_speed_um_s = abs(z_delta_um) / expected_duration_s
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Test: X={x_speed_mm_s:.0f} mm/s, slope={slope_um_per_mm:.2f} µm/mm")
     print(f"  Z velocity: {z_speed_um_s:.2f} µm/s")
     print(f"  Z delta: {z_delta_um:+.1f} µm over {x_distance_mm:.0f} mm")
@@ -116,7 +115,7 @@ def run_single_test(
             time.sleep(0.1)  # Brief warmup
 
             # Start motion
-            t_before_start = time.perf_counter()
+            time.perf_counter()
 
             if x_towards_max:
                 stage.x.start_towards_max(x_speed_um_s)
@@ -139,9 +138,7 @@ def run_single_test(
                     print(f"  TIMEOUT after {elapsed:.2f}s")
                     break
                 current_x = stage.x.position_um
-                if x_towards_max and current_x >= x_end:
-                    target_reached = True
-                elif not x_towards_max and current_x <= x_end:
+                if x_towards_max and current_x >= x_end or not x_towards_max and current_x <= x_end:
                     target_reached = True
                 time.sleep(0.001)
 
@@ -149,7 +146,7 @@ def run_single_test(
             t_halt = time.perf_counter()
             stage.x.halt()
             z_drive.halt()
-            t_after_halt = time.perf_counter()
+            time.perf_counter()
 
             time.sleep(0.05)
             stop_polling.set()
@@ -161,7 +158,7 @@ def run_single_test(
             final_z = z_drive.position_um
             motion_duration = t_halt - t_after_start
 
-            print(f"  Duration: {motion_duration*1000:.0f} ms (expected {expected_duration_s*1000:.0f} ms)")
+            print(f"  Duration: {motion_duration * 1000:.0f} ms (expected {expected_duration_s * 1000:.0f} ms)")
             print(f"  X overshoot: {final_x - x_end:+.0f} µm")
             print(f"  Z overshoot: {final_z - z_end:+.1f} µm")
 
@@ -194,8 +191,8 @@ def run_single_test(
         error_std = float(np.std(z_error))
         error_max = float(np.max(np.abs(z_error)))
     else:
-        error_mean = error_std = error_max = float('nan')
-        print(f"  WARNING: Not enough samples in constant velocity region")
+        error_mean = error_std = error_max = float("nan")
+        print("  WARNING: Not enough samples in constant velocity region")
 
     print(f"  Tracking error: mean={error_mean:.2f} µm, std={error_std:.2f} µm, max={error_max:.2f} µm")
 
@@ -229,38 +226,23 @@ def main():
         description="Test Z ramp synchronization at various X speeds",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
-        "--slope", type=float, default=1.45,
-        help="Focus plane slope in µm/mm (Z change per mm X)"
-    )
-    parser.add_argument(
-        "--x-distance", type=float, default=10.0,
-        help="X travel distance in mm"
-    )
-    parser.add_argument(
-        "--z-safe", type=float, default=20000.0,
-        help="Safe Z position to start from (µm)"
-    )
-    parser.add_argument(
-        "-o", "--output", type=Path, default=None,
-        help="Output JSON path"
-    )
-    parser.add_argument(
-        "--speeds", type=str, default="5,10,20,30,40",
-        help="Comma-separated X speeds to test (mm/s)"
-    )
+    parser.add_argument("--slope", type=float, default=1.45, help="Focus plane slope in µm/mm (Z change per mm X)")
+    parser.add_argument("--x-distance", type=float, default=10.0, help="X travel distance in mm")
+    parser.add_argument("--z-safe", type=float, default=20000.0, help="Safe Z position to start from (µm)")
+    parser.add_argument("-o", "--output", type=Path, default=None, help="Output JSON path")
+    parser.add_argument("--speeds", type=str, default="5,10,20,30,40", help="Comma-separated X speeds to test (mm/s)")
     args = parser.parse_args()
 
     # X speeds to test (mm/s)
     x_speeds = [float(s) for s in args.speeds.split(",")]
 
-    print(f"Z Ramp Speed Test")
-    print(f"=================")
+    print("Z Ramp Speed Test")
+    print("=================")
     print(f"Slope: {args.slope:.2f} µm/mm")
     print(f"X distance: {args.x_distance:.1f} mm")
     print(f"X speeds to test: {x_speeds} mm/s")
-    print(f"")
-    print(f"Expected Z velocities:")
+    print("")
+    print("Expected Z velocities:")
     for x_speed in x_speeds:
         z_vel = args.slope * x_speed
         print(f"  {x_speed:2.0f} mm/s X -> {z_vel:5.1f} µm/s Z")
@@ -277,27 +259,31 @@ def main():
             results.append(result)
         except Exception as e:
             print(f"  ERROR: {e}")
-            results.append({
-                "x_speed_mm_s": x_speed,
-                "error": str(e),
-            })
+            results.append(
+                {
+                    "x_speed_mm_s": x_speed,
+                    "error": str(e),
+                }
+            )
         time.sleep(0.5)  # Brief pause between tests
 
     # Summary table
-    print(f"\n{'='*60}")
-    print(f"SUMMARY")
-    print(f"{'='*60}")
+    print(f"\n{'=' * 60}")
+    print("SUMMARY")
+    print(f"{'=' * 60}")
     print(f"{'X Speed':>8} {'Z Speed':>8} {'Duration':>10} {'Err Mean':>10} {'Err Max':>10}")
     print(f"{'(mm/s)':>8} {'(µm/s)':>8} {'(ms)':>10} {'(µm)':>10} {'(µm)':>10}")
-    print(f"{'-'*60}")
+    print(f"{'-' * 60}")
 
     for r in results:
         if "error" in r:
             print(f"{r['x_speed_mm_s']:>8.0f} {'FAILED':>8}")
         else:
-            print(f"{r['x_speed_mm_s']:>8.0f} {r['z_speed_um_s']:>8.1f} "
-                  f"{r['actual_duration_s']*1000:>10.0f} "
-                  f"{r['error_mean_um']:>10.2f} {r['error_max_um']:>10.2f}")
+            print(
+                f"{r['x_speed_mm_s']:>8.0f} {r['z_speed_um_s']:>8.1f} "
+                f"{r['actual_duration_s'] * 1000:>10.0f} "
+                f"{r['error_mean_um']:>10.2f} {r['error_max_um']:>10.2f}"
+            )
 
     # Save results
     output_path = args.output

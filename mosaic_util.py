@@ -37,9 +37,18 @@ def _get_font(size):
     return ImageFont.load_default()
 
 
-def make_mosaic(image_paths, rows, cols, max_dim, margin, bg_color,
-                labels=False, label_size=None, label_color=(255, 255, 255),
-                label_bg=None):
+def make_mosaic(
+    image_paths,
+    rows,
+    cols,
+    max_dim,
+    margin,
+    bg_color,
+    labels=False,
+    label_size=None,
+    label_color=(255, 255, 255),
+    label_bg=None,
+):
     """Tile images into a grid mosaic.
 
     All thumbnails use the aspect ratio of the first image.
@@ -66,7 +75,7 @@ def make_mosaic(image_paths, rows, cols, max_dim, margin, bg_color,
     # thumb_h = thumb_w / aspect
     # Solve for thumb_w from width constraint:
     thumb_w_from_width = (max_dim - (cols - 1) * margin) / cols
-    thumb_h_from_width = thumb_w_from_width / aspect
+    thumb_w_from_width / aspect
 
     # Solve for thumb_h from height constraint:
     thumb_h_from_height = (max_dim - (rows - 1) * margin) / rows
@@ -136,15 +145,15 @@ def main():
     parser.add_argument("--rows", type=int, default=1, help="Number of rows")
     parser.add_argument("--cols", type=int, default=None, help="Max columns (default: fit all images)")
     parser.add_argument("--margin", type=int, default=2, help="Gap between images in pixels")
-    parser.add_argument("--bg-color", type=_parse_color, default=(30, 30, 30),
-                        help="Canvas background color as R,G,B")
+    parser.add_argument("--bg-color", type=_parse_color, default=(30, 30, 30), help="Canvas background color as R,G,B")
     parser.add_argument("--labels", action="store_true", help="Label each image with its filename")
-    parser.add_argument("--label-size", type=int, default=None,
-                        help="Label font size in points (default: auto ~3%% of thumb height)")
-    parser.add_argument("--label-color", type=_parse_color, default=(255, 255, 255),
-                        help="Label text color as R,G,B")
-    parser.add_argument("--label-bg", type=_parse_color, default=None,
-                        help="Label background color as R,G,B or R,G,B,A (default: none)")
+    parser.add_argument(
+        "--label-size", type=int, default=None, help="Label font size in points (default: auto ~3%% of thumb height)"
+    )
+    parser.add_argument("--label-color", type=_parse_color, default=(255, 255, 255), help="Label text color as R,G,B")
+    parser.add_argument(
+        "--label-bg", type=_parse_color, default=None, help="Label background color as R,G,B or R,G,B,A (default: none)"
+    )
     args = parser.parse_args()
 
     # Collect image paths
@@ -157,9 +166,16 @@ def main():
     print(f"Mosaic: {len(paths)} images, {args.rows} row(s), max {args.max_dim}px")
 
     canvas = make_mosaic(
-        paths, args.rows, args.cols, args.max_dim, args.margin, args.bg_color,
-        labels=args.labels, label_size=args.label_size,
-        label_color=args.label_color, label_bg=args.label_bg,
+        paths,
+        args.rows,
+        args.cols,
+        args.max_dim,
+        args.margin,
+        args.bg_color,
+        labels=args.labels,
+        label_size=args.label_size,
+        label_color=args.label_color,
+        label_bg=args.label_bg,
     )
     canvas.save(args.output, quality=95)
     print(f"Saved {canvas.width}x{canvas.height} -> {args.output}")

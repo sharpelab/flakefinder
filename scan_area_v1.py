@@ -158,9 +158,7 @@ Examples:
         default=12,
         help="Y overlap between rows as %% of frame height (default: 12)",
     )
-    frame_group.add_argument(
-        "--downsample", type=int, default=1, help="Downsample factor (2 = half dims)"
-    )
+    frame_group.add_argument("--downsample", type=int, default=1, help="Downsample factor (2 = half dims)")
     frame_group.add_argument(
         "--white-balance",
         type=str,
@@ -181,9 +179,7 @@ Examples:
         default=1.0,
         help="Exposure time in milliseconds (default: 1.0)",
     )
-    frame_group.add_argument(
-        "--gain", type=float, default=1.0, help="Camera gain multiplier (default: 1.0)"
-    )
+    frame_group.add_argument("--gain", type=float, default=1.0, help="Camera gain multiplier (default: 1.0)")
     frame_group.add_argument(
         "--warmup-frames",
         type=int,
@@ -193,12 +189,8 @@ Examples:
 
     # Output options
     output_group = parser.add_argument_group("Output")
-    output_group.add_argument(
-        "--compress", action="store_true", help="Create .zip of output directory"
-    )
-    output_group.add_argument(
-        "--clean", action="store_true", help="Wipe output directory if it exists"
-    )
+    output_group.add_argument("--compress", action="store_true", help="Create .zip of output directory")
+    output_group.add_argument("--clean", action="store_true", help="Wipe output directory if it exists")
     output_group.add_argument(
         "--write-threads", type=int, default=2, help="Number of image writer threads (default: 2)"
     )
@@ -272,9 +264,7 @@ Examples:
         if args.clean:
             shutil.rmtree(args.output)
         else:
-            print(
-                f"Error: Output directory '{args.output}' already exists. Use --clean to wipe it."
-            )
+            print(f"Error: Output directory '{args.output}' already exists. Use --clean to wipe it.")
             return 1
     os.makedirs(args.output)
 
@@ -456,9 +446,7 @@ Examples:
 
         print(f"Camera: {camera.name}")
         exp_str = f"{actual_exposure * 1000:.1f}ms" if actual_exposure else "?"
-        print(
-            f"  Trigger: CONTINUOUS, Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}{readout_fps}"
-        )
+        print(f"  Trigger: CONTINUOUS, Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}{readout_fps}")
         print(f"  White balance (B,G,R): {wb_blue}, {wb_green}, {wb_red}")
         print(f"  Gamma: {args.gamma}")
         if frame_width_px and frame_height_px:
@@ -521,24 +509,16 @@ Examples:
                 x_min, x_max, y_min, y_max = parse_area_rect(args.area_rect)
                 # Validate against stage limits (hard fail, no clamping)
                 if x_min < stage.x.min_um:
-                    print(
-                        f"Error: x_min ({x_min:.0f}) is below stage minimum ({stage.x.min_um:.0f})"
-                    )
+                    print(f"Error: x_min ({x_min:.0f}) is below stage minimum ({stage.x.min_um:.0f})")
                     return 1
                 if x_max > stage.x.max_um:
-                    print(
-                        f"Error: x_max ({x_max:.0f}) exceeds stage maximum ({stage.x.max_um:.0f})"
-                    )
+                    print(f"Error: x_max ({x_max:.0f}) exceeds stage maximum ({stage.x.max_um:.0f})")
                     return 1
                 if y_min < stage.y.min_um:
-                    print(
-                        f"Error: y_min ({y_min:.0f}) is below stage minimum ({stage.y.min_um:.0f})"
-                    )
+                    print(f"Error: y_min ({y_min:.0f}) is below stage minimum ({stage.y.min_um:.0f})")
                     return 1
                 if y_max > stage.y.max_um:
-                    print(
-                        f"Error: y_max ({y_max:.0f}) exceeds stage maximum ({stage.y.max_um:.0f})"
-                    )
+                    print(f"Error: y_max ({y_max:.0f}) exceeds stage maximum ({stage.y.max_um:.0f})")
                     return 1
             except ValueError as e:
                 print(f"Error: {e}")
@@ -618,11 +598,7 @@ Examples:
                 x_start_interp = interpolate_position(t_start, row_x_samples)
                 x_end_interp = interpolate_position(t_end, row_x_samples)
                 dt = t_end - t_start
-                x_vel = (
-                    (x_end_interp - x_start_interp) / dt
-                    if dt > 0 and x_start_interp and x_end_interp
-                    else 0
-                )
+                x_vel = (x_end_interp - x_start_interp) / dt if dt > 0 and x_start_interp and x_end_interp else 0
 
                 saved_frames_meta.append(
                     {
@@ -791,14 +767,10 @@ Examples:
 
             # Filter position samples to row scan period
             row_x_samples = [
-                (t_before, t_after, x)
-                for t_before, t_after, x in x_samples
-                if row_start <= t_before <= row_end
+                (t_before, t_after, x) for t_before, t_after, x in x_samples if row_start <= t_before <= row_end
             ]
 
-            print(
-                f"  {row_frame_count} frames, {len(row_x_samples)} pos samples, {row_duration:.2f}s"
-            )
+            print(f"  {row_frame_count} frames, {len(row_x_samples)} pos samples, {row_duration:.2f}s")
 
             # Add position samples to global list (with adjusted timestamps)
             for t_before, t_after, x_um in row_x_samples:

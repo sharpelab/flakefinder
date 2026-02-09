@@ -18,18 +18,16 @@ Usage:
 
 import argparse
 import bisect
-from datetime import datetime
 import json
 import os
 import queue
 import shutil
 import threading
 import time
-from pathlib import Path
+from datetime import datetime
 
 import numpy as np
 from scipy.interpolate import CubicSpline
-
 
 # ============================================================================
 # Surface Data (from autofocus measurements)
@@ -65,9 +63,9 @@ SURFACE_DATA = {
 
 # Plane fit from autofocus data: Z = a*X_mm + b*Y_mm + c
 PLANE_FIT = {
-    "a_um_per_mm": 1.4722,   # X slope
+    "a_um_per_mm": 1.4722,  # X slope
     "b_um_per_mm": -0.6527,  # Y slope
-    "c_um": 24666.85,        # Intercept
+    "c_um": 24666.85,  # Intercept
 }
 
 
@@ -140,7 +138,7 @@ def load_microscope_description() -> dict | None:
     try:
         with open(MICROSCOPE_DESCRIPTION) as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except (OSError, json.JSONDecodeError):
         return None
 
 
@@ -197,8 +195,8 @@ def parse_area_rect(value: str) -> tuple[float, float, float, float]:
         raise ValueError("--area-rect must be x_min,x_max,y_min,y_max (4 values)")
     try:
         x1, x2, y1, y2 = float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3])
-    except ValueError:
-        raise ValueError("--area-rect values must be numbers")
+    except ValueError as e:
+        raise ValueError("--area-rect values must be numbers") from e
 
     x_min, x_max = min(x1, x2), max(x1, x2)
     y_min, y_max = min(y1, y2), max(y1, y2)
@@ -212,6 +210,7 @@ def parse_area_rect(value: str) -> tuple[float, float, float, float]:
 # ============================================================================
 # Main Scan
 # ============================================================================
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -227,65 +226,70 @@ Examples:
 
   # Objective by turret position
   python scan_area_with_focus.py -o scan_20x --area-rect 12000,35000,8175,8175 --objective-pos 3 --speed-mm 10
-"""
+""",
     )
     parser.add_argument("-o", "--output", required=True, help="Output directory")
 
     # Scan area
     area_group = parser.add_argument_group("Scan area")
-    area_group.add_argument("--area-rect", type=str, required=True, metavar="X1,X2,Y1,Y2",
-                           help="Scan area as x_min,x_max,y_min,y_max in µm (Y values should match for single row)")
-    area_group.add_argument("--surface", choices=["top", "middle"], default="top",
-                           help="Surface profile to track (default: top)")
+    area_group.add_argument(
+        "--area-rect",
+        type=str,
+        required=True,
+        metavar="X1,X2,Y1,Y2",
+        help="Scan area as x_min,x_max,y_min,y_max in µm (Y values should match for single row)",
+    )
+    area_group.add_argument(
+        "--surface", choices=["top", "middle"], default="top", help="Surface profile to track (default: top)"
+    )
 
     # Optics
     optics_group = parser.add_argument_group("Optics")
-    optics_group.add_argument("--objective-mag", type=str, metavar="MAG",
-                             help="Objective by magnification (e.g., 5, 5x, 20, 2.5) - switches before scan")
-    optics_group.add_argument("--objective-pos", type=int, metavar="POS",
-                             help="Objective by turret position (1-6) - switches before scan")
+    optics_group.add_argument(
+        "--objective-mag",
+        type=str,
+        metavar="MAG",
+        help="Objective by magnification (e.g., 5, 5x, 20, 2.5) - switches before scan",
+    )
+    optics_group.add_argument(
+        "--objective-pos", type=int, metavar="POS", help="Objective by turret position (1-6) - switches before scan"
+    )
 
     # Motion
     motion_group = parser.add_argument_group("Motion")
-    motion_group.add_argument("--speed-mm", type=float, default=5.0,
-                             help="Scan speed in mm/s (default: 5)")
-    motion_group.add_argument("--move-speed-mm", type=float, default=40,
-                             help="Move speed for positioning (default: 40)")
+    motion_group.add_argument("--speed-mm", type=float, default=5.0, help="Scan speed in mm/s (default: 5)")
+    motion_group.add_argument(
+        "--move-speed-mm", type=float, default=40, help="Move speed for positioning (default: 40)"
+    )
 
     # Camera
     frame_group = parser.add_argument_group("Camera")
-    frame_group.add_argument("--exposure-ms", type=float, default=0.25,
-                            help="Exposure time in ms (default: 0.25)")
-    frame_group.add_argument("--gain", type=float, default=4.0,
-                            help="Camera gain (default: 4.0)")
-    frame_group.add_argument("--binning", type=int, default=3, choices=[1, 2, 3],
-                            help="Camera binning NxN (default: 3)")
-    frame_group.add_argument("--white-balance", type=str, default="2.51,1.02,1.41",
-                            help="White balance as B,G,R gains")
+    frame_group.add_argument("--exposure-ms", type=float, default=0.25, help="Exposure time in ms (default: 0.25)")
+    frame_group.add_argument("--gain", type=float, default=4.0, help="Camera gain (default: 4.0)")
+    frame_group.add_argument(
+        "--binning", type=int, default=3, choices=[1, 2, 3], help="Camera binning NxN (default: 3)"
+    )
+    frame_group.add_argument("--white-balance", type=str, default="2.51,1.02,1.41", help="White balance as B,G,R gains")
     frame_group.add_argument("--gamma", type=float, default=1.0, help="Gamma (default: 1.0)")
     frame_group.add_argument("--downsample", type=int, default=1, help="Downsample factor")
-    frame_group.add_argument("--warmup-frames", type=int, default=3,
-                            help="Warmup captures before scan (default: 3)")
+    frame_group.add_argument("--warmup-frames", type=int, default=3, help="Warmup captures before scan (default: 3)")
 
     # Z Controller
     ctrl_group = parser.add_argument_group("Z Controller")
-    ctrl_group.add_argument("--kp", type=float, default=3.0,
-                           help="Position error gain (default: 3.0)")
-    ctrl_group.add_argument("--kv", type=float, default=0.3,
-                           help="Velocity error gain (default: 0.3)")
-    ctrl_group.add_argument("--kff", type=float, default=1.0,
-                           help="Feedforward gain (default: 1.0)")
-    ctrl_group.add_argument("--lookahead-ms", type=float, default=50.0,
-                           help="Feedforward lookahead in ms (default: 50)")
-    ctrl_group.add_argument("--control-rate", type=float, default=50.0,
-                           help="Z controller update rate in Hz (default: 50)")
+    ctrl_group.add_argument("--kp", type=float, default=3.0, help="Position error gain (default: 3.0)")
+    ctrl_group.add_argument("--kv", type=float, default=0.3, help="Velocity error gain (default: 0.3)")
+    ctrl_group.add_argument("--kff", type=float, default=1.0, help="Feedforward gain (default: 1.0)")
+    ctrl_group.add_argument(
+        "--lookahead-ms", type=float, default=50.0, help="Feedforward lookahead in ms (default: 50)"
+    )
+    ctrl_group.add_argument(
+        "--control-rate", type=float, default=50.0, help="Z controller update rate in Hz (default: 50)"
+    )
 
     # Safety
     safety_group = parser.add_argument_group("Safety")
-    safety_group.add_argument("--z-max", type=float, default=26000.0,
-                             help="Hard Z limit in µm (default: 26000)")
-    safety_group.add_argument("--z-margin", type=float, default=500.0,
-                             help="Safety margin below z-max (default: 500)")
+    safety_group.add_argument("--z-max", type=float, default=26000.0, help="Hard Z limit in µm (default: 26000)")
+    safety_group.add_argument("--z-margin", type=float, default=500.0, help="Safety margin below z-max (default: 500)")
 
     # Output
     output_group = parser.add_argument_group("Output")
@@ -329,7 +333,7 @@ Examples:
     # Warn if Y doesn't match surface
     if abs(row_y - surface_y) > 1000:
         print(f"Warning: Row Y ({row_y:.0f}) doesn't match surface '{surface_name}' Y ({surface_y:.0f})")
-        print(f"  Consider using a surface with closer Y, or adjust --area-rect")
+        print("  Consider using a surface with closer Y, or adjust --area-rect")
 
     # Build Z profile
     z_func, dzdx_func, profile_info = build_z_profile(surface_name, x_min, x_max)
@@ -365,12 +369,12 @@ Examples:
 
     print("Scan with Focus Tracking")
     print("=" * 60)
-    print(f"X range: {x_min:.0f} -> {x_max:.0f} µm ({x_distance_um/1000:.1f} mm)")
+    print(f"X range: {x_min:.0f} -> {x_max:.0f} µm ({x_distance_um / 1000:.1f} mm)")
     print(f"Row Y: {row_y:.0f} µm (surface '{surface_name}' Y={surface_y:.0f})")
     print(f"X speed: {args.speed_mm:.1f} mm/s")
     print(f"Expected duration: {expected_duration_s:.2f} s")
     print()
-    print(f"Z profile:")
+    print("Z profile:")
     print(f"  Expected Z range: {z_min_expected:.0f} - {z_max_expected:.0f} µm")
     print(f"  Max gradient: {profile_info['max_gradient_um_per_mm']:.2f} µm/mm")
     print(f"  Max Z velocity: {max_z_vel_needed:.1f} µm/s")
@@ -380,13 +384,15 @@ Examples:
     print()
 
     from PIL import Image as PILImage
-    from flakefinder.leica import LeicaConnection, Stage, ZDrive, Lamp, Shutter, Nosepiece
+
+    from flakefinder.leica import Lamp, LeicaConnection, Nosepiece, Shutter, Stage, ZDrive
     from flakefinder.leica.camera import Camera
-    from flakefinder.leica.enums import UCAPI_IID
     from flakefinder.leica.core import get_interface_required
+    from flakefinder.leica.enums import UCAPI_IID
 
     with LeicaConnection() as conn:
         from LeicaMicrosystems.HardwareModel import Extensions
+
         Extensions.ExUCAPI.Register()
 
         # Set up hardware
@@ -507,7 +513,7 @@ Examples:
                 frame_height_um = frame_height_px * sample_pixel_y_um
 
         print(f"Camera: {camera.name}")
-        exp_str = f"{actual_exposure*1000:.2f}ms" if actual_exposure else "?"
+        exp_str = f"{actual_exposure * 1000:.2f}ms" if actual_exposure else "?"
         print(f"  Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}, Gain: {args.gain}")
         if frame_width_px and frame_height_px:
             print(f"  Frame: {frame_width_px}x{frame_height_px} px")
@@ -562,19 +568,21 @@ Examples:
                 dt = t_end - t_start
                 x_vel = (x_end_interp - x_start_interp) / dt if dt > 0 and x_start_interp and x_end_interp else 0
 
-                saved_frames_meta.append({
-                    "n": frame_idx,
-                    "row": 0,  # Single row scan
-                    "t_start": t_start - t0,
-                    "t_end": t_end - t0,
-                    "x_start": x_start_interp,
-                    "x_end": x_end_interp,
-                    "x_vel": x_vel,
-                    "y_um": row_y,
-                    "z_actual": z_interp,
-                    "z_ideal": z_ideal,
-                    "z_error": z_error,
-                })
+                saved_frames_meta.append(
+                    {
+                        "n": frame_idx,
+                        "row": 0,  # Single row scan
+                        "t_start": t_start - t0,
+                        "t_end": t_end - t0,
+                        "x_start": x_start_interp,
+                        "x_end": x_end_interp,
+                        "x_vel": x_vel,
+                        "y_um": row_y,
+                        "z_actual": z_interp,
+                        "z_ideal": z_ideal,
+                        "z_error": z_error,
+                    }
+                )
 
                 save_queue.task_done()
 
@@ -731,14 +739,16 @@ Examples:
                         else:
                             z_drive.halt()
 
-                        control_log.append({
-                            "t": t_now,
-                            "x_um": current_x,
-                            "z_actual_um": current_z,
-                            "z_target_um": ideal_z,
-                            "error_pos_um": error_pos,
-                            "commanded_vel_um_s": commanded_vel,
-                        })
+                        control_log.append(
+                            {
+                                "t": t_now,
+                                "x_um": current_x,
+                                "z_actual_um": current_z,
+                                "z_target_um": ideal_z,
+                                "error_pos_um": error_pos,
+                                "commanded_vel_um_s": commanded_vel,
+                            }
+                        )
                         last_cmd_vel = commanded_vel
 
                     # Sleep
@@ -788,10 +798,9 @@ Examples:
 
                 if current_image[0] is not None:
                     # Make copies of current sample lists for the saver
-                    save_queue.put((
-                        frame_idx, t_start, t_end, current_image[0],
-                        list(x_samples), list(z_samples), t_scan_start
-                    ))
+                    save_queue.put(
+                        (frame_idx, t_start, t_end, current_image[0], list(x_samples), list(z_samples), t_scan_start)
+                    )
                     frame_idx += 1
 
             t_scan_end = time.perf_counter()
@@ -805,8 +814,8 @@ Examples:
             z_drive.halt()
 
             scan_duration = t_scan_end - t_scan_start
-            print(f"\nScan complete!")
-            print(f"  Duration: {scan_duration*1000:.0f} ms (expected: {expected_duration_s*1000:.0f} ms)")
+            print("\nScan complete!")
+            print(f"  Duration: {scan_duration * 1000:.0f} ms (expected: {expected_duration_s * 1000:.0f} ms)")
             print(f"  Frames captured: {frame_idx}")
 
             # Stop polling
@@ -825,7 +834,7 @@ Examples:
 
         finally:
             # Restore position
-            print(f"\nRestoring position...")
+            print("\nRestoring position...")
             z_drive.move_to(initial_z)
             stage.x.move_to(initial_x)
             print(f"  Restored to: X={stage.x.position_um:.0f}, Z={z_drive.position_um:.0f} µm")
@@ -852,12 +861,14 @@ Examples:
             dof_20x = 1.7  # µm (20x DOF is ~1.7µm)
             within_dof = z_error_max < dof_20x
 
-            print(f"\nZ Tracking Error:")
+            print("\nZ Tracking Error:")
             print(f"  Mean: {z_error_mean:+.2f} µm")
             print(f"  Std: {z_error_std:.2f} µm")
             print(f"  Max: {z_error_max:.2f} µm")
             print(f"  95th percentile: {z_error_p95:.2f} µm")
-            print(f"  {'PASS' if within_dof else 'FAIL'}: {'within' if within_dof else 'exceeds'} 20x DOF ({dof_20x} µm)")
+            print(
+                f"  {'PASS' if within_dof else 'FAIL'}: {'within' if within_dof else 'exceeds'} 20x DOF ({dof_20x} µm)"  # noqa: E501
+            )
         else:
             z_error_mean = z_error_std = z_error_max = z_error_p95 = None
             within_dof = None
@@ -913,15 +924,17 @@ Examples:
                 "shutter_open": shutter.is_open if shutter else None,
             },
             # Rows array for stitch_area.py compatibility
-            "rows": [{
-                "row_idx": 0,
-                "y_um": row_y,
-                "direction": 1,  # +X direction
-                "frame_start": 0,
-                "frame_end": frame_idx,
-                "duration_s": scan_duration,
-                "position_samples": len(x_samples),
-            }],
+            "rows": [
+                {
+                    "row_idx": 0,
+                    "y_um": row_y,
+                    "direction": 1,  # +X direction
+                    "frame_start": 0,
+                    "frame_end": frame_idx,
+                    "duration_s": scan_duration,
+                    "position_samples": len(x_samples),
+                }
+            ],
             # Position stream for stitching (scan_area_v1 format)
             "position_stream": [
                 {"t_before": s[0] - t_scan_start, "t_after": s[1] - t_scan_start, "x_um": s[2], "row": 0}
@@ -975,7 +988,7 @@ Examples:
         # Compress if requested
         if args.compress:
             print(f"Creating {args.output}.zip...")
-            shutil.make_archive(args.output, 'zip', args.output)
+            shutil.make_archive(args.output, "zip", args.output)
             print(f"Created {args.output}.zip")
 
         # Clean up camera

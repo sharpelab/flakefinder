@@ -95,13 +95,9 @@ Examples:
 
     # Chip and plane
     chip_group = parser.add_argument_group("Chip and focus")
-    chip_group.add_argument(
-        "--chips-meta", type=str, required=True, help="Path to chips JSON from find_chips.py"
-    )
+    chip_group.add_argument("--chips-meta", type=str, required=True, help="Path to chips JSON from find_chips.py")
     chip_group.add_argument("--chip", type=int, required=True, help="Chip index (from chips JSON)")
-    chip_group.add_argument(
-        "--plane", type=str, required=True, help="Path to plane JSON from analyze_focus_map.py"
-    )
+    chip_group.add_argument("--plane", type=str, required=True, help="Path to plane JSON from analyze_focus_map.py")
     chip_group.add_argument(
         "--padding",
         type=float,
@@ -123,9 +119,7 @@ Examples:
         action="store_true",
         help="Print scan plan and row summary, then exit (no hardware)",
     )
-    scan_group.add_argument(
-        "--row-limit", type=int, default=None, help="Scan only N rows then stop (for testing)"
-    )
+    scan_group.add_argument("--row-limit", type=int, default=None, help="Scan only N rows then stop (for testing)")
     scan_group.add_argument(
         "--row-settle",
         type=float,
@@ -165,25 +159,19 @@ Examples:
 
     # Motion
     motion_group = parser.add_argument_group("Motion")
-    motion_group.add_argument(
-        "--speed-mm", type=float, default=5.0, help="Scan speed in mm/s (default: 5)"
-    )
+    motion_group.add_argument("--speed-mm", type=float, default=5.0, help="Scan speed in mm/s (default: 5)")
     motion_group.add_argument(
         "--move-speed-mm", type=float, default=40, help="Move speed for positioning (default: 40)"
     )
 
     # Camera
     frame_group = parser.add_argument_group("Camera")
-    frame_group.add_argument(
-        "--exposure-ms", type=float, default=0.25, help="Exposure time in ms (default: 0.25)"
-    )
+    frame_group.add_argument("--exposure-ms", type=float, default=0.25, help="Exposure time in ms (default: 0.25)")
     frame_group.add_argument("--gain", type=float, default=4.0, help="Camera gain (default: 4.0)")
     frame_group.add_argument(
         "--binning", type=int, default=3, choices=[1, 2, 3], help="Camera binning NxN (default: 3)"
     )
-    frame_group.add_argument(
-        "--white-balance", type=str, default="2.51,1.02,1.41", help="White balance as B,G,R gains"
-    )
+    frame_group.add_argument("--white-balance", type=str, default="2.51,1.02,1.41", help="White balance as B,G,R gains")
     frame_group.add_argument("--gamma", type=float, default=1.0, help="Gamma (default: 1.0)")
     frame_group.add_argument("--downsample", type=int, default=1, help="Downsample factor")
     frame_group.add_argument(
@@ -212,15 +200,11 @@ Examples:
 
     # Safety
     safety_group = parser.add_argument_group("Safety")
-    safety_group.add_argument(
-        "--z-max", type=float, default=26000.0, help="Hard Z limit in µm (default: 26000)"
-    )
+    safety_group.add_argument("--z-max", type=float, default=26000.0, help="Hard Z limit in µm (default: 26000)")
 
     # Output
     output_group = parser.add_argument_group("Output")
-    output_group.add_argument(
-        "--clean", action="store_true", help="Wipe output directory if exists"
-    )
+    output_group.add_argument("--clean", action="store_true", help="Wipe output directory if exists")
     output_group.add_argument("--write-threads", type=int, default=2, help="Image writer threads")
     output_group.add_argument("--compress", action="store_true", help="Create .zip of output")
 
@@ -338,9 +322,7 @@ Examples:
     print("Chip Scan with Focus Plane")
     print("=" * 60)
     print(f"Chip: #{args.chip}")
-    print(
-        f"  BBox: X=[{bbox['x_min']:.0f}, {bbox['x_max']:.0f}], Y=[{bbox['y_min']:.0f}, {bbox['y_max']:.0f}] µm"
-    )
+    print(f"  BBox: X=[{bbox['x_min']:.0f}, {bbox['x_max']:.0f}], Y=[{bbox['y_min']:.0f}, {bbox['y_max']:.0f}] µm")
     print(f"  Centroid: ({centroid[0]:.0f}, {centroid[1]:.0f}) µm")
     print(f"  Hull vertices: {len(polygon)}")
     print(f"  Area: {chip_geo.area_um2 / 1e6:.1f} mm²")
@@ -383,9 +365,7 @@ Examples:
     est_total_time_s = total_distance_mm / args.speed_mm + len(plan.rows) * 0.5
 
     print(f"Frame FOV: {plan.frame_width_um:.1f} x {plan.frame_height_um:.1f} µm")
-    print(
-        f"Frame skip: target advance {plan.target_advance_um:.0f} µm ({args.x_overlap_percent:.0f}% X overlap)"
-    )
+    print(f"Frame skip: target advance {plan.target_advance_um:.0f} µm ({args.x_overlap_percent:.0f}% X overlap)")
     print()
     print(f"Row plan: {len(plan.rows)} rows")
     print(f"  Y step: {plan.y_step_um:.1f} µm ({args.y_overlap_percent:.0f}% overlap)")
@@ -529,21 +509,15 @@ Examples:
 
         # Assert camera dimensions match the plan
         if abs(frame_width_um - plan.frame_width_um) > 1.0:
-            print(
-                f"ABORT: Camera frame width {frame_width_um:.1f} != plan {plan.frame_width_um:.1f} µm"
-            )
+            print(f"ABORT: Camera frame width {frame_width_um:.1f} != plan {plan.frame_width_um:.1f} µm")
             return 1
         if abs(frame_height_um - plan.frame_height_um) > 1.0:
-            print(
-                f"ABORT: Camera frame height {frame_height_um:.1f} != plan {plan.frame_height_um:.1f} µm"
-            )
+            print(f"ABORT: Camera frame height {frame_height_um:.1f} != plan {plan.frame_height_um:.1f} µm")
             return 1
 
         exp_str = f"{actual_exposure * 1000:.2f}ms" if actual_exposure else "?"
         print(f"Camera: {camera.name}")
-        print(
-            f"  Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}, Gain: {args.gain}"
-        )
+        print(f"  Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}, Gain: {args.gain}")
         if frame_width_px and frame_height_px:
             print(f"  Frame: {frame_width_px}x{frame_height_px} px")
         if frame_width_um and frame_height_um:
@@ -605,16 +579,10 @@ Examples:
                     if x_start_interp
                     else None
                 )
-                z_error = (
-                    (z_interp - z_ideal) if (z_interp is not None and z_ideal is not None) else None
-                )
+                z_error = (z_interp - z_ideal) if (z_interp is not None and z_ideal is not None) else None
 
                 dt = t_end - t_start
-                x_vel = (
-                    (x_end_interp - x_start_interp) / dt
-                    if dt > 0 and x_start_interp and x_end_interp
-                    else 0
-                )
+                x_vel = (x_end_interp - x_start_interp) / dt if dt > 0 and x_start_interp and x_end_interp else 0
 
                 saved_frames_meta.append(
                     {
@@ -698,9 +666,7 @@ Examples:
                     dir_str = "-X"
 
                 # Compute Z for start and end of this row
-                z_start = compute_plane_z(
-                    plan.plane_a, plan.plane_b, plan.plane_c, x_start_pos, row_y
-                )
+                z_start = compute_plane_z(plan.plane_a, plan.plane_b, plan.plane_c, x_start_pos, row_y)
                 z_end = compute_plane_z(plan.plane_a, plan.plane_b, plan.plane_c, x_end_pos, row_y)
 
                 # Z velocity during this row: dZ/dt = (plane_a * direction) * x_speed
@@ -715,9 +681,7 @@ Examples:
 
                 # Runtime Z safety check
                 if max(z_start, z_end) > args.z_max:
-                    print(
-                        f"  SKIP: Z would exceed limit ({max(z_start, z_end):.0f} > {args.z_max:.0f})"
-                    )
+                    print(f"  SKIP: Z would exceed limit ({max(z_start, z_end):.0f} > {args.z_max:.0f})")
                     continue
 
                 # Move to row start position (instrumented)
@@ -859,9 +823,7 @@ Examples:
                         if row_start <= tb <= row_end
                     ]
                 else:
-                    row_x_samples = [
-                        (tb, ta, x) for tb, ta, x in x_samples if row_start <= tb <= row_end
-                    ]
+                    row_x_samples = [(tb, ta, x) for tb, ta, x in x_samples if row_start <= tb <= row_end]
 
                 print(
                     f"  {row_frame_count} saved, {row_skip_count} skipped, {len(row_x_samples)} pos, {row_duration:.2f}s"  # noqa: E501
@@ -893,9 +855,7 @@ Examples:
                 scan_stop_polling.set()
                 scan_x_thread.join(timeout=1.0)
                 scan_z_thread.join(timeout=1.0)
-                print(
-                    f"Persistent polling: {len(scan_x_samples)} X samples, {len(scan_z_samples)} Z samples total"
-                )
+                print(f"Persistent polling: {len(scan_x_samples)} X samples, {len(scan_z_samples)} Z samples total")
 
             # Stop any motion
             z_drive.halt()
@@ -930,9 +890,7 @@ Examples:
                     {"t_before": tb - total_scan_start, "t_after": ta - total_scan_start, "x_um": x}
                     for tb, ta, x in scan_x_samples
                 ]
-                debug_data["z_samples"] = [
-                    {"t": t - total_scan_start, "z_um": z} for t, z in scan_z_samples
-                ]
+                debug_data["z_samples"] = [{"t": t - total_scan_start, "z_um": z} for t, z in scan_z_samples]
             else:
                 # In per-row mode, all_position_samples has the X data already
                 debug_data["x_samples"] = all_position_samples
@@ -1015,9 +973,7 @@ Examples:
                 "a": plan.plane_a,
                 "b": plan.plane_b,
                 "c": plan.plane_c,
-                "equation": plane.get(
-                    "equation", f"Z = {plan.plane_a}*X + {plan.plane_b}*Y + {plan.plane_c}"
-                ),
+                "equation": plane.get("equation", f"Z = {plan.plane_a}*X + {plan.plane_b}*Y + {plan.plane_c}"),
                 "z_range_um": [plan.validated_z_min_um, plan.validated_z_max_um],
                 "tracking_error": {
                     "mean_um": z_error_mean,
@@ -1076,11 +1032,7 @@ Examples:
         print(f"  Total time: {total_duration:.1f}s")
         print(f"  Rows: {len(plan.rows)}")
         print(f"  Total frames: {global_frame_idx}")
-        print(
-            f"  Avg FPS: {global_frame_idx / total_duration:.1f}"
-            if total_duration > 0
-            else "  Avg FPS: N/A"
-        )
+        print(f"  Avg FPS: {global_frame_idx / total_duration:.1f}" if total_duration > 0 else "  Avg FPS: N/A")
         if z_error_max is not None:
             dof_20x = 1.7
             print(

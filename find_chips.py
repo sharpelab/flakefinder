@@ -1,10 +1,10 @@
 """Detect chips in stitched microscope images using Otsu thresholding."""
 
 import argparse
-from datetime import datetime
 import json
-from pathlib import Path
 import time
+from datetime import datetime
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -82,7 +82,7 @@ def extract_chip_geometry(contour: np.ndarray, meta: dict) -> dict:
     # Area
     area_px = cv2.contourArea(contour)
     scale = meta["scale_um_per_px"]
-    area_um2 = area_px * (scale ** 2)
+    area_um2 = area_px * (scale**2)
 
     return {
         "bbox_px": bbox_px,
@@ -145,11 +145,11 @@ def find_chips(
     rejected = []
     chip_id = 0
 
-    min_area_px = min_area_um2 / (scale ** 2)
+    min_area_px = min_area_um2 / (scale**2)
 
     for contour in contours:
         area_px = cv2.contourArea(contour)
-        area_um2 = area_px * (scale ** 2)
+        area_um2 = area_px * (scale**2)
 
         # Check minimum area
         if area_px < min_area_px:
@@ -161,12 +161,14 @@ def find_chips(
         if edge:
             # Rejected due to edge clipping
             x, y, w, h = cv2.boundingRect(contour)
-            rejected.append({
-                "reason": "edge_clipped",
-                "edge": edge,
-                "bbox_px": [int(x), int(y), int(w), int(h)],
-                "area_um2": area_um2,
-            })
+            rejected.append(
+                {
+                    "reason": "edge_clipped",
+                    "edge": edge,
+                    "bbox_px": [int(x), int(y), int(w), int(h)],
+                    "area_um2": area_um2,
+                }
+            )
         else:
             # Valid chip
             geom = extract_chip_geometry(contour, meta)
@@ -232,14 +234,20 @@ def find_chips(
         cx = chip["bbox_px"][0] + chip["bbox_px"][2] // 2
         cy = chip["bbox_px"][1] + chip["bbox_px"][3] // 2
         text = str(chip["id"])
-        (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX,
-                                               font_scale, font_thickness)
-        cv2.putText(debug_img, text, (cx - text_w // 2, cy + text_h // 2),
-                   cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 0), font_thickness)
+        (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+        cv2.putText(
+            debug_img,
+            text,
+            (cx - text_w // 2, cy + text_h // 2),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            (255, 255, 0),
+            font_thickness,
+        )
 
     # Add scale bar
     # Choose largest round number that fits in 10-20% of image width
-    img_width_um = img_w * scale
+    img_w * scale
     bar_length_um = 1000  # default 1mm
     for candidate_um in [20000, 10000, 5000, 2000, 1000]:
         candidate_px = int(candidate_um / scale)
@@ -254,27 +262,40 @@ def find_chips(
     bar_y = img_h - bar_margin_px - bar_height_px
 
     # Draw scale bar with outline for visibility
-    cv2.rectangle(debug_img, (bar_x - 2, bar_y - 2),
-                 (bar_x + bar_length_px + 2, bar_y + bar_height_px + 2),
-                 (0, 0, 0), -1)  # Black outline
-    cv2.rectangle(debug_img, (bar_x, bar_y),
-                 (bar_x + bar_length_px, bar_y + bar_height_px),
-                 (255, 255, 255), -1)  # White bar
+    cv2.rectangle(
+        debug_img, (bar_x - 2, bar_y - 2), (bar_x + bar_length_px + 2, bar_y + bar_height_px + 2), (0, 0, 0), -1
+    )  # Black outline
+    cv2.rectangle(
+        debug_img, (bar_x, bar_y), (bar_x + bar_length_px, bar_y + bar_height_px), (255, 255, 255), -1
+    )  # White bar
 
     # Scale bar label
     bar_label = f"{bar_length_um / 1000:.0f} mm" if bar_length_um >= 1000 else f"{bar_length_um} µm"
     label_font_scale = 1.0 * img_scale
     label_thickness = max(1, int(2 * img_scale))
-    (label_w, label_h), _ = cv2.getTextSize(bar_label, cv2.FONT_HERSHEY_SIMPLEX,
-                                             label_font_scale, label_thickness)
+    (label_w, label_h), _ = cv2.getTextSize(bar_label, cv2.FONT_HERSHEY_SIMPLEX, label_font_scale, label_thickness)
     label_x = bar_x + (bar_length_px - label_w) // 2
     label_y = bar_y - max(5, int(10 * img_scale))
 
     # Draw label with outline
-    cv2.putText(debug_img, bar_label, (label_x, label_y),
-               cv2.FONT_HERSHEY_SIMPLEX, label_font_scale, (0, 0, 0), label_thickness + 2)
-    cv2.putText(debug_img, bar_label, (label_x, label_y),
-               cv2.FONT_HERSHEY_SIMPLEX, label_font_scale, (255, 255, 255), label_thickness)
+    cv2.putText(
+        debug_img,
+        bar_label,
+        (label_x, label_y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        label_font_scale,
+        (0, 0, 0),
+        label_thickness + 2,
+    )
+    cv2.putText(
+        debug_img,
+        bar_label,
+        (label_x, label_y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        label_font_scale,
+        (255, 255, 255),
+        label_thickness,
+    )
 
     # Downscale to reasonable size for viewing
     max_debug_dim = 1500
@@ -292,9 +313,7 @@ def find_chips(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Detect chips in stitched microscope images"
-    )
+    parser = argparse.ArgumentParser(description="Detect chips in stitched microscope images")
     parser.add_argument(
         "image",
         type=Path,
@@ -332,18 +351,17 @@ def main():
     print(f"Results saved to {out_path}")
 
     # Summary
-    print(f"\nDetection summary:")
+    print("\nDetection summary:")
     print(f"  Otsu threshold: {results['detection_params']['otsu_threshold']}")
     print(f"  Chips found: {len(results['chips'])}")
     print(f"  Rejected (edge-clipped): {len(results['rejected'])}")
 
     if results["chips"]:
-        print(f"\nChips:")
+        print("\nChips:")
         for chip in results["chips"]:
             cx, cy = chip["centroid_stage_um"]
             area_mm2 = chip["area_um2"] / 1e6
-            print(f"  #{chip['id']}: center=({cx/1000:.1f}, {cy/1000:.1f}) mm, "
-                  f"area={area_mm2:.2f} mm²")
+            print(f"  #{chip['id']}: center=({cx / 1000:.1f}, {cy / 1000:.1f}) mm, area={area_mm2:.2f} mm²")
 
     return 0
 

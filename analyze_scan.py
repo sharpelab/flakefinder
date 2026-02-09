@@ -128,15 +128,12 @@ def compute_sharpness_values(scan_dir: Path, meta: dict, sample_every: int = 1) 
             rate = processed / elapsed
             remaining = (total / sample_every - processed) / rate if rate > 0 else 0
             print(
-                f"  Processed {processed}/{total // sample_every} frames "
-                f"({rate:.0f} fps, ~{remaining:.0f}s remaining)",
+                f"  Processed {processed}/{total // sample_every} frames ({rate:.0f} fps, ~{remaining:.0f}s remaining)",
                 end="\r",
             )
 
     elapsed = time.monotonic() - t0
-    print(
-        f"  Processed {processed} frames in {elapsed:.1f}s ({processed / elapsed:.0f} fps)        "
-    )
+    print(f"  Processed {processed} frames in {elapsed:.1f}s ({processed / elapsed:.0f} fps)        ")
 
     sharpness_arr = np.array(sharpness_vals)
     indices_arr = np.array(indices)
@@ -274,9 +271,7 @@ def plot_analysis(
 
     ax_sharp.set_xlabel("Frame number")
     ax_sharp.set_ylabel("Tenengrad sharpness")
-    sample_note = (
-        f" (every {sharpness_data['sample_every']}th)" if sharpness_data["sample_every"] > 1 else ""
-    )
+    sample_note = f" (every {sharpness_data['sample_every']}th)" if sharpness_data["sample_every"] > 1 else ""
     ax_sharp.set_title(
         f"Frame Sharpness{sample_note}: mean={sharpness_data['overall_mean']:.1f}, "
         f"std={sharpness_data['overall_std']:.1f}, "
@@ -405,12 +400,8 @@ def print_summary(
     print(f"Std:            {ov['std_um']:.4f} um")
     print(f"Max |error|:    {ov['max_abs_um']:.4f} um")
     print(f"P95 |error|:    {ov['p95_um']:.4f} um")
-    print(
-        f"Outside 2 um:   {ov['pct_outside_2um']:.1f}% ({int(ov['n_frames'] * ov['pct_outside_2um'] / 100)} frames)"
-    )
-    print(
-        f"Outside 4 um:   {ov['pct_outside_4um']:.1f}% ({int(ov['n_frames'] * ov['pct_outside_4um'] / 100)} frames)"
-    )
+    print(f"Outside 2 um:   {ov['pct_outside_2um']:.1f}% ({int(ov['n_frames'] * ov['pct_outside_2um'] / 100)} frames)")
+    print(f"Outside 4 um:   {ov['pct_outside_4um']:.1f}% ({int(ov['n_frames'] * ov['pct_outside_4um'] / 100)} frames)")
 
     # Per-row Z (worst rows)
     worst_rows = sorted(z_stats["per_row"], key=lambda r: r["max_abs_um"], reverse=True)
@@ -427,9 +418,7 @@ def print_summary(
         print()
         print("--- Sharpness (Tenengrad) ---")
         sample_note = (
-            f" (sampled every {sharpness_data['sample_every']}th frame)"
-            if sharpness_data["sample_every"] > 1
-            else ""
+            f" (sampled every {sharpness_data['sample_every']}th frame)" if sharpness_data["sample_every"] > 1 else ""
         )
         print(f"Frames analyzed: {len(sharpness_data['indices'])}{sample_note}")
         print(f"Mean:   {sharpness_data['overall_mean']:.1f}")

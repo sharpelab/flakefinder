@@ -44,11 +44,11 @@ def run_step_response_test(
     """
     from flakefinder.leica import LeicaConnection, ZDrive
 
-    print(f"Z Step Response Test")
-    print(f"=" * 50)
+    print("Z Step Response Test")
+    print("=" * 50)
     print(f"Step size: {step_size_um:+.1f} µm")
     print(f"Start position: {z_safe_um:.0f} µm")
-    print(f"Settling tolerance: ±{settle_tolerance*100:.1f}% of step")
+    print(f"Settling tolerance: ±{settle_tolerance * 100:.1f}% of step")
     print()
 
     with LeicaConnection() as conn:
@@ -92,14 +92,14 @@ def run_step_response_test(
                     samples.append((t_before, t_after, z_um))
 
             # Start polling
-            print(f"\nStarting position polling...")
+            print("\nStarting position polling...")
             poll_thread = threading.Thread(target=poll_z, daemon=True)
             poll_thread.start()
 
             # Let polling warm up
             time.sleep(0.2)
             warmup_samples = len(samples)
-            print(f"  Warmup polling rate: {warmup_samples/0.2:.1f} Hz")
+            print(f"  Warmup polling rate: {warmup_samples / 0.2:.1f} Hz")
 
             # Mark pre-step samples
             samples_at_step_start = len(samples)
@@ -131,11 +131,11 @@ def run_step_response_test(
             motion_time = t_complete - t_command_end
             command_latency = (t_command_end - t_command_start) * 1000
 
-            print(f"\nStep complete!")
+            print("\nStep complete!")
             print(f"  Command latency: {command_latency:.1f} ms")
-            print(f"  Motion time: {motion_time*1000:.1f} ms")
+            print(f"  Motion time: {motion_time * 1000:.1f} ms")
             print(f"  Final Z: {final_z:.1f} µm (target: {z_target:.0f}, error: {final_z - z_target:+.2f})")
-            print(f"  Total samples: {len(samples)} ({len(samples)/motion_time:.1f} Hz during motion)")
+            print(f"  Total samples: {len(samples)} ({len(samples) / motion_time:.1f} Hz during motion)")
 
         finally:
             # Restore position
@@ -146,7 +146,7 @@ def run_step_response_test(
             print(f"  Restored to: Z={restored_z:.0f} µm")
 
     # Analyze step response
-    print(f"\nAnalyzing step response...")
+    print("\nAnalyzing step response...")
 
     # Convert to numpy arrays
     t_samples = np.array([(s[0] + s[1]) / 2 for s in samples])
@@ -167,16 +167,14 @@ def run_step_response_test(
 
     # Find key metrics
     # Motion start: first sample > 10% of step
-    motion_start_idx = None
-    for i, z_norm in enumerate(z_normalized):
+    for _i, z_norm in enumerate(z_normalized):
         if z_norm > 0.1:
-            motion_start_idx = i
             break
 
     # 10% and 90% times (for rise time)
     t_10pct = None
     t_90pct = None
-    for i, (t, z_norm) in enumerate(zip(t_rel, z_normalized)):
+    for _i, (t, z_norm) in enumerate(zip(t_rel, z_normalized, strict=False)):
         if t_10pct is None and z_norm >= 0.1:
             t_10pct = t
         if t_90pct is None and z_norm >= 0.9:
@@ -205,10 +203,10 @@ def run_step_response_test(
     read_times_ms = [(s[1] - s[0]) * 1000 for s in samples]
     mean_read_time = statistics.mean(read_times_ms) if read_times_ms else 0
 
-    print(f"\nStep Response Metrics:")
+    print("\nStep Response Metrics:")
     print(f"  Latency (to 10%): {latency_ms:.1f} ms")
     print(f"  Rise time (10-90%): {rise_time_ms:.1f} ms" if rise_time_ms else "  Rise time: N/A")
-    print(f"  Settling time (±{settle_tolerance*100:.0f}%): {settling_time_ms:.1f} ms")
+    print(f"  Settling time (±{settle_tolerance * 100:.0f}%): {settling_time_ms:.1f} ms")
     print(f"  Overshoot: {overshoot_pct:.1f}%")
     print(f"  SDK read time: {mean_read_time:.2f} ms")
 
@@ -252,10 +250,7 @@ def run_step_response_test(
             "poll_rate_hz": len(samples) / (t_samples[-1] - t_samples[0]) if len(samples) > 1 else 0,
             "sdk_read_time_ms": mean_read_time,
         },
-        "samples": [
-            {"t_before": s[0], "t_after": s[1], "z_um": s[2]}
-            for s in samples
-        ],
+        "samples": [{"t_before": s[0], "t_after": s[1], "z_um": s[2]} for s in samples],
     }
 
     # Save results
@@ -288,8 +283,8 @@ def run_multiple_trials(
     """
     from flakefinder.leica import LeicaConnection, ZDrive
 
-    print(f"Z Step Response - Multiple Trials")
-    print(f"=" * 50)
+    print("Z Step Response - Multiple Trials")
+    print("=" * 50)
     print(f"Step size: {step_size_um:+.1f} µm")
     print(f"Number of trials: {num_trials}")
     print()
@@ -362,7 +357,7 @@ def run_multiple_trials(
                     # Find metrics
                     t_10pct = None
                     t_90pct = None
-                    for t, z_n in zip(t_samples, z_norm):
+                    for t, z_n in zip(t_samples, z_norm, strict=False):
                         if t_10pct is None and z_n >= 0.1:
                             t_10pct = t
                         if t_90pct is None and z_n >= 0.9:
@@ -389,29 +384,31 @@ def run_multiple_trials(
 
                     print(f"  Rise: {rise_time:.1f}ms, Settle: {t_settle:.1f}ms, Overshoot: {overshoot:.1f}%")
 
-                    trials.append({
-                        "trial": trial_num + 1,
-                        "latency_ms": latency,
-                        "rise_time_ms": rise_time,
-                        "settling_time_ms": t_settle,
-                        "overshoot_pct": overshoot,
-                        "actual_step_um": actual_step,
-                        "motion_time_ms": (t_done - t_cmd) * 1000,
-                    })
+                    trials.append(
+                        {
+                            "trial": trial_num + 1,
+                            "latency_ms": latency,
+                            "rise_time_ms": rise_time,
+                            "settling_time_ms": t_settle,
+                            "overshoot_pct": overshoot,
+                            "actual_step_um": actual_step,
+                            "motion_time_ms": (t_done - t_cmd) * 1000,
+                        }
+                    )
                 else:
-                    print(f"  WARNING: No motion detected")
+                    print("  WARNING: No motion detected")
 
                 time.sleep(0.2)  # Brief pause between trials
 
         finally:
             # Restore
-            print(f"\nRestoring initial position...")
+            print("\nRestoring initial position...")
             z_drive.move_to(initial_z)
 
     # Compute statistics
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"SUMMARY ({len(trials)} successful trials)")
-    print(f"{'='*50}")
+    print(f"{'=' * 50}")
 
     def stat_str(values, unit=""):
         if not values:
@@ -422,7 +419,7 @@ def run_multiple_trials(
 
     print(f"Latency (to 10%):      {stat_str(metrics_lists['latency_ms'], 'ms')}")
     print(f"Rise time (10-90%):    {stat_str(metrics_lists['rise_time_ms'], 'ms')}")
-    print(f"Settling time (±{settle_tolerance*100:.0f}%): {stat_str(metrics_lists['settling_time_ms'], 'ms')}")
+    print(f"Settling time (±{settle_tolerance * 100:.0f}%): {stat_str(metrics_lists['settling_time_ms'], 'ms')}")
     print(f"Overshoot:             {stat_str(metrics_lists['overshoot_pct'], '%')}")
 
     results = {
@@ -440,15 +437,23 @@ def run_multiple_trials(
             },
             "rise_time_ms": {
                 "mean": statistics.mean(metrics_lists["rise_time_ms"]) if metrics_lists["rise_time_ms"] else None,
-                "std": statistics.stdev(metrics_lists["rise_time_ms"]) if len(metrics_lists["rise_time_ms"]) > 1 else None,
+                "std": statistics.stdev(metrics_lists["rise_time_ms"])
+                if len(metrics_lists["rise_time_ms"]) > 1
+                else None,
             },
             "settling_time_ms": {
-                "mean": statistics.mean(metrics_lists["settling_time_ms"]) if metrics_lists["settling_time_ms"] else None,
-                "std": statistics.stdev(metrics_lists["settling_time_ms"]) if len(metrics_lists["settling_time_ms"]) > 1 else None,
+                "mean": statistics.mean(metrics_lists["settling_time_ms"])
+                if metrics_lists["settling_time_ms"]
+                else None,
+                "std": statistics.stdev(metrics_lists["settling_time_ms"])
+                if len(metrics_lists["settling_time_ms"]) > 1
+                else None,
             },
             "overshoot_pct": {
                 "mean": statistics.mean(metrics_lists["overshoot_pct"]) if metrics_lists["overshoot_pct"] else None,
-                "std": statistics.stdev(metrics_lists["overshoot_pct"]) if len(metrics_lists["overshoot_pct"]) > 1 else None,
+                "std": statistics.stdev(metrics_lists["overshoot_pct"])
+                if len(metrics_lists["overshoot_pct"]) > 1
+                else None,
             },
         },
         "trials": trials,
@@ -467,26 +472,18 @@ def main():
         description="Measure Z axis step response characteristics",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    parser.add_argument("--step-size", type=float, default=10.0, help="Step size in µm (positive = towards max)")
+    parser.add_argument("--z-safe", type=float, default=20000.0, help="Safe Z position to start from (µm)")
     parser.add_argument(
-        "--step-size", type=float, default=10.0,
-        help="Step size in µm (positive = towards max)"
+        "--num-trials", type=int, default=1, help="Number of trials (>1 runs multi-trial mode with statistics)"
     )
     parser.add_argument(
-        "--z-safe", type=float, default=20000.0,
-        help="Safe Z position to start from (µm)"
+        "--settle-tolerance",
+        type=float,
+        default=0.02,
+        help="Settling criterion as fraction of step (e.g., 0.02 = ±2%%)",
     )
-    parser.add_argument(
-        "--num-trials", type=int, default=1,
-        help="Number of trials (>1 runs multi-trial mode with statistics)"
-    )
-    parser.add_argument(
-        "--settle-tolerance", type=float, default=0.02,
-        help="Settling criterion as fraction of step (e.g., 0.02 = ±2%%)"
-    )
-    parser.add_argument(
-        "-o", "--output", type=Path, default=None,
-        help="Output JSON path"
-    )
+    parser.add_argument("-o", "--output", type=Path, default=None, help="Output JSON path")
     args = parser.parse_args()
 
     # Generate output path if not specified
@@ -495,7 +492,7 @@ def main():
         args.output = Path(f"z_step_response_{timestamp}.json")
 
     if args.num_trials > 1:
-        results = run_multiple_trials(
+        run_multiple_trials(
             step_size_um=args.step_size,
             num_trials=args.num_trials,
             z_safe_um=args.z_safe,
@@ -503,7 +500,7 @@ def main():
             output_path=args.output,
         )
     else:
-        results = run_step_response_test(
+        run_step_response_test(
             step_size_um=args.step_size,
             z_safe_um=args.z_safe,
             settle_tolerance=args.settle_tolerance,

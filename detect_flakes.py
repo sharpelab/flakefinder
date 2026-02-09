@@ -20,7 +20,7 @@ def check_server(server_url: str) -> bool:
     except requests.ConnectionError:
         print(f"Cannot connect to MaskTerial server at {server_url}")
         print("Start it with:")
-        print(f"  cd ~/code/MaskTerial && uvicorn server:app --host 0.0.0.0 --port 8000")
+        print("  cd ~/code/MaskTerial && uvicorn server:app --host 0.0.0.0 --port 8000")
         return False
 
 
@@ -59,11 +59,15 @@ def make_flake_map(flakes: list[dict], scan_meta: dict, output_path: Path):
     if "chip_info" in scan_meta and "bbox_stage_um" in scan_meta["chip_info"]:
         bb = scan_meta["chip_info"]["bbox_stage_um"]
         from matplotlib.patches import Rectangle
+
         rect = Rectangle(
             (bb["x_min"], bb["y_min"]),
             bb["x_max"] - bb["x_min"],
             bb["y_max"] - bb["y_min"],
-            linewidth=1, edgecolor="gray", facecolor="none", linestyle="--",
+            linewidth=1,
+            edgecolor="gray",
+            facecolor="none",
+            linestyle="--",
         )
         ax.add_patch(rect)
 
@@ -127,9 +131,9 @@ def main():
         return 1
 
     if args.start:
-        all_frame_files = all_frame_files[args.start:]
+        all_frame_files = all_frame_files[args.start :]
     if args.limit:
-        all_frame_files = all_frame_files[:args.limit]
+        all_frame_files = all_frame_files[: args.limit]
 
     total = len(all_frame_files)
     print(f"Processing {total} frames ({um_per_px:.4f} µm/px, {frame_w}x{frame_h})")
@@ -159,29 +163,33 @@ def main():
 
         for det in detections:
             stage_x, stage_y = compute_stage_coords(det, frame_meta, um_per_px, frame_w, frame_h)
-            all_flakes.append({
-                "frame_idx": frame_idx,
-                "frame_file": frame_path.name,
-                "stage_x_um": round(stage_x, 2),
-                "stage_y_um": round(stage_y, 2),
-                "thickness": det["thickness"],
-                "size_px": det["size"],
-                "size_um2": round(det["size"] * um_per_px ** 2, 2),
-                "center_px": det["center"],
-                "max_sidelength_px": det["max_sidelength"],
-                "min_sidelength_px": det["min_sidelength"],
-                "aspect_ratio": det["aspect_ratio"],
-                "false_positive_probability": det["false_positive_probability"],
-                "entropy": det["entropy"],
-                "bbox": det.get("bbox"),  # [x, y, w, h] in pixels
-            })
+            all_flakes.append(
+                {
+                    "frame_idx": frame_idx,
+                    "frame_file": frame_path.name,
+                    "stage_x_um": round(stage_x, 2),
+                    "stage_y_um": round(stage_y, 2),
+                    "thickness": det["thickness"],
+                    "size_px": det["size"],
+                    "size_um2": round(det["size"] * um_per_px**2, 2),
+                    "center_px": det["center"],
+                    "max_sidelength_px": det["max_sidelength"],
+                    "min_sidelength_px": det["min_sidelength"],
+                    "aspect_ratio": det["aspect_ratio"],
+                    "false_positive_probability": det["false_positive_probability"],
+                    "entropy": det["entropy"],
+                    "bbox": det.get("bbox"),  # [x, y, w, h] in pixels
+                }
+            )
 
         elapsed = time.monotonic() - t_start
         per_frame = elapsed / (i + 1)
         eta = per_frame * (total - i - 1)
         n_flakes = len(all_flakes)
         n_this = len(detections)
-        print(f"  [{i+1}/{total}] {frame_path.name}: {n_this} flakes ({n_flakes} total) | {per_frame:.2f}s/frame | ETA {eta:.0f}s")
+        print(
+            f"  [{i + 1}/{total}] {frame_path.name}: {n_this} flakes ({n_flakes} total) | {per_frame:.2f}s/frame | ETA {eta:.0f}s"  # noqa: E501
+        )
 
     # Write results
     result = {

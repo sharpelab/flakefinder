@@ -8,6 +8,7 @@ With --move flag, moves stage from current X to max X during polling.
 """
 
 import argparse
+import contextlib
 import ctypes
 import json
 import random
@@ -16,24 +17,24 @@ import time
 from pathlib import Path
 
 # Improve Windows timer resolution to ~1ms
-try:
+with contextlib.suppress(Exception):  # Not on Windows or no permission
     ctypes.windll.winmm.timeBeginPeriod(1)
-except Exception:
-    pass  # Not on Windows or no permission
 
 
 def main():
     parser = argparse.ArgumentParser(description="Test multi-threaded position polling")
     parser.add_argument("-o", "--output", required=True, help="Output JSON file")
     parser.add_argument("-t", "--threads", type=int, default=2, help="Number of polling threads (default: 2)")
-    parser.add_argument("-d", "--duration", type=float, default=5.0, help="Duration in seconds (default: 5, ignored with --move)")
+    parser.add_argument(
+        "-d", "--duration", type=float, default=5.0, help="Duration in seconds (default: 5, ignored with --move)"
+    )
     parser.add_argument("--move", action="store_true", help="Move stage from current X to max X during test")
     parser.add_argument("--speed-mm", type=float, default=40, help="Move speed in mm/s (default: 40)")
     args = parser.parse_args()
 
     from flakefinder.leica import LeicaConnection, Stage
 
-    print(f"Multi-threaded Position Polling Test")
+    print("Multi-threaded Position Polling Test")
     print(f"  Threads: {args.threads}")
     if args.move:
         print(f"  Mode: Move to max X at {args.speed_mm} mm/s")
@@ -48,7 +49,6 @@ def main():
         x_converter = stage.x.converter
 
         start_x = stage.x.position_um
-        start_y = stage.y.position_um
         target_x = stage.x.max_um - 5000  # Stop 5mm before end to avoid edge issues
 
         print(f"Stage X: {start_x:.1f} µm (target: {target_x:.1f} µm)")
@@ -88,12 +88,14 @@ def main():
                 t_after = time.perf_counter()
                 x_um = x_converter.GetMetricsValue(x_native)
 
-                local_samples.append({
-                    "thread_id": thread_id,
-                    "t_before": t_before,
-                    "t_after": t_after,
-                    "x_um": x_um,
-                })
+                local_samples.append(
+                    {
+                        "thread_id": thread_id,
+                        "t_before": t_before,
+                        "t_after": t_after,
+                        "x_um": x_um,
+                    }
+                )
 
                 # Random jitter to desynchronize threads
                 time.sleep(random.uniform(0, 0.002))  # 0-2ms
@@ -206,10 +208,8 @@ def main():
             print("Done.")
 
     # Restore Windows timer resolution
-    try:
+    with contextlib.suppress(Exception):
         ctypes.windll.winmm.timeEndPeriod(1)
-    except Exception:
-        pass
 
     return 0
 
