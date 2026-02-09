@@ -23,7 +23,7 @@ Supporting changes:
 
 **Step 3 (done):** `continuous_autofocus()` refactored to take `scope: Microscope` instead of `(conn, camera, acquisition, context)`. `_get_safe_range` takes `Nosepiece` instead of `LeicaConnection`. `_run_z_scan` uses `sdk_image_to_numpy` directly. `autofocus_demo.py` also migrated to facade. `run_focus_map` no longer takes a `context` parameter.
 
-**Step 4 (in progress):** Lazy `scope.context` property added — creates acquisition context on first access, auto-disposed in `__exit__`. `continuous_autofocus` uses `scope.context` instead of creating/disposing its own. Scan scripts not yet migrated (still use `create_acquisition_context()` + manual dispose). Needs testing via `autofocus_demo.py`.
+**Step 4 (done):** Lazy `scope.context` property added — creates acquisition context on first access, auto-disposed in `__exit__`. All consumers migrated: `continuous_autofocus`, `scan_area_v1`, `scan_chip`, `scan_area_with_focus`. `create_acquisition_context()` remains available for streaming threads that need independent contexts.
 
 **Step 5 (done):** `Stage.wait_all()` moved to module-level `wait_all()` function; all callers updated. `load_microscope_description` renamed to `require_microscope_description` (raises instead of returning None); `if desc:` guards removed from scan scripts.
 
