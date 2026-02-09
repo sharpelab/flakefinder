@@ -19,7 +19,7 @@ Supporting changes:
 
 **Step 1 (done):** `stage_util.py` and `capture_util.py` migrated. All None guards removed.
 
-**Step 2 (in progress):** `focus_map.py` and `scan_chip.py` migrated. Also extracted `sdk_image_to_numpy` to `src/flakefinder/image_utils.py` (was `Camera._image_to_numpy` private static). `scan_area_v1.py`, `scan_area_with_focus.py`, `capture_flatfield.py` still use raw `LeicaConnection` + `Nosepiece.set_position()`.
+**Step 2 (in progress):** `focus_map.py`, `scan_chip.py`, and `scan_area_v1.py` migrated. Also extracted `sdk_image_to_numpy` to `src/flakefinder/image_utils.py` (was `Camera._image_to_numpy` private static). `scan_area_with_focus.py`, `capture_flatfield.py` still use raw `LeicaConnection` + `Nosepiece.set_position()`.
 
 **Step 3 (not started):** `continuous_autofocus()` signature refactor.
 

@@ -5,6 +5,7 @@ See docs/maskterial_integration.md for 20x scanning context.
 """
 
 import argparse
+import contextlib
 import json
 import os
 import queue
@@ -268,69 +269,38 @@ Examples:
             return 1
     os.makedirs(args.output)
 
-    from flakefinder.leica import Lamp, LeicaConnection, Nosepiece, Shutter, Stage, ZDrive
-    from flakefinder.leica.camera import Camera
-    from flakefinder.leica.core import get_interface_required
-    from flakefinder.leica.enums import UCAPI_IID
+    from flakefinder.image_utils import sdk_image_to_numpy
+    from flakefinder.leica import Microscope, Stage
 
     print("Area Scan v1 (Snake Pattern)")
     print("=" * 50)
 
-    with LeicaConnection() as conn:
-        from LeicaMicrosystems.HardwareModel import Extensions
-
-        Extensions.ExUCAPI.Register()
-
-        # Set up stage
-        stage = Stage.from_connection(conn)
+    with Microscope() as scope:
+        stage = scope.stage
+        z = scope.z
         x_bcv = stage.x.bcv  # Native position reader
         x_converter = stage.x.converter  # For native -> um conversion
 
-        # Set up Z drive (needed for objective switching)
-        z = ZDrive.from_connection(conn)
-
-        # Set up nosepiece early (before camera, since objective affects frame size)
-        nosepiece = None
-        objective_mag = None
-        objective_idx = None
-        try:
-            nosepiece = Nosepiece.from_connection(conn)
-            objective_idx = nosepiece.position
-            objective_mag = nosepiece.magnification
-        except LookupError:
-            pass
-
         # Switch objective if requested
-        target_pos = None
         if args.objective_mag is not None:
-            if nosepiece is None:
-                print("Error: Nosepiece not available, cannot switch objective")
-                return 1
-            try:
-                target_pos = nosepiece.parse_magnification(args.objective_mag)
-            except ValueError as e:
-                print(f"Error: {e}")
-                return 1
-        elif args.objective_pos is not None:
-            if nosepiece is None:
-                print("Error: Nosepiece not available, cannot switch objective")
-                return 1
-            try:
-                target_pos = nosepiece.validate_position(args.objective_pos)
-            except ValueError as e:
-                print(f"Error: {e}")
-                return 1
-
-        if target_pos is not None:
-            if target_pos != objective_idx:
-                target_mag = nosepiece.magnifications.get(target_pos)
-                print(f"Switching objective: {objective_mag}x -> {target_mag}x...")
-                nosepiece.set_position(target_pos, z=z)
-                objective_idx = nosepiece.position
-                objective_mag = nosepiece.magnification
-                print(f"Objective: now at {objective_mag}x")
+            current_mag = scope.nosepiece.magnification
+            scope.switch_objective_mag(args.objective_mag)
+            new_mag = scope.nosepiece.magnification
+            if new_mag != current_mag:
+                print(f"Switched objective: {current_mag}x -> {new_mag}x")
             else:
-                print(f"Objective: already at {objective_mag}x")
+                print(f"Objective: already at {new_mag}x")
+        elif args.objective_pos is not None:
+            current_pos = scope.nosepiece.position
+            scope.switch_objective_pos(args.objective_pos)
+            new_mag = scope.nosepiece.magnification
+            if args.objective_pos != current_pos:
+                print(f"Switched objective to position {args.objective_pos} ({new_mag}x)")
+            else:
+                print(f"Objective: already at {new_mag}x")
+
+        objective_mag = scope.nosepiece.magnification
+        objective_idx = scope.nosepiece.position
 
         # Move Z if requested (after objective switch, before scan)
         if args.z is not None:
@@ -366,30 +336,10 @@ Examples:
         set_stage_speed(move_speed_mm)
         actual_speed_mm = scan_speed_mm  # Will be set before scan
 
-        # Set up lighting
-        shutter = None
-        lamp = None
-        try:
-            shutter = Shutter.from_connection(conn)
-            shutter.open()
-        except LookupError:
-            pass
-
-        try:
-            lamp = Lamp.from_connection(conn)
-            lamp.full()
-        except LookupError:
-            pass
-
-        # Set up camera
-        try:
-            camera = Camera.from_connection(conn)
-        except LookupError:
-            print("Camera not found!")
-            return 1
-
-        # Get acquisition interface for raw capture loop
-        acquisition = get_interface_required(camera._unit, UCAPI_IID.IID_IMAGE_ACQUISITION)
+        # Lighting and camera
+        scope.light_on()
+        camera = scope.camera
+        acquisition = scope.acquisition
 
         # Configure camera
         camera.trigger_mode = 0  # CONTINUOUS for faster capture
@@ -425,24 +375,14 @@ Examples:
         if readout_time:
             readout_fps = f", Readout: {readout_time * 1000:.1f}ms ({1 / readout_time:.0f} fps)"
 
-        # Compute frame size in µm
-        # The SDK's "logical pixel size" doesn't account for objective magnification
-        # Sample pixel size = physical_pixel × binning / magnification
-        frame_width_um = None
-        frame_height_um = None
-        sample_pixel_x_um = None
-        sample_pixel_y_um = None
-
-        # Compute sample-plane pixel size and frame size in µm
-        # sample_pixel = physical_pixel × binning / magnification
-        if physical_pixel_x_um and actual_binning and objective_mag:
-            sample_pixel_x_um = physical_pixel_x_um * actual_binning / objective_mag
-            if frame_width_px:
-                frame_width_um = frame_width_px * sample_pixel_x_um
-        if physical_pixel_y_um and actual_binning and objective_mag:
-            sample_pixel_y_um = physical_pixel_y_um * actual_binning / objective_mag
-            if frame_height_px:
-                frame_height_um = frame_height_px * sample_pixel_y_um
+        # Compute frame size in µm using actual binning
+        actual_frame_size = compute_frame_size_um(desc.camera, objective_mag, actual_binning_idx)
+        if actual_frame_size is None:
+            print("Error: Could not determine frame size. Check objective/camera.")
+            return 1
+        frame_width_um, frame_height_um = actual_frame_size
+        sample_pixel_x_um = frame_width_um / frame_width_px if frame_width_px else None
+        sample_pixel_y_um = frame_height_um / frame_height_px if frame_height_px else None
 
         print(f"Camera: {camera.name}")
         exp_str = f"{actual_exposure * 1000:.1f}ms" if actual_exposure else "?"
@@ -459,13 +399,13 @@ Examples:
             print(f"  Downsample: {args.downsample}x")
 
         # Print lighting info
-        if lamp:
-            print(f"Lamp: {lamp.name}, intensity={lamp.intensity}/{lamp.max_intensity}")
-        if shutter:
-            print(f"Shutter: {shutter.name}, {'open' if shutter.is_open else 'closed'}")
+        print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
+        print(f"Shutter: {scope.shutter.name}, {'open' if scope.shutter.is_open else 'closed'}")
 
         # Set up acquisition context
-        context = Extensions.UCAPI.CancellableImageAcquisitionContext.SystemMemoryFactory
+        from LeicaMicrosystems.HardwareModel import Extensions
+
+        context = scope.create_acquisition_context()
         current_image = [None]
 
         def on_image(image):
@@ -485,9 +425,9 @@ Examples:
 
             try:
                 af_result = continuous_autofocus(
-                    conn=conn,
-                    camera=camera,
-                    acquisition=acquisition,
+                    conn=scope.conn,
+                    camera=scope.camera,
+                    acquisition=scope.acquisition,
                     context=context,
                     fine_pass=True,
                     super_fine_pass=True,
@@ -534,10 +474,6 @@ Examples:
         y_center = (y_min + y_max) / 2
 
         # Calculate row Y positions (top to bottom, -Y direction)
-        if not frame_height_um:
-            print("Error: Could not determine frame height. Check objective/camera.")
-            return 1
-
         y_step = frame_height_um * (1 - args.y_overlap_percent / 100)
         row_y_positions = []
         y = y_max
@@ -581,7 +517,7 @@ Examples:
                 frame_idx, row_idx, t_start, t_end, image, row_y, row_x_samples, t0 = item
 
                 # Convert to numpy and dispose .NET image
-                arr = Camera._image_to_numpy(image)
+                arr = sdk_image_to_numpy(image)
                 image.Dispose()
 
                 # Resize if needed
@@ -680,7 +616,7 @@ Examples:
                 frame_width_um=frame_width_um,
                 frame_height_um=frame_height_um,
             ),
-            "lighting": build_lighting_meta(lamp=lamp, shutter=shutter),
+            "lighting": build_lighting_meta(lamp=scope.lamp, shutter=scope.shutter),
             "rows": [],
         }
 
@@ -861,8 +797,9 @@ Examples:
         return_handle_x.dispose()
         return_handle_y.dispose()
 
-        # Clean up camera before connection closes
-        camera.dispose()
+        # Cleanup (camera disposed by Microscope.__exit__)
+        with contextlib.suppress(Exception):
+            context.Dispose()
 
         print()
         print("Done.")
