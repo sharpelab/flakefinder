@@ -21,7 +21,6 @@ Usage:
 
 import argparse
 import bisect
-from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import os
@@ -31,177 +30,18 @@ import threading
 import time
 from pathlib import Path
 
-
-# ============================================================================
-# Geometry helpers
-# ============================================================================
-
-def intersect_polygon_with_y(polygon, y):
-    """Find X extent where horizontal line y intersects a convex polygon.
-
-    Args:
-        polygon: List of [x, y] vertices.
-        y: Y coordinate of the horizontal line.
-
-    Returns:
-        (x_min, x_max) or None if no intersection.
-    """
-    intersections = []
-    n = len(polygon)
-    for i in range(n):
-        x1, y1 = polygon[i]
-        x2, y2 = polygon[(i + 1) % n]
-
-        # Check if edge crosses this Y (half-open interval to avoid double-counting vertices)
-        if (y1 <= y < y2) or (y2 <= y < y1):
-            t = (y - y1) / (y2 - y1)
-            x = x1 + t * (x2 - x1)
-            intersections.append(x)
-
-    if len(intersections) < 2:
-        return None
-
-    return (min(intersections), max(intersections))
-
-
-def compute_plane_z(a, b, c, x_um, y_um):
-    """Compute Z from plane coefficients. Z_um = a * X_um + b * Y_um + c."""
-    return a * x_um + b * y_um + c
-
-
-# ============================================================================
-# Scan planning
-# ============================================================================
-
-@dataclass
-class ScanPlan:
-    """Computed scan plan from chip geometry and focus plane."""
-    rows: list                  # [(y_um, x_min_um, x_max_um), ...]
-    target_advance_um: float
-    y_step_um: float
-    validated_z_min_um: float
-    validated_z_max_um: float
-    plane_a: float
-    plane_b: float
-    plane_c: float
-    frame_width_um: float
-    frame_height_um: float
-    inputs: dict = field(default_factory=dict)
-
-
-def compute_scan_plan(
-    bbox, polygon, *,
-    plane_a, plane_b, plane_c,
-    frame_width_um, frame_height_um,
-    x_overlap_pct, y_overlap_pct,
-    padding, row_limit, speed_mm, z_max,
-) -> ScanPlan:
-    """Compute row plan from chip geometry and focus plane.
-
-    Raises ValueError if plan is invalid (no rows, Z exceeds limit).
-    """
-    target_advance = frame_width_um * (1 - x_overlap_pct / 100)
-    y_step = frame_height_um * (1 - y_overlap_pct / 100)
-
-    rows = []
-    y = bbox["y_min"]
-    while y <= bbox["y_max"]:
-        extent = intersect_polygon_with_y(polygon, y)
-        if extent is not None:
-            x_min, x_max = extent
-            # Skip rows narrower than one frame (polygon tips)
-            if (x_max - x_min) < frame_width_um:
-                y += y_step
-                continue
-            # Apply padding — extends X range beyond hull intersection
-            x_min -= padding
-            x_max += padding
-            rows.append((y, x_min, x_max))
-        y += y_step
-
-    if row_limit:
-        rows = rows[:row_limit]
-
-    if not rows:
-        raise ValueError("No rows intersect the chip contour")
-
-    # Z range validation
-    all_z = []
-    for row_y, row_x_min, row_x_max in rows:
-        all_z.append(compute_plane_z(plane_a, plane_b, plane_c, row_x_min, row_y))
-        all_z.append(compute_plane_z(plane_a, plane_b, plane_c, row_x_max, row_y))
-    z_min = min(all_z)
-    z_max_val = max(all_z)
-
-    if z_max_val > z_max:
-        raise ValueError(f"Scan Z max ({z_max_val:.0f}) exceeds limit ({z_max:.0f})")
-
-    return ScanPlan(
-        rows=rows,
-        target_advance_um=target_advance,
-        y_step_um=y_step,
-        validated_z_min_um=z_min,
-        validated_z_max_um=z_max_val,
-        plane_a=plane_a,
-        plane_b=plane_b,
-        plane_c=plane_c,
-        frame_width_um=frame_width_um,
-        frame_height_um=frame_height_um,
-        inputs={
-            "bbox": bbox,
-            "polygon": polygon,
-            "x_overlap_pct": x_overlap_pct,
-            "y_overlap_pct": y_overlap_pct,
-            "padding": padding,
-            "row_limit": row_limit,
-            "speed_mm": speed_mm,
-            "z_max": z_max,
-            "plane_a": plane_a,
-            "plane_b": plane_b,
-            "plane_c": plane_c,
-        },
-    )
-
-
-# ============================================================================
-# Helpers (from scan_area_v1.py)
-# ============================================================================
+from flakefinder.scan import (
+    CameraMeta,
+    OpticsMeta,
+    build_lighting_meta,
+    compute_frame_size_um,
+    compute_plane_z,
+    compute_planar_scan_plan,
+    interpolate_position,
+    load_microscope_description,
+)
 
 MICROSCOPE_DESCRIPTION = os.path.join(os.path.dirname(__file__), "microscope_description.json")
-
-
-def load_microscope_description() -> dict | None:
-    """Load microscope hardware description for pre-connection validation."""
-    if not os.path.exists(MICROSCOPE_DESCRIPTION):
-        return None
-    try:
-        with open(MICROSCOPE_DESCRIPTION) as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return None
-
-
-def interpolate_position(t, samples):
-    """Interpolate position at time t from (t_before, t_after, x_um) samples."""
-    if not samples:
-        return None
-
-    times = [(s[0] + s[1]) / 2 for s in samples]
-    idx = bisect.bisect_left(times, t)
-
-    if idx == 0:
-        return samples[0][2]
-    if idx >= len(samples):
-        return samples[-1][2]
-
-    t0, x0 = times[idx - 1], samples[idx - 1][2]
-    t1, x1 = times[idx], samples[idx][2]
-
-    if t1 == t0:
-        return x0
-
-    alpha = (t - t0) / (t1 - t0)
-    return x0 + alpha * (x1 - x0)
 
 
 def interpolate_z_position(t, z_samples):
@@ -415,7 +255,7 @@ Examples:
         os.makedirs(args.output)
 
     # ---- Compute frame dimensions from microscope description ----
-    desc = load_microscope_description()
+    desc = load_microscope_description(MICROSCOPE_DESCRIPTION)
     if desc is None:
         print("Error: microscope_description.json not found")
         return 1
@@ -441,11 +281,11 @@ Examples:
         print("Error: --objective-mag or --objective-pos required")
         return 1
 
-    bin_info = desc["camera"]["binning_levels"][str(binning_idx)]
-    phys_px = desc["camera"]["physical_pixel_x_um"]
-    phys_py = desc["camera"]["physical_pixel_y_um"]
-    plan_frame_width_um = bin_info["frame_width_px"] * phys_px * args.binning / obj_mag_for_plan
-    plan_frame_height_um = bin_info["frame_height_px"] * phys_py * args.binning / obj_mag_for_plan
+    frame_size = compute_frame_size_um(desc, obj_mag_for_plan, binning_idx)
+    if frame_size is None:
+        print("Error: Could not compute frame size from microscope description")
+        return 1
+    plan_frame_width_um, plan_frame_height_um = frame_size
 
     # ---- Print scan plan ----
     print("Chip Scan with Focus Plane")
@@ -469,7 +309,7 @@ Examples:
 
     # ---- Compute row plan ----
     try:
-        plan = compute_scan_plan(
+        plan = compute_planar_scan_plan(
             bbox, polygon,
             plane_a=plane_a, plane_b=plane_b, plane_c=plane_c,
             frame_width_um=plan_frame_width_um,
@@ -1054,10 +894,10 @@ Examples:
             },
             "focus_plane": {
                 "plane_file": str(plane_path),
-                "a": plane_a,
-                "b": plane_b,
-                "c": plane_c,
-                "equation": plane.get("equation", f"Z = {plane_a}*X + {plane_b}*Y + {plane_c}"),
+                "a": plan.plane_a,
+                "b": plan.plane_b,
+                "c": plan.plane_c,
+                "equation": plane.get("equation", f"Z = {plan.plane_a}*X + {plan.plane_b}*Y + {plan.plane_c}"),
                 "z_range_um": [plan.validated_z_min_um, plan.validated_z_max_um],
                 "tracking_error": {
                     "mean_um": z_error_mean,
@@ -1066,38 +906,21 @@ Examples:
                     "p95_um": z_error_p95,
                 },
             },
-            "camera": {
-                "name": camera.name,
-                "exposure_s": actual_exposure,
-                "gain": args.gain,
-                "binning": actual_binning,
-                "readout_time_s": readout_time,
-                "frame_width_px": frame_width_px,
-                "frame_height_px": frame_height_px,
-                "pixel_size_x_um": pixel_size_x_um,
-                "pixel_size_y_um": pixel_size_y_um,
-                "sensor_width_px": sensor_width_px,
-                "sensor_height_px": sensor_height_px,
-                "physical_pixel_x_um": physical_pixel_x_um,
-                "physical_pixel_y_um": physical_pixel_y_um,
-                "white_balance_bgr": [wb_blue, wb_green, wb_red],
-                "gamma": args.gamma,
-            },
-            "optics": {
-                "objective_mag": objective_mag,
-                "objective_idx": objective_idx,
-                "sample_pixel_x_um": sample_pixel_x_um,
-                "sample_pixel_y_um": sample_pixel_y_um,
-                "frame_width_um": frame_width_um,
-                "frame_height_um": frame_height_um,
-            },
-            "lighting": {
-                "lamp_name": lamp.name if lamp else None,
-                "lamp_intensity": lamp.intensity if lamp else None,
-                "lamp_max_intensity": lamp.max_intensity if lamp else None,
-                "shutter_name": shutter.name if shutter else None,
-                "shutter_open": shutter.is_open if shutter else None,
-            },
+            "camera": CameraMeta(
+                name=camera.name, exposure_s=actual_exposure, gain=args.gain,
+                binning=actual_binning, readout_time_s=readout_time,
+                frame_width_px=frame_width_px, frame_height_px=frame_height_px,
+                pixel_size_x_um=pixel_size_x_um, pixel_size_y_um=pixel_size_y_um,
+                sensor_width_px=sensor_width_px, sensor_height_px=sensor_height_px,
+                physical_pixel_x_um=physical_pixel_x_um, physical_pixel_y_um=physical_pixel_y_um,
+                white_balance_bgr=[wb_blue, wb_green, wb_red], gamma=args.gamma,
+            ),
+            "optics": OpticsMeta(
+                objective_mag=objective_mag, objective_idx=objective_idx,
+                sample_pixel_x_um=sample_pixel_x_um, sample_pixel_y_um=sample_pixel_y_um,
+                frame_width_um=frame_width_um, frame_height_um=frame_height_um,
+            ),
+            "lighting": build_lighting_meta(lamp=lamp, shutter=shutter),
             "rows": rows_meta,
             "position_stream": all_position_samples,
             "frames": saved_frames_meta,

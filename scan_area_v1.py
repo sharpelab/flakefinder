@@ -5,7 +5,6 @@ See docs/maskterial_integration.md for 20x scanning context.
 """
 
 import argparse
-import bisect
 from datetime import datetime
 import json
 import os
@@ -15,88 +14,16 @@ import shutil
 import threading
 import time
 
-# Path to microscope hardware description (for pre-connection validation)
+from flakefinder.scan import (
+    CameraMeta,
+    OpticsMeta,
+    build_lighting_meta,
+    compute_frame_size_um,
+    interpolate_position,
+    load_microscope_description,
+)
+
 MICROSCOPE_DESCRIPTION = os.path.join(os.path.dirname(__file__), "microscope_description.json")
-
-
-def load_microscope_description() -> dict | None:
-    """Load microscope hardware description for pre-connection validation.
-
-    Returns:
-        Dict with hardware specs, or None if file doesn't exist.
-    """
-    if not os.path.exists(MICROSCOPE_DESCRIPTION):
-        return None
-    try:
-        with open(MICROSCOPE_DESCRIPTION) as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return None
-
-
-def compute_frame_size_um(desc: dict, objective_mag: float, binning_idx: int = 2) -> tuple[float, float] | None:
-    """Compute frame size in µm from microscope description.
-
-    Args:
-        desc: Loaded microscope description.
-        objective_mag: Objective magnification (e.g., 5, 10, 20).
-        binning_idx: Binning index (0=1x1, 1=2x2, 2=3x3).
-
-    Returns:
-        (frame_width_um, frame_height_um) or None if can't compute.
-    """
-    camera = desc.get("camera", {})
-    binning_info = camera.get("binning_levels", {}).get(str(binning_idx))
-    if not binning_info:
-        return None
-
-    physical_pixel_x = camera.get("physical_pixel_x_um")
-    physical_pixel_y = camera.get("physical_pixel_y_um")
-    if not physical_pixel_x or not physical_pixel_y:
-        return None
-
-    frame_width_px = binning_info.get("frame_width_px")
-    frame_height_px = binning_info.get("frame_height_px")
-    binning_factor = binning_info.get("factor", 1)
-
-    if not frame_width_px or not frame_height_px:
-        return None
-
-    # sample_pixel = physical_pixel × binning / magnification
-    sample_pixel_x = physical_pixel_x * binning_factor / objective_mag
-    sample_pixel_y = physical_pixel_y * binning_factor / objective_mag
-
-    return (frame_width_px * sample_pixel_x, frame_height_px * sample_pixel_y)
-
-
-def interpolate_position(t, samples):
-    """Interpolate position at time t from (t_before, t_after, x_um) samples.
-
-    Uses midpoint of t_before/t_after as the effective sample time.
-    """
-    if not samples:
-        return None
-
-    # Use midpoint of before/after as effective time
-    times = [(s[0] + s[1]) / 2 for s in samples]
-
-    # Find insertion point
-    idx = bisect.bisect_left(times, t)
-
-    if idx == 0:
-        return samples[0][2]  # Before first sample
-    if idx >= len(samples):
-        return samples[-1][2]  # After last sample
-
-    # Linear interpolate between samples[idx-1] and samples[idx]
-    t0, x0 = times[idx - 1], samples[idx - 1][2]
-    t1, x1 = times[idx], samples[idx][2]
-
-    if t1 == t0:
-        return x0
-
-    alpha = (t - t0) / (t1 - t0)
-    return x0 + alpha * (x1 - x0)
 
 
 def parse_area_rect(value: str) -> tuple[float, float, float, float]:
@@ -243,7 +170,7 @@ Examples:
     binning_idx = args.binning - 1
 
     # Pre-validation using microscope description (avoids slow hardware connection)
-    desc = load_microscope_description()
+    desc = load_microscope_description(MICROSCOPE_DESCRIPTION)
     if desc:
         stage_desc = desc.get("stage", {})
 
@@ -676,37 +603,21 @@ Examples:
                 "frame_count": af_result.frame_count if af_result else None,
             } if auto_focus_pos else None,
             # Camera and optics metadata
-            "camera": {
-                "name": camera.name,
-                "exposure_s": actual_exposure,
-                "binning": actual_binning,
-                "readout_time_s": readout_time,
-                "frame_width_px": frame_width_px,
-                "frame_height_px": frame_height_px,
-                "pixel_size_x_um": pixel_size_x_um,
-                "pixel_size_y_um": pixel_size_y_um,
-                "sensor_width_px": sensor_width_px,
-                "sensor_height_px": sensor_height_px,
-                "physical_pixel_x_um": physical_pixel_x_um,
-                "physical_pixel_y_um": physical_pixel_y_um,
-                "white_balance_bgr": [wb_blue, wb_green, wb_red],
-                "gamma": args.gamma,
-            },
-            "optics": {
-                "objective_mag": objective_mag,
-                "objective_idx": objective_idx,
-                "sample_pixel_x_um": sample_pixel_x_um,
-                "sample_pixel_y_um": sample_pixel_y_um,
-                "frame_width_um": frame_width_um,
-                "frame_height_um": frame_height_um,
-            },
-            "lighting": {
-                "lamp_name": lamp.name if lamp else None,
-                "lamp_intensity": lamp.intensity if lamp else None,
-                "lamp_max_intensity": lamp.max_intensity if lamp else None,
-                "shutter_name": shutter.name if shutter else None,
-                "shutter_open": shutter.is_open if shutter else None,
-            },
+            "camera": CameraMeta(
+                name=camera.name, exposure_s=actual_exposure, gain=args.gain,
+                binning=actual_binning, readout_time_s=readout_time,
+                frame_width_px=frame_width_px, frame_height_px=frame_height_px,
+                pixel_size_x_um=pixel_size_x_um, pixel_size_y_um=pixel_size_y_um,
+                sensor_width_px=sensor_width_px, sensor_height_px=sensor_height_px,
+                physical_pixel_x_um=physical_pixel_x_um, physical_pixel_y_um=physical_pixel_y_um,
+                white_balance_bgr=[wb_blue, wb_green, wb_red], gamma=args.gamma,
+            ),
+            "optics": OpticsMeta(
+                objective_mag=objective_mag, objective_idx=objective_idx,
+                sample_pixel_x_um=sample_pixel_x_um, sample_pixel_y_um=sample_pixel_y_um,
+                frame_width_um=frame_width_um, frame_height_um=frame_height_um,
+            ),
+            "lighting": build_lighting_meta(lamp=lamp, shutter=shutter),
             "rows": [],
         }
 
