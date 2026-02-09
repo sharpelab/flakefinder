@@ -57,7 +57,7 @@ git config core.hooksPath hooks/
 ```
 
 - **Ruff** config: `pyproject.toml` under `[tool.ruff]`. Rules: E, F, I, UP, B, SIM.
-- **ty** config: `pyproject.toml` under `[tool.ty]`. Excludes `driver/` and `cli.py`; suppresses `unresolved-reference` (forward-ref string annotations) and .NET SDK imports.
+- **ty** config: `pyproject.toml` under `[tool.ty]`. Excludes `driver/`; ignores all rules for `cli.py` (via override); suppresses `unresolved-reference` (forward-ref string annotations) and .NET SDK imports.
 
 ## Microscope Operations
 

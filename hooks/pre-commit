@@ -10,5 +10,5 @@ uv run ruff check --fix $STAGED && uv run ruff format $STAGED
 # Re-stage files that ruff modified
 echo "$STAGED" | xargs git add
 
-# Type check (project-wide so [tool.ty.src] excludes apply)
-uvx ty check src/flakefinder/
+# Type check (per-file overrides in pyproject.toml handle exclusions)
+uvx ty check $STAGED
