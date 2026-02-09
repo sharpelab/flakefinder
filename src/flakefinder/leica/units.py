@@ -4,6 +4,7 @@ This module provides high-level classes for controlling microscope components
 with both blocking (sync) and non-blocking (async) operations.
 """
 
+import contextlib
 import re
 import time
 
@@ -117,10 +118,8 @@ class MoveHandle:
     def dispose(self) -> None:
         """Release SDK resources. Called automatically when move completes."""
         if not self._disposed:
-            try:
+            with contextlib.suppress(Exception):
                 self._result.Dispose()
-            except Exception:
-                pass
             self._disposed = True
 
     def __del__(self):
@@ -162,20 +161,20 @@ class Axis:
         self._name = unit.GetName()
 
         # Required interfaces
-        self._bcv: "BasicControlValue" = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE)
+        self._bcv: BasicControlValue = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE)
 
         # Get metrics converter for µm
         converters = self._bcv.GetMetricsConverters()
-        self._converter: "MetricsConverter" = converters.FindMetricsConverter(int(EMetricsId.METRICS_MICRONS))
+        self._converter: MetricsConverter = converters.FindMetricsConverter(int(EMetricsId.METRICS_MICRONS))
         if self._converter is None:
             raise LookupError(f"No microns converter for {self._name}")
 
         # Optional interfaces
-        self._bcv_async: "BasicControlValueAsync | None" = get_interface(unit, IID.IID_BASIC_CONTROL_VALUE_ASYNC)
-        self._halt: "HaltControlValue | None" = get_interface(unit, IID.IID_HALT_CONTROL_VALUE)
-        self._state: "BasicControlState | None" = get_interface(unit, IID.IID_BASIC_CONTROL_STATE)
-        self._velocity: "BasicControlValueVelocity | None" = get_interface(unit, IID.IID_BASIC_CONTROL_VALUE_VELOCITY)
-        self._velocity_converter: "MetricsConverter | None" = None
+        self._bcv_async: BasicControlValueAsync | None = get_interface(unit, IID.IID_BASIC_CONTROL_VALUE_ASYNC)
+        self._halt: HaltControlValue | None = get_interface(unit, IID.IID_HALT_CONTROL_VALUE)
+        self._state: BasicControlState | None = get_interface(unit, IID.IID_BASIC_CONTROL_STATE)
+        self._velocity: BasicControlValueVelocity | None = get_interface(unit, IID.IID_BASIC_CONTROL_VALUE_VELOCITY)
+        self._velocity_converter: MetricsConverter | None = None
         if self._velocity is not None:
             try:
                 vel_converters = self._velocity.GetMetricsConverters()
@@ -185,7 +184,7 @@ class Axis:
             except Exception:
                 pass  # No velocity converter available
 
-        self._calibration: "AutoCalibration | None" = get_interface(unit, IID.IID_AUTO_CALIBRATION)
+        self._calibration: AutoCalibration | None = get_interface(unit, IID.IID_AUTO_CALIBRATION)
         self._directed_velocity = get_interface(unit, IID.IID_DIRECTED_CONTROL_VALUE_ASYNC_VELOCITY)
         # Use regular velocity converter for directed velocity (same native units)
 
@@ -527,7 +526,7 @@ class Shutter:
         """
         self._unit = unit
         self._name = unit.GetName()
-        self._bcv: "BasicControlValue" = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE)
+        self._bcv: BasicControlValue = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE)
 
     @classmethod
     def from_connection(cls, conn: "LeicaConnection", tid: TID = TID.MICROSCOPE_IL_SHUTTER) -> "Shutter":
@@ -591,7 +590,7 @@ class Lamp:
         """
         self._unit = unit
         self._name = unit.GetName()
-        self._bcv: "BasicControlValue" = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE)
+        self._bcv: BasicControlValue = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE)
         self._min = self._bcv.MinControlValue()
         self._max = self._bcv.MaxControlValue()
 
@@ -682,7 +681,7 @@ class Nosepiece:
         """
         self._unit = unit
         self._name = unit.GetName()
-        self._bcv: "BasicControlValue" = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE)
+        self._bcv: BasicControlValue = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE)
         self._magnifications = magnifications or self.DEFAULT_MAGNIFICATIONS.copy()
 
     @classmethod

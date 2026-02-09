@@ -4,6 +4,7 @@ This module provides camera control for the Leica microscope using the UCAPI SDK
 Supports both single-shot capture and continuous streaming for scanning operations.
 """
 
+import contextlib
 import queue
 import threading
 import time
@@ -61,10 +62,8 @@ class Camera:
         # Register UCAPI extensions (required for camera interfaces)
         from LeicaMicrosystems.HardwareModel import Extensions
 
-        try:
+        with contextlib.suppress(Exception):  # May already be registered
             Extensions.ExUCAPI.Register()
-        except Exception:
-            pass  # May already be registered
 
         # Camera requires initialization
         unit.Init()
@@ -386,10 +385,8 @@ class Camera:
         """
         if self._context is not None:
             self._context.IsCancelled = True
-            try:
+            with contextlib.suppress(Exception):
                 self._context.Dispose()
-            except Exception:
-                pass
             self._context = None
         # Don't dispose _unit - it's owned by LeicaConnection
 
@@ -493,10 +490,8 @@ class FrameStream:
         except Exception:
             pass  # Expected when cancelled
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 self._context.Dispose()
-            except Exception:
-                pass
             self._context = None
 
     def _on_frame(self, image) -> None:
@@ -506,10 +501,8 @@ class FrameStream:
         # Get position if stage provided
         position = None
         if self._stage is not None:
-            try:
+            with contextlib.suppress(Exception):
                 position = self._stage.position_um
-            except Exception:
-                pass
 
         # Convert image
         try:
@@ -688,10 +681,8 @@ class DeferredFrameStream:
         except Exception:
             pass
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 self._context.Dispose()
-            except Exception:
-                pass
             self._context = None
 
     def _on_frame(self, image) -> None:
@@ -702,10 +693,8 @@ class DeferredFrameStream:
             if len(self._raw_frames) >= self._max_frames:
                 # Drop oldest
                 old_ts, old_img = self._raw_frames.pop(0)
-                try:
+                with contextlib.suppress(Exception):
                     old_img.Dispose()
-                except Exception:
-                    pass
                 self._frames_dropped += 1
 
             # Keep reference to .NET image (don't dispose yet)
@@ -727,10 +716,8 @@ class DeferredFrameStream:
                     arr = Camera._image_to_numpy(image)
                     results.append((timestamp, arr))
                 finally:
-                    try:
+                    with contextlib.suppress(Exception):
                         image.Dispose()
-                    except Exception:
-                        pass
             self._raw_frames = []
         return results
 

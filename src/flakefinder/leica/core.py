@@ -4,6 +4,7 @@ This module provides the low-level connection to the Leica hardware model
 and utilities for finding units in the device tree.
 """
 
+import contextlib
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -107,17 +108,13 @@ class LeicaConnection:
     def disconnect(self) -> None:
         """Disconnect and release SDK resources."""
         if self._root is not None:
-            try:
+            with contextlib.suppress(Exception):  # Ignore cleanup errors
                 self._root.Dispose()
-            except Exception:
-                pass  # Ignore cleanup errors
             self._root = None
 
         if self._hwm is not None:
-            try:
+            with contextlib.suppress(Exception):  # Ignore cleanup errors
                 self._hwm.Dispose()
-            except Exception:
-                pass  # Ignore cleanup errors
             self._hwm = None
 
     @property
@@ -268,7 +265,7 @@ def find_all_units(root: "Unit", tid: TID) -> list["Unit"]:
 T = TypeVar("T")
 
 
-def get_interface(unit: "Unit", iid: IID, expected_type: type[T] | None = None) -> T | None:
+def get_interface[T](unit: "Unit", iid: IID, expected_type: type[T] | None = None) -> T | None:
     """Get an interface from a unit by interface ID.
 
     Args:
@@ -290,7 +287,7 @@ def get_interface(unit: "Unit", iid: IID, expected_type: type[T] | None = None) 
     return iface.GetObject()
 
 
-def get_interface_required(unit: "Unit", iid: IID, expected_type: type[T] | None = None) -> T:
+def get_interface_required[T](unit: "Unit", iid: IID, expected_type: type[T] | None = None) -> T:
     """Get an interface from a unit, raising if not found.
 
     Args:

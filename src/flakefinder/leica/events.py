@@ -9,6 +9,7 @@ Key classes:
 - PositionMonitor: Tracks position changes on an axis
 """
 
+import contextlib
 import queue
 import threading
 from collections.abc import Callable
@@ -140,10 +141,8 @@ class AxisEvents:
 
         # Create wrapper that calls the Python callback
         def handler(sender: "Unit", iid: int, value: int) -> None:
-            try:
+            with contextlib.suppress(Exception):  # Don't let exceptions propagate to .NET
                 callback(sender, iid, value)
-            except Exception:
-                pass  # Don't let exceptions propagate to .NET
 
         # Create .NET delegate explicitly (pythonnet requires this)
         delegate = ESType.ValueChangedEventHandler(handler)
