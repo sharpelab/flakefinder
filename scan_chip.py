@@ -21,6 +21,7 @@ Usage:
 
 import argparse
 import bisect
+from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import os
@@ -66,6 +67,100 @@ def intersect_polygon_with_y(polygon, y):
 def compute_plane_z(a, b, c, x_um, y_um):
     """Compute Z from plane coefficients. Z_um = a * X_um + b * Y_um + c."""
     return a * x_um + b * y_um + c
+
+
+# ============================================================================
+# Scan planning
+# ============================================================================
+
+@dataclass
+class ScanPlan:
+    """Computed scan plan from chip geometry and focus plane."""
+    rows: list                  # [(y_um, x_min_um, x_max_um), ...]
+    target_advance_um: float
+    y_step_um: float
+    validated_z_min_um: float
+    validated_z_max_um: float
+    plane_a: float
+    plane_b: float
+    plane_c: float
+    frame_width_um: float
+    frame_height_um: float
+    inputs: dict = field(default_factory=dict)
+
+
+def compute_scan_plan(
+    bbox, polygon, *,
+    plane_a, plane_b, plane_c,
+    frame_width_um, frame_height_um,
+    x_overlap_pct, y_overlap_pct,
+    padding, row_limit, speed_mm, z_max,
+) -> ScanPlan:
+    """Compute row plan from chip geometry and focus plane.
+
+    Raises ValueError if plan is invalid (no rows, Z exceeds limit).
+    """
+    target_advance = frame_width_um * (1 - x_overlap_pct / 100)
+    y_step = frame_height_um * (1 - y_overlap_pct / 100)
+
+    rows = []
+    y = bbox["y_min"]
+    while y <= bbox["y_max"]:
+        extent = intersect_polygon_with_y(polygon, y)
+        if extent is not None:
+            x_min, x_max = extent
+            # Skip rows narrower than one frame (polygon tips)
+            if (x_max - x_min) < frame_width_um:
+                y += y_step
+                continue
+            # Apply padding — extends X range beyond hull intersection
+            x_min -= padding
+            x_max += padding
+            rows.append((y, x_min, x_max))
+        y += y_step
+
+    if row_limit:
+        rows = rows[:row_limit]
+
+    if not rows:
+        raise ValueError("No rows intersect the chip contour")
+
+    # Z range validation
+    all_z = []
+    for row_y, row_x_min, row_x_max in rows:
+        all_z.append(compute_plane_z(plane_a, plane_b, plane_c, row_x_min, row_y))
+        all_z.append(compute_plane_z(plane_a, plane_b, plane_c, row_x_max, row_y))
+    z_min = min(all_z)
+    z_max_val = max(all_z)
+
+    if z_max_val > z_max:
+        raise ValueError(f"Scan Z max ({z_max_val:.0f}) exceeds limit ({z_max:.0f})")
+
+    return ScanPlan(
+        rows=rows,
+        target_advance_um=target_advance,
+        y_step_um=y_step,
+        validated_z_min_um=z_min,
+        validated_z_max_um=z_max_val,
+        plane_a=plane_a,
+        plane_b=plane_b,
+        plane_c=plane_c,
+        frame_width_um=frame_width_um,
+        frame_height_um=frame_height_um,
+        inputs={
+            "bbox": bbox,
+            "polygon": polygon,
+            "x_overlap_pct": x_overlap_pct,
+            "y_overlap_pct": y_overlap_pct,
+            "padding": padding,
+            "row_limit": row_limit,
+            "speed_mm": speed_mm,
+            "z_max": z_max,
+            "plane_a": plane_a,
+            "plane_b": plane_b,
+            "plane_c": plane_c,
+        },
+    )
 
 
 # ============================================================================
@@ -320,41 +415,37 @@ Examples:
         os.makedirs(args.output)
 
     # ---- Compute frame dimensions from microscope description ----
-    # Used for dry-run row planning; overridden by live camera values in normal mode
     desc = load_microscope_description()
     if desc is None:
-        if args.dry_run:
-            print("Error: microscope_description.json required for --dry-run")
+        print("Error: microscope_description.json not found")
+        return 1
+
+    obj_mag_for_plan = None
+    if args.objective_mag is not None:
+        mag_str = args.objective_mag.lower().rstrip("x")
+        for pos, obj in desc["objectives"].items():
+            if str(obj["magnification"]) == mag_str:
+                obj_mag_for_plan = obj["magnification"]
+                break
+        if obj_mag_for_plan is None:
+            print(f"Error: Unknown objective magnification '{args.objective_mag}'")
+            return 1
+    elif args.objective_pos is not None:
+        obj_info = desc["objectives"].get(str(args.objective_pos))
+        if obj_info:
+            obj_mag_for_plan = obj_info["magnification"]
+        else:
+            print(f"Error: Unknown objective position {args.objective_pos}")
             return 1
     else:
-        # Resolve objective magnification for frame size calculation
-        obj_mag_for_plan = None
-        if args.objective_mag is not None:
-            mag_str = args.objective_mag.lower().rstrip("x")
-            for pos, obj in desc["objectives"].items():
-                if str(obj["magnification"]) == mag_str:
-                    obj_mag_for_plan = obj["magnification"]
-                    break
-            if obj_mag_for_plan is None:
-                if args.dry_run:
-                    print(f"Error: Unknown objective magnification '{args.objective_mag}'")
-                    return 1
-        elif args.objective_pos is not None:
-            obj_info = desc["objectives"].get(str(args.objective_pos))
-            if obj_info:
-                obj_mag_for_plan = obj_info["magnification"]
+        print("Error: --objective-mag or --objective-pos required")
+        return 1
 
-        if obj_mag_for_plan is not None:
-            bin_info = desc["camera"]["binning_levels"][str(binning_idx)]
-            phys_px = desc["camera"]["physical_pixel_x_um"]
-            phys_py = desc["camera"]["physical_pixel_y_um"]
-            plan_sample_px_x = phys_px * args.binning / obj_mag_for_plan
-            plan_sample_px_y = phys_py * args.binning / obj_mag_for_plan
-            plan_frame_width_um = bin_info["frame_width_px"] * plan_sample_px_x
-            plan_frame_height_um = bin_info["frame_height_px"] * plan_sample_px_y
-        else:
-            plan_frame_width_um = None
-            plan_frame_height_um = None
+    bin_info = desc["camera"]["binning_levels"][str(binning_idx)]
+    phys_px = desc["camera"]["physical_pixel_x_um"]
+    phys_py = desc["camera"]["physical_pixel_y_um"]
+    plan_frame_width_um = bin_info["frame_width_px"] * phys_px * args.binning / obj_mag_for_plan
+    plan_frame_height_um = bin_info["frame_height_px"] * phys_py * args.binning / obj_mag_for_plan
 
     # ---- Print scan plan ----
     print("Chip Scan with Focus Plane")
@@ -376,64 +467,43 @@ Examples:
         print(f"Row limit: {args.row_limit}")
     print()
 
-    # ---- Dry-run: compute row plan from description and exit ----
+    # ---- Compute row plan ----
+    try:
+        plan = compute_scan_plan(
+            bbox, polygon,
+            plane_a=plane_a, plane_b=plane_b, plane_c=plane_c,
+            frame_width_um=plan_frame_width_um,
+            frame_height_um=plan_frame_height_um,
+            x_overlap_pct=args.x_overlap_percent,
+            y_overlap_pct=args.y_overlap_percent,
+            padding=args.padding,
+            row_limit=args.row_limit,
+            speed_mm=args.speed_mm,
+            z_max=args.z_max,
+        )
+    except ValueError as e:
+        print(f"ABORT: {e}")
+        return 1
+
+    # Print plan summary
+    row_widths = [(x_max - x_min) / 1000 for _, x_min, x_max in plan.rows]
+    total_distance_mm = sum(row_widths)
+    est_total_time_s = total_distance_mm / args.speed_mm + len(plan.rows) * 0.5
+
+    print(f"Frame FOV: {plan.frame_width_um:.1f} x {plan.frame_height_um:.1f} µm")
+    print(f"Frame skip: target advance {plan.target_advance_um:.0f} µm ({args.x_overlap_percent:.0f}% X overlap)")
+    print()
+    print(f"Row plan: {len(plan.rows)} rows")
+    print(f"  Y step: {plan.y_step_um:.1f} µm ({args.y_overlap_percent:.0f}% overlap)")
+    print(f"  Row widths: {min(row_widths):.1f} - {max(row_widths):.1f} mm")
+    print(f"  Total scan distance: {total_distance_mm:.1f} mm")
+    print(f"  Z range: {plan.validated_z_min_um:.0f} - {plan.validated_z_max_um:.0f} µm")
+    z_vel = abs(plan.plane_a * args.speed_mm * 1000)
+    print(f"  Z velocity: {z_vel:.1f} µm/s (from plane slope)")
+    print(f"  Estimated time: ~{est_total_time_s:.0f}s")
+    print()
+
     if args.dry_run:
-        if plan_frame_width_um is None or plan_frame_height_um is None:
-            print("Error: --dry-run requires --objective-mag or --objective-pos")
-            return 1
-
-        target_advance = plan_frame_width_um * (1 - args.x_overlap_percent / 100)
-        print(f"Frame FOV: {plan_frame_width_um:.1f} x {plan_frame_height_um:.1f} µm (from description)")
-        print(f"Frame skip: target advance {target_advance:.0f} µm ({args.x_overlap_percent:.0f}% X overlap)")
-        print()
-
-        y_step = plan_frame_height_um * (1 - args.y_overlap_percent / 100)
-        rows_plan = []
-        y = bbox["y_min"]
-        while y <= bbox["y_max"]:
-            extent = intersect_polygon_with_y(polygon, y)
-            if extent is not None:
-                x_min, x_max = extent
-                if (x_max - x_min) < plan_frame_width_um:
-                    y += y_step
-                    continue
-                x_min -= args.padding
-                x_max += args.padding
-                rows_plan.append((y, x_min, x_max))
-            y += y_step
-
-        if args.row_limit:
-            rows_plan = rows_plan[:args.row_limit]
-
-        if not rows_plan:
-            print("Error: No rows intersect the chip contour")
-            return 1
-
-        all_z = []
-        for row_y, row_x_min, row_x_max in rows_plan:
-            all_z.append(compute_plane_z(plane_a, plane_b, plane_c, row_x_min, row_y))
-            all_z.append(compute_plane_z(plane_a, plane_b, plane_c, row_x_max, row_y))
-        z_scan_min = min(all_z)
-        z_scan_max = max(all_z)
-
-        if z_scan_max > args.z_max:
-            print(f"ABORT: Scan Z max ({z_scan_max:.0f}) exceeds limit ({args.z_max:.0f})")
-            return 1
-
-        row_widths = [(x_max - x_min) / 1000 for _, x_min, x_max in rows_plan]
-        total_distance_mm = sum(row_widths)
-        est_scan_time_s = total_distance_mm / args.speed_mm
-        est_total_time_s = est_scan_time_s + len(rows_plan) * 0.5
-
-        print(f"Row plan: {len(rows_plan)} rows")
-        print(f"  Y step: {y_step:.1f} µm ({args.y_overlap_percent:.0f}% overlap)")
-        print(f"  Row widths: {min(row_widths):.1f} - {max(row_widths):.1f} mm")
-        print(f"  Total scan distance: {total_distance_mm:.1f} mm")
-        print(f"  Z range: {z_scan_min:.0f} - {z_scan_max:.0f} µm")
-        z_vel = abs(plane_a * args.speed_mm * 1000)
-        print(f"  Z velocity: {z_vel:.1f} µm/s (from plane slope)")
-        print(f"  Estimated time: ~{est_total_time_s:.0f}s")
-        print()
         print("(dry run — exiting)")
         return 0
 
@@ -544,11 +614,11 @@ Examples:
         binning_map = {0: 1, 1: 2, 2: 3}
         actual_binning = binning_map.get(actual_binning_idx, actual_binning_idx)
 
-        # Compute frame size in µm
-        frame_width_um = None
-        frame_height_um = None
+        # Compute frame size in µm and validate against plan
         sample_pixel_x_um = None
         sample_pixel_y_um = None
+        frame_width_um = None
+        frame_height_um = None
         if physical_pixel_x_um and actual_binning and objective_mag:
             sample_pixel_x_um = physical_pixel_x_um * actual_binning / objective_mag
             if frame_width_px:
@@ -562,76 +632,23 @@ Examples:
             print("Error: Could not determine frame height. Check objective/camera.")
             return 1
 
+        # Assert camera dimensions match the plan
+        if abs(frame_width_um - plan.frame_width_um) > 1.0:
+            print(f"ABORT: Camera frame width {frame_width_um:.1f} != plan {plan.frame_width_um:.1f} µm")
+            return 1
+        if abs(frame_height_um - plan.frame_height_um) > 1.0:
+            print(f"ABORT: Camera frame height {frame_height_um:.1f} != plan {plan.frame_height_um:.1f} µm")
+            return 1
+
         exp_str = f"{actual_exposure*1000:.2f}ms" if actual_exposure else "?"
         print(f"Camera: {camera.name}")
         print(f"  Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}, Gain: {args.gain}")
         if frame_width_px and frame_height_px:
             print(f"  Frame: {frame_width_px}x{frame_height_px} px")
         if frame_width_um and frame_height_um:
-            print(f"  FOV: {frame_width_um:.1f} x {frame_height_um:.1f} µm")
+            print(f"  FOV: {frame_width_um:.1f} x {frame_height_um:.1f} µm (matches plan)")
         if objective_mag:
             print(f"  Objective: {objective_mag}x")
-        print()
-
-        # ---- Frame skip target ----
-        target_advance = frame_width_um * (1 - args.x_overlap_percent / 100)
-        print(f"Frame skip: target advance {target_advance:.0f} µm ({args.x_overlap_percent:.0f}% X overlap)")
-        print()
-
-        # ---- Compute row plan ----
-        y_step = frame_height_um * (1 - args.y_overlap_percent / 100)
-
-        rows_plan = []  # List of (y, x_min, x_max)
-        y = bbox["y_min"]
-        while y <= bbox["y_max"]:
-            extent = intersect_polygon_with_y(polygon, y)
-            if extent is not None:
-                x_min, x_max = extent
-                # Skip rows narrower than one frame (polygon tips)
-                if (x_max - x_min) < (frame_width_um or 0):
-                    y += y_step
-                    continue
-                # Apply padding — extends X range beyond hull intersection
-                x_min -= args.padding
-                x_max += args.padding
-                rows_plan.append((y, x_min, x_max))
-            y += y_step
-
-        if args.row_limit:
-            rows_plan = rows_plan[:args.row_limit]
-
-        if not rows_plan:
-            print("Error: No rows intersect the chip contour")
-            return 1
-
-        # Compute Z range across all row endpoints
-        all_z = []
-        for row_y, row_x_min, row_x_max in rows_plan:
-            all_z.append(compute_plane_z(plane_a, plane_b, plane_c, row_x_min, row_y))
-            all_z.append(compute_plane_z(plane_a, plane_b, plane_c, row_x_max, row_y))
-
-        z_scan_min = min(all_z)
-        z_scan_max = max(all_z)
-
-        if z_scan_max > args.z_max:
-            print(f"ABORT: Scan Z max ({z_scan_max:.0f}) exceeds limit ({args.z_max:.0f})")
-            return 1
-
-        # Print row plan summary
-        row_widths = [(x_max - x_min) / 1000 for _, x_min, x_max in rows_plan]
-        total_distance_mm = sum(row_widths)
-        est_scan_time_s = total_distance_mm / args.speed_mm
-        # Add repositioning time estimate (Y jog + X return per row)
-        est_total_time_s = est_scan_time_s + len(rows_plan) * 0.5
-
-        print(f"Row plan: {len(rows_plan)} rows")
-        print(f"  Y step: {y_step:.1f} µm ({args.y_overlap_percent:.0f}% overlap)")
-        print(f"  Row widths: {min(row_widths):.1f} - {max(row_widths):.1f} mm")
-        print(f"  Total scan distance: {total_distance_mm:.1f} mm")
-        print(f"  Z range: {z_scan_min:.0f} - {z_scan_max:.0f} µm")
-        z_vel = abs(plane_a * args.speed_mm * 1000)
-        print(f"  Z velocity: {z_vel:.1f} µm/s (from plane slope)")
-        print(f"  Estimated time: ~{est_total_time_s:.0f}s")
         print()
 
         # ---- Set up acquisition context ----
@@ -672,7 +689,7 @@ Examples:
                 z_interp = interpolate_z_position(t_start, row_z_samples)
 
                 # Compute ideal Z and error
-                z_ideal = compute_plane_z(plane_a, plane_b, plane_c, x_start_interp, row_y) if x_start_interp else None
+                z_ideal = compute_plane_z(plan.plane_a, plan.plane_b, plan.plane_c, x_start_interp, row_y) if x_start_interp else None
                 z_error = (z_interp - z_ideal) if (z_interp is not None and z_ideal is not None) else None
 
                 dt = t_end - t_start
@@ -747,7 +764,7 @@ Examples:
             print("Persistent polling: started X/Z threads")
 
         try:
-            for row_idx, (row_y, row_x_min, row_x_max) in enumerate(rows_plan):
+            for row_idx, (row_y, row_x_min, row_x_max) in enumerate(plan.rows):
                 # Snake pattern: even rows +X, odd rows -X
                 direction = 1 if row_idx % 2 == 0 else -1
                 if direction == 1:
@@ -758,14 +775,14 @@ Examples:
                     dir_str = "-X"
 
                 # Compute Z for start and end of this row
-                z_start = compute_plane_z(plane_a, plane_b, plane_c, x_start_pos, row_y)
-                z_end = compute_plane_z(plane_a, plane_b, plane_c, x_end_pos, row_y)
+                z_start = compute_plane_z(plan.plane_a, plan.plane_b, plan.plane_c, x_start_pos, row_y)
+                z_end = compute_plane_z(plan.plane_a, plan.plane_b, plan.plane_c, x_end_pos, row_y)
 
                 # Z velocity during this row: dZ/dt = (plane_a * direction) * x_speed
-                z_vel_um_s = plane_a * direction * x_speed_um_s
+                z_vel_um_s = plan.plane_a * direction * x_speed_um_s
 
                 row_width_mm = (row_x_max - row_x_min) / 1000
-                print(f"Row {row_idx}/{len(rows_plan)-1}: Y={row_y:.0f}µm, {dir_str}, "
+                print(f"Row {row_idx}/{len(plan.rows)-1}: Y={row_y:.0f}µm, {dir_str}, "
                       f"X=[{row_x_min:.0f},{row_x_max:.0f}] ({row_width_mm:.1f}mm), "
                       f"Z={z_start:.0f}->{z_end:.0f}")
 
@@ -863,7 +880,7 @@ Examples:
                     if current_image[0] is not None:
                         # Check if we've advanced enough to save this frame
                         x_now = x_samples[-1][2] if x_samples else None
-                        if last_saved_x is not None and x_now is not None and abs(x_now - last_saved_x) < target_advance:
+                        if last_saved_x is not None and x_now is not None and abs(x_now - last_saved_x) < plan.target_advance_um:
                             current_image[0].Dispose()
                             row_skip_count += 1
                         else:
@@ -989,7 +1006,7 @@ Examples:
 
         # Build rows metadata
         rows_meta = []
-        for row_idx, (row_y, row_x_min, row_x_max) in enumerate(rows_plan):
+        for row_idx, (row_y, row_x_min, row_x_max) in enumerate(plan.rows):
             direction = 1 if row_idx % 2 == 0 else -1
             row_frames = [f for f in saved_frames_meta if f["row"] == row_idx]
             frame_start = row_frames[0]["n"] if row_frames else global_frame_idx
@@ -1011,11 +1028,11 @@ Examples:
         # Build metadata (scan_area_v1.py compatible for stitching)
         meta = {
             "timestamp": datetime.now().isoformat(),
-            "x_min_um": min(r[1] for r in rows_plan),
-            "x_max_um": max(r[2] for r in rows_plan),
-            "y_min_um": rows_plan[0][0],
-            "y_max_um": rows_plan[-1][0],
-            "y_step_um": y_step,
+            "x_min_um": min(r[1] for r in plan.rows),
+            "x_max_um": max(r[2] for r in plan.rows),
+            "y_min_um": plan.rows[0][0],
+            "y_max_um": plan.rows[-1][0],
+            "y_step_um": plan.y_step_um,
             "y_overlap_percent": args.y_overlap_percent,
             "downsample": args.downsample,
             "scan_duration_s": total_duration,
@@ -1041,7 +1058,7 @@ Examples:
                 "b": plane_b,
                 "c": plane_c,
                 "equation": plane.get("equation", f"Z = {plane_a}*X + {plane_b}*Y + {plane_c}"),
-                "z_range_um": [z_scan_min, z_scan_max],
+                "z_range_um": [plan.validated_z_min_um, plan.validated_z_max_um],
                 "tracking_error": {
                     "mean_um": z_error_mean,
                     "std_um": z_error_std,
@@ -1103,7 +1120,7 @@ Examples:
         print("=" * 60)
         print("SCAN SUMMARY:")
         print(f"  Total time: {total_duration:.1f}s")
-        print(f"  Rows: {len(rows_plan)}")
+        print(f"  Rows: {len(plan.rows)}")
         print(f"  Total frames: {global_frame_idx}")
         print(f"  Avg FPS: {global_frame_idx / total_duration:.1f}" if total_duration > 0 else "  Avg FPS: N/A")
         if z_error_max is not None:
