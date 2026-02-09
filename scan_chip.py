@@ -852,10 +852,10 @@ Examples:
             )
 
         # Z tracking error stats
+        import numpy as np
+
         z_errors = [f["z_error"] for f in saved_frames_meta if f["z_error"] is not None]
         if z_errors:
-            import numpy as np
-
             z_error_arr = np.array(z_errors)
             z_error_mean = float(np.mean(z_error_arr))
             z_error_std = float(np.std(z_error_arr))
@@ -863,6 +863,27 @@ Examples:
             z_error_p95 = float(np.percentile(np.abs(z_error_arr), 95))
         else:
             z_error_mean = z_error_std = z_error_max = z_error_p95 = None
+
+        # Per-direction bias and z-jump stats
+        dir_stats = {}  # direction -> {mean_error, z_jump}
+        for direction in [1, -1]:
+            dir_row_idxs = {ri for ri, (_, _, _) in enumerate(plan.rows) if (1 if ri % 2 == 0 else -1) == direction}
+            dir_frames = [f for f in saved_frames_meta if f["row"] in dir_row_idxs and f["z_error"] is not None]
+            if not dir_frames:
+                continue
+            dir_errors = [f["z_error"] for f in dir_frames]
+
+            # Z-jump per row: |z_error[1] - z_error[0]|
+            z_jumps = []
+            for ri in sorted(dir_row_idxs):
+                rf = [f for f in saved_frames_meta if f["row"] == ri and f["z_error"] is not None]
+                if len(rf) >= 2:
+                    z_jumps.append(abs(rf[1]["z_error"] - rf[0]["z_error"]))
+
+            dir_stats[direction] = {
+                "mean_error_um": float(np.mean(dir_errors)),
+                "z_jump_um": float(np.mean(z_jumps)) if z_jumps else None,
+            }
 
         # Build rows metadata
         rows_meta = []
@@ -926,6 +947,10 @@ Examples:
                     "std_um": z_error_std,
                     "max_um": z_error_max,
                     "p95_um": z_error_p95,
+                    "mean_error_pos_um": dir_stats.get(1, {}).get("mean_error_um"),
+                    "mean_error_neg_um": dir_stats.get(-1, {}).get("mean_error_um"),
+                    "z_jump_pos_um": dir_stats.get(1, {}).get("z_jump_um"),
+                    "z_jump_neg_um": dir_stats.get(-1, {}).get("z_jump_um"),
                 },
             },
             "camera": CameraMeta(
@@ -989,6 +1014,15 @@ Examples:
                 f"  {'PASS' if z_error_max < dof_20x else 'NOTE'}: max error "
                 f"{'within' if z_error_max < dof_20x else 'exceeds'} 20x DOF ({dof_20x} µm)"
             )
+            if dir_stats:
+                pos = dir_stats.get(1)
+                neg = dir_stats.get(-1)
+                if pos:
+                    zj = f", z-jump={pos['z_jump_um']:.2f}" if pos["z_jump_um"] is not None else ""
+                    print(f"  +X rows: mean err={pos['mean_error_um']:+.2f}{zj} µm")
+                if neg:
+                    zj = f", z-jump={neg['z_jump_um']:.2f}" if neg["z_jump_um"] is not None else ""
+                    print(f"  -X rows: mean err={neg['mean_error_um']:+.2f}{zj} µm")
         print(f"  Output: {args.output}/")
         print()
         print("Done.")
