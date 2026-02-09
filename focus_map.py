@@ -10,43 +10,58 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 import time
+from typing import NamedTuple, Sequence
 
 import numpy as np
 from PIL import Image as PILImage
 
+from flakefinder.data_utils import load_chip_geometry
 from flakefinder.leica.autofocus import ALL_SHARPNESS_METRICS
+from flakefinder.types import Point2F
 
 
-def load_chips_meta(chips_meta_path: Path) -> dict:
-    """Load chips metadata from JSON file."""
-    if not chips_meta_path.exists():
-        raise FileNotFoundError(f"Chips metadata not found: {chips_meta_path}")
-    with open(chips_meta_path) as f:
-        return json.load(f)
+class SamplePoint(NamedTuple):
+    x_um: float
+    y_um: float
+    type: str  # "contour" or "grid"
+    index: int
+
+
+def hull_perimeter_um(convex_hull: Sequence[Point2F]) -> float:
+    """Compute perimeter of a convex hull in µm.
+
+    Args:
+        convex_hull: List of (x, y) vertices in stage coords (µm).
+
+    Returns:
+        Perimeter length in µm.
+    """
+    hull = np.array(convex_hull)
+    hull_closed = np.vstack([hull, hull[0:1]])
+    diffs = np.diff(hull_closed, axis=0)
+    return float(np.sum(np.sqrt((diffs ** 2).sum(axis=1))))
 
 
 def sample_contour_points(
-    convex_hull: list[list[float]],
+    convex_hull: Sequence[Point2F],
     num_samples: int,
-) -> list[tuple[float, float]]:
+) -> list[Point2F]:
     """Sample points evenly along a convex hull perimeter.
 
     Args:
-        convex_hull: List of [x, y] points defining the hull in stage coords.
+        convex_hull: List of (x, y) vertices in stage coords.
         num_samples: Number of points to sample along the perimeter.
 
     Returns:
         List of (x, y) tuples in stage coordinates.
     """
     if len(convex_hull) < 2:
-        return [(convex_hull[0][0], convex_hull[0][1])] if convex_hull else []
+        return [convex_hull[0]] if convex_hull else []
 
     # Calculate cumulative distance along perimeter
     hull = np.array(convex_hull)
-    # Close the loop by appending first point
     hull_closed = np.vstack([hull, hull[0:1]])
 
-    # Calculate segment lengths
     diffs = np.diff(hull_closed, axis=0)
     segment_lengths = np.sqrt((diffs ** 2).sum(axis=1))
     cumulative_dist = np.concatenate([[0], np.cumsum(segment_lengths)])
@@ -79,17 +94,17 @@ def sample_contour_points(
 
 
 def sample_grid_points(
-    convex_hull: list[list[float]],
+    convex_hull: Sequence[Point2F],
     spacing_um: float,
     inset_um: float = 1500.0,
-) -> list[tuple[float, float]]:
+) -> list[Point2F]:
     """Sample interior grid points within a convex hull, centered on centroid.
 
     Grid is centered on the hull centroid and only includes points inside
     the hull (with an inset margin to avoid crowding contour points).
 
     Args:
-        convex_hull: List of [x, y] points defining the hull in stage coords.
+        convex_hull: List of (x, y) vertices in stage coords.
         spacing_um: Grid spacing in micrometers.
         inset_um: Inset margin from hull edge in µm (avoids crowding contour points).
 
@@ -282,38 +297,19 @@ def main():
     )
     args = parser.parse_args()
 
-    # Load chips metadata
+    # Load chip geometry
     print(f"Loading chips metadata from {args.chips_meta}")
-    chips_meta = load_chips_meta(args.chips_meta)
-
-    chips = chips_meta.get("chips", [])
-    if not chips:
-        print("Error: No chips found in metadata")
+    try:
+        chip_geo = load_chip_geometry(str(args.chips_meta), args.chip)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error: {e}")
         return 1
 
-    if args.chip < 0 or args.chip >= len(chips):
-        print(f"Error: Chip {args.chip} not found (have {len(chips)} chips)")
-        return 1
-
-    chip = chips[args.chip]
     print(f"Processing chip {args.chip}")
-
-    # Get hull and bbox
-    convex_hull = chip.get("convex_hull_stage_um", [])
-    bbox = chip.get("bbox_stage_um", {})
-
-    if not convex_hull:
-        print("Error: Chip has no convex hull data")
-        return 1
-    if not bbox:
-        print("Error: Chip has no bounding box data")
-        return 1
+    convex_hull = chip_geo.polygon
 
     # Compute contour sample count from perimeter and target spacing
-    hull_arr = np.array(convex_hull)
-    hull_closed = np.vstack([hull_arr, hull_arr[0:1]])
-    diffs = np.diff(hull_closed, axis=0)
-    perimeter_mm = np.sum(np.sqrt((diffs ** 2).sum(axis=1))) / 1000
+    perimeter_mm = hull_perimeter_um(convex_hull) / 1000
     contour_samples = max(4, min(24, round(perimeter_mm / args.contour_spacing_mm)))
 
     # Generate sample points
@@ -326,22 +322,23 @@ def main():
     print(f"  Total: {len(contour_points) + len(grid_points)} points")
 
     # All sample points with labels
-    all_points = []
+    all_points: list[SamplePoint] = []
     for i, (x, y) in enumerate(contour_points):
-        all_points.append({"x_um": x, "y_um": y, "type": "contour", "index": i})
+        all_points.append(SamplePoint(x, y, "contour", i))
     for i, (x, y) in enumerate(grid_points):
-        all_points.append({"x_um": x, "y_um": y, "type": "grid", "index": i})
+        all_points.append(SamplePoint(x, y, "grid", i))
 
     if args.dry_run:
         print("\n[DRY RUN] Would autofocus at these points:")
         for pt in all_points:
-            print(f"  {pt['type']:7} {pt['index']:2}: ({pt['x_um']/1000:.2f}, {pt['y_um']/1000:.2f}) mm")
+            print(f"  {pt.type:7} {pt.index:2}: ({pt.x_um/1000:.2f}, {pt.y_um/1000:.2f}) mm")
         return 0
 
-    # Output directory
+    # Output directory and stem
     output_dir = args.output_dir or args.chips_meta.parent
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"focus_map_chip{args.chip}_{args.suffix}" if args.suffix else f"focus_map_chip{args.chip}"
 
     # Import hardware libraries (after dry-run check)
     from flakefinder.leica import LeicaConnection, Stage, Lamp, Shutter, ZDrive
@@ -402,8 +399,7 @@ def main():
 
         # Determine reference Z (autofocus at centroid if not provided)
         if args.z is None:
-            hull = np.array(convex_hull)
-            cx, cy = float(hull[:, 0].mean()), float(hull[:, 1].mean())
+            cx, cy = chip_geo.centroid
             print(f"\nNo --z provided, autofocusing at chip centroid ({cx/1000:.2f}, {cy/1000:.2f}) mm...")
             hx, hy = stage.move_to_async(cx, cy)
             Stage.wait_all([hx, hy])
@@ -427,7 +423,6 @@ def main():
         # Create images directory if saving images
         images_dir = None
         if args.save_images:
-            stem = f"focus_map_chip{args.chip}_{args.suffix}" if args.suffix else f"focus_map_chip{args.chip}"
             images_dir = output_dir / f"{stem}_images"
             images_dir.mkdir(parents=True, exist_ok=True)
             print(f"Saving images to {images_dir}")
@@ -441,13 +436,11 @@ def main():
         print(f"\nRunning autofocus at {total_points} points...")
 
         for i, pt in enumerate(all_points):
-            x_um, y_um = pt["x_um"], pt["y_um"]
-
-            print(f"  [{i+1}/{total_points}] {pt['type']} {pt['index']}: "
-                  f"({x_um/1000:.2f}, {y_um/1000:.2f}) mm ... ", end="", flush=True)
+            print(f"  [{i+1}/{total_points}] {pt.type} {pt.index}: "
+                  f"({pt.x_um/1000:.2f}, {pt.y_um/1000:.2f}) mm ... ", end="", flush=True)
 
             # Move to position
-            hx, hy = stage.move_to_async(x_um, y_um)
+            hx, hy = stage.move_to_async(pt.x_um, pt.y_um)
             Stage.wait_all([hx, hy])
             hx.dispose()
             hy.dispose()
@@ -456,7 +449,7 @@ def main():
 
             # Run autofocus
             image_path = None
-            label = f"{'c' if pt['type'] == 'contour' else 'g'}{pt['index']:02d}"
+            label = f"{'c' if pt.type == 'contour' else 'g'}{pt.index:02d}"
 
             try:
                 af_result = continuous_autofocus(
@@ -486,7 +479,7 @@ def main():
                         time.sleep(args.af_settle)
                     after_img = camera.capture()
                     if after_img is not None:
-                        fname = f"{pt['type']}_{pt['index']:02d}.jpg"
+                        fname = f"{pt.type}_{pt.index:02d}.jpg"
                         image_path = images_dir / fname
                         print(f" -> {fname}", end="")
 
@@ -518,19 +511,19 @@ def main():
 
             if af_result is None:
                 sample_results.append({
-                    "x_um": x_um,
-                    "y_um": y_um,
-                    "type": pt["type"],
-                    "index": pt["index"],
+                    "x_um": pt.x_um,
+                    "y_um": pt.y_um,
+                    "type": pt.type,
+                    "index": pt.index,
                     "error": True,
                 })
             else:
                 result_dict = af_result.to_dict()
                 result_dict.update({
-                    "x_um": x_um,
-                    "y_um": y_um,
-                    "type": pt["type"],
-                    "index": pt["index"],
+                    "x_um": pt.x_um,
+                    "y_um": pt.y_um,
+                    "type": pt.type,
+                    "index": pt.index,
                     "image": str(image_path.name) if image_path else None,
                 })
                 sample_results.append(result_dict)
@@ -577,7 +570,6 @@ def main():
     }
 
     # Save
-    stem = f"focus_map_chip{args.chip}_{args.suffix}" if args.suffix else f"focus_map_chip{args.chip}"
     output_path = output_dir / f"{stem}.json"
     with open(output_path, "w") as f:
         json.dump(output, f, indent=2)
