@@ -30,7 +30,8 @@ At the start of each session:
   - **Keep entries brief and resumable** — 1-3 lines focused on findings and key values, not process. Bold the important numbers.
   - Use `### Headings` to group entries by phase of work (e.g. "5x overview", "Z tracking investigation"), not per-entry.
   - **Log user decisions immediately** — when the user picks a value, makes a judgment call, or decides on a plan, write it to the notebook right away. Don't wait to be reminded.
-  - **The log is strictly append-only.** Never edit or strike through existing entries — if something was wrong, append a correction. Use Edit to append: match `<!-- end-of-log -->` and replace with `<new entry>\n\n---\n\n<!-- end-of-log -->`.
+  - **The log is strictly append-only.** Never edit or strike through existing entries — if something was wrong, append a correction.
+  - **Appending to the log:** Always use the `<!-- end-of-log -->` sentinel. Match it with Edit and replace with `<new entry>\n\n---\n\n<!-- end-of-log -->`. Never match other log content to insert entries.
   - Timestamp each entry: `**MM-DD HH:MM**` on its own line before the entry content.
   - **Always include durations for chip scans** and record the commands used.
 - **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `rsync -a --quiet` for bulk transfers. Use `rm -r` before `scp -r` if using scp to avoid stale file issues. Download one-off files (manual AF images, etc.) into `downloads/`, not the project root. Scan data goes in `scans/`.
