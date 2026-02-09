@@ -9,7 +9,6 @@ working distance if not specified.
 """
 
 import bisect
-import contextlib
 import threading
 import time
 from dataclasses import dataclass, field
@@ -485,7 +484,7 @@ def continuous_autofocus(
     z_axis = scope.z
     camera = scope.camera
     acquisition = scope.acquisition
-    context = scope.create_acquisition_context()
+    context = scope.context
 
     current_z = z_axis.position_um
 
@@ -671,10 +670,6 @@ def continuous_autofocus(
     final_image = camera.capture()
     final_sharpness = sharpness(final_image, method=sharpness_method)
     stored_final_image = final_image if store_frames else None
-
-    # Dispose context (owned by this function)
-    with contextlib.suppress(Exception):
-        context.Dispose()
 
     return AutofocusResult(
         selected_z_um=best_z,

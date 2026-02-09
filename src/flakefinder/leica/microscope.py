@@ -41,6 +41,7 @@ class Microscope:
         self._lamp: Lamp | None = None
         self._camera: Camera | None = None
         self._camera_initialized = False
+        self._context = None  # Lazy acquisition context
 
     def __enter__(self) -> "Microscope":
         """Connect to hardware and initialize subsystems."""
@@ -58,7 +59,10 @@ class Microscope:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Dispose camera and disconnect."""
+        """Dispose acquisition context, camera, and disconnect."""
+        if self._context is not None:
+            with contextlib.suppress(Exception):
+                self._context.Dispose()
         if self._camera is not None:
             with contextlib.suppress(Exception):
                 self._camera.dispose()
@@ -143,6 +147,18 @@ class Microscope:
         self._init_camera()
         assert self._camera is not None
         return self._camera._acquisition
+
+    @property
+    def context(self):
+        """Shared acquisition context (lazily created, auto-disposed on exit).
+
+        Use for single-shot captures and autofocus. Streaming classes
+        (FrameStream, DeferredFrameStream) create their own per-thread
+        contexts and should NOT use this one.
+        """
+        if self._context is None:
+            self._context = self.create_acquisition_context()
+        return self._context
 
     # --- Computed properties ---
 
