@@ -171,6 +171,7 @@ Examples:
     output_group.add_argument(
         "--write-threads", type=int, default=2, help="Number of image writer threads (default: 2)"
     )
+    output_group.add_argument("-q", "--quiet", action="store_true", help="Suppress per-row progress output")
 
     args = parser.parse_args()
 
@@ -531,7 +532,8 @@ Examples:
                 x_start_pos, x_end_pos = x_max, x_min
                 dir_str = "-X"
 
-            print(f"Row {row_idx}/{num_rows - 1}: Y={row_y:.0f}µm, {dir_str}")
+            if not args.quiet:
+                print(f"Row {row_idx}/{num_rows - 1}: Y={row_y:.0f}µm, {dir_str}")
 
             # Move to row start if not already there
             if row_idx > 0:
@@ -606,7 +608,8 @@ Examples:
                 (t_before, t_after, x) for t_before, t_after, x in x_samples if row_start <= t_before <= row_end
             ]
 
-            print(f"  {row_frame_count} frames, {len(row_x_samples)} pos samples, {row_duration:.2f}s")
+            if not args.quiet:
+                print(f"  {row_frame_count} frames, {len(row_x_samples)} pos samples, {row_duration:.2f}s")
 
             # Add position samples to global list (with adjusted timestamps)
             for t_before, t_after, x_um in row_x_samples:
