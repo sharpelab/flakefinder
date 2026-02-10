@@ -606,7 +606,9 @@ Examples:
     output_group.add_argument("--clean", action="store_true", help="Wipe output directory if exists")
     output_group.add_argument("--write-threads", type=int, default=2, help="Image writer threads")
     output_group.add_argument("--compress", action="store_true", help="Create .zip of output")
-    output_group.add_argument("--quiet", action="store_true", help="Suppress per-row progress output")
+    output_group.add_argument(
+        "--quiet", "-q", action="store_true", help="Suppress verbose output (keep scan summary and errors)"
+    )
 
     args = parser.parse_args()
 
@@ -702,23 +704,24 @@ Examples:
     plan_frame_width_um, plan_frame_height_um = frame_size
 
     # ---- Print scan plan ----
-    print("Chip Scan with Focus Plane (v2)")
-    print("=" * 60)
-    print(f"Chip: #{args.chip}")
-    print(f"  BBox: X=[{bbox['x_min']:.0f}, {bbox['x_max']:.0f}], Y=[{bbox['y_min']:.0f}, {bbox['y_max']:.0f}] um")
-    print(f"  Centroid: ({centroid[0]:.0f}, {centroid[1]:.0f}) um")
-    print(f"  Hull vertices: {len(polygon)}")
-    print(f"  Area: {chip_geo.area_um2 / 1e6:.1f} mm2")
-    print()
-    print(f"Focus plane: Z = {plane_a * 1000:.4f}*X_mm + {plane_b * 1000:.4f}*Y_mm + {plane_c:.2f}")
-    print(f"  Expected Z range: {z_min_expected:.0f} - {z_max_expected:.0f} um")
-    print(f"  Z limit: {args.z_max:.0f} um")
-    print()
-    print(f"Scan speed: {args.speed_mm:.1f} mm/s")
-    print(f"Lead-in: {args.lead_in_um:.0f} um, Z lead: {args.z_lead_ms:.0f} ms")
-    if args.row_limit:
-        print(f"Row limit: {args.row_limit}")
-    print()
+    if not args.quiet:
+        print("Chip Scan with Focus Plane (v2)")
+        print("=" * 60)
+        print(f"Chip: #{args.chip}")
+        print(f"  BBox: X=[{bbox['x_min']:.0f}, {bbox['x_max']:.0f}], Y=[{bbox['y_min']:.0f}, {bbox['y_max']:.0f}] um")
+        print(f"  Centroid: ({centroid[0]:.0f}, {centroid[1]:.0f}) um")
+        print(f"  Hull vertices: {len(polygon)}")
+        print(f"  Area: {chip_geo.area_um2 / 1e6:.1f} mm2")
+        print()
+        print(f"Focus plane: Z = {plane_a * 1000:.4f}*X_mm + {plane_b * 1000:.4f}*Y_mm + {plane_c:.2f}")
+        print(f"  Expected Z range: {z_min_expected:.0f} - {z_max_expected:.0f} um")
+        print(f"  Z limit: {args.z_max:.0f} um")
+        print()
+        print(f"Scan speed: {args.speed_mm:.1f} mm/s")
+        print(f"Lead-in: {args.lead_in_um:.0f} um, Z lead: {args.z_lead_ms:.0f} ms")
+        if args.row_limit:
+            print(f"Row limit: {args.row_limit}")
+        print()
 
     # ---- Compute row plan (unpadded — lead-in applied per-row) ----
     try:
@@ -746,18 +749,19 @@ Examples:
     total_distance_mm = sum(row_widths)
     est_total_time_s = total_distance_mm / args.speed_mm + len(plan.rows) * 0.5
 
-    print(f"Frame FOV: {plan.frame_width_um:.1f} x {plan.frame_height_um:.1f} um")
-    print(f"Frame skip: target advance {plan.target_advance_um:.0f} um ({args.x_overlap_percent:.0f}% X overlap)")
-    print()
-    print(f"Row plan: {len(plan.rows)} rows")
-    print(f"  Y step: {plan.y_step_um:.1f} um ({args.y_overlap_percent:.0f}% overlap)")
-    print(f"  Row widths: {min(row_widths):.1f} - {max(row_widths):.1f} mm")
-    print(f"  Total scan distance: {total_distance_mm:.1f} mm")
-    print(f"  Z range: {plan.validated_z_min_um:.0f} - {plan.validated_z_max_um:.0f} um")
-    z_vel = abs(plan.plane_a * args.speed_mm * 1000)
-    print(f"  Z velocity: {z_vel:.1f} um/s (from plane slope)")
-    print(f"  Estimated time: ~{est_total_time_s:.0f}s")
-    print()
+    if not args.quiet:
+        print(f"Frame FOV: {plan.frame_width_um:.1f} x {plan.frame_height_um:.1f} um")
+        print(f"Frame skip: target advance {plan.target_advance_um:.0f} um ({args.x_overlap_percent:.0f}% X overlap)")
+        print()
+        print(f"Row plan: {len(plan.rows)} rows")
+        print(f"  Y step: {plan.y_step_um:.1f} um ({args.y_overlap_percent:.0f}% overlap)")
+        print(f"  Row widths: {min(row_widths):.1f} - {max(row_widths):.1f} mm")
+        print(f"  Total scan distance: {total_distance_mm:.1f} mm")
+        print(f"  Z range: {plan.validated_z_min_um:.0f} - {plan.validated_z_max_um:.0f} um")
+        z_vel = abs(plan.plane_a * args.speed_mm * 1000)
+        print(f"  Z velocity: {z_vel:.1f} um/s (from plane slope)")
+        print(f"  Estimated time: ~{est_total_time_s:.0f}s")
+        print()
 
     if args.dry_run:
         print("(dry run -- exiting)")
@@ -783,14 +787,18 @@ Examples:
         # Switch objective if requested
         if args.objective_mag is not None:
             if scope.switch_objective_mag(args.objective_mag):
-                print(f"Switched objective to {scope.objective_mag}x")
+                if not args.quiet:
+                    print(f"Switched objective to {scope.objective_mag}x")
             else:
-                print(f"Objective: already at {scope.objective_mag}x")
+                if not args.quiet:
+                    print(f"Objective: already at {scope.objective_mag}x")
         elif args.objective_pos is not None:
             if scope.switch_objective_pos(args.objective_pos):
-                print(f"Switched objective to position {args.objective_pos} ({scope.objective_mag}x)")
+                if not args.quiet:
+                    print(f"Switched objective to position {args.objective_pos} ({scope.objective_mag}x)")
             else:
-                print(f"Objective: already at {scope.objective_mag}x")
+                if not args.quiet:
+                    print(f"Objective: already at {scope.objective_mag}x")
 
         # Lighting
         scope.light_on()
@@ -825,14 +833,16 @@ Examples:
             print(f"ABORT: Camera frame height {frame_height_um:.1f} != plan {plan.frame_height_um:.1f} um")
             return 1
 
-        exp_str = f"{cam_meta['exposure_s'] * 1000:.2f}ms" if cam_meta["exposure_s"] else "?"
-        print(f"Camera: {cam_meta['name']}")
-        print(f"  Binning: {cam_meta['binning']}x{cam_meta['binning']}, Exposure: {exp_str}, Gain: {cam_meta['gain']}")
-        print(f"  Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
-        print(f"  Frame: {cam_meta['frame_width_px']}x{cam_meta['frame_height_px']} px")
-        print(f"  FOV: {frame_width_um:.1f} x {frame_height_um:.1f} um (matches plan)")
-        print(f"  Objective: {optics_meta['objective_mag']}x")
-        print()
+        if not args.quiet:
+            exp_str = f"{cam_meta['exposure_s'] * 1000:.2f}ms" if cam_meta["exposure_s"] else "?"
+            print(f"Camera: {cam_meta['name']}")
+            bin_ = cam_meta["binning"]
+            print(f"  Binning: {bin_}x{bin_}, Exposure: {exp_str}, Gain: {cam_meta['gain']}")
+            print(f"  Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
+            print(f"  Frame: {cam_meta['frame_width_px']}x{cam_meta['frame_height_px']} px")
+            print(f"  FOV: {frame_width_um:.1f} x {frame_height_um:.1f} um (matches plan)")
+            print(f"  Objective: {optics_meta['objective_mag']}x")
+            print()
 
         # ---- Set up acquisition context ----
         from LeicaMicrosystems.HardwareModel import Extensions
@@ -935,7 +945,8 @@ Examples:
         initial_y = stage.y.position_um
         initial_z = z_drive.position_um
 
-        print(f"Initial position: X={initial_x:.0f}, Y={initial_y:.0f}, Z={initial_z:.0f} um")
+        if not args.quiet:
+            print(f"Initial position: X={initial_x:.0f}, Y={initial_y:.0f}, Z={initial_z:.0f} um")
 
         # Set move speed for positioning
         stage.x.set_velocity_um_s(args.move_speed_mm * 1000)
@@ -1012,19 +1023,22 @@ Examples:
         total_duration = total_scan_end - total_scan_start
 
         # Return to initial position
-        print("\nReturning to initial position...")
+        if not args.quiet:
+            print("\nReturning to initial position...")
         stage.x.set_velocity_um_s(args.move_speed_mm * 1000)
         stage.y.set_velocity_um_s(args.move_speed_mm * 1000)
         hx = stage.x.move_to_async(initial_x)
         hy = stage.y.move_to_async(initial_y)
 
         # Wait for savers
-        print(f"Waiting for savers ({save_queue.qsize()} frames queued)...")
+        if not args.quiet:
+            print(f"Waiting for savers ({save_queue.qsize()} frames queued)...")
         for _ in savers:
             save_queue.put(None)
         for t in savers:
             t.join()
-        print(f"Saved {len(saved_frames_meta)} frames")
+        if not args.quiet:
+            print(f"Saved {len(saved_frames_meta)} frames")
 
         # Sort frames
         saved_frames_meta.sort(key=lambda f: f["n"])
@@ -1159,13 +1173,16 @@ Examples:
         meta_path = os.path.join(args.output, "scan_meta.json")
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2)
-        print(f"Saved metadata to {meta_path}")
+        if not args.quiet:
+            print(f"Saved metadata to {meta_path}")
 
         # Compress if requested
         if args.compress:
-            print(f"Creating {args.output}.zip...")
+            if not args.quiet:
+                print(f"Creating {args.output}.zip...")
             shutil.make_archive(args.output, "zip", args.output)
-            print(f"Created {args.output}.zip")
+            if not args.quiet:
+                print(f"Created {args.output}.zip")
 
         # Summary (printed before cleanup to survive Dispose() crashes)
         print()
