@@ -135,8 +135,7 @@ def compute_sharpness_values(scan_dir: Path, meta: dict, sample_every: int = 1) 
         s = sharpness(img, method="tenengrad")
         indices.append(frame["n"])
         sharpness_vals.append(s)
-        # Use midpoint of x_start/x_end as frame X position
-        x_positions.append((frame["x_start"] + frame["x_end"]) / 2)
+        x_positions.append(frame["x_start"])
         y_positions.append(frame["y_um"])
         row_ids.append(frame["row"])
         processed += 1
@@ -191,6 +190,50 @@ def compute_sharpness_values(scan_dir: Path, meta: dict, sample_every: int = 1) 
     }
 
 
+def _plot_spatial_z_error(
+    ax: plt.Axes,
+    frames: list[dict],
+    z_errors: list,
+    lead_in_mask: list[bool],
+) -> None:
+    """Render the spatial Z error map on *ax*."""
+    x_mm = np.array([f["x_start"] for f in frames]) / 1000
+    y_mm = np.array([f["y_um"] for f in frames]) / 1000
+    z_err_arr = np.array(z_errors)
+    li_mask = np.array(lead_in_mask)
+
+    abs_max = max(np.percentile(np.abs(z_err_arr), 99), 0.5)
+    track = ~li_mask
+    if np.any(track):
+        sc = ax.scatter(
+            x_mm[track],
+            y_mm[track],
+            c=z_err_arr[track],
+            cmap="coolwarm",
+            s=2,
+            alpha=0.6,
+            vmin=-abs_max,
+            vmax=abs_max,
+            rasterized=True,
+        )
+        plt.colorbar(sc, ax=ax, label="Z error (um)")
+    if np.any(li_mask):
+        ax.scatter(
+            x_mm[li_mask],
+            y_mm[li_mask],
+            c="gray",
+            marker="x",
+            s=6,
+            alpha=0.3,
+            rasterized=True,
+        )
+    ax.set_xlabel("X (mm)")
+    ax.set_ylabel("Y (mm)")
+    ax.set_title("Spatial Z Error Map")
+    ax.set_aspect("equal")
+    ax.invert_yaxis()  # +Y down
+
+
 def plot_analysis(
     meta: dict,
     z_stats: dict,
@@ -202,19 +245,23 @@ def plot_analysis(
     """Generate combined analysis plot and save to output_path."""
     frames = meta["frames"]
     n_rows = len(meta["rows"])
+    spatial_z = kwargs.get("spatial_z", False)
 
-    # Determine layout: 2x2 if sharpness data, 1x2 if only Z
+    # Determine layout
     has_sharpness = sharpness_data is not None
-    if has_sharpness:
+    if has_sharpness and spatial_z:
         fig, axes = plt.subplots(2, 2, figsize=(16, 10))
-        ax_zerr, ax_sharp, ax_zmap, ax_sharpmap = (
-            axes[0, 0],
-            axes[0, 1],
-            axes[1, 0],
-            axes[1, 1],
-        )
+        ax_zerr, ax_sharp = axes[0, 0], axes[0, 1]
+        ax_zmap, ax_sharpmap = axes[1, 0], axes[1, 1]
+    elif has_sharpness:
+        fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+        ax_zerr, ax_sharp = axes[0, 0], axes[0, 1]
+        ax_sharpmap = axes[1, 1]
+        fig.delaxes(axes[1, 0])  # spatial Z hidden by default
+    elif spatial_z:
+        fig, (ax_zerr, ax_zmap) = plt.subplots(1, 2, figsize=(16, 5))
     else:
-        fig, (ax_zerr, ax_zmap_only) = plt.subplots(1, 2, figsize=(16, 5))
+        fig, ax_zerr = plt.subplots(1, 1, figsize=(10, 5))
 
     # Color map for rows
     cmap = plt.colormaps["viridis"]
@@ -279,46 +326,18 @@ def plot_analysis(
     for row in meta["rows"]:
         ax_zerr.axvline(row["frame_start"], color="gray", alpha=0.15, linewidth=0.5)
 
+    # --- Spatial Z error map (only when --spatial-z) ---
+    if spatial_z and not has_sharpness:
+        _plot_spatial_z_error(ax_zmap, frames, z_errors, lead_in_mask)
+
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.close()
+        print(f"Plot saved to {output_path}")
+        return
+
     if not has_sharpness:
-        # Right panel: spatial Z error map
-        x_mm = np.array([(f["x_start"] + f["x_end"]) / 2 for f in frames]) / 1000
-        y_mm = np.array([f["y_um"] for f in frames]) / 1000
-        z_err_arr = np.array(z_errors)
-        li_mask = np.array(lead_in_mask)
-
-        abs_max = max(np.percentile(np.abs(z_err_arr), 99), 0.5)
-        # Tracking frames: colored by Z error
-        track = ~li_mask
-        if np.any(track):
-            sc = ax_zmap_only.scatter(
-                x_mm[track],
-                y_mm[track],
-                c=z_err_arr[track],
-                cmap="coolwarm",
-                s=2,
-                alpha=0.6,
-                vmin=-abs_max,
-                vmax=abs_max,
-                rasterized=True,
-            )
-            plt.colorbar(sc, ax=ax_zmap_only, label="Z error (um)")
-        # Lead-in frames: gray
-        if np.any(li_mask):
-            ax_zmap_only.scatter(
-                x_mm[li_mask],
-                y_mm[li_mask],
-                c="gray",
-                marker="x",
-                s=6,
-                alpha=0.3,
-                rasterized=True,
-            )
-        ax_zmap_only.set_xlabel("X (mm)")
-        ax_zmap_only.set_ylabel("Y (mm)")
-        ax_zmap_only.set_title("Spatial Z Error Map")
-        ax_zmap_only.set_aspect("equal")
-        ax_zmap_only.invert_yaxis()  # +Y down
-
+        # Z-only, no spatial → single panel done
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches="tight")
         plt.close()
@@ -370,45 +389,9 @@ def plot_analysis(
     for row in meta["rows"]:
         ax_sharp.axvline(row["frame_start"], color="gray", alpha=0.15, linewidth=0.5)
 
-    # --- Panel 3: Spatial Z error map ---
-    x_mm = np.array([(f["x_start"] + f["x_end"]) / 2 for f in frames]) / 1000
-    y_mm = np.array([f["y_um"] for f in frames]) / 1000
-    z_err_arr = np.array(z_errors)
-    li_mask = np.array(lead_in_mask)
-
-    # Use absolute Z error for color
-    abs_max = max(np.percentile(np.abs(z_err_arr), 99), 0.5)
-    # Tracking frames: colored by Z error
-    track = ~li_mask
-    if np.any(track):
-        sc = ax_zmap.scatter(
-            x_mm[track],
-            y_mm[track],
-            c=z_err_arr[track],
-            cmap="coolwarm",
-            s=2,
-            alpha=0.6,
-            vmin=-abs_max,
-            vmax=abs_max,
-            rasterized=True,
-        )
-        plt.colorbar(sc, ax=ax_zmap, label="Z error (um)")
-    # Lead-in frames: gray
-    if np.any(li_mask):
-        ax_zmap.scatter(
-            x_mm[li_mask],
-            y_mm[li_mask],
-            c="gray",
-            marker="x",
-            s=6,
-            alpha=0.3,
-            rasterized=True,
-        )
-    ax_zmap.set_xlabel("X (mm)")
-    ax_zmap.set_ylabel("Y (mm)")
-    ax_zmap.set_title("Spatial Z Error Map")
-    ax_zmap.set_aspect("equal")
-    ax_zmap.invert_yaxis()  # +Y down
+    # --- Panel 3: Spatial Z error map (only when --spatial-z) ---
+    if spatial_z:
+        _plot_spatial_z_error(ax_zmap, frames, z_errors, lead_in_mask)
 
     # --- Panel 4: Spatial sharpness map ---
     sx_mm = sharpness_data["x_um"] / 1000
@@ -697,6 +680,11 @@ def main() -> int:
         help="Label for plot title and output filename (e.g. 'raw_async')",
     )
     parser.add_argument(
+        "--spatial-z",
+        action="store_true",
+        help="Include spatial Z error map panel in plots (off by default)",
+    )
+    parser.add_argument(
         "--compare",
         type=Path,
         default=None,
@@ -751,7 +739,15 @@ def main() -> int:
     else:
         output_path = scan_dir / "scan_analysis.png"
     print("Generating plot...")
-    plot_analysis(meta, z_stats, sharpness_data, output_path, args.min_sharpness, notes=args.notes)
+    plot_analysis(
+        meta,
+        z_stats,
+        sharpness_data,
+        output_path,
+        args.min_sharpness,
+        notes=args.notes,
+        spatial_z=args.spatial_z,
+    )
 
     return 0
 

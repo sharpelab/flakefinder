@@ -801,17 +801,12 @@ Examples:
                 dt = t_end - t_start
                 x_vel = (x_end_interp - x_start_interp) / dt if dt > 0 and x_start_interp and x_end_interp else 0
 
-                # Lead-in check: frame midpoint hasn't crossed chip edge yet
-                x_mid = (
-                    (x_start_interp + x_end_interp) / 2
-                    if x_start_interp is not None and x_end_interp is not None
-                    else None
-                )
-                if x_mid is not None:
+                # Lead-in check: frame start hasn't crossed chip edge yet
+                if x_start_interp is not None:
                     if frame_direction == 1:
-                        in_lead_in = x_mid < frame_chip_edge_x
+                        in_lead_in = x_start_interp < frame_chip_edge_x
                     else:
-                        in_lead_in = x_mid > frame_chip_edge_x
+                        in_lead_in = x_start_interp > frame_chip_edge_x
                 else:
                     in_lead_in = True  # no position data → treat as lead-in
 
