@@ -321,8 +321,7 @@ Examples:
         readout_time = camera.readout_time_s
         actual_exposure = camera.exposure_time
         actual_binning_idx = camera.binning
-        binning_map = {0: 1, 1: 2, 2: 3}
-        actual_binning = binning_map.get(actual_binning_idx, actual_binning_idx)
+        actual_binning = desc.camera.binning_levels[actual_binning_idx].factor
 
         # Build readout info string
         readout_fps = ""

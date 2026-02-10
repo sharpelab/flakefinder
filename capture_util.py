@@ -15,6 +15,7 @@ import sys
 
 from PIL import Image as PILImage
 
+from flakefinder.data_utils import require_microscope_description
 from flakefinder.leica import Microscope
 
 
@@ -44,8 +45,8 @@ def report_status(scope: Microscope) -> None:
 
     # Camera settings
     camera = scope.camera
-    binning_map = {0: "1x1", 1: "2x2", 2: "3x3"}
-    binning_str = binning_map.get(camera.binning, str(camera.binning))
+    desc = require_microscope_description()
+    binning_str = desc.camera.binning_levels[camera.binning].name
     w, h = camera.frame_size_px
     r, g, b = camera.gain_rgb
     print(f"Camera: {w}x{h} @ {binning_str} binning, {camera.exposure_time * 1000:.1f}ms exposure")
@@ -152,8 +153,8 @@ def main() -> int:
         print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
         print(f"Shutter: {'open' if scope.shutter.is_open else 'closed'}")
 
-        binning_map = {0: "1x1", 1: "2x2", 2: "3x3"}
-        binning_str = binning_map.get(camera.binning, str(camera.binning))
+        desc = require_microscope_description()
+        binning_str = desc.camera.binning_levels[camera.binning].name
         r, g, b = camera.gain_rgb
         print(f"Exposure: {camera.exposure_time * 1000:.2f} ms")
         print(f"Binning: {binning_str}")
