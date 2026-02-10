@@ -45,6 +45,7 @@ def main() -> int:
     )
     parser.add_argument("--gain", type=float, help="Camera gain (e.g., 4.0)")
     parser.add_argument("--saturation", type=int, help="Color saturation (e.g., 100)")
+    parser.add_argument("--gamma", type=float, help="Gamma correction (e.g., 1.0)")
     parser.add_argument("--quality", type=int, default=95, help="JPEG quality (default: 95)")
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress verbose output; print only saved filename")
     parser.add_argument(
@@ -92,6 +93,9 @@ def main() -> int:
 
         if args.saturation is not None:
             camera.saturation = args.saturation
+
+        if args.gamma is not None:
+            camera.gamma = args.gamma
 
         camera.gain_rgb = args.white_balance
 
