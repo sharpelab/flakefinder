@@ -149,6 +149,43 @@ def draw_grid(background, stage_bounds_um, um_per_px, spacing_um, line_color, li
     return result.convert("RGB")
 
 
+def draw_row_labels(background, rows, um_per_px, stage_bounds_um):
+    """Draw row index + direction labels (e.g., '0+', '1-') on the left edge."""
+    w, h = background.size
+    y_min_stage = stage_bounds_um["y_min"]
+
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    font_size = max(16, min(w, h) // 200)
+    try:
+        font = ImageFont.load_default(size=font_size)
+    except TypeError:
+        font = ImageFont.load_default()
+
+    pad = 6
+    for row in rows:
+        row_idx = row["row_idx"]
+        direction = row["direction"]
+        label = f"{row_idx}{'+' if direction > 0 else '-'}"
+
+        # Row center Y in image coords
+        row_y_stage = row["y_um"]
+        row_y_px = int((row_y_stage - y_min_stage) / um_per_px)
+
+        # Center text vertically on the row
+        bbox = font.getbbox(label)
+        text_h = bbox[3] - bbox[1]
+        ty = row_y_px - text_h // 2
+
+        # Draw with shadow for readability
+        draw.text((pad + 1, ty + 1), label, fill=(0, 0, 0, 200), font=font)
+        draw.text((pad, ty), label, fill=(255, 255, 100, 220), font=font)
+
+    result = Image.alpha_composite(background.convert("RGBA"), overlay)
+    return result.convert("RGB")
+
+
 def find_constant_velocity_frames(frames):
     """
     Find frames in the constant-velocity portion of the scan.
@@ -251,10 +288,16 @@ def stitch_row_to_global(
         last_moving = len(all_row_frames)
     row_frames = all_row_frames[first_moving:last_moving]
 
-    # Savgol smooth ALL frame positions (handles accel zones naturally)
+    # Savgol smooth ALL frame positions (handles accel zones naturally).
+    # Window=15 (~225ms) absorbs camera timing jitter (occasional 20ms gaps
+    # that cause velocity spikes in narrower windows). polyorder=2 tracks
+    # quadratic accel profiles well.
     raw_positions = np.array([f["x_start"] for f in row_frames])
     n = len(raw_positions)
-    if n >= 7:
+    if n >= 15:
+        window = min(15, n if n % 2 == 1 else n - 1)
+        all_positions = savgol_filter(raw_positions, window, 2).tolist()
+    elif n >= 7:
         window = min(7, n if n % 2 == 1 else n - 1)
         all_positions = savgol_filter(raw_positions, window, 2).tolist()
     else:
@@ -292,13 +335,22 @@ def stitch_row_to_global(
     else:
         indices = list(range(num_frames))
 
-    # Compute per-frame velocity from smoothed positions for deskew
+    # Compute per-frame velocity for deskew using savgol derivative.
+    # A wider window (31 samples, ~450ms) gives smooth velocity estimates
+    # that aren't distorted by camera timing jitter (e.g., 20ms gaps that
+    # cause position-differencing to spike). The stage velocity is physically
+    # smooth, so a wide polynomial fit recovers it well.
     if deskew:
         readout_time = meta["camera"]["readout_time_s"]
         times = np.array([(f["t_start"] + f["t_end"]) / 2 for f in row_frames])
-        positions_arr = np.array(all_positions)
-        # Central differences for interior, forward/backward at edges
-        frame_velocities = np.gradient(positions_arr, times)
+        raw_pos = np.array([f["x_start"] for f in row_frames])
+        vel_window = min(31, n if n % 2 == 1 else n - 1)
+        if vel_window >= 5:
+            # dt = mean time step for converting savgol derivative to velocity
+            dt = np.mean(np.diff(times))
+            frame_velocities = savgol_filter(raw_pos, vel_window, 2, deriv=1, delta=dt)
+        else:
+            frame_velocities = np.gradient(np.array(all_positions), times)
     else:
         frame_velocities = np.zeros(num_frames)
 
@@ -440,6 +492,7 @@ def main():
         help="Grid line color: name or #RRGGBBAA (default: #FFFFFF50)",
     )
     parser.add_argument("--grid-line-width", type=int, default=1, help="Grid line width in pixels (default: 1)")
+    parser.add_argument("--row-labels", action="store_true", help="Draw row index+direction labels (e.g., 0+, 1-, 2+)")
     parser.add_argument(
         "-o",
         "--output",
@@ -702,6 +755,10 @@ def main():
             args.grid_line_width,
         )
         print(f"Grid: {args.grid_spacing_um:.0f} µm spacing")
+
+    # Draw row labels
+    if args.row_labels:
+        background = draw_row_labels(background, rows, um_per_px, stage_bounds_um)
 
     # Save image
     if args.output:
