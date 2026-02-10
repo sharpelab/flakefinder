@@ -582,23 +582,55 @@ def print_summary(
     sharpness_data: dict | None,
     min_sharpness: float | None,
     slope_metrics: dict | None = None,
+    *,
+    quiet: bool = False,
 ) -> None:
-    """Print text summary to console."""
+    """Print text summary to console.
+
+    When *quiet* is True, print only a compact 2-3 line summary suitable
+    for pipeline use.
+    """
+    chip_info = meta.get("chip_info", {})
+    chip_idx = chip_info.get("chip_index", "?")
+    obj_mag = meta.get("optics", {}).get("objective_mag", "?")
+    n_frames = meta.get("frame_count", "?")
+    n_rows = len(meta.get("rows", []))
+    duration = meta.get("scan_duration_s", 0)
+    ov = z_stats["overall"]
+
+    if quiet:
+        print(f"Scan: chip {chip_idx} @ {obj_mag}x | {n_frames} frames, {duration:.1f}s | {n_rows} rows")
+        print(
+            f"Z tracking: std={ov['std_um']:.2f} um, p95={ov['p95_um']:.2f} um, "
+            f">2um: {ov['pct_outside_2um']:.1f}%, >4um: {ov['pct_outside_4um']:.1f}%"
+        )
+        if sharpness_data is not None:
+            n_below = 0
+            if min_sharpness is not None:
+                n_below = int(np.sum(sharpness_data["sharpness"] < min_sharpness))
+                thresh_str = f", {n_below} below {min_sharpness}"
+            else:
+                thresh_str = ""
+            print(
+                f"Sharpness: mean={sharpness_data['overall_mean']:.1f}, "
+                f"min={sharpness_data['overall_min']:.1f}{thresh_str}"
+            )
+        return
+
     print()
     print("=" * 65)
     print("SCAN ANALYSIS")
     print("=" * 65)
 
     # Scan info
-    chip_info = meta.get("chip_info", {})
     print(f"Timestamp:    {meta.get('timestamp', 'unknown')}")
-    print(f"Chip index:   {chip_info.get('chip_index', '?')}")
-    print(f"Objective:    {meta.get('optics', {}).get('objective_mag', '?')}x")
-    n_lead_in = z_stats["overall"].get("n_lead_in", 0)
+    print(f"Chip index:   {chip_idx}")
+    print(f"Objective:    {obj_mag}x")
+    n_lead_in = ov.get("n_lead_in", 0)
     lead_in_str = f" ({n_lead_in} lead-in excluded from stats)" if n_lead_in > 0 else ""
-    print(f"Frames:       {meta.get('frame_count', '?')}{lead_in_str}")
-    print(f"Rows:         {len(meta.get('rows', []))}")
-    print(f"Duration:     {meta.get('scan_duration_s', 0):.1f}s")
+    print(f"Frames:       {n_frames}{lead_in_str}")
+    print(f"Rows:         {n_rows}")
+    print(f"Duration:     {duration:.1f}s")
 
     # Focus plane
     fp = meta.get("focus_plane", {})
@@ -606,7 +638,6 @@ def print_summary(
         print(f"\nFocus plane:  {fp.get('equation', 'N/A')}")
 
     # Z tracking
-    ov = z_stats["overall"]
     print()
     print("--- Z Tracking ---")
     print(f"Mean error:     {ov['mean_error_um']:+.4f} um")
@@ -843,6 +874,12 @@ def main() -> int:
         help="Include spatial Z error map panel in plots (off by default)",
     )
     parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Compact output: one-line scan info + Z quality verdict only",
+    )
+    parser.add_argument(
         "--compare",
         type=Path,
         default=None,
@@ -857,11 +894,13 @@ def main() -> int:
         return 1
 
     # Load metadata
-    print(f"Loading scan metadata from {scan_dir}")
+    if not args.quiet:
+        print(f"Loading scan metadata from {scan_dir}")
     meta = load_scan_meta(scan_dir)
     n_frames = meta.get("frame_count", len(meta["frames"]))
     n_rows = len(meta.get("rows", []))
-    print(f"  {n_frames} frames, {n_rows} rows, {meta.get('scan_duration_s', 0):.1f}s")
+    if not args.quiet:
+        print(f"  {n_frames} frames, {n_rows} rows, {meta.get('scan_duration_s', 0):.1f}s")
 
     # Z tracking analysis (always, from metadata only)
     z_stats = compute_z_tracking_stats(meta)
@@ -870,11 +909,12 @@ def main() -> int:
     # Sharpness analysis (optional, reads JPGs)
     sharpness_data = None
     if not args.no_sharpness:
-        print(f"Computing sharpness (sample every {args.sample})...")
+        if not args.quiet:
+            print(f"Computing sharpness (sample every {args.sample})...")
         sharpness_data = compute_sharpness_values(scan_dir, meta, sample_every=args.sample)
 
     # Print summary
-    print_summary(meta, z_stats, sharpness_data, args.min_sharpness, slope_metrics)
+    print_summary(meta, z_stats, sharpness_data, args.min_sharpness, slope_metrics, quiet=args.quiet)
 
     # Comparison mode
     if args.compare:
@@ -897,7 +937,8 @@ def main() -> int:
         output_path = args.output
     else:
         output_path = scan_dir / "scan_analysis.png"
-    print("Generating plot...")
+    if not args.quiet:
+        print("Generating plot...")
     plot_analysis(
         meta,
         z_stats,

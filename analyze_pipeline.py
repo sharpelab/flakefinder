@@ -37,6 +37,7 @@ def main() -> int:
     parser.add_argument("--sample", type=int, default=None, help="Sharpness: process every Nth frame")
     parser.add_argument("--min-sharpness", type=float, default=None, help="Sharpness threshold for flagging")
     parser.add_argument("--spatial-z", action="store_true", help="Include spatial Z error map panel")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Full analyze_scan output (default: quiet)")
     args = parser.parse_args()
 
     local_scan_dir = REPO_DIR / args.remote_scan_dir
@@ -52,6 +53,8 @@ def main() -> int:
 
     # --- Step 2: run analyze_scan.py ---
     cmd = [sys.executable, str(REPO_DIR / "analyze_scan.py"), str(local_scan_dir)]
+    if not args.verbose:
+        cmd.append("--quiet")
     if not args.sharpness:
         cmd.append("--no-sharpness")
     if args.notes is not None:
