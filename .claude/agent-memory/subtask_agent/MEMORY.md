@@ -27,12 +27,14 @@
 - **Only do what was explicitly approved.** "go for X" means X only — do NOT batch in additional scripts/files without asking. Stop after each approved unit and check in.
 
 ## Summary Files
-- Keep summaries to 2-3 sentences max. Root cause, fix approach, sync status. No technical details like method signatures or try/finally mechanics.
+- Don't restate the problem — the operator already knows it. Just describe the fix/change, any new CLI flags, and sync status.
+- Keep summaries to 2-3 sentences max. No technical details like method signatures or try/finally mechanics.
 
 ## Linting & Type Checking
-- Pre-commit hook: ruff check + format, then `uv run ty check src/flakefinder/`
+- Pre-commit hook: ruff check + format, then `uv run ty check` on staged files
 - Line length limit: 120 chars. Break long f-strings into multi-line or intermediate vars.
 - Ruff catches unused variables — don't create lookups/dicts you never reference.
+- **Imports**: Just add at the top of the block, let ruff isort handle placement.
 - **ty** (Astral's type checker): `uv run ty check src/flakefinder/` — config in pyproject.toml
   - `[tool.ty.src] exclude` only works on directory scans, NOT direct file args
   - ty narrows through `if x is not None:` but NOT through intermediate bool variables
@@ -44,6 +46,13 @@
 - .NET wrapper uses PascalCase: GetControlValue, SetControlValue, MinControlValue, MaxControlValue
 - All DM6M axes (X, Y, Z) have velocity — required in Axis.__init__
 - SDK headers at ~/sharpelab/leica_sdk/AHM_SDK_V2020.3.3.10693/C++/include/
+
+## X/Z Velocity & Measurement
+- X motor runs ~0.27% slower than commanded (4987 vs 5000 µm/s). Z is accurate (+0.05%).
+- `scan_chip_v2.py` measures actual X cruise speed via regression during lead-in, uses it for Z velocity.
+- Per-frame velocity deltas (`np.diff(x)/np.diff(t)`) are very noisy — always use `np.polyfit(t, x, 1)` for cruise speed.
+- Velocity converter native resolution: X ~0.0015 µm/s/step, Z ~0.0006 µm/s/step — quantization is negligible.
+- `BasicControlValueVelocity` (IID 0x108) and `DirectedControlValueAsyncVelocity` (IID 0x114) share same velocity converter per axis.
 
 ## Microscope
 - Do NOT run hardware commands (scans, autofocus, stage moves) — only the main scan session does that.

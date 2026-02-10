@@ -139,24 +139,21 @@ def compute_slope_metrics(meta: dict) -> dict:
         drift_end = float(np.mean(z_err[-n_edge:]))
         drift_um = drift_end - drift_start
 
-        # 3. Velocities from consecutive frames
-        dx = np.diff(x)
-        dt = np.diff(t)
-        valid = dt > 0
-        if np.any(valid):
-            x_vel = np.abs(dx[valid] / dt[valid]) / 1000  # mm/s
-            x_speed_mean = float(np.mean(x_vel))
-            x_speed_std = float(np.std(x_vel))
-        else:
-            x_speed_mean = x_speed_std = 0.0
+        # 3. Velocities via linear regression (accurate cruise speed)
+        t_rel = t - t[0]
+        t_var = float(np.sum((t_rel - np.mean(t_rel)) ** 2))
 
-        dz = np.diff(z)
-        if np.any(valid):
-            z_vel = dz[valid] / dt[valid]  # um/s (signed)
-            z_speed_mean = float(np.mean(z_vel))
-            z_speed_std = float(np.std(z_vel))
-        else:
-            z_speed_mean = z_speed_std = 0.0
+        x_coeffs = np.polyfit(t_rel, x, 1)
+        x_speed_mean = float(abs(x_coeffs[0])) / 1000  # mm/s
+        x_fit = np.polyval(x_coeffs, t_rel)
+        x_resid_var = float(np.sum((x - x_fit) ** 2)) / (len(x) - 2) if len(x) > 2 else 0.0
+        x_speed_std = float(np.sqrt(x_resid_var / t_var)) / 1000 if t_var > 0 else 0.0  # mm/s
+
+        z_coeffs = np.polyfit(t_rel, z, 1)
+        z_speed_mean = float(z_coeffs[0])  # um/s (signed, matches direction)
+        z_fit = np.polyval(z_coeffs, t_rel)
+        z_resid_var = float(np.sum((z - z_fit) ** 2)) / (len(z) - 2) if len(z) > 2 else 0.0
+        z_speed_std = float(np.sqrt(z_resid_var / t_var)) if t_var > 0 else 0.0  # um/s
 
         ideal_z_vel = plane_a * direction * cmd_speed_mm * 1000  # um/s
         row_width_mm = (row["x_max_um"] - row["x_min_um"]) / 1000
