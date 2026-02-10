@@ -25,6 +25,7 @@
 
 ## Scope Discipline
 - **Only do what was explicitly approved.** "go for X" means X only — do NOT batch in additional scripts/files without asking. Stop after each approved unit and check in.
+- **Every task needs its own approval cycle.** A "go" for task N does NOT carry to task N+1. Each `# Operator Task` continuation resets: propose → wait for go → implement → ask "commit/push/pull?" → wait for go → sync → write summary.
 
 ## Summary Files
 - Don't restate the problem — the operator already knows it. Just describe the fix/change, any new CLI flags, and sync status.
