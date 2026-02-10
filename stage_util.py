@@ -135,6 +135,7 @@ def main() -> int:
     parser.add_argument("--objective-pos", type=int, metavar="POS", help="Switch objective by turret position (1-6)")
     parser.add_argument("--z-speed", type=float, metavar="UM_S", help="Set Z velocity (µm/s)")
     parser.add_argument("--park", action="store_true", help="Park microscope in safe idle state")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Print only single-line position summary")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show velocity limits and conversion factors")
     args = parser.parse_args()
 
@@ -237,9 +238,16 @@ def main() -> int:
                 print(f"Error: {e}")
                 return 1
 
-        # Always report full status
-        print()
-        report_status(scope, verbose=args.verbose)
+        # Report status
+        if args.quiet:
+            x, y = scope.stage.position_um
+            z = scope.z.position_um
+            mag = scope.nosepiece.magnification
+            obj_str = f" ({mag}x)" if mag else ""
+            print(f"X={x:.1f} Y={y:.1f} Z={z:.1f} µm{obj_str}")
+        else:
+            print()
+            report_status(scope, verbose=args.verbose)
 
     return 0
 

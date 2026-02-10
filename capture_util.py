@@ -45,6 +45,7 @@ def main() -> int:
     )
     parser.add_argument("--gain", type=float, help="Camera gain (e.g., 4.0)")
     parser.add_argument("--quality", type=int, default=95, help="JPEG quality (default: 95)")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Suppress verbose output; print only saved filename")
     parser.add_argument(
         "--xy",
         type=str,
@@ -91,26 +92,28 @@ def main() -> int:
         camera.gain_rgb = args.white_balance
 
         # Report capture settings
-        x, y = scope.stage.position_um
-        print(f"Position: X={x:.1f} Y={y:.1f} Z={scope.z.position_um:.1f} µm")
-        print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
-        print(f"Shutter: {'open' if scope.shutter.is_open else 'closed'}")
-        ap = scope.aperture
-        ap_label = " (fully open)" if ap.value == ap.max_value else ""
-        print(f"Aperture: {ap.value}/{ap.max_value}{ap_label}")
+        if not args.quiet:
+            x, y = scope.stage.position_um
+            print(f"Position: X={x:.1f} Y={y:.1f} Z={scope.z.position_um:.1f} µm")
+            print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
+            print(f"Shutter: {'open' if scope.shutter.is_open else 'closed'}")
+            ap = scope.aperture
+            ap_label = " (fully open)" if ap.value == ap.max_value else ""
+            print(f"Aperture: {ap.value}/{ap.max_value}{ap_label}")
 
-        from flakefinder.data_utils import require_microscope_description
+            from flakefinder.data_utils import require_microscope_description
 
-        desc = require_microscope_description()
-        binning_str = desc.camera.binning_levels[camera.binning].name
-        r, g, b = camera.gain_rgb
-        print(f"Exposure: {camera.exposure_time * 1000:.2f} ms")
-        print(f"Binning: {binning_str}")
-        print(f"White balance: R={r:.2f} G={g:.2f} B={b:.2f}")
-        print()
+            desc = require_microscope_description()
+            binning_str = desc.camera.binning_levels[camera.binning].name
+            r, g, b = camera.gain_rgb
+            print(f"Exposure: {camera.exposure_time * 1000:.2f} ms")
+            print(f"Binning: {binning_str}")
+            print(f"White balance: R={r:.2f} G={g:.2f} B={b:.2f}")
+            print()
 
         # Capture
-        print("Capturing...")
+        if not args.quiet:
+            print("Capturing...")
         image = camera.capture()
 
         # Convert to PIL
@@ -132,8 +135,9 @@ def main() -> int:
         print(f"Saved: {args.output} ({img.width}x{img.height})")
 
         # Report full status
-        print()
-        report_status(scope)
+        if not args.quiet:
+            print()
+            report_status(scope)
 
     return 0
 
