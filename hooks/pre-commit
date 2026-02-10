@@ -11,4 +11,4 @@ uv run ruff check --fix $STAGED && uv run ruff format $STAGED
 echo "$STAGED" | xargs git add
 
 # Type check (per-file overrides in pyproject.toml handle exclusions)
-uvx ty check $STAGED
+uv run ty check $STAGED

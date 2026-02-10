@@ -85,7 +85,7 @@ uv sync --dev
 
 This adds:
 - `ruff` - Linter and formatter
-- `mypy` - Type checker
+- `ty` - Type checker
 - `pytest` - Test runner
 
 ### Running Checks
@@ -98,7 +98,7 @@ uv run ruff check src/
 uv run ruff format src/
 
 # Type check
-uv run mypy src/
+uv run ty check src/flakefinder/
 
 # Tests
 uv run pytest

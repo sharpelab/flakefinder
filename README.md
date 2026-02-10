@@ -95,7 +95,7 @@ uv sync --dev
 uv run ruff check src/
 
 # Run type checker
-uv run mypy src/
+uv run ty check src/flakefinder/
 
 # Run tests
 uv run pytest

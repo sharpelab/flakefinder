@@ -30,10 +30,10 @@
 - Keep summaries to 2-3 sentences max. Root cause, fix approach, sync status. No technical details like method signatures or try/finally mechanics.
 
 ## Linting & Type Checking
-- Pre-commit hook: ruff check + format, then `uvx ty check src/flakefinder/`
+- Pre-commit hook: ruff check + format, then `uv run ty check src/flakefinder/`
 - Line length limit: 120 chars. Break long f-strings into multi-line or intermediate vars.
 - Ruff catches unused variables — don't create lookups/dicts you never reference.
-- **ty** (Astral's type checker): `uvx ty check src/flakefinder/` — config in pyproject.toml
+- **ty** (Astral's type checker): `uv run ty check src/flakefinder/` — config in pyproject.toml
   - `[tool.ty.src] exclude` only works on directory scans, NOT direct file args
   - ty narrows through `if x is not None:` but NOT through intermediate bool variables
   - For type narrowing past None guards: assign to local var, check, then assign to self

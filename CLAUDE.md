@@ -54,7 +54,7 @@ From `microscope_description.json`:
 Run before committing:
 ```bash
 uv run ruff check --fix . && uv run ruff format .
-uvx ty check src/flakefinder/
+uv run ty check src/flakefinder/
 ```
 
 Pre-commit hook setup (one-time per clone):
