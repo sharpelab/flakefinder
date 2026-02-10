@@ -369,7 +369,7 @@ Examples:
             "lamp_intensity": lamp_intensity,
             "exposure_s": camera.exposure_time,
             "gain": args.gain,
-            "white_balance_rgb": [wb_r, wb_g, wb_b],
+            "white_balance_rgb": [args.wb.red, args.wb.green, args.wb.blue],
             "frame_size_px": [frame_w, frame_h],
             "position_um": list(position),
             "mean_bgr": cal_values["mean_bgr"],

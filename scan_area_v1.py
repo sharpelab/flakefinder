@@ -368,7 +368,7 @@ Examples:
         print(f"Camera: {camera.name}")
         exp_str = f"{actual_exposure * 1000:.1f}ms" if actual_exposure else "?"
         print(f"  Trigger: CONTINUOUS, Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}{readout_fps}")
-        print(f"  White balance (B,G,R): {wb_blue}, {wb_green}, {wb_red}")
+        print(f"  White balance (B,G,R): {wb.blue}, {wb.green}, {wb.red}")
         print(f"  Gamma: {args.gamma}")
         print(f"  Frame: {frame_width_px}x{frame_height_px} px")
         print(f"  FOV: {frame_width_um:.2f} x {frame_height_um:.2f} µm")
