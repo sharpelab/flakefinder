@@ -186,6 +186,27 @@ def draw_row_labels(background, rows, um_per_px, stage_bounds_um):
     return result.convert("RGB")
 
 
+def draw_frame_outlines(background, frame_rects, crop_offset=(0, 0)):
+    """Draw outline rectangles for each placed frame."""
+    w, h = background.size
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    ox, oy = crop_offset
+
+    for fx, fy, fw, fh in frame_rects:
+        x0 = fx - ox
+        y0 = fy - oy
+        x1 = x0 + fw - 1
+        y1 = y0 + fh - 1
+        # Skip if fully outside
+        if x1 < 0 or y1 < 0 or x0 >= w or y0 >= h:
+            continue
+        draw.rectangle([x0, y0, x1, y1], outline=(255, 0, 0, 100), width=1)
+
+    result = Image.alpha_composite(background.convert("RGBA"), overlay)
+    return result.convert("RGB")
+
+
 def find_constant_velocity_frames(frames):
     """
     Find frames in the constant-velocity portion of the scan.
@@ -406,6 +427,24 @@ def stitch_row_to_global(
             alpha = create_blend_alpha(frame_w, frame_h, blend_width_x, 0, is_first_x=is_first, is_last_x=is_last)
         else:
             alpha = Image.new("L", img.size, 128)
+
+        # Mask deskew void: the shear leaves a triangle of edge-replicated
+        # pixels that grows from 0 px at top to |shear| px at bottom.
+        # Zero alpha there so they don't contaminate blending.
+        if frame_deskew != 0:
+            alpha_arr = np.array(alpha)
+            abs_shear = abs(frame_deskew)
+            # Build column index array and compare against void boundary per row
+            ys = np.arange(frame_h)
+            void_widths = (abs_shear * ys / frame_h + 1).astype(int)
+            cols = np.arange(frame_w)
+            if frame_deskew < 0:  # +X motion: void at left
+                mask = cols[np.newaxis, :] < void_widths[:, np.newaxis]
+            else:  # -X motion: void at right
+                mask = cols[np.newaxis, :] >= (frame_w - void_widths[:, np.newaxis])
+            alpha_arr[mask] = 0
+            alpha = Image.fromarray(alpha_arr, mode="L")
+
         img.putalpha(alpha)
 
         return img
@@ -418,19 +457,25 @@ def stitch_row_to_global(
         loaded = [load_frame(item) for item in work_items]
 
     frames_placed = 0
+    frame_rects = []  # (x, y=0, w, h) of each placed frame in row-local coords
     for img, (_, _, x_offset, _) in zip(loaded, work_items, strict=True):
         # Clamp to canvas bounds
+        actual_x = x_offset
+        actual_w = img.width
         if x_offset < 0:
             img = img.crop((-x_offset, 0, img.width, img.height))
-            x_offset = 0
-        if x_offset + img.width > canvas_w:
-            img = img.crop((0, 0, canvas_w - x_offset, img.height))
+            actual_x = 0
+            actual_w = img.width
+        if actual_x + img.width > canvas_w:
+            img = img.crop((0, 0, canvas_w - actual_x, img.height))
+            actual_w = img.width
 
         if img.width > 0 and img.height > 0:
-            canvas.alpha_composite(img, (x_offset, 0))
+            canvas.alpha_composite(img, (actual_x, 0))
+            frame_rects.append((actual_x, 0, actual_w, img.height))
             frames_placed += 1
 
-    return canvas, frames_placed
+    return canvas, frames_placed, frame_rects
 
 
 def main():
@@ -493,6 +538,7 @@ def main():
     )
     parser.add_argument("--grid-line-width", type=int, default=1, help="Grid line width in pixels (default: 1)")
     parser.add_argument("--row-labels", action="store_true", help="Draw row index+direction labels (e.g., 0+, 1-, 2+)")
+    parser.add_argument("--draw-frame-outlines", action="store_true", help="Draw outline of each placed frame (debug)")
     parser.add_argument(
         "-o",
         "--output",
@@ -639,13 +685,14 @@ def main():
     canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
 
     print("\nStitching rows...")
+    all_frame_rects = []  # (x, y, w, h) in final canvas coords
 
     for result in row_results:
         row = result["row"]
         row_idx = row["row_idx"]
 
         # Stitch this row in global coordinates
-        row_img, frames_placed = stitch_row_to_global(
+        row_img, frames_placed, frame_rects = stitch_row_to_global(
             meta,
             row,
             frame_w,
@@ -699,6 +746,10 @@ def main():
         # Composite onto canvas
         canvas.alpha_composite(row_img, (0, y_offset_px))
 
+        # Collect frame rects in global canvas coords
+        for fx, fy, fw, fh in frame_rects:
+            all_frame_rects.append((fx, fy + y_offset_px, fw, fh))
+
         print(f"  Row {row_idx}: {frames_placed} frames, y={y_offset_px} px")
 
     # Convert to RGB with background color
@@ -723,6 +774,8 @@ def main():
         return 1
     crop_top_um, crop_right_um, crop_bottom_um, crop_left_um = crop_parts
 
+    crop_left_px = 0
+    crop_top_px = 0
     if any(c != 0 for c in crop_parts):
         crop_top_px = int(crop_top_um / um_per_px)
         crop_right_px = int(crop_right_um / um_per_px)
@@ -759,6 +812,11 @@ def main():
     # Draw row labels
     if args.row_labels:
         background = draw_row_labels(background, rows, um_per_px, stage_bounds_um)
+
+    # Draw frame outlines
+    if args.draw_frame_outlines:
+        background = draw_frame_outlines(background, all_frame_rects, (crop_left_px, crop_top_px))
+        print(f"Frame outlines: {len(all_frame_rects)} frames")
 
     # Save image
     if args.output:
