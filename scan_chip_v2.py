@@ -312,6 +312,8 @@ def scan_row(
                         list(x_samples),
                         list(z_samples),
                         scan_t0,
+                        chip_edge_x,
+                        direction,
                     )
                 )
                 if x_now is not None:
@@ -768,6 +770,8 @@ Examples:
                     row_x_samples,
                     row_z_samples,
                     t0,
+                    frame_chip_edge_x,
+                    frame_direction,
                 ) = item
 
                 arr = sdk_image_to_numpy(image)
@@ -797,6 +801,20 @@ Examples:
                 dt = t_end - t_start
                 x_vel = (x_end_interp - x_start_interp) / dt if dt > 0 and x_start_interp and x_end_interp else 0
 
+                # Lead-in check: frame midpoint hasn't crossed chip edge yet
+                x_mid = (
+                    (x_start_interp + x_end_interp) / 2
+                    if x_start_interp is not None and x_end_interp is not None
+                    else None
+                )
+                if x_mid is not None:
+                    if frame_direction == 1:
+                        in_lead_in = x_mid < frame_chip_edge_x
+                    else:
+                        in_lead_in = x_mid > frame_chip_edge_x
+                else:
+                    in_lead_in = True  # no position data → treat as lead-in
+
                 saved_frames_meta.append(
                     {
                         "n": frame_idx,
@@ -810,6 +828,7 @@ Examples:
                         "z_actual": z_interp,
                         "z_ideal": z_ideal,
                         "z_error": z_error,
+                        "in_lead_in": in_lead_in,
                     }
                 )
 
@@ -918,8 +937,10 @@ Examples:
         # Sort frames
         saved_frames_meta.sort(key=lambda f: f["n"])
 
-        # Z tracking error stats
-        z_errors = [f["z_error"] for f in saved_frames_meta if f["z_error"] is not None]
+        # Z tracking error stats (exclude lead-in frames)
+        tracking_frames = [f for f in saved_frames_meta if f["z_error"] is not None and not f.get("in_lead_in", False)]
+        n_lead_in = sum(1 for f in saved_frames_meta if f.get("in_lead_in", False))
+        z_errors = [f["z_error"] for f in tracking_frames]
         if z_errors:
             z_error_arr = np.array(z_errors)
             z_error_mean = float(np.mean(z_error_arr))
@@ -929,19 +950,27 @@ Examples:
         else:
             z_error_mean = z_error_std = z_error_max = z_error_p95 = None
 
-        # Per-direction bias and z-jump stats
+        # Per-direction bias and z-jump stats (exclude lead-in)
         dir_stats = {}  # direction -> {mean_error, z_jump}
         for direction in [1, -1]:
             dir_row_idxs = {ri for ri, (_, _, _) in enumerate(plan.rows) if (1 if ri % 2 == 0 else -1) == direction}
-            dir_frames = [f for f in saved_frames_meta if f["row"] in dir_row_idxs and f["z_error"] is not None]
+            dir_frames = [
+                f
+                for f in saved_frames_meta
+                if f["row"] in dir_row_idxs and f["z_error"] is not None and not f.get("in_lead_in", False)
+            ]
             if not dir_frames:
                 continue
             dir_errors = [f["z_error"] for f in dir_frames]
 
-            # Z-jump per row: |z_error[1] - z_error[0]|
+            # Z-jump per row: first two non-lead-in frames
             z_jumps = []
             for ri in sorted(dir_row_idxs):
-                rf = [f for f in saved_frames_meta if f["row"] == ri and f["z_error"] is not None]
+                rf = [
+                    f
+                    for f in saved_frames_meta
+                    if f["row"] == ri and f["z_error"] is not None and not f.get("in_lead_in", False)
+                ]
                 if len(rf) >= 2:
                     z_jumps.append(abs(rf[1]["z_error"] - rf[0]["z_error"]))
 
@@ -1051,6 +1080,7 @@ Examples:
         print(f"  Total time: {total_duration:.1f}s")
         print(f"  Rows: {len(plan.rows)}")
         print(f"  Total frames: {global_frame_idx}")
+        print(f"  Lead-in frames: {n_lead_in} (excluded from Z tracking stats)")
         print(f"  Avg FPS: {global_frame_idx / total_duration:.1f}" if total_duration > 0 else "  Avg FPS: N/A")
         if z_error_max is not None:
             dof_20x = 1.7

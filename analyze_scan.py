@@ -36,13 +36,20 @@ def load_scan_meta(scan_dir: Path) -> dict:
 def compute_z_tracking_stats(meta: dict) -> dict:
     """Compute Z tracking error statistics from frame metadata.
 
-    Returns dict with overall and per-row stats.
+    Lead-in frames (where ``in_lead_in`` is true) are excluded from all
+    statistics.  Older scans without the field are treated as all non-lead-in.
+
+    Returns dict with overall and per-row stats, plus ``n_lead_in``.
     """
     frames = meta["frames"]
     rows = meta["rows"]
 
-    # Overall arrays
-    z_errors = np.array([f["z_error"] for f in frames])
+    # Separate lead-in vs tracking frames (backwards compatible)
+    tracking_frames = [f for f in frames if not f.get("in_lead_in", False)]
+    n_lead_in = len(frames) - len(tracking_frames)
+
+    # Overall arrays (tracking frames only)
+    z_errors = np.array([f["z_error"] for f in tracking_frames])
     abs_errors = np.abs(z_errors)
 
     overall = {
@@ -52,14 +59,15 @@ def compute_z_tracking_stats(meta: dict) -> dict:
         "p95_um": float(np.percentile(abs_errors, 95)),
         "pct_outside_2um": float(np.mean(abs_errors > 2.0) * 100),
         "pct_outside_4um": float(np.mean(abs_errors > 4.0) * 100),
-        "n_frames": len(frames),
+        "n_frames": len(tracking_frames),
+        "n_lead_in": n_lead_in,
     }
 
-    # Per-row stats
+    # Per-row stats (exclude lead-in)
     per_row = []
     for row in rows:
         row_idx = row["row_idx"]
-        row_frames = [f for f in frames if f["row"] == row_idx]
+        row_frames = [f for f in tracking_frames if f["row"] == row_idx]
         if not row_frames:
             continue
         row_errors = np.array([f["z_error"] for f in row_frames])
@@ -67,7 +75,7 @@ def compute_z_tracking_stats(meta: dict) -> dict:
 
         direction = row["direction"]
 
-        # Z-jump: |z_error[frame 1] - z_error[frame 0]|
+        # Z-jump: first two non-lead-in frames
         if len(row_frames) >= 2:
             z_jump = abs(row_frames[1]["z_error"] - row_frames[0]["z_error"])
         else:
@@ -214,12 +222,38 @@ def plot_analysis(
     row_colors = {r: cmap(i / max(1, len(row_indices) - 1)) for i, r in enumerate(row_indices)}
 
     # --- Panel 1: Z error vs frame number ---
+    # Separate lead-in from tracking frames for distinct styling
+    lead_in_mask = [f.get("in_lead_in", False) for f in frames]
+    tracking_idx = [i for i, li in enumerate(lead_in_mask) if not li]
+    lead_in_idx = [i for i, li in enumerate(lead_in_mask) if li]
+
     frame_nums = [f["n"] for f in frames]
     z_errors = [f["z_error"] for f in frames]
     frame_rows = [f["row"] for f in frames]
     colors = [row_colors[r] for r in frame_rows]
 
-    ax_zerr.scatter(frame_nums, z_errors, c=colors, s=2, alpha=0.6, rasterized=True)
+    # Tracking frames: colored dots
+    if tracking_idx:
+        ax_zerr.scatter(
+            [frame_nums[i] for i in tracking_idx],
+            [z_errors[i] for i in tracking_idx],
+            c=[colors[i] for i in tracking_idx],
+            s=2,
+            alpha=0.6,
+            rasterized=True,
+        )
+    # Lead-in frames: gray x markers
+    if lead_in_idx:
+        ax_zerr.scatter(
+            [frame_nums[i] for i in lead_in_idx],
+            [z_errors[i] for i in lead_in_idx],
+            c="gray",
+            marker="x",
+            s=6,
+            alpha=0.3,
+            rasterized=True,
+            label=f"Lead-in ({len(lead_in_idx)})",
+        )
 
     # DOF bands
     for dof, alpha, label in [(2, 0.15, "2 um DOF"), (4, 0.08, "4 um DOF")]:
@@ -228,6 +262,8 @@ def plot_analysis(
     ax_zerr.axhline(0, color="gray", linewidth=0.5, linestyle="--")
 
     ov = z_stats["overall"]
+    n_lead_in = ov.get("n_lead_in", 0)
+    lead_in_note = f"  [{n_lead_in} lead-in excluded]" if n_lead_in > 0 else ""
     ax_zerr.set_xlabel("Frame number")
     ax_zerr.set_ylabel("Z error (um)")
     ax_zerr.set_title(
@@ -235,7 +271,7 @@ def plot_analysis(
         f"std={ov['std_um']:.3f}, max={ov['max_abs_um']:.3f}, "
         f"p95={ov['p95_um']:.3f} um\n"
         f"Outside 2um: {ov['pct_outside_2um']:.1f}%, "
-        f"Outside 4um: {ov['pct_outside_4um']:.1f}%"
+        f"Outside 4um: {ov['pct_outside_4um']:.1f}%{lead_in_note}"
     )
     ax_zerr.legend(loc="upper right", fontsize=8)
 
@@ -248,20 +284,35 @@ def plot_analysis(
         x_mm = np.array([(f["x_start"] + f["x_end"]) / 2 for f in frames]) / 1000
         y_mm = np.array([f["y_um"] for f in frames]) / 1000
         z_err_arr = np.array(z_errors)
+        li_mask = np.array(lead_in_mask)
 
         abs_max = max(np.percentile(np.abs(z_err_arr), 99), 0.5)
-        sc = ax_zmap_only.scatter(
-            x_mm,
-            y_mm,
-            c=z_err_arr,
-            cmap="coolwarm",
-            s=2,
-            alpha=0.6,
-            vmin=-abs_max,
-            vmax=abs_max,
-            rasterized=True,
-        )
-        plt.colorbar(sc, ax=ax_zmap_only, label="Z error (um)")
+        # Tracking frames: colored by Z error
+        track = ~li_mask
+        if np.any(track):
+            sc = ax_zmap_only.scatter(
+                x_mm[track],
+                y_mm[track],
+                c=z_err_arr[track],
+                cmap="coolwarm",
+                s=2,
+                alpha=0.6,
+                vmin=-abs_max,
+                vmax=abs_max,
+                rasterized=True,
+            )
+            plt.colorbar(sc, ax=ax_zmap_only, label="Z error (um)")
+        # Lead-in frames: gray
+        if np.any(li_mask):
+            ax_zmap_only.scatter(
+                x_mm[li_mask],
+                y_mm[li_mask],
+                c="gray",
+                marker="x",
+                s=6,
+                alpha=0.3,
+                rasterized=True,
+            )
         ax_zmap_only.set_xlabel("X (mm)")
         ax_zmap_only.set_ylabel("Y (mm)")
         ax_zmap_only.set_title("Spatial Z Error Map")
@@ -323,21 +374,36 @@ def plot_analysis(
     x_mm = np.array([(f["x_start"] + f["x_end"]) / 2 for f in frames]) / 1000
     y_mm = np.array([f["y_um"] for f in frames]) / 1000
     z_err_arr = np.array(z_errors)
+    li_mask = np.array(lead_in_mask)
 
     # Use absolute Z error for color
     abs_max = max(np.percentile(np.abs(z_err_arr), 99), 0.5)
-    sc = ax_zmap.scatter(
-        x_mm,
-        y_mm,
-        c=z_err_arr,
-        cmap="coolwarm",
-        s=2,
-        alpha=0.6,
-        vmin=-abs_max,
-        vmax=abs_max,
-        rasterized=True,
-    )
-    plt.colorbar(sc, ax=ax_zmap, label="Z error (um)")
+    # Tracking frames: colored by Z error
+    track = ~li_mask
+    if np.any(track):
+        sc = ax_zmap.scatter(
+            x_mm[track],
+            y_mm[track],
+            c=z_err_arr[track],
+            cmap="coolwarm",
+            s=2,
+            alpha=0.6,
+            vmin=-abs_max,
+            vmax=abs_max,
+            rasterized=True,
+        )
+        plt.colorbar(sc, ax=ax_zmap, label="Z error (um)")
+    # Lead-in frames: gray
+    if np.any(li_mask):
+        ax_zmap.scatter(
+            x_mm[li_mask],
+            y_mm[li_mask],
+            c="gray",
+            marker="x",
+            s=6,
+            alpha=0.3,
+            rasterized=True,
+        )
     ax_zmap.set_xlabel("X (mm)")
     ax_zmap.set_ylabel("Y (mm)")
     ax_zmap.set_title("Spatial Z Error Map")
@@ -419,7 +485,9 @@ def print_summary(
     print(f"Timestamp:    {meta.get('timestamp', 'unknown')}")
     print(f"Chip index:   {chip_info.get('chip_index', '?')}")
     print(f"Objective:    {meta.get('optics', {}).get('objective_mag', '?')}x")
-    print(f"Frames:       {meta.get('frame_count', '?')}")
+    n_lead_in = z_stats["overall"].get("n_lead_in", 0)
+    lead_in_str = f" ({n_lead_in} lead-in excluded from stats)" if n_lead_in > 0 else ""
+    print(f"Frames:       {meta.get('frame_count', '?')}{lead_in_str}")
     print(f"Rows:         {len(meta.get('rows', []))}")
     print(f"Duration:     {meta.get('scan_duration_s', 0):.1f}s")
 
