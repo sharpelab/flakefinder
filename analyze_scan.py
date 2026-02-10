@@ -97,6 +97,110 @@ def compute_z_tracking_stats(meta: dict) -> dict:
     return {"overall": overall, "per_row": per_row}
 
 
+def compute_slope_metrics(meta: dict) -> dict:
+    """Compute per-row Z slope accuracy, drift, and velocity metrics.
+
+    Uses non-lead-in frames only.  Returns dict with per_row list and overall
+    summary.
+    """
+    frames = meta["frames"]
+    rows_meta = meta["rows"]
+    plane_a = meta["focus_plane"]["a"]  # um/um  (dZ/dX)
+    cmd_speed_mm = meta["scan_params"]["scan_speed_mm_s"]
+
+    tracking = [f for f in frames if not f.get("in_lead_in", False)]
+
+    per_row: list[dict] = []
+    for row in rows_meta:
+        ri = row["row_idx"]
+        direction = row["direction"]
+        rf = [f for f in tracking if f["row"] == ri]
+        if len(rf) < 5:
+            continue
+
+        x = np.array([f["x_start"] for f in rf])
+        z = np.array([f["z_actual"] for f in rf])
+        t = np.array([f["t_start"] for f in rf])
+        z_err = np.array([f["z_error"] for f in rf])
+        frame_ns = np.array([f["n"] for f in rf])
+
+        # 1. Z slope: linear fit of z_actual vs x (dZ/dX, direction-independent)
+        coeffs = np.polyfit(x, z, 1)  # [slope_um_um, intercept]
+        actual_slope = coeffs[0] * 1000  # um/mm
+        ideal_slope = plane_a * 1000  # um/mm
+        slope_err_pct = (actual_slope - ideal_slope) / abs(ideal_slope) * 100 if abs(ideal_slope) > 0.001 else 0.0
+
+        # Fit line for z_error vs frame_num (for plotting)
+        err_coeffs = np.polyfit(frame_ns.astype(float), z_err, 1)
+
+        # 2. Z drift: mean z_error first 5 vs last 5
+        n_edge = min(5, len(rf) // 2)
+        drift_start = float(np.mean(z_err[:n_edge]))
+        drift_end = float(np.mean(z_err[-n_edge:]))
+        drift_um = drift_end - drift_start
+
+        # 3. Velocities from consecutive frames
+        dx = np.diff(x)
+        dt = np.diff(t)
+        valid = dt > 0
+        if np.any(valid):
+            x_vel = np.abs(dx[valid] / dt[valid]) / 1000  # mm/s
+            x_speed_mean = float(np.mean(x_vel))
+            x_speed_std = float(np.std(x_vel))
+        else:
+            x_speed_mean = x_speed_std = 0.0
+
+        dz = np.diff(z)
+        if np.any(valid):
+            z_vel = dz[valid] / dt[valid]  # um/s (signed)
+            z_speed_mean = float(np.mean(z_vel))
+            z_speed_std = float(np.std(z_vel))
+        else:
+            z_speed_mean = z_speed_std = 0.0
+
+        ideal_z_vel = plane_a * direction * cmd_speed_mm * 1000  # um/s
+        row_width_mm = (row["x_max_um"] - row["x_min_um"]) / 1000
+
+        per_row.append(
+            {
+                "row_idx": ri,
+                "direction": direction,
+                "row_width_mm": row_width_mm,
+                "n_frames": len(rf),
+                "actual_slope_um_mm": float(actual_slope),
+                "ideal_slope_um_mm": float(ideal_slope),
+                "slope_error_pct": float(slope_err_pct),
+                "drift_start_um": drift_start,
+                "drift_end_um": drift_end,
+                "drift_um": drift_um,
+                "x_speed_mean_mm_s": x_speed_mean,
+                "x_speed_std_mm_s": x_speed_std,
+                "z_speed_mean_um_s": z_speed_mean,
+                "z_speed_std_um_s": z_speed_std,
+                "ideal_z_vel_um_s": float(ideal_z_vel),
+                # For plotting: fit line coefficients (z_error vs frame_num)
+                "err_fit_coeffs": [float(err_coeffs[0]), float(err_coeffs[1])],
+                "frame_range": [int(frame_ns[0]), int(frame_ns[-1])],
+            }
+        )
+
+    # Overall summary
+    if per_row:
+        slope_errs = [r["slope_error_pct"] for r in per_row]
+        drifts = [r["drift_um"] for r in per_row]
+        overall = {
+            "mean_slope_error_pct": float(np.mean(slope_errs)),
+            "mean_drift_um": float(np.mean(drifts)),
+            "max_abs_drift_um": float(np.max(np.abs(drifts))),
+            "cmd_speed_mm_s": cmd_speed_mm,
+            "plane_a_um_um": plane_a,
+        }
+    else:
+        overall = {}
+
+    return {"overall": overall, "per_row": per_row}
+
+
 def compute_sharpness_values(scan_dir: Path, meta: dict, sample_every: int = 1) -> dict:
     """Compute tenengrad sharpness for saved frame JPGs.
 
@@ -240,6 +344,8 @@ def plot_analysis(
     sharpness_data: dict | None,
     output_path: Path,
     min_sharpness: float | None,
+    *,
+    slope_metrics: dict | None = None,
     **kwargs,
 ) -> None:
     """Generate combined analysis plot and save to output_path."""
@@ -325,6 +431,25 @@ def plot_analysis(
     # Add row boundary markers
     for row in meta["rows"]:
         ax_zerr.axvline(row["frame_start"], color="gray", alpha=0.15, linewidth=0.5)
+
+    # Overlay per-row linear fit lines (slope drift)
+    if slope_metrics:
+        for sr in slope_metrics["per_row"]:
+            f0, f1 = sr["frame_range"]
+            xs = np.array([f0, f1], dtype=float)
+            ys = sr["err_fit_coeffs"][0] * xs + sr["err_fit_coeffs"][1]
+            ax_zerr.plot(xs, ys, color="black", linewidth=1.0, alpha=0.7)
+        # Annotation
+        sm_ov = slope_metrics["overall"]
+        ax_zerr.text(
+            0.01,
+            0.01,
+            f"Slope err: {sm_ov['mean_slope_error_pct']:+.2f}%  Drift: {sm_ov['mean_drift_um']:+.2f} um",
+            transform=ax_zerr.transAxes,
+            fontsize=8,
+            verticalalignment="bottom",
+            bbox={"boxstyle": "round,pad=0.3", "facecolor": "wheat", "alpha": 0.8},
+        )
 
     # --- Spatial Z error map (only when --spatial-z) ---
     if spatial_z and not has_sharpness:
@@ -456,6 +581,7 @@ def print_summary(
     z_stats: dict,
     sharpness_data: dict | None,
     min_sharpness: float | None,
+    slope_metrics: dict | None = None,
 ) -> None:
     """Print text summary to console."""
     print()
@@ -515,6 +641,38 @@ def print_summary(
         print(f"-X rows ({len(neg_rows):2d}):  mean Z err = {neg_mean:+.3f} um,  mean z-jump = {neg_zjump:.3f} um")
     if pos_rows and neg_rows:
         print(f"Directional split:  {pos_mean - neg_mean:+.3f} um (+X minus -X)")
+
+    # Slope & drift
+    if slope_metrics and slope_metrics["per_row"]:
+        sm = slope_metrics
+        print("\n--- Z Slope & Drift ---")
+        hdr = (
+            f"{'Row':>3}  {'Dir':>3}  {'Width':>6}  "
+            f"{'Slope':>7} {'Ideal':>7} {'Err%':>6}  "
+            f"{'Drift':>7}  {'X mm/s':>7} {'Z um/s':>7}"
+        )
+        print(hdr)
+        sep = (
+            f"{'---':>3}  {'---':>3}  {'-----':>6}  "
+            f"{'-----':>7} {'-----':>7} {'----':>6}  "
+            f"{'-----':>7}  {'------':>7} {'------':>7}"
+        )
+        print(sep)
+        for r in sm["per_row"]:
+            d = "+X" if r["direction"] > 0 else "-X"
+            print(
+                f"{r['row_idx']:3d}   {d:>2}  {r['row_width_mm']:5.1f}m  "
+                f"{r['actual_slope_um_mm']:+7.3f} {r['ideal_slope_um_mm']:+7.3f} "
+                f"{r['slope_error_pct']:+5.1f}%  "
+                f"{r['drift_um']:+7.3f}  "
+                f"{r['x_speed_mean_mm_s']:7.2f} {r['z_speed_mean_um_s']:+7.1f}"
+            )
+        ov = sm["overall"]
+        print(
+            f"\nMean slope error: {ov['mean_slope_error_pct']:+.2f}%, "
+            f"Mean drift: {ov['mean_drift_um']:+.2f} um, "
+            f"Max |drift|: {ov['max_abs_drift_um']:.2f} um"
+        )
 
     # Sharpness
     if sharpness_data is not None:
@@ -707,6 +865,7 @@ def main() -> int:
 
     # Z tracking analysis (always, from metadata only)
     z_stats = compute_z_tracking_stats(meta)
+    slope_metrics = compute_slope_metrics(meta)
 
     # Sharpness analysis (optional, reads JPGs)
     sharpness_data = None
@@ -715,7 +874,7 @@ def main() -> int:
         sharpness_data = compute_sharpness_values(scan_dir, meta, sample_every=args.sample)
 
     # Print summary
-    print_summary(meta, z_stats, sharpness_data, args.min_sharpness)
+    print_summary(meta, z_stats, sharpness_data, args.min_sharpness, slope_metrics)
 
     # Comparison mode
     if args.compare:
@@ -745,6 +904,7 @@ def main() -> int:
         sharpness_data,
         output_path,
         args.min_sharpness,
+        slope_metrics=slope_metrics,
         notes=args.notes,
         spatial_z=args.spatial_z,
     )
