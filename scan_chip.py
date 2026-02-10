@@ -42,6 +42,7 @@ from flakefinder.scan_utils import (
     compute_planar_scan_plan,
     compute_plane_z,
     interpolate_position,
+    parse_white_balance,
 )
 from flakefinder.types import CameraMeta, OpticsMeta
 
@@ -171,7 +172,9 @@ Examples:
     frame_group.add_argument(
         "--binning", type=int, default=3, choices=[1, 2, 3], help="Camera binning NxN (default: 3)"
     )
-    frame_group.add_argument("--white-balance", type=str, default="2.51,1.02,1.41", help="White balance as B,G,R gains")
+    frame_group.add_argument(
+        "--white-balance", type=parse_white_balance, default="2.51,1.02,1.41", help="White balance as B,G,R gains"
+    )
     frame_group.add_argument("--gamma", type=float, default=1.0, help="Gamma (default: 1.0)")
     frame_group.add_argument("--downsample", type=int, default=1, help="Downsample factor")
     frame_group.add_argument(
@@ -249,16 +252,7 @@ Examples:
     plane_b = plane["b"]  # µm/µm
     plane_c = plane["c"]  # µm
 
-    # ---- Parse white balance ----
-    wb_parts = args.white_balance.split(",")
-    if len(wb_parts) != 3:
-        print("Error: --white-balance must be 3 comma-separated values (B,G,R)")
-        return 1
-    try:
-        wb_blue, wb_green, wb_red = float(wb_parts[0]), float(wb_parts[1]), float(wb_parts[2])
-    except ValueError:
-        print("Error: --white-balance values must be numbers")
-        return 1
+    wb = args.white_balance
 
     binning_idx = args.binning - 1
 
@@ -422,7 +416,7 @@ Examples:
         camera.binning = binning_idx
         camera.exposure_time = args.exposure_ms / 1000.0
         camera.gain = args.gain
-        camera.gain_rgb = (wb_red, wb_green, wb_blue)
+        camera.gain_rgb = wb
         camera.gamma = args.gamma
 
         # Read camera properties
@@ -956,7 +950,7 @@ Examples:
                 sensor_height_px=sensor_height_px,
                 physical_pixel_x_um=physical_pixel_x_um,
                 physical_pixel_y_um=physical_pixel_y_um,
-                white_balance_bgr=[wb_blue, wb_green, wb_red],
+                white_balance_bgr=[wb.blue, wb.green, wb.red],
                 gamma=args.gamma,
             ),
             "optics": OpticsMeta(

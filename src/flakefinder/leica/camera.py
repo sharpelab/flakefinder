@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from flakefinder.types import Point2F
+from flakefinder.types import GainRGB, Point2F
 
 from .core import find_unit, get_interface_required
 from .enums import IID, UCAPI_IID, UCAPI_PROP, UCAPI_TID
@@ -158,19 +158,19 @@ class Camera:
             prop.SetValue(value)
 
     @property
-    def gain_rgb(self) -> tuple[float, float, float]:
+    def gain_rgb(self) -> GainRGB:
         """Per-channel gain (red, green, blue)."""
         r = self._get_property(UCAPI_PROP.PROP_GAIN_RED)
         g = self._get_property(UCAPI_PROP.PROP_GAIN_GREEN)
         b = self._get_property(UCAPI_PROP.PROP_GAIN_BLUE)
-        return (
-            r.GetValue() if r else 1.0,
-            g.GetValue() if g else 1.0,
-            b.GetValue() if b else 1.0,
+        return GainRGB(
+            red=r.GetValue() if r else 1.0,
+            green=g.GetValue() if g else 1.0,
+            blue=b.GetValue() if b else 1.0,
         )
 
     @gain_rgb.setter
-    def gain_rgb(self, value: tuple[float, float, float]) -> None:
+    def gain_rgb(self, value: GainRGB | tuple[float, float, float]) -> None:
         r, g, b = value
         prop_r = self._get_property(UCAPI_PROP.PROP_GAIN_RED)
         prop_g = self._get_property(UCAPI_PROP.PROP_GAIN_GREEN)

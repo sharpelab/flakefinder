@@ -21,6 +21,7 @@ from flakefinder.leica.autofocus import (
     continuous_autofocus,
     sharpness,
 )
+from flakefinder.scan_utils import parse_white_balance
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -79,7 +80,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gain", type=float, default=None, help="Camera gain (default: unchanged)")
     parser.add_argument(
         "--white-balance",
-        type=str,
+        type=parse_white_balance,
         default=None,
         help="White balance as B,G,R gains (e.g., 2.51,1.02,1.41)",
     )
@@ -188,20 +189,7 @@ def main():
         if args.gain is not None:
             camera.gain = args.gain
         if args.white_balance is not None:
-            wb_parts = args.white_balance.split(",")
-            if len(wb_parts) != 3:
-                print("Error: --white-balance must be 3 comma-separated values (B,G,R)")
-                return 1
-            try:
-                wb_blue, wb_green, wb_red = (
-                    float(wb_parts[0]),
-                    float(wb_parts[1]),
-                    float(wb_parts[2]),
-                )
-            except ValueError:
-                print("Error: --white-balance values must be numbers")
-                return 1
-            camera.gain_rgb = (wb_red, wb_green, wb_blue)
+            camera.gain_rgb = args.white_balance
         if args.gamma is not None:
             camera.gamma = args.gamma
 

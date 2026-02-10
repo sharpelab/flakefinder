@@ -23,6 +23,14 @@ class Point3F(NamedTuple):
     z: float
 
 
+class GainRGB(NamedTuple):
+    """Per-channel camera gain (red, green, blue)."""
+
+    red: float
+    green: float
+    blue: float
+
+
 class ScanRow(NamedTuple):
     """A single row in a scan plan: (y_um, x_min_um, x_max_um)."""
 

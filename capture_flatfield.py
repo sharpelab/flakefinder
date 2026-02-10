@@ -25,6 +25,7 @@ import numpy as np
 from PIL import Image
 
 from flakefinder.leica.units import Nosepiece
+from flakefinder.scan_utils import parse_white_balance
 
 DEFAULT_OUTPUT_DIR = Path(__file__).parent / "calibration"
 
@@ -226,7 +227,10 @@ Examples:
     parser.add_argument("--exposure", type=float, default=1.0, help="Exposure time in ms (default: 1.0)")
     parser.add_argument("--gain", type=float, default=None, help="Camera gain (default: not set)")
     parser.add_argument(
-        "--wb", type=str, default="1.0,1.0,1.0", help="White balance as R,G,B gains (default: 1.0,1.0,1.0)"
+        "--wb",
+        type=parse_white_balance,
+        default="1.0,1.0,1.0",
+        help="White balance as B,G,R gains (default: 1.0,1.0,1.0)",
     )
     parser.add_argument("--skip-validation", action="store_true", help="Skip uniformity validation (use with caution)")
 
@@ -295,18 +299,11 @@ Examples:
         lamp_intensity = scope.lamp.intensity
         print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({lamp_intensity}/{scope.lamp.max_intensity})")
 
-        # Parse white balance
-        wb_parts = args.wb.split(",")
-        if len(wb_parts) != 3:
-            print("Error: --wb must be R,G,B (e.g., '1.41,1.02,2.51')")
-            return 1
-        wb_r, wb_g, wb_b = float(wb_parts[0]), float(wb_parts[1]), float(wb_parts[2])
-
         # Configure camera for calibration capture
         camera.binning = 2  # 3x3 binning (index 2)
         camera.exposure_time = args.exposure / 1000.0
         camera.gamma = 1.0  # Linear
-        camera.gain_rgb = (wb_r, wb_g, wb_b)
+        camera.gain_rgb = args.wb
         camera.auto_brightness = False
         if args.gain is not None:
             camera.gain = args.gain

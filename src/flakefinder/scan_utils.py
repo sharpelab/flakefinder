@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import bisect
+from argparse import ArgumentTypeError
 from collections.abc import Sequence
 from typing import Any
 
 from flakefinder.types import (
     BBox,
     CameraMeta,
+    GainRGB,
     LightingMeta,
     MicroscopeMeta,
     OpticsMeta,
@@ -20,6 +22,29 @@ from flakefinder.types import (
 
 # Binning index (SDK) -> binning factor (NxN)
 _BINNING_FACTOR = {0: 1, 1: 2, 2: 3}
+
+
+def parse_white_balance(s: str) -> GainRGB:
+    """Parse 'B,G,R' white balance string into GainRGB.
+
+    Intended as an argparse type= callback:
+        parser.add_argument("--white-balance", type=parse_white_balance, ...)
+
+    Args:
+        s: Comma-separated string in B,G,R order (e.g., "2.51,1.02,1.41").
+
+    Returns:
+        GainRGB(red, green, blue) suitable for camera.gain_rgb.
+    """
+    parts = s.split(",")
+    if len(parts) != 3:
+        raise ArgumentTypeError(f"expected 3 comma-separated values (B,G,R), got: {s}")
+    try:
+        b, g, r = float(parts[0]), float(parts[1]), float(parts[2])
+    except ValueError as e:
+        raise ArgumentTypeError(f"values must be numbers, got: {s}") from e
+    return GainRGB(red=r, green=g, blue=b)
+
 
 # ============================================================================
 # Position interpolation
