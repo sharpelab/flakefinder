@@ -44,6 +44,7 @@ def main() -> int:
         help="White balance as B,G,R gains (default: '2.51,1.02,1.41')",
     )
     parser.add_argument("--gain", type=float, help="Camera gain (e.g., 4.0)")
+    parser.add_argument("--saturation", type=int, help="Color saturation (e.g., 100)")
     parser.add_argument("--quality", type=int, default=95, help="JPEG quality (default: 95)")
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress verbose output; print only saved filename")
     parser.add_argument(
@@ -88,6 +89,9 @@ def main() -> int:
 
         if args.gain is not None:
             camera.gain = args.gain
+
+        if args.saturation is not None:
+            camera.saturation = args.saturation
 
         camera.gain_rgb = args.white_balance
 

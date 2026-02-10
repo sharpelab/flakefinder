@@ -57,7 +57,8 @@ def report_status(scope: Microscope, *, verbose: bool = False) -> None:
     binning_str = desc.camera.binning_levels[camera.binning].name
     w, h = camera.frame_size_px
     r, g, b = camera.gain_rgb
-    print(f"Camera: {w}x{h} @ {binning_str} binning, {camera.exposure_time * 1000:.1f}ms exposure")
+    exp_ms = camera.exposure_time * 1000
+    print(f"Camera: {w}x{h} @ {binning_str} binning, {exp_ms:.1f}ms exposure, saturation={camera.saturation}")
     print(f"White balance: R={r:.2f} G={g:.2f} B={b:.2f}")
 
 
