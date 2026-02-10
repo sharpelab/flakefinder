@@ -1256,11 +1256,22 @@ def main():
             min_sharpness=args.min_sharpness,
         )
 
-        if not args.quiet:
-            q = result["quality"]
-            t = result["tilt"]
-            c = result["coverage"]
+        q = result["quality"]
+        t = result["tilt"]
+        c = result["coverage"]
 
+        # One-line summary (always printed)
+        corners_str = (
+            ",".join(c["corners_extrapolated"]) + " extrapolated" if c["corners_extrapolated"] else "all covered"
+        )
+        print(
+            f"analyze_focus_map: {q['points_used']}/{q['points_total']} pts, "
+            f"R\u00b2={q['r_squared']:.3f}, residual={q['residual_std_um']:.1f}\u00b5m, "
+            f"tilt={t['magnitude_um_per_mm']:.2f}\u00b5m/mm, "
+            f"corners: {corners_str}, {args.export_plane}"
+        )
+
+        if not args.quiet:
             print()
             print("=" * 60)
             print("ROBUST PLANE FIT EXPORT")
