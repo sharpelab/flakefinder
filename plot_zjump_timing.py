@@ -121,7 +121,7 @@ def plot_multi_scan_comparison(scan_dirs, labels=None):
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.scatter(all_gaps, all_jumps, s=40, alpha=0.7, edgecolors="black", linewidths=0.5)
 
-    for gap, jump, lbl in zip(all_gaps, all_jumps, all_labels):
+    for gap, jump, lbl in zip(all_gaps, all_jumps, all_labels, strict=False):
         ax.annotate(lbl, (gap, jump), fontsize=6, alpha=0.6,
                     xytext=(3, 3), textcoords="offset points")
 

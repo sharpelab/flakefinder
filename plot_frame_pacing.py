@@ -45,7 +45,6 @@ def plot_pacing(scan_dirs, output=None):
         for row in rows:
             rf = sorted([f for f in frames if f["row"] == row["row_idx"]], key=lambda f: f["t_start"])
             if len(rf) >= 2:
-                gap_ms = (rf[1]["t_start"] - rf[0]["t_end"]) * 1000
                 dt01_ms = (rf[1]["t_start"] - rf[0]["t_start"]) * 1000
                 mid_t = (rf[0]["t_end"] + rf[1]["t_start"]) / 2
                 ax.annotate(f"{dt01_ms:.0f}ms", xy=(mid_t, row["row_idx"]),
