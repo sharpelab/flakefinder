@@ -190,7 +190,7 @@ def compute_slope_metrics(meta: dict) -> dict:
         drifts = [r["drift_um"] for r in per_row]
         overall = {
             "mean_slope_error_pct": float(np.mean(slope_errs)),
-            "mean_drift_um": float(np.mean(drifts)),
+            "mean_abs_drift_um": float(np.mean(np.abs(drifts))),
             "max_abs_drift_um": float(np.max(np.abs(drifts))),
             "cmd_speed_mm_s": cmd_speed_mm,
             "plane_a_um_um": plane_a,
@@ -444,7 +444,7 @@ def plot_analysis(
         ax_zerr.text(
             0.01,
             0.01,
-            f"Slope err: {sm_ov['mean_slope_error_pct']:+.2f}%  Drift: {sm_ov['mean_drift_um']:+.2f} um",
+            f"Slope err: {sm_ov['mean_slope_error_pct']:+.2f}%  |Drift|: {sm_ov['mean_abs_drift_um']:.2f} um",
             transform=ax_zerr.transAxes,
             fontsize=8,
             verticalalignment="bottom",
@@ -670,7 +670,7 @@ def print_summary(
         ov = sm["overall"]
         print(
             f"\nMean slope error: {ov['mean_slope_error_pct']:+.2f}%, "
-            f"Mean drift: {ov['mean_drift_um']:+.2f} um, "
+            f"Mean |drift|: {ov['mean_abs_drift_um']:.2f} um, "
             f"Max |drift|: {ov['max_abs_drift_um']:.2f} um"
         )
 
