@@ -30,6 +30,7 @@ def wait_all(
     handles: list["MoveHandle"],
     timeout: float | None = None,
     poll_interval: float = 0.01,
+    dispose: bool = True,
 ) -> bool:
     """Wait for multiple moves to complete.
 
@@ -37,6 +38,7 @@ def wait_all(
         handles: List of MoveHandles to wait for.
         timeout: Maximum seconds to wait (None = forever).
         poll_interval: Seconds between state checks.
+        dispose: Dispose handles after completion (default True).
 
     Returns:
         True if all completed, False if timed out.
@@ -46,6 +48,9 @@ def wait_all(
         if timeout is not None and (time.monotonic() - start) > timeout:
             return False
         time.sleep(poll_interval)
+    if dispose:
+        for h in handles:
+            h.dispose()
     return True
 
 

@@ -1017,8 +1017,6 @@ Examples:
         print("Done.")
 
         wait_all([hx, hy])
-        hx.dispose()
-        hy.dispose()
         z_drive.move_to_corrected(initial_z)
 
         return 0

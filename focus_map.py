@@ -265,8 +265,6 @@ def run_focus_map(
         # Move to position
         hx, hy = stage.move_to_async(pt.x_um, pt.y_um)
         wait_all([hx, hy])
-        hx.dispose()
-        hy.dispose()
         if move_settle_s > 0:
             time.sleep(move_settle_s)
 
@@ -545,8 +543,6 @@ def main():
             print(f"\nNo --z provided, autofocusing at centroid ({cx_mm:.2f}, {cy_mm:.2f}) mm...")
             hx, hy = scope.stage.move_to_async(cx, cy)
             wait_all([hx, hy])
-            hx.dispose()
-            hy.dispose()
             centroid_af = continuous_autofocus(
                 scope,
                 z_range_um=args.z_range,

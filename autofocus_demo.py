@@ -215,8 +215,6 @@ def main():
         vprint(f"Moving to X={target_x:.1f}, Y={target_y:.1f}...")
         hx, hy = stage.move_to_async(target_x, target_y)
         wait_all([hx, hy])
-        hx.dispose()
-        hy.dispose()
 
         # === Step 2: Move to initial Z ===
         # Set Z speed for positioning (restores sane default if a previous crash left it slow)

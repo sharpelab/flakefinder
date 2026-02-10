@@ -132,8 +132,6 @@ def park_microscope(scope: Microscope) -> None:
     # 2. XY to origin
     hx, hy = scope.stage.move_to_async(0.0, 0.0)
     wait_all([hx, hy])
-    hx.dispose()
-    hy.dispose()
     print(f"  X -> {scope.stage.x.position_um:.0f} um [ok]")
     print(f"  Y -> {scope.stage.y.position_um:.0f} um [ok]")
 
@@ -255,8 +253,6 @@ def main() -> int:
 
             hx, hy = scope.stage.move_to_async(x_target, y_target)
             wait_all([hx, hy])
-            hx.dispose()
-            hy.dispose()
 
             x_after, y_after = scope.stage.position_um
             print(f"XY: done at ({x_after:.1f}, {y_after:.1f}) µm")
@@ -271,8 +267,6 @@ def main() -> int:
 
             hx, hy = scope.stage.move_rel_async(dx, dy)
             wait_all([hx, hy])
-            hx.dispose()
-            hy.dispose()
 
             x_after, y_after = scope.stage.position_um
             print(f"XY: done at ({x_after:.1f}, {y_after:.1f}) µm")

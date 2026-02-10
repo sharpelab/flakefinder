@@ -407,8 +407,6 @@ Examples:
             # Move to autofocus position
             hx, hy = stage.move_to_async(auto_focus_pos[0], auto_focus_pos[1])
             wait_all([hx, hy])
-            hx.dispose()
-            hy.dispose()
 
             try:
                 af_result = continuous_autofocus(
