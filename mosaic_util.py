@@ -96,7 +96,6 @@ def make_mosaic(
     # thumb_h = thumb_w / aspect
     # Solve for thumb_w from width constraint:
     thumb_w_from_width = (max_dim - (cols - 1) * margin) / cols
-    thumb_w_from_width / aspect
 
     # Solve for thumb_h from height constraint:
     thumb_h_from_height = (max_dim - (rows - 1) * margin) / rows
@@ -109,6 +108,11 @@ def make_mosaic(
     else:
         thumb_h = int(thumb_h_from_height)
         thumb_w = int(thumb_h * aspect)
+
+    # Cap to original image size — never upscale
+    if thumb_w > first_img.width:
+        thumb_w = first_img.width
+        thumb_h = int(thumb_w / aspect)
 
     if thumb_w < 1 or thumb_h < 1:
         print("Error: too many images or margin too large for max-dim.")
