@@ -599,8 +599,12 @@ def print_summary(
 
     if quiet:
         print(f"Scan: chip {chip_idx} @ {obj_mag}x | {n_frames} frames, {duration:.1f}s | {n_rows} rows")
+        drift_str = ""
+        if slope_metrics and slope_metrics.get("overall"):
+            drift_str = f", drift={slope_metrics['overall']['max_abs_drift_um']:.2f} um"
         print(
-            f"Z tracking: std={ov['std_um']:.2f} um, p95={ov['p95_um']:.2f} um, "
+            f"Z tracking: std={ov['std_um']:.2f} um, p95={ov['p95_um']:.2f} um"
+            f"{drift_str}, "
             f">2um: {ov['pct_outside_2um']:.1f}%, >4um: {ov['pct_outside_4um']:.1f}%"
         )
         if sharpness_data is not None:
