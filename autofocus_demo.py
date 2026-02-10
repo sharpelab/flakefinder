@@ -23,7 +23,7 @@ from flakefinder.leica.autofocus import (
 )
 
 
-def main():
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Continuous Z-scan autofocus demo",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -75,7 +75,7 @@ def main():
         action="store_true",
         help="Remove existing output/debug directories before running",
     )
-    parser.add_argument("--exposure-ms", type=float, default=None, help="Exposure time in ms (default: 1.0)")
+    parser.add_argument("--exposure-ms", type=float, default=1.0, help="Exposure time in ms")
     parser.add_argument("--gain", type=float, default=None, help="Camera gain (default: unchanged)")
     parser.add_argument(
         "--white-balance",
@@ -91,7 +91,11 @@ def main():
         help="Single-line output: 'AF: Z=... (adj ...), sharpness=sel/after, Ns, N frames' "
         "or 'AF: stayed_at_initial, DR=..., scan_best_z=..., Ns, N frames'",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main():
+    args = _build_parser().parse_args()
 
     def vprint(*a, **kw):
         if not args.quiet:
@@ -133,22 +137,16 @@ def main():
             print(f"  8. Save summary to {args.output}/")
         return 0
 
-    # Clean existing directories if requested
-    if args.clean:
-        if args.output and os.path.exists(args.output):
-            shutil.rmtree(args.output)
-            print(f"Removed existing: {args.output}")
-        if args.debug_dir and os.path.exists(args.debug_dir):
-            shutil.rmtree(args.debug_dir)
-            print(f"Removed existing: {args.debug_dir}")
-
-    # Check directories BEFORE connecting to hardware
-    if args.output and os.path.exists(args.output):
-        print(f"Error: Output directory '{args.output}' already exists")
-        return 1
-    if args.debug_dir and os.path.exists(args.debug_dir):
-        print(f"Error: Debug directory '{args.debug_dir}' already exists")
-        return 1
+    # Validate/clean output directories BEFORE connecting to hardware
+    for d in [args.output, args.debug_dir]:
+        if not d:
+            continue
+        if args.clean and os.path.exists(d):
+            shutil.rmtree(d)
+            print(f"Removed existing: {d}")
+        elif os.path.exists(d):
+            print(f"Error: Directory '{d}' already exists (use --clean to remove)")
+            return 1
 
     # Import hardware libraries
     from flakefinder.leica import Microscope, wait_all
@@ -186,10 +184,7 @@ def main():
         # Configure camera for fast capture
         camera.trigger_mode = 0  # CONTINUOUS
         camera.binning = 2  # 3x3 binning for speed
-        if args.exposure_ms is not None:
-            camera.exposure_time = args.exposure_ms / 1000.0
-        else:
-            camera.exposure_time = 0.001  # 1ms default
+        camera.exposure_time = args.exposure_ms / 1000.0
         if args.gain is not None:
             camera.gain = args.gain
         if args.white_balance is not None:
