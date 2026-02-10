@@ -449,12 +449,9 @@ Examples:
         print(f"Camera: {camera.name}")
         exp_str = f"{actual_exposure * 1000:.2f}ms" if actual_exposure else "?"
         print(f"  Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}, Gain: {args.gain}")
-        if frame_width_px and frame_height_px:
-            print(f"  Frame: {frame_width_px}x{frame_height_px} px")
-        if frame_width_um and frame_height_um:
-            print(f"  FOV: {frame_width_um:.1f} x {frame_height_um:.1f} µm")
-        if objective_mag:
-            print(f"  Objective: {objective_mag}x")
+        print(f"  Frame: {frame_width_px}x{frame_height_px} px")
+        print(f"  FOV: {frame_width_um:.1f} x {frame_height_um:.1f} µm")
+        print(f"  Objective: {objective_mag}x")
         print()
 
         # Set up image acquisition context

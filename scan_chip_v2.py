@@ -739,12 +739,9 @@ Examples:
         print(f"Camera: {cam_meta['name']}")
         print(f"  Binning: {cam_meta['binning']}x{cam_meta['binning']}, Exposure: {exp_str}, Gain: {cam_meta['gain']}")
         print(f"  Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
-        if cam_meta["frame_width_px"] and cam_meta["frame_height_px"]:
-            print(f"  Frame: {cam_meta['frame_width_px']}x{cam_meta['frame_height_px']} px")
-        if frame_width_um and frame_height_um:
-            print(f"  FOV: {frame_width_um:.1f} x {frame_height_um:.1f} um (matches plan)")
-        if optics_meta["objective_mag"]:
-            print(f"  Objective: {optics_meta['objective_mag']}x")
+        print(f"  Frame: {cam_meta['frame_width_px']}x{cam_meta['frame_height_px']} px")
+        print(f"  FOV: {frame_width_um:.1f} x {frame_height_um:.1f} um (matches plan)")
+        print(f"  Objective: {optics_meta['objective_mag']}x")
         print()
 
         # ---- Set up acquisition context ----

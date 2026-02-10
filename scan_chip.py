@@ -457,12 +457,9 @@ Examples:
         print(f"Camera: {camera.name}")
         print(f"  Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}, Gain: {args.gain}")
         print(f"  Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
-        if frame_width_px and frame_height_px:
-            print(f"  Frame: {frame_width_px}x{frame_height_px} px")
-        if frame_width_um and frame_height_um:
-            print(f"  FOV: {frame_width_um:.1f} x {frame_height_um:.1f} µm (matches plan)")
-        if objective_mag:
-            print(f"  Objective: {objective_mag}x")
+        print(f"  Frame: {frame_width_px}x{frame_height_px} px")
+        print(f"  FOV: {frame_width_um:.1f} x {frame_height_um:.1f} µm (matches plan)")
+        print(f"  Objective: {objective_mag}x")
         print()
 
         # ---- Set up acquisition context ----

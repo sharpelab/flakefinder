@@ -380,12 +380,9 @@ Examples:
         print(f"  Trigger: CONTINUOUS, Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}{readout_fps}")
         print(f"  White balance (B,G,R): {wb_blue}, {wb_green}, {wb_red}")
         print(f"  Gamma: {args.gamma}")
-        if frame_width_px and frame_height_px:
-            print(f"  Frame: {frame_width_px}x{frame_height_px} px")
-        if frame_width_um and frame_height_um:
-            print(f"  FOV: {frame_width_um:.2f} x {frame_height_um:.2f} µm")
-        if objective_mag:
-            print(f"  Objective: {objective_mag}x")
+        print(f"  Frame: {frame_width_px}x{frame_height_px} px")
+        print(f"  FOV: {frame_width_um:.2f} x {frame_height_um:.2f} µm")
+        print(f"  Objective: {objective_mag}x")
         if args.downsample > 1:
             print(f"  Downsample: {args.downsample}x")
 
