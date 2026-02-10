@@ -5,10 +5,10 @@
 STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$')
 [ -z "$STAGED" ] && exit 0
 
-uv run ruff check --fix $STAGED && uv run ruff format $STAGED
+uv run ruff check --fix -- $STAGED && uv run ruff format -- $STAGED
 
 # Re-stage files that ruff modified
 echo "$STAGED" | xargs git add
 
 # Type check (per-file overrides in pyproject.toml handle exclusions)
-uv run ty check $STAGED
+uv run ty check -- $STAGED
