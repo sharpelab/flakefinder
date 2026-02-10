@@ -175,7 +175,7 @@ class Microscope:
 
     # --- High-level operations ---
 
-    def switch_objective_pos(self, pos: int) -> None:
+    def switch_objective_pos(self, pos: int) -> bool:
         """Switch objective by turret position (1-6).
 
         Temporarily maxes Z speed for the SDK's internal z-hop.
@@ -188,21 +188,26 @@ class Microscope:
         Args:
             pos: Turret position (1-6).
 
+        Returns:
+            True if the objective was switched, False if already at target.
+
         Raises:
             ValueError: If position is out of range.
         """
         nosepiece = self.nosepiece
         target_pos = nosepiece.validate_position(pos)
-        if target_pos != nosepiece.position:
-            z = self.z
-            saved = z.velocity_native
-            z.set_velocity_native(z.max_velocity_native)
-            try:
-                nosepiece.position = target_pos
-            finally:
-                z.set_velocity_native(saved)
+        if target_pos == nosepiece.position:
+            return False
+        z = self.z
+        saved = z.velocity_native
+        z.set_velocity_native(z.max_velocity_native)
+        try:
+            nosepiece.position = target_pos
+        finally:
+            z.set_velocity_native(saved)
+        return True
 
-    def switch_objective_mag(self, mag: str) -> None:
+    def switch_objective_mag(self, mag: str) -> bool:
         """Switch objective by magnification string (e.g. '20x', '5', '2.5').
 
         Parses the magnification and delegates to switch_objective_pos().
@@ -210,11 +215,14 @@ class Microscope:
         Args:
             mag: Magnification string (e.g. '20x', '5', '2.5x').
 
+        Returns:
+            True if the objective was switched, False if already at target.
+
         Raises:
             ValueError: If magnification is unknown.
         """
         target_pos = self.nosepiece.parse_magnification(mag)
-        self.switch_objective_pos(target_pos)
+        return self.switch_objective_pos(target_pos)
 
     def light_on(self, intensity_pct: float = 100) -> None:
         """Open shutter and set lamp intensity.

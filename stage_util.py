@@ -97,31 +97,20 @@ def _change_objective_pos(scope: Microscope, target_pos: int) -> None:
     """
     nosepiece = scope.nosepiece
 
-    current_position = nosepiece.position
-    current_mag = nosepiece.magnification
     target_mag = nosepiece.magnifications.get(target_pos)
 
-    if current_position == target_pos:
+    if not scope.switch_objective_pos(target_pos):
         print(f"Objective: already at position {target_pos} ({target_mag}x)")
         return
 
-    z_before = scope.z.position_um
-
-    print(f"Objective: {current_mag}x (pos {current_position}) -> {target_mag}x (pos {target_pos})")
-    print(f"  Z before: {z_before:.1f} µm")
-    print("  Switching (SDK handles z-hop)...")
-
-    scope.switch_objective_pos(target_pos)
-
     z_after = scope.z.position_um
-    print(f"  Z after: {z_after:.1f} µm (delta: {z_after - z_before:+.1f} µm)")
+    print(f"Objective: switched to {target_mag}x (pos {target_pos})")
+    print(f"  Z after: {z_after:.1f} µm")
 
     # Future: parfocal compensation would go here once calibrated
     # current_offset = PARFOCAL_OFFSETS_UM.get(current_position, 0)
     # target_offset = PARFOCAL_OFFSETS_UM.get(target_position, 0)
     # ...
-
-    print(f"Objective: done at {nosepiece.magnification}x")
 
 
 def park_microscope(scope: Microscope) -> None:
@@ -154,9 +143,9 @@ def park_microscope(scope: Microscope) -> None:
         if mag == 5.0:
             target_pos = pos
             break
-    if target_pos is not None and scope.nosepiece.position != target_pos:
+    if target_pos is not None:
         scope.switch_objective_pos(target_pos)
-    print(f"  Objective -> {scope.nosepiece.magnification}x [ok]")
+    print(f"  Objective -> {scope.objective_mag}x [ok]")
 
     # 4. Lights off
     scope.light_off()

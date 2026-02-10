@@ -398,21 +398,15 @@ Examples:
 
         # Switch objective if requested
         if args.objective_mag is not None:
-            current_mag = scope.nosepiece.magnification
-            scope.switch_objective_mag(args.objective_mag)
-            new_mag = scope.nosepiece.magnification
-            if new_mag != current_mag:
-                print(f"Switched objective: {current_mag}x -> {new_mag}x")
+            if scope.switch_objective_mag(args.objective_mag):
+                print(f"Switched objective to {scope.objective_mag}x")
             else:
-                print(f"Objective: already at {new_mag}x")
+                print(f"Objective: already at {scope.objective_mag}x")
         elif args.objective_pos is not None:
-            current_pos = scope.nosepiece.position
-            scope.switch_objective_pos(args.objective_pos)
-            new_mag = scope.nosepiece.magnification
-            if args.objective_pos != current_pos:
-                print(f"Switched objective to position {args.objective_pos} ({new_mag}x)")
+            if scope.switch_objective_pos(args.objective_pos):
+                print(f"Switched objective to position {args.objective_pos} ({scope.objective_mag}x)")
             else:
-                print(f"Objective: already at {new_mag}x")
+                print(f"Objective: already at {scope.objective_mag}x")
 
         objective_mag = scope.nosepiece.magnification
         objective_idx = scope.nosepiece.position
