@@ -37,6 +37,26 @@ def _get_font(size):
     return ImageFont.load_default()
 
 
+def _resolve_labels(paths, label_text=None):
+    """Determine label strings for each image.
+
+    If *label_text* is given, split by comma and validate count.
+    Otherwise, if any basenames collide, use ``parent/filename``; else plain filename.
+    """
+    if label_text is not None:
+        labels = [s.strip() for s in label_text.split(",")]
+        if len(labels) != len(paths):
+            print(f"Error: --label-text has {len(labels)} labels but {len(paths)} images.")
+            sys.exit(1)
+        return labels
+
+    basenames = [os.path.basename(p) for p in paths]
+    if len(set(basenames)) < len(basenames):
+        # Duplicates exist – use parent/filename
+        return [os.path.join(os.path.basename(os.path.dirname(p)), os.path.basename(p)) for p in paths]
+    return basenames
+
+
 def make_mosaic(
     image_paths,
     rows,
@@ -44,7 +64,7 @@ def make_mosaic(
     max_dim,
     margin,
     bg_color,
-    labels=False,
+    labels=None,
     label_size=None,
     label_color=(255, 255, 255),
     label_bg=None,
@@ -52,6 +72,7 @@ def make_mosaic(
     """Tile images into a grid mosaic.
 
     All thumbnails use the aspect ratio of the first image.
+    *labels* is an optional list of strings (one per image) to overlay.
     Returns the composited PIL Image.
     """
     if not image_paths:
@@ -94,7 +115,7 @@ def make_mosaic(
         sys.exit(1)
 
     # Font setup: label_size is in points. Default ~3% of thumb height, clamped.
-    if labels:
+    if labels is not None:
         if label_size is None:
             label_size = max(10, min(36, int(thumb_h * 0.03)))
         font = _get_font(label_size)
@@ -114,8 +135,8 @@ def make_mosaic(
         img.thumbnail((thumb_w, thumb_h), Image.Resampling.LANCZOS)
         canvas.paste(img, (x, y))
 
-        if labels:
-            label = os.path.basename(path)
+        if labels is not None:
+            label = labels[i]
             pad = 2
             tx = x + pad
             ty = y + thumb_h - label_size - pad
@@ -154,6 +175,9 @@ def main():
     parser.add_argument(
         "--label-bg", type=_parse_color, default=None, help="Label background color as R,G,B or R,G,B,A (default: none)"
     )
+    parser.add_argument(
+        "--label-text", type=str, default=None, help="Comma-separated manual labels (overrides auto-detection)"
+    )
     args = parser.parse_args()
 
     # Collect image paths
@@ -165,6 +189,11 @@ def main():
 
     print(f"Mosaic: {len(paths)} images, {args.rows} row(s), max {args.max_dim}px")
 
+    # Resolve labels
+    resolved_labels = None
+    if args.label_text is not None or args.labels:
+        resolved_labels = _resolve_labels(paths, label_text=args.label_text)
+
     canvas = make_mosaic(
         paths,
         args.rows,
@@ -172,7 +201,7 @@ def main():
         args.max_dim,
         args.margin,
         args.bg_color,
-        labels=args.labels,
+        labels=resolved_labels,
         label_size=args.label_size,
         label_color=args.label_color,
         label_bg=args.label_bg,
