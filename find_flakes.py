@@ -41,8 +41,7 @@ from pathlib import Path
 DEFAULT_AREA_RECT = "8000,95000,0,78000"
 DEFAULT_INITIAL_Z = 24690
 DEFAULT_SCAN_SPEED = 5
-DEFAULT_SCAN_Z_SPEED = 625
-DEFAULT_CHIP_PADDING = 2000
+DEFAULT_SCAN_Z_SPEED = 1250
 
 SCRIPT_DIR = Path(__file__).parent
 
@@ -220,12 +219,6 @@ Examples:
         help=f"Focus map AF Z speed in µm/s (default: {DEFAULT_SCAN_Z_SPEED})",
     )
     parser.add_argument(
-        "--chip-padding",
-        type=float,
-        default=DEFAULT_CHIP_PADDING,
-        help=f"Chip scan padding in µm (default: {DEFAULT_CHIP_PADDING})",
-    )
-    parser.add_argument(
         "--notes",
         type=str,
         default=None,
@@ -270,7 +263,6 @@ Examples:
     print(f"Initial Z:     {args.initial_z} µm")
     print(f"Scan speed:    {args.scan_speed} mm/s")
     print(f"AF Z speed:    {args.scan_z_speed} µm/s")
-    print(f"Chip padding:  {args.chip_padding} µm")
     if chip_filter:
         print(f"Chips:         {chip_filter}")
     if args.after is not None:
@@ -488,6 +480,7 @@ Examples:
                     "0.2",
                     "--output-dir",
                     str(chip_dir),
+                    "-q",
                 ],
                 dry_run=args.dry_run,
                 pause=args.pause,
@@ -529,7 +522,7 @@ Examples:
                     "uv",
                     "run",
                     "python",
-                    "scan_chip.py",
+                    "scan_chip_v2.py",
                     "-o",
                     str(scan_20x_dir),
                     "--chips-meta",
@@ -540,11 +533,10 @@ Examples:
                     str(plane_path),
                     "--objective-mag",
                     "20x",
-                    "--padding",
-                    str(int(args.chip_padding)),
                     "--speed-mm",
                     str(args.scan_speed),
                     "--clean",
+                    "-q",
                 ],
                 dry_run=args.dry_run,
                 pause=args.pause,
@@ -591,7 +583,6 @@ Examples:
             "initial_z": args.initial_z,
             "scan_speed": args.scan_speed,
             "scan_z_speed": args.scan_z_speed,
-            "chip_padding": args.chip_padding,
             "chips": args.chips,
             "after": args.after,
             "limit": args.limit,

@@ -31,6 +31,8 @@ Parse what the user wants. Identify:
 
 Pick from this menu based on relevance to the task. The subtask will read these before starting.
 
+**Do NOT read these files yourself.** The subtask reads them — you're just picking which ones to list. Only read a file if YOU need information from it that isn't already in your session context (notebook, previous findings, etc.).
+
 | File | When to include |
 |------|----------------|
 | `src/flakefinder/leica/units.py` | Hardware control, axis/stage/Z classes, SDK interfaces |
@@ -73,6 +75,8 @@ Write a prompt file to `/tmp/subtask_<descriptive_slug>.prompt.md`. Structure:
 <full description of what to build/modify, including any specific requirements, code snippets, or values from the current session>
 ```
 
+**Never instruct the subtask to commit or sync directly.** The subtask's default behavior is to propose a plan and wait for approval. Don't override that — the user reviews before anything is committed.
+
 ### 5. Inject session-specific details
 
 If relevant, pull details from the current session into the prompt:
@@ -108,7 +112,11 @@ Choose a short descriptive slug for this follow-up task (e.g. `fix_dr_threshold`
 
 ### 3c. Write the continuation blurb
 
-Write a blurb that the user will paste into the existing subtask's terminal. Format:
+Write a blurb that the user will paste into the existing subtask's terminal.
+
+**Do NOT read source files to write the blurb.** You already have session context from the notebook. The subtask has the code open. Only include problem description and session-specific values (measurements, file paths, error messages).
+
+Format:
 
 ```
 # Operator Task
