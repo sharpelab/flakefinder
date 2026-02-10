@@ -8,6 +8,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import requests
+from matplotlib.patches import Rectangle
 
 
 def check_server(server_url: str) -> bool:
@@ -58,8 +59,6 @@ def make_flake_map(flakes: list[dict], scan_meta: dict, output_path: Path):
     # Chip bounding box if available
     if "chip_info" in scan_meta and "bbox_stage_um" in scan_meta["chip_info"]:
         bb = scan_meta["chip_info"]["bbox_stage_um"]
-        from matplotlib.patches import Rectangle
-
         rect = Rectangle(
             (bb["x_min"], bb["y_min"]),
             bb["x_max"] - bb["x_min"],

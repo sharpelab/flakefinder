@@ -30,6 +30,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
+
 from flakefinder.data_utils import (
     compute_frame_size_um,
     load_chip_geometry,
@@ -851,8 +853,6 @@ Examples:
             )
 
         # Z tracking error stats
-        import numpy as np
-
         z_errors = [f["z_error"] for f in saved_frames_meta if f["z_error"] is not None]
         if z_errors:
             z_error_arr = np.array(z_errors)

@@ -13,7 +13,7 @@ from pathlib import Path
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from mosaic_util import make_mosaic
 
@@ -648,8 +648,6 @@ def make_frame_mosaic(
     )
 
     # Compute thumbnail size to draw labels at correct positions
-    from PIL import ImageDraw, ImageFont
-
     first_img = Image.open(paths[0])
     aspect = first_img.width / first_img.height
     margin = 2

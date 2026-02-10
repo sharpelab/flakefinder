@@ -678,7 +678,7 @@ Examples:
     from PIL import Image as PILImage
 
     from flakefinder.image_utils import sdk_image_to_numpy
-    from flakefinder.leica import Microscope
+    from flakefinder.leica import Microscope, wait_all
 
     with Microscope() as scope:
         stage = scope.stage
@@ -1090,8 +1090,6 @@ Examples:
         print(f"  Output: {args.output}/")
         print()
         print("Done.")
-
-        from flakefinder.leica import wait_all
 
         wait_all([hx, hy])
         hx.dispose()

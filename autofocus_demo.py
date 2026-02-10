@@ -11,6 +11,7 @@ output. The core autofocus logic is in flakefinder.leica.autofocus.
 import argparse
 import json
 import os
+import shutil
 
 from PIL import Image as PILImage
 
@@ -134,8 +135,6 @@ def main():
 
     # Clean existing directories if requested
     if args.clean:
-        import shutil
-
         if args.output and os.path.exists(args.output):
             shutil.rmtree(args.output)
             print(f"Removed existing: {args.output}")

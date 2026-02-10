@@ -24,6 +24,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from flakefinder.leica.units import Nosepiece
+
 DEFAULT_OUTPUT_DIR = Path(__file__).parent / "calibration"
 
 
@@ -45,8 +47,6 @@ def resolve_objective_mag(objective_mag: str | None, objective_pos: int | None) 
 
     Returns the magnification as a float (e.g. 5.0, 20.0).
     """
-    from flakefinder.leica.units import Nosepiece
-
     if objective_mag is not None:
         match = re.match(r"^(\d+(?:\.\d+)?)[xX]?$", objective_mag.strip())
         if not match:
