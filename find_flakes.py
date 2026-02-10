@@ -38,7 +38,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Defaults
-DEFAULT_AREA_RECT = "8000,95000,0,75000"
+DEFAULT_AREA_RECT = "8000,95000,0,78000"
 DEFAULT_INITIAL_Z = 24690
 DEFAULT_SCAN_SPEED = 5
 DEFAULT_SCAN_Z_SPEED = 625

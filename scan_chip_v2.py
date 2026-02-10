@@ -454,8 +454,8 @@ Examples:
     scan_group.add_argument(
         "--z-lead-ms",
         type=float,
-        default=50,
-        help="Start Z tracking this many ms before X reaches chip edge (default: 50)",
+        default=30,
+        help="Start Z tracking this many ms before X reaches chip edge (default: 30)",
     )
 
     # Optics
