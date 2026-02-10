@@ -221,6 +221,7 @@ def run_focus_map(
     images_dir: "Path | None" = None,
     debug_dir: "Path | None" = None,
     save_executor: "ThreadPoolExecutor | None" = None,
+    quiet: bool = False,
 ) -> list[FocusMapSample]:
     """Run autofocus at each sample point and return results.
 
@@ -240,6 +241,7 @@ def run_focus_map(
         images_dir: Directory for after-images, or None.
         debug_dir: Directory for AF debug frames, or None.
         save_executor: ThreadPoolExecutor for background disk writes, or None.
+        quiet: Suppress per-point progress output.
 
     Returns:
         List of FocusMapSample (one per point).
@@ -254,14 +256,17 @@ def run_focus_map(
     save_futures = []
     total_points = len(all_points)
 
-    print(f"\nRunning autofocus at {total_points} points...")
+    if not quiet:
+        print(f"\nRunning autofocus at {total_points} points...")
 
     for i, pt in enumerate(all_points):
-        print(
-            f"  [{i + 1}/{total_points}] {pt.type} {pt.index}: ({pt.x_um / 1000:.2f}, {pt.y_um / 1000:.2f}) mm ... ",
-            end="",
-            flush=True,
-        )
+        if not quiet:
+            x_mm, y_mm = pt.x_um / 1000, pt.y_um / 1000
+            print(
+                f"  [{i + 1}/{total_points}] {pt.type} {pt.index}: ({x_mm:.2f}, {y_mm:.2f}) mm ... ",
+                end="",
+                flush=True,
+            )
 
         # Move to position
         hx, hy = stage.move_to_async(pt.x_um, pt.y_um)
@@ -289,21 +294,23 @@ def run_focus_map(
             best_z = af_result.selected_z_um
             selected_sharpness = af_result.selected_sharpness
             final_sharpness = af_result.final_sharpness
-            print(
-                f"Z={best_z:.1f} µm, sharpness={selected_sharpness:.1f}/{final_sharpness:.1f}",
-                end="",
-            )
+            if not quiet:
+                print(
+                    f"Z={best_z:.1f} µm, sharpness={selected_sharpness:.1f}/{final_sharpness:.1f}",
+                    end="",
+                )
 
             # Capture after image while still at this position (needs camera)
             after_img = None
             if images_dir is not None:
                 if af_settle_s > 0:
                     time.sleep(af_settle_s)
-                after_img = camera.capture()
+                after_img = scope.camera.capture()
                 if after_img is not None:
                     fname = f"{pt.type}_{pt.index:02d}.jpg"
                     image_path = images_dir / fname
-                    print(f" -> {fname}", end="")
+                    if not quiet:
+                        print(f" -> {fname}", end="")
 
             # Queue all disk writes to background thread
             if save_executor and (af_result.frames is not None or after_img is not None):
@@ -326,9 +333,10 @@ def run_focus_map(
 
                 save_futures.append(save_executor.submit(_save))
 
-            print()
+            if not quiet:
+                print()
         except Exception as e:
-            print(f"FAILED: {e}")
+            print(f"  [{i + 1}/{total_points}] FAILED: {e}" if quiet else f"FAILED: {e}")
             af_result = None
 
         sample_results.append(
@@ -467,17 +475,26 @@ def main():
         action="store_true",
         help="Print sample points without running autofocus",
     )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Suppress verbose output; print one summary line",
+    )
     args = parser.parse_args()
 
     # Load chip geometry
-    print(f"Loading chips metadata from {args.chips_meta}")
+    quiet = args.quiet
+    if not quiet:
+        print(f"Loading chips metadata from {args.chips_meta}")
     try:
         chip_geo = load_chip_geometry(str(args.chips_meta), args.chip)
     except (FileNotFoundError, ValueError) as e:
         print(f"Error: {e}")
         return 1
 
-    print(f"Processing chip {args.chip}")
+    if not quiet:
+        print(f"Processing chip {args.chip}")
     convex_hull = chip_geo.polygon
 
     # Compute contour sample count from perimeter and target spacing
@@ -490,10 +507,11 @@ def main():
 
     spacing_mm = args.contour_spacing_mm
     actual_mm = perimeter_mm / len(contour_points)
-    print(f"Sample points (perimeter={perimeter_mm:.1f} mm, spacing={spacing_mm:.1f} mm):")
-    print(f"  Contour: {len(contour_points)} points ({actual_mm:.1f} mm apart)")
-    print(f"  Grid: {len(grid_points)} points")
-    print(f"  Total: {len(contour_points) + len(grid_points)} points")
+    if not quiet:
+        print(f"Sample points (perimeter={perimeter_mm:.1f} mm, spacing={spacing_mm:.1f} mm):")
+        print(f"  Contour: {len(contour_points)} points ({actual_mm:.1f} mm apart)")
+        print(f"  Grid: {len(grid_points)} points")
+        print(f"  Total: {len(contour_points) + len(grid_points)} points")
 
     # All sample points with labels
     all_points: list[SamplePoint] = []
@@ -523,8 +541,9 @@ def main():
     with Microscope() as scope:
         scope.light_on()
 
-        x, y = scope.stage.position_um
-        print(f"\nCurrent position: X={x:.1f}, Y={y:.1f}, Z={scope.z.position_um:.1f} µm")
+        if not quiet:
+            x, y = scope.stage.position_um
+            print(f"\nCurrent position: X={x:.1f}, Y={y:.1f}, Z={scope.z.position_um:.1f} µm")
 
         # Configure camera for fast capture
         camera = scope.camera
@@ -532,8 +551,9 @@ def main():
         camera.binning = 2  # 3x3 binning for speed
         camera.exposure_time = 0.001  # 1ms
 
-        print(f"Camera: {camera.name}")
-        print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
+        if not quiet:
+            print(f"Camera: {camera.name}")
+            print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
 
         # Resolve reference Z
         if args.z is not None:
@@ -541,7 +561,8 @@ def main():
         else:
             cx, cy = chip_geo.centroid
             cx_mm, cy_mm = cx / 1000, cy / 1000
-            print(f"\nNo --z provided, autofocusing at centroid ({cx_mm:.2f}, {cy_mm:.2f}) mm...")
+            if not quiet:
+                print(f"\nNo --z provided, autofocusing at centroid ({cx_mm:.2f}, {cy_mm:.2f}) mm...")
             hx, hy = scope.stage.move_to_async(cx, cy)
             wait_all([hx, hy])
             centroid_af = continuous_autofocus(
@@ -555,14 +576,16 @@ def main():
             )
             reference_z_um = centroid_af.selected_z_um
             sharpness = centroid_af.selected_sharpness
-            print(f"  Centroid AF: Z={reference_z_um:.1f} µm, sharpness={sharpness:.1f}")
+            if not quiet:
+                print(f"  Centroid AF: Z={reference_z_um:.1f} µm, sharpness={sharpness:.1f}")
 
         # Create images directory if saving images
         images_dir = None
         if args.save_images:
             images_dir = output_dir / f"{stem}_images"
             images_dir.mkdir(parents=True, exist_ok=True)
-            print(f"Saving images to {images_dir}")
+            if not quiet:
+                print(f"Saving images to {images_dir}")
 
         save_executor = ThreadPoolExecutor(max_workers=1) if (args.debug_dir or args.save_images) else None
 
@@ -582,6 +605,7 @@ def main():
             images_dir=images_dir,
             debug_dir=args.debug_dir,
             save_executor=save_executor,
+            quiet=quiet,
         )
 
         # Wait for background saves to finish
@@ -622,25 +646,25 @@ def main():
     with open(output_path, "w") as f:
         json.dump(output, f, indent=2)
 
-    print(f"\nFocus map saved to {output_path}")
-
     # Summary
     successful_results = [s.af_result for s in sample_results if s.af_result is not None]
     z_values = [r.selected_z_um for r in successful_results]
-    selected_sharpness_values = [r.selected_sharpness for r in successful_results]
-    final_sharpness_values = [r.final_sharpness for r in successful_results]
+    n_ok = len(successful_results)
+    n_total = len(sample_results)
 
-    print("\nSummary:")
-    print(f"  Duration: {duration_s:.1f}s")
-    print(f"  Points sampled: {len(sample_results)}")
-    print(f"  Successful: {len(successful_results)}")
+    # One-line summary (always printed)
+    z_range_str = f"Z={min(z_values):.0f}-{max(z_values):.0f} µm" if z_values else "no Z data"
+    print(f"focus_map: {n_ok}/{n_total} OK, {z_range_str}, {duration_s:.1f}s, {output_path}")
 
-    if z_values:
-        print(f"  Z range: {min(z_values):.1f} - {max(z_values):.1f} µm")
-        print(f"  Z mean: {np.mean(z_values):.1f} µm")
+    if not quiet and z_values:
+        selected_sharpness_values = [r.selected_sharpness for r in successful_results]
+        final_sharpness_values = [r.final_sharpness for r in successful_results]
+        sel_mean = np.mean(selected_sharpness_values)
+        sel_std = np.std(selected_sharpness_values)
+        fin_mean = np.mean(final_sharpness_values)
+        fin_std = np.std(final_sharpness_values)
+        print(f"\n  Z mean: {np.mean(z_values):.1f} µm")
         print(f"  Z std: {np.std(z_values):.1f} µm")
-        sel_mean, sel_std = np.mean(selected_sharpness_values), np.std(selected_sharpness_values)
-        fin_mean, fin_std = np.mean(final_sharpness_values), np.std(final_sharpness_values)
         print(f"  Sharpness (selected): {sel_mean:.1f} ± {sel_std:.1f}")
         print(f"  Sharpness (final): {fin_mean:.1f} ± {fin_std:.1f}")
 
