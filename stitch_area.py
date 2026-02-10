@@ -53,26 +53,46 @@ def create_blend_alpha(
     return Image.fromarray((alpha * 255).astype("uint8"), mode="L")
 
 
-def deskew_image(img, shear_px, bg_color=(0, 0, 0)):
+def deskew_image(img, shear_px):
     """Apply horizontal shear to correct rolling shutter skew.
 
     Positive shear_px: bottom of image shifts RIGHT
     Negative shear_px: bottom of image shifts LEFT
 
-    Returns image with same dimensions. Void regions filled with bg_color.
+    Returns image with same dimensions. Edge pixels are replicated to fill
+    void regions (avoids transparent gaps at frame edges).
     """
     width, height = img.size
+    pad = int(abs(shear_px)) + 1
 
-    a, b, c = 1, shear_px / height, 0
+    # Pad the side that will have void with edge-replicated pixels
+    arr = np.array(img)
+    if shear_px > 0:
+        # Void at bottom-right → pad right side
+        pad_width = [(0, 0), (0, pad)] + ([(0, 0)] if arr.ndim == 3 else [])
+        x_crop = 0
+    else:
+        # Void at bottom-left → pad left side
+        pad_width = [(0, 0), (pad, 0)] + ([(0, 0)] if arr.ndim == 3 else [])
+        x_crop = pad
+
+    padded_arr = np.pad(arr, pad_width, mode="edge")
+    padded = Image.fromarray(padded_arr, mode=img.mode)
+    pw, ph = padded.size
+
+    a, b, c = 1, shear_px / ph, 0
     d, e, f = 0, 1, 0
 
-    return img.transform(
-        (width, height),
+    result = padded.transform(
+        (pw, ph),
         Image.Transform.AFFINE,
         (a, b, c, d, e, f),
         resample=Image.Resampling.BICUBIC,
-        fillcolor=(bg_color + (0,)) if img.mode == "RGBA" else bg_color,
+        fillcolor=(0,) * len(img.getbands()),
     )
+
+    # Crop back to original size
+    return result.crop((x_crop, 0, x_crop + width, height))
 
 
 def draw_grid(background, stage_bounds_um, um_per_px, spacing_um, line_color, line_width):
@@ -167,52 +187,19 @@ def find_constant_velocity_frames(frames):
     return first_cv, last_cv + 1, velocity
 
 
-def fit_linear_positions(frames, cv_start, cv_end):
-    """Fit linear model to CV frames and return smoothed positions."""
-    cv_frames = frames[cv_start:cv_end]
-
-    times = [(f["t_start"] + f["t_end"]) / 2 for f in cv_frames]
-    positions = [f["x_start"] for f in cv_frames]
-
-    n = len(times)
-    sum_t = sum(times)
-    sum_x = sum(positions)
-    sum_tt = sum(t * t for t in times)
-    sum_tx = sum(t * x for t, x in zip(times, positions, strict=True))
-
-    denom = n * sum_tt - sum_t * sum_t
-    if abs(denom) < 1e-10:
-        return positions, 0
-
-    fit_velocity = (n * sum_tx - sum_t * sum_x) / denom
-    fit_intercept = (sum_x - fit_velocity * sum_t) / n
-
-    smoothed = [fit_velocity * t + fit_intercept for t in times]
-    return smoothed, fit_velocity
-
-
 def smooth_positions_savgol(frames, cv_start, cv_end, window=7, polyorder=2):
     """Smooth CV frame positions with Savitzky-Golay filter.
 
-    Unlike fit_linear_positions which fits a single line across all CV frames,
-    this uses a local polynomial fit that tracks the actual stage trajectory
+    Uses a local polynomial fit that tracks the actual stage trajectory
     while reducing position jitter (~100 µm from SDK readout noise).
-
-    Returns (smoothed_positions, fit_velocity) — fit_velocity is from a linear
-    fit used only for deskew correction.
     """
     cv_frames = frames[cv_start:cv_end]
     raw_x = np.array([f["x_start"] for f in cv_frames])
 
     if len(raw_x) < window:
-        return raw_x.tolist(), 0
+        return raw_x.tolist()
 
-    smoothed = savgol_filter(raw_x, window, polyorder)
-
-    # Linear fit velocity still needed for rolling shutter deskew
-    _, fit_velocity = fit_linear_positions(frames, cv_start, cv_end)
-
-    return smoothed.tolist(), fit_velocity
+    return savgol_filter(raw_x, window, polyorder).tolist()
 
 
 def stitch_row_to_global(
@@ -231,46 +218,62 @@ def stitch_row_to_global(
     flatfield=None,
     flatfield_mean=None,
     num_threads=1,
-    bg_color=(0, 0, 0),
-    smoothing="linear",
 ):
     """
     Stitch a single row directly into global X coordinate space.
 
-    Returns (row_image, cv_count) where row_image is sized to fit
+    Returns (row_image, frames_placed) where row_image is sized to fit
     global_x_min to global_x_max + fov_width.
 
-    smoothing: "linear" (global linear fit) or "savgol" (Savitzky-Golay local filter)
+    All frame positions are savgol-smoothed. Stationary boundary frames
+    (stage parked) are trimmed. Rolling shutter deskew uses per-frame
+    velocity (not a single CV estimate).
     """
     frames = meta["frames"]
     optics = meta["optics"]
     fov_width_um = optics["frame_width_um"]
 
-    row_frames = frames[row["frame_start"] : row["frame_end"]]
+    all_row_frames = frames[row["frame_start"] : row["frame_end"]]
     direction = row["direction"]
 
-    # Find constant-velocity region for this row
-    cv_start, cv_end, velocity = find_constant_velocity_frames(row_frames)
-    cv_frames = row_frames[cv_start:cv_end]
+    # Trim stationary frames at row boundaries (stage parked, camera still capturing)
+    raw_x = np.array([f["x_start"] for f in all_row_frames])
+    deltas = np.diff(raw_x)
+    stationary_thresh = 2.0  # µm — frames closer than this are "stationary"
 
-    # Smooth positions
-    if smoothing == "savgol":
-        smoothed_positions, fit_velocity = smooth_positions_savgol(row_frames, cv_start, cv_end)
+    # Find first/last moving frames
+    moving = np.abs(deltas) > stationary_thresh
+    if np.any(moving):
+        first_moving = int(np.argmax(moving))
+        last_moving = int(len(moving) - 1 - np.argmax(moving[::-1])) + 1
     else:
-        smoothed_positions, fit_velocity = fit_linear_positions(row_frames, cv_start, cv_end)
+        first_moving = 0
+        last_moving = len(all_row_frames)
+    row_frames = all_row_frames[first_moving:last_moving]
+
+    # Savgol smooth ALL frame positions (handles accel zones naturally)
+    raw_positions = np.array([f["x_start"] for f in row_frames])
+    n = len(raw_positions)
+    if n >= 7:
+        window = min(7, n if n % 2 == 1 else n - 1)
+        all_positions = savgol_filter(raw_positions, window, 2).tolist()
+    else:
+        all_positions = raw_positions.tolist()
 
     # Apply hysteresis correction to -X rows
     if direction < 0 and hysteresis_um != 0:
-        smoothed_positions = [x + hysteresis_um for x in smoothed_positions]
+        all_positions = [x + hysteresis_um for x in all_positions]
 
     # Canvas width in global coordinates
     canvas_w_um = (global_x_max - global_x_min) + fov_width_um
     canvas_w = int(canvas_w_um / um_per_px)
     canvas_h = frame_h
 
-    # Blend width for X
-    if len(smoothed_positions) > 1:
-        frame_spacing_um = abs(smoothed_positions[1] - smoothed_positions[0])
+    # Blend width for X (based on mid-row frame spacing, i.e. CV region)
+    mid = len(all_positions) // 2
+    mid_positions = all_positions[max(0, mid - 5) : mid + 5]
+    if len(mid_positions) > 1:
+        frame_spacing_um = abs(mid_positions[1] - mid_positions[0])
         frame_spacing_px = int(frame_spacing_um / um_per_px)
     else:
         frame_spacing_px = frame_w
@@ -280,8 +283,8 @@ def stitch_row_to_global(
     # Create canvas
     canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
 
-    # Determine which frames fall within global range
-    num_frames = len(cv_frames)
+    # Use all frames (including accel zones)
+    num_frames = len(row_frames)
 
     # For snake pattern, process frames in the order that places them left-to-right
     if direction < 0:
@@ -289,22 +292,39 @@ def stitch_row_to_global(
     else:
         indices = list(range(num_frames))
 
+    # Compute per-frame velocity from smoothed positions for deskew
+    if deskew:
+        readout_time = meta["camera"]["readout_time_s"]
+        times = np.array([(f["t_start"] + f["t_end"]) / 2 for f in row_frames])
+        positions_arr = np.array(all_positions)
+        # Central differences for interior, forward/backward at edges
+        frame_velocities = np.gradient(positions_arr, times)
+    else:
+        frame_velocities = np.zeros(num_frames)
+
     # Build work list: filter to frames that overlap canvas
     canvas_right_um = global_x_max + fov_width_um
     work_items = []
     for seq_i, i in enumerate(indices):
-        x_um = smoothed_positions[i]
+        x_um = all_positions[i]
         if x_um + fov_width_um < global_x_min or x_um > canvas_right_um:
             continue
-        frame_idx = row["frame_start"] + cv_start + i
+        frame_idx = row["frame_start"] + first_moving + i
+
+        # Per-frame deskew from actual velocity at this frame
+        vel = frame_velocities[i]
+        shear_um = abs(vel) * readout_time if deskew else 0
+        shear_px = shear_um / um_per_px
+        frame_deskew = -shear_px * np.sign(vel)
+
         x_offset = int((x_um - global_x_min) / um_per_px)
-        work_items.append((seq_i, frame_idx, x_offset))
+        work_items.append((seq_i, frame_idx, x_offset, frame_deskew))
 
     num_work = len(work_items)
 
     def load_frame(item):
-        """Load, resize, flatfield-correct, and alpha-blend a single frame."""
-        seq_i, frame_idx, _ = item
+        """Load, resize, flatfield-correct, deskew, and alpha-blend a single frame."""
+        seq_i, frame_idx, _, frame_deskew = item
         path = scan_dir / f"frame_{frame_idx:04d}.jpg"
 
         img = Image.open(path)
@@ -324,6 +344,10 @@ def stitch_row_to_global(
             img_arr = np.clip(img_arr, 0, 255).astype(np.uint8)
             img = Image.fromarray(img_arr, mode="RGBA")
 
+        # Apply per-frame deskew (rolling shutter correction).
+        if frame_deskew != 0:
+            img = deskew_image(img, frame_deskew)
+
         if blend:
             is_first = seq_i == 0
             is_last = seq_i == num_work - 1
@@ -342,7 +366,7 @@ def stitch_row_to_global(
         loaded = [load_frame(item) for item in work_items]
 
     frames_placed = 0
-    for img, (_, _, x_offset) in zip(loaded, work_items, strict=True):
+    for img, (_, _, x_offset, _) in zip(loaded, work_items, strict=True):
         # Clamp to canvas bounds
         if x_offset < 0:
             img = img.crop((-x_offset, 0, img.width, img.height))
@@ -353,14 +377,6 @@ def stitch_row_to_global(
         if img.width > 0 and img.height > 0:
             canvas.alpha_composite(img, (x_offset, 0))
             frames_placed += 1
-
-    # Apply deskew (no expansion - clips at edges)
-    if deskew and fit_velocity != 0:
-        readout_time = meta["camera"]["readout_time_s"]
-        shear_um = abs(fit_velocity) * readout_time
-        shear_px = shear_um / um_per_px
-        correction_shear = -shear_px * direction
-        canvas = deskew_image(canvas, correction_shear, bg_color)
 
     return canvas, frames_placed
 
@@ -424,13 +440,6 @@ def main():
         help="Grid line color: name or #RRGGBBAA (default: #FFFFFF50)",
     )
     parser.add_argument("--grid-line-width", type=int, default=1, help="Grid line width in pixels (default: 1)")
-    parser.add_argument(
-        "--smoothing",
-        type=str,
-        default="linear",
-        choices=["linear", "savgol"],
-        help="Position smoothing: linear (global fit, default) or savgol (local filter)",
-    )
     parser.add_argument(
         "-o",
         "--output",
@@ -525,39 +534,35 @@ def main():
     print(f"Y step: {y_step_um:.0f} µm, Y overlap: {y_overlap_um:.0f} µm ({y_overlap_um / fov_height_um * 100:.0f}%)")
 
     # Process each row to find CV regions and global X bounds
-    smooth_fn = smooth_positions_savgol if args.smoothing == "savgol" else fit_linear_positions
-    print(f"\nDetecting constant-velocity regions (smoothing: {args.smoothing})...")
+    print("\nAnalyzing rows...")
     row_results = []
 
     for row in rows:
-        frames = meta["frames"][row["frame_start"] : row["frame_end"]]
-        cv_start, cv_end, velocity = find_constant_velocity_frames(frames)
+        row_frames = meta["frames"][row["frame_start"] : row["frame_end"]]
+        cv_start, cv_end, _velocity = find_constant_velocity_frames(row_frames)
         cv_count = cv_end - cv_start
 
-        # Get smoothed X positions for CV region (in global coordinates)
-        smoothed, fit_vel = smooth_fn(frames, cv_start, cv_end)
-        x_min = min(smoothed)
-        x_max = max(smoothed)
+        # Get smoothed X positions for CV region (used for cv_stats only)
+        smoothed = smooth_positions_savgol(row_frames, cv_start, cv_end)
+
+        # Use all frames' positions for global bounds (includes accel zones)
+        all_x = [f["x_start"] for f in row_frames]
+        x_min = min(all_x)
+        x_max = max(all_x)
 
         row_results.append(
             {
                 "row": row,
-                "cv_start": cv_start,
-                "cv_end": cv_end,
                 "cv_count": cv_count,
                 "x_min": x_min,
                 "x_max": x_max,
                 "smoothed": smoothed,
-                "velocity": velocity,
             }
         )
 
-        print(
-            f"  Row {row['row_idx']:2d}: CV frames {cv_start}-{cv_end - 1} "
-            f"({cv_count} frames), X: {x_min:.0f} - {x_max:.0f} µm"
-        )
+        print(f"  Row {row['row_idx']:2d}: {len(row_frames)} frames ({cv_count} CV), X: {x_min:.0f} - {x_max:.0f} µm")
 
-    # Find global X bounds: union of all rows
+    # Find global X bounds: union of all rows (including accel zones)
     global_x_min = min(r["x_min"] for r in row_results)
     global_x_max = max(r["x_max"] for r in row_results)
     global_x_range = global_x_max - global_x_min + fov_width_um
@@ -603,8 +608,6 @@ def main():
             flatfield=flatfield,
             flatfield_mean=flatfield_mean,
             num_threads=args.threads,
-            bg_color=bg_color,
-            smoothing=args.smoothing,
         )
 
         # Calculate Y position for this row (min Y = top of image)
