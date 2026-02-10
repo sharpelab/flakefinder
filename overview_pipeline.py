@@ -1,10 +1,11 @@
-"""Overview scan post-processing pipeline: stitch, detect chips, show results.
+"""Overview scan post-processing pipeline: rsync, stitch, detect chips, show results.
 
 Wraps the common overview workflow into a single command.
 
 Usage:
     uv run python overview_pipeline.py scans/overview_5x
     uv run python overview_pipeline.py scans/overview_5x --downsample 4 --show
+    uv run python overview_pipeline.py scans/overview_5x --local  # skip rsync
 """
 
 import argparse
@@ -17,13 +18,13 @@ REPO_DIR = Path(__file__).parent
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Stitch an overview scan and detect chips.",
+        description="Rsync an overview scan, stitch it, and detect chips.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "scan_dir",
-        type=Path,
-        help="Scan directory containing scan_meta.json and frame JPGs",
+        type=str,
+        help="Scan directory relative to flakefinder/ (e.g. scans/overview_5x)",
     )
     parser.add_argument(
         "--downsample",
@@ -32,46 +33,65 @@ def main() -> int:
         help="Downsample factor for stitching",
     )
     parser.add_argument("--show", action="store_true", help="Open the chip detection image")
+    parser.add_argument("--local", action="store_true", help="Skip rsync (data already local)")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Show full stitch output")
     args = parser.parse_args()
 
-    scan_dir = args.scan_dir.resolve()
-    if not scan_dir.is_dir():
-        print(f"Error: Not a directory: {scan_dir}")
+    local_scan_dir = (REPO_DIR / args.scan_dir).resolve()
+
+    # --- Step 1: rsync from microscope ---
+    if not args.local:
+        remote = f"sharpelab-microscope:flakefinder/{args.scan_dir}/"
+        local = f"{local_scan_dir}/"
+        print(f"Syncing {remote} -> {local}")
+        result = subprocess.run(["rsync", "-a", "--quiet", remote, local])
+        if result.returncode != 0:
+            print(f"Error: rsync failed (exit {result.returncode})")
+            return 1
+
+    if not local_scan_dir.is_dir():
+        print(f"Error: Not a directory: {local_scan_dir}")
         return 1
 
-    # --- Step 1: stitch ---
+    # --- Step 2: stitch (capture output, suppress unless verbose/error) ---
     cmd = [
         sys.executable,
         str(REPO_DIR / "stitch_area.py"),
-        str(scan_dir),
+        str(local_scan_dir),
         "--downsample",
         str(args.downsample),
     ]
-    print(f"Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd)
+    print("Stitching...")
+    if args.verbose:
+        result = subprocess.run(cmd)
+    else:
+        result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
+        if not args.verbose and result.stdout:
+            print(result.stdout)
+        if not args.verbose and result.stderr:
+            print(result.stderr, file=sys.stderr)
         print(f"Error: stitch_area failed (exit {result.returncode})")
         return 1
 
-    # --- Step 2: find chips ---
-    stitch_path = scan_dir.parent / f"{scan_dir.name}_stitch.jpg"
+    # --- Step 3: find chips (output passes through — already compact) ---
+    stitch_path = local_scan_dir.parent / f"{local_scan_dir.name}_stitch.jpg"
     if not stitch_path.exists():
         print(f"Error: expected stitch not found at {stitch_path}")
         return 1
 
     cmd = [sys.executable, str(REPO_DIR / "find_chips.py"), str(stitch_path)]
-    print(f"Running: {' '.join(cmd)}")
     result = subprocess.run(cmd)
     if result.returncode != 0:
         print(f"Error: find_chips failed (exit {result.returncode})")
         return 1
 
-    # --- Step 3: optionally show detection image ---
+    # --- Step 4: optionally show detection image ---
     detection_path = stitch_path.with_name(stitch_path.stem + "_chips_detected.png")
     if args.show and detection_path.exists():
         subprocess.run(["show", str(detection_path)])
 
-    # --- Step 4: print all artifact paths ---
+    # --- Step 5: print all artifact paths ---
     chips_json_path = stitch_path.with_name(stitch_path.stem + "_chips.json")
     print("\nArtifacts:")
     print(f"  Stitch:    {stitch_path}")
