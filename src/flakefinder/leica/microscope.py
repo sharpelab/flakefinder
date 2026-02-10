@@ -10,7 +10,7 @@ from flakefinder.types import MicroscopeDescription, Point3F
 
 from .camera import Camera
 from .core import LeicaConnection
-from .units import Lamp, Nosepiece, Shutter, Stage, ZDrive
+from .units import Aperture, Lamp, Nosepiece, Shutter, Stage, ZDrive
 
 
 class Microscope:
@@ -39,6 +39,7 @@ class Microscope:
         self._nosepiece: Nosepiece | None = None
         self._shutter: Shutter | None = None
         self._lamp: Lamp | None = None
+        self._aperture: Aperture | None = None
         self._camera: Camera | None = None
         self._camera_initialized = False
         self._context = None  # Lazy acquisition context
@@ -53,6 +54,7 @@ class Microscope:
             self._nosepiece = Nosepiece.from_connection(self._conn)
             self._shutter = Shutter.from_connection(self._conn)
             self._lamp = Lamp.from_connection(self._conn)
+            self._aperture = Aperture.from_connection(self._conn)
         except Exception:
             self._conn.disconnect()
             raise
@@ -112,6 +114,13 @@ class Microscope:
         if self._lamp is None:
             raise RuntimeError("Not connected")
         return self._lamp
+
+    @property
+    def aperture(self) -> Aperture:
+        """IL aperture diaphragm."""
+        if self._aperture is None:
+            raise RuntimeError("Not connected")
+        return self._aperture
 
     # --- Camera (lazy init) ---
 

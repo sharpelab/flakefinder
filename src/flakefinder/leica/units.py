@@ -668,6 +668,73 @@ class Lamp:
         return f"Lamp({self._name}, intensity={self.intensity}/{self._max})"
 
 
+class Aperture:
+    """Aperture diaphragm control (IL aperture on DM6M).
+
+    Usage:
+        aperture = Aperture.from_connection(conn)
+        aperture.value = aperture.max_value  # fully open (default)
+        print(f"Aperture: {aperture.value}/{aperture.max_value}")
+    """
+
+    def __init__(self, unit: Unit):
+        self._unit = unit
+        self._name = unit.GetName()
+        self._bcv: BasicControlValue = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE)
+        self._min = self._bcv.MinControlValue()
+        self._max = self._bcv.MaxControlValue()
+
+    @classmethod
+    def from_connection(cls, conn: LeicaConnection, tid: TID = TID.MICROSCOPE_IL_APERTURE_DIAPHRAGM) -> Aperture:
+        """Create Aperture from a LeicaConnection.
+
+        Args:
+            conn: Active LeicaConnection.
+            tid: Aperture type ID (default: IL aperture diaphragm).
+
+        Returns:
+            Aperture instance.
+
+        Raises:
+            LookupError: If aperture unit not found.
+        """
+        unit = find_unit(conn.root, tid)
+        if unit is None:
+            raise LookupError(f"Aperture unit not found: {tid.name}")
+        return cls(unit)
+
+    @property
+    def name(self) -> str:
+        """Aperture name from SDK."""
+        return self._name
+
+    @property
+    def value(self) -> int:
+        """Current aperture value."""
+        return self._bcv.GetControlValue()
+
+    @value.setter
+    def value(self, v: int) -> None:
+        self._bcv.SetControlValue(v)
+
+    @property
+    def min_value(self) -> int:
+        """Minimum aperture value."""
+        return self._min
+
+    @property
+    def max_value(self) -> int:
+        """Maximum aperture value."""
+        return self._max
+
+    def fully_open(self) -> None:
+        """Set aperture to maximum (fully open)."""
+        self.value = self._max
+
+    def __repr__(self) -> str:
+        return f"Aperture({self._name}, {self.value}/{self._max})"
+
+
 class Nosepiece:
     """Objective turret (nosepiece) control.
 

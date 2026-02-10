@@ -76,7 +76,7 @@ from .enums import (
 )
 from .events import AxisEvents, EventQueue, PositionMonitor, Subscription
 from .microscope import Microscope
-from .units import Axis, Lamp, MoveHandle, Nosepiece, Shutter, Stage, ZDrive, wait_all
+from .units import Aperture, Axis, Lamp, MoveHandle, Nosepiece, Shutter, Stage, ZDrive, wait_all
 from .utils import (
     UnitConverter,
     get_metrics_converter,
@@ -111,6 +111,7 @@ __all__ = [
     # Microscope facade
     "Microscope",
     # Units
+    "Aperture",
     "Axis",
     "Stage",
     "ZDrive",
