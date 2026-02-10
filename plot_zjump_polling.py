@@ -37,8 +37,7 @@ def plot_polling(scan_dir, output=None):
     x_t = np.array([(s["t_before"] + s["t_after"]) / 2 for s in polling["x_samples"]])
     x_um = np.array([s["x_um"] for s in polling["x_samples"]])
 
-    fig, (ax_z, ax_x, ax_f) = plt.subplots(3, 1, figsize=(16, 9), sharex=True,
-                                             gridspec_kw={"height_ratios": [3, 2, 1]})
+    fig, (ax_z, ax_x, ax_f) = plt.subplots(3, 1, figsize=(16, 9), sharex=True, gridspec_kw={"height_ratios": [3, 2, 1]})
     fig.suptitle(f"Full Run: {Path(scan_dir).name}", fontsize=13, fontweight="bold")
 
     # Row background shading (all panels)
@@ -53,9 +52,15 @@ def plot_polling(scan_dir, output=None):
         for ax in (ax_z, ax_x, ax_f):
             ax.axvspan(t0, t1, alpha=0.4, color=color, zorder=0)
         direction = "+X" if row["direction"] == 1 else "-X"
-        ax_z.text((t0 + t1) / 2, ax_z.get_ylim()[0] if ax_z.get_ylim()[0] != 0 else z_um.min(),
-                  f"R{row['row_idx']} ({direction})", ha="center", va="bottom",
-                  fontsize=7, alpha=0.6)
+        ax_z.text(
+            (t0 + t1) / 2,
+            ax_z.get_ylim()[0] if ax_z.get_ylim()[0] != 0 else z_um.min(),
+            f"R{row['row_idx']} ({direction})",
+            ha="center",
+            va="bottom",
+            fontsize=7,
+            alpha=0.6,
+        )
 
     # Panel 1: Z position
     ax_z.plot(z_t, z_um, "-", color="C0", linewidth=0.6, alpha=0.8)
@@ -70,10 +75,21 @@ def plot_polling(scan_dir, output=None):
     # Panel 3: Frame pacing — horizontal bars per row
     for f in frames:
         row_idx = f["row"]
-        color = "red" if f["n"] == meta["rows"][row_idx]["frame_start"] else (
-            "orange" if f["n"] == meta["rows"][row_idx]["frame_start"] + 1 else "C0")
-        ax_f.barh(row_idx, f["t_end"] - f["t_start"], left=f["t_start"],
-                  height=0.6, color=color, alpha=0.7, edgecolor="black", linewidth=0.2)
+        color = (
+            "red"
+            if f["n"] == meta["rows"][row_idx]["frame_start"]
+            else ("orange" if f["n"] == meta["rows"][row_idx]["frame_start"] + 1 else "C0")
+        )
+        ax_f.barh(
+            row_idx,
+            f["t_end"] - f["t_start"],
+            left=f["t_start"],
+            height=0.6,
+            color=color,
+            alpha=0.7,
+            edgecolor="black",
+            linewidth=0.2,
+        )
 
     # Annotate frame 0→1 gaps
     for row in rows:
@@ -81,9 +97,17 @@ def plot_polling(scan_dir, output=None):
         if len(rf) >= 2:
             dt_ms = (rf[1]["t_start"] - rf[0]["t_end"]) * 1000
             mid_t = (rf[0]["t_end"] + rf[1]["t_start"]) / 2
-            ax_f.annotate(f"{dt_ms:.0f}ms", xy=(mid_t, row["row_idx"]),
-                          ha="center", va="center", fontsize=7, color="red", fontweight="bold",
-                          xytext=(0, 10), textcoords="offset points")
+            ax_f.annotate(
+                f"{dt_ms:.0f}ms",
+                xy=(mid_t, row["row_idx"]),
+                ha="center",
+                va="center",
+                fontsize=7,
+                color="red",
+                fontweight="bold",
+                xytext=(0, 10),
+                textcoords="offset points",
+            )
 
     ax_f.set_ylabel("Row")
     ax_f.set_xlabel("Time (s)")
@@ -98,8 +122,9 @@ def plot_polling(scan_dir, output=None):
             continue
         t_mid = (rf[0]["t_start"] + rf[-1]["t_end"]) / 2
         direction = "+X" if row["direction"] == 1 else "-X"
-        ax_z.text(t_mid, ax_z.get_ylim()[1], f"R{row['row_idx']} ({direction})",
-                  ha="center", va="top", fontsize=8, alpha=0.5)
+        ax_z.text(
+            t_mid, ax_z.get_ylim()[1], f"R{row['row_idx']} ({direction})", ha="center", va="top", fontsize=8, alpha=0.5
+        )
 
     plt.tight_layout()
 

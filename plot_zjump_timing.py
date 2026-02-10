@@ -50,16 +50,31 @@ def plot_row_timing(ax_x, ax_z, meta, row_idx, label_prefix=""):
         ax_x.axvspan(ft_start, ft_end, alpha=alpha, color=color, zorder=0)
 
         # Z error markers
-        ax_z.plot(ft_mid, f["z_error"], "o", color=color, markersize=6 if i < 2 else 3,
-                  zorder=5, markeredgecolor="black", markeredgewidth=0.5)
+        ax_z.plot(
+            ft_mid,
+            f["z_error"],
+            "o",
+            color=color,
+            markersize=6 if i < 2 else 3,
+            zorder=5,
+            markeredgecolor="black",
+            markeredgewidth=0.5,
+        )
 
     # Annotate frame 0→1 gap
     if len(frames) >= 2:
         dt = (frames[1]["t_start"] - frames[0]["t_start"]) * 1000
         mid_t = (frames[0]["t_start"] + frames[1]["t_start"]) / 2 - t0
-        ax_x.annotate(f"{dt:.0f}ms", xy=(mid_t, ax_x.get_ylim()[0]),
-                      xytext=(mid_t, ax_x.get_ylim()[0]),
-                      ha="center", va="bottom", fontsize=7, color="red", fontweight="bold")
+        ax_x.annotate(
+            f"{dt:.0f}ms",
+            xy=(mid_t, ax_x.get_ylim()[0]),
+            xytext=(mid_t, ax_x.get_ylim()[0]),
+            ha="center",
+            va="bottom",
+            fontsize=7,
+            color="red",
+            fontweight="bold",
+        )
 
     # Z error line
     frame_t = [(f["t_start"] + f["t_end"]) / 2 - t0 for f in frames]
@@ -79,8 +94,7 @@ def plot_scan(scan_dir, scan_label=None):
     if scan_label is None:
         scan_label = Path(scan_dir).name
 
-    fig, axes = plt.subplots(n_rows, 2, figsize=(14, 3 * n_rows), squeeze=False,
-                             gridspec_kw={"width_ratios": [2, 1]})
+    fig, axes = plt.subplots(n_rows, 2, figsize=(14, 3 * n_rows), squeeze=False, gridspec_kw={"width_ratios": [2, 1]})
     fig.suptitle(f"Z-Jump Timing Analysis: {scan_label}", fontsize=12, fontweight="bold")
 
     for row_idx in range(n_rows):
@@ -122,8 +136,7 @@ def plot_multi_scan_comparison(scan_dirs, labels=None):
     ax.scatter(all_gaps, all_jumps, s=40, alpha=0.7, edgecolors="black", linewidths=0.5)
 
     for gap, jump, lbl in zip(all_gaps, all_jumps, all_labels, strict=False):
-        ax.annotate(lbl, (gap, jump), fontsize=6, alpha=0.6,
-                    xytext=(3, 3), textcoords="offset points")
+        ax.annotate(lbl, (gap, jump), fontsize=6, alpha=0.6, xytext=(3, 3), textcoords="offset points")
 
     # Fit line
     gaps = np.array(all_gaps)
@@ -131,8 +144,14 @@ def plot_multi_scan_comparison(scan_dirs, labels=None):
     if len(gaps) > 2:
         coeffs = np.polyfit(gaps, jumps, 1)
         x_fit = np.linspace(gaps.min(), gaps.max(), 100)
-        ax.plot(x_fit, np.polyval(coeffs, x_fit), "--", color="red", alpha=0.5,
-                label=f"fit: {coeffs[0]:.3f}·dt + {coeffs[1]:.1f}")
+        ax.plot(
+            x_fit,
+            np.polyval(coeffs, x_fit),
+            "--",
+            color="red",
+            alpha=0.5,
+            label=f"fit: {coeffs[0]:.3f}·dt + {coeffs[1]:.1f}",
+        )
         r2 = 1 - np.sum((jumps - np.polyval(coeffs, gaps)) ** 2) / np.sum((jumps - jumps.mean()) ** 2)
         ax.set_title(f"Frame 0→1 Gap vs Z-Jump (R²={r2:.3f})", fontweight="bold")
         ax.legend()
@@ -146,11 +165,15 @@ def plot_multi_scan_comparison(scan_dirs, labels=None):
 
 
 if __name__ == "__main__":
-    scan_dirs = sys.argv[1:] if len(sys.argv) > 1 else [
-        "scans/chip7_baseline_3row",
-        *[f"scans/chip7_repeat_{i}" for i in range(1, 6)],
-        "scans/settle_test_steep",
-    ]
+    scan_dirs = (
+        sys.argv[1:]
+        if len(sys.argv) > 1
+        else [
+            "scans/chip7_baseline_3row",
+            *[f"scans/chip7_repeat_{i}" for i in range(1, 6)],
+            "scans/settle_test_steep",
+        ]
+    )
 
     # Per-scan row plots for the first scan
     fig1 = plot_scan(scan_dirs[0])

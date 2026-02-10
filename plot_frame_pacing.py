@@ -38,8 +38,16 @@ def plot_pacing(scan_dirs, output=None):
             is_f0 = f["n"] == row["frame_start"]
             is_f1 = f["n"] == row["frame_start"] + 1
             color = "red" if is_f0 else ("orange" if is_f1 else row_colors[ri % len(row_colors)])
-            ax.barh(ri, f["t_end"] - f["t_start"], left=f["t_start"],
-                    height=0.6, color=color, alpha=0.7, edgecolor="black", linewidth=0.15)
+            ax.barh(
+                ri,
+                f["t_end"] - f["t_start"],
+                left=f["t_start"],
+                height=0.6,
+                color=color,
+                alpha=0.7,
+                edgecolor="black",
+                linewidth=0.15,
+            )
 
         # Annotate f0→f1 gaps
         for row in rows:
@@ -47,9 +55,17 @@ def plot_pacing(scan_dirs, output=None):
             if len(rf) >= 2:
                 dt01_ms = (rf[1]["t_start"] - rf[0]["t_start"]) * 1000
                 mid_t = (rf[0]["t_end"] + rf[1]["t_start"]) / 2
-                ax.annotate(f"{dt01_ms:.0f}ms", xy=(mid_t, row["row_idx"]),
-                            ha="center", va="center", fontsize=7, color="red", fontweight="bold",
-                            xytext=(0, -12), textcoords="offset points")
+                ax.annotate(
+                    f"{dt01_ms:.0f}ms",
+                    xy=(mid_t, row["row_idx"]),
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                    color="red",
+                    fontweight="bold",
+                    xytext=(0, -12),
+                    textcoords="offset points",
+                )
 
         ax.set_ylabel("Row")
         ax.set_title(label, fontsize=10, loc="left", fontweight="bold")
@@ -66,8 +82,12 @@ def plot_pacing(scan_dirs, output=None):
 
 
 if __name__ == "__main__":
-    dirs = sys.argv[1:] if len(sys.argv) > 1 else [
-        "scans/area_facade_test",
-        "scans/chip7_baseline_3row",
-    ]
+    dirs = (
+        sys.argv[1:]
+        if len(sys.argv) > 1
+        else [
+            "scans/area_facade_test",
+            "scans/chip7_baseline_3row",
+        ]
+    )
     plot_pacing(dirs)

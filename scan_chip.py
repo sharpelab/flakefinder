@@ -45,8 +45,6 @@ from flakefinder.scan_utils import (
 )
 from flakefinder.types import CameraMeta, OpticsMeta
 
-MICROSCOPE_DESCRIPTION = os.path.join(os.path.dirname(__file__), "microscope_description.json")
-
 
 def interpolate_z_position(t, z_samples):
     """Interpolate Z position at time t from (t, z_um) samples."""
@@ -288,7 +286,7 @@ Examples:
         os.makedirs(args.output)
 
     # ---- Compute frame dimensions from microscope description ----
-    desc = require_microscope_description(MICROSCOPE_DESCRIPTION)
+    desc = require_microscope_description()
 
     obj_mag_for_plan = None
     if args.objective_mag is not None:
@@ -387,6 +385,7 @@ Examples:
     from flakefinder.leica import Microscope, wait_all
 
     with Microscope() as scope:
+        scope.validate_description(desc)
         stage = scope.stage
         z_drive = scope.z
 

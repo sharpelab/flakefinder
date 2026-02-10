@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from flakefinder.types import (
     AxisDescription,
@@ -16,21 +17,20 @@ from flakefinder.types import (
     StageDescription,
 )
 
+_DESCRIPTION_PATH = Path(__file__).parent / "microscope_description.json"
 
-def require_microscope_description(path: str) -> MicroscopeDescription:
-    """Load and parse microscope hardware description JSON.
 
-    Args:
-        path: Path to microscope_description.json.
+def require_microscope_description() -> MicroscopeDescription:
+    """Load and parse the bundled microscope hardware description.
 
     Returns:
         MicroscopeDescription.
 
     Raises:
-        FileNotFoundError: If the file does not exist.
+        FileNotFoundError: If the bundled file is missing.
         json.JSONDecodeError: If the file is not valid JSON.
     """
-    with open(path) as f:
+    with open(_DESCRIPTION_PATH) as f:
         raw = json.load(f)
 
     raw_camera = raw.get("camera", {})

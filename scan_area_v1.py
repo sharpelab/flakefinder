@@ -18,8 +18,6 @@ from flakefinder.data_utils import compute_frame_size_um, require_microscope_des
 from flakefinder.scan_utils import build_lighting_meta, interpolate_position
 from flakefinder.types import CameraMeta, OpticsMeta
 
-MICROSCOPE_DESCRIPTION = os.path.join(os.path.dirname(__file__), "microscope_description.json")
-
 
 def parse_area_rect(value: str) -> tuple[float, float, float, float]:
     """Parse area rectangle from comma-separated string.
@@ -217,7 +215,7 @@ Examples:
     binning_idx = args.binning - 1
 
     # Pre-validation using microscope description (avoids slow hardware connection)
-    desc = require_microscope_description(MICROSCOPE_DESCRIPTION)
+    desc = require_microscope_description()
 
     # Validate area-rect against stage limits
     if args.area_rect:
@@ -273,6 +271,7 @@ Examples:
     print("=" * 50)
 
     with Microscope() as scope:
+        scope.validate_description(desc)
         stage = scope.stage
         z = scope.z
         x_bcv = stage.x.bcv  # Native position reader
@@ -428,26 +427,9 @@ Examples:
         # Register scan's image handler (after autofocus, which uses its own handler)
         context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(on_image)
 
-        # Calculate scan area bounds
+        # Calculate scan area bounds (already validated pre-connection)
         if args.area_rect:
-            try:
-                x_min, x_max, y_min, y_max = parse_area_rect(args.area_rect)
-                # Validate against stage limits (hard fail, no clamping)
-                if x_min < stage.x.min_um:
-                    print(f"Error: x_min ({x_min:.0f}) is below stage minimum ({stage.x.min_um:.0f})")
-                    return 1
-                if x_max > stage.x.max_um:
-                    print(f"Error: x_max ({x_max:.0f}) exceeds stage maximum ({stage.x.max_um:.0f})")
-                    return 1
-                if y_min < stage.y.min_um:
-                    print(f"Error: y_min ({y_min:.0f}) is below stage minimum ({stage.y.min_um:.0f})")
-                    return 1
-                if y_max > stage.y.max_um:
-                    print(f"Error: y_max ({y_max:.0f}) exceeds stage maximum ({stage.y.max_um:.0f})")
-                    return 1
-            except ValueError as e:
-                print(f"Error: {e}")
-                return 1
+            x_min, x_max, y_min, y_max = parse_area_rect(args.area_rect)
         else:
             margin = args.margin
             x_min = stage.x.min_um + margin

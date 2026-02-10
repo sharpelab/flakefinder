@@ -128,8 +128,6 @@ def build_z_profile(surface_name: str, x_start_um: float, x_end_um: float):
 # Helpers from scan_area_v1.py
 # ============================================================================
 
-MICROSCOPE_DESCRIPTION = os.path.join(os.path.dirname(__file__), "microscope_description.json")
-
 
 def interpolate_position(t, samples):
     """Interpolate position at time t from (t_before, t_after, x_um) samples."""
@@ -437,7 +435,8 @@ Examples:
         # Compute frame size in µm
         from flakefinder.data_utils import compute_frame_size_um, require_microscope_description
 
-        desc = require_microscope_description(MICROSCOPE_DESCRIPTION)
+        desc = require_microscope_description()
+        scope.validate_description(desc)
         actual_frame_size = compute_frame_size_um(desc.camera, objective_mag, actual_binning_idx)
         if actual_frame_size is None:
             print("Error: Could not determine frame size. Check objective/camera.")

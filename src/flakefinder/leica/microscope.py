@@ -6,7 +6,7 @@ per-script boilerplate for connection, subsystem lookup, and UCAPI registration.
 
 import contextlib
 
-from flakefinder.types import Point3F
+from flakefinder.types import MicroscopeDescription, Point3F
 
 from .camera import Camera
 from .core import LeicaConnection
@@ -238,6 +238,44 @@ class Microscope:
         """Close shutter and turn lamp off."""
         self.shutter.close()
         self.lamp.off()
+
+    def validate_description(self, desc: MicroscopeDescription) -> None:
+        """Validate a microscope description against live hardware.
+
+        Call after connecting to ensure pre-connection checks (area bounds,
+        frame size estimates) used trustworthy values.
+
+        Args:
+            desc: Parsed MicroscopeDescription to validate.
+
+        Raises:
+            ValueError: If any description value doesn't match live hardware.
+        """
+        errors: list[str] = []
+        tol = 1.0  # µm tolerance for float conversion differences
+
+        # Stage axes
+        for name, desc_axis, live_axis in [
+            ("X", desc.stage.x, self.stage.x),
+            ("Y", desc.stage.y, self.stage.y),
+            ("Z", desc.stage.z, self.z),
+        ]:
+            if abs(desc_axis.min_um - live_axis.min_um) > tol:
+                errors.append(f"{name} min: desc={desc_axis.min_um:.1f}, live={live_axis.min_um:.1f}")
+            if abs(desc_axis.max_um - live_axis.max_um) > tol:
+                errors.append(f"{name} max: desc={desc_axis.max_um:.1f}, live={live_axis.max_um:.1f}")
+
+        # Nosepiece objectives
+        live_mags = self.nosepiece.magnifications
+        for pos, obj in desc.objectives.items():
+            live_mag = live_mags.get(pos)
+            if live_mag is None:
+                errors.append(f"Objective pos {pos}: in description but not on nosepiece")
+            elif obj.magnification != live_mag:
+                errors.append(f"Objective pos {pos}: desc={obj.magnification}x, live={live_mag}x")
+
+        if errors:
+            raise ValueError("Microscope description does not match live hardware:\n  " + "\n  ".join(errors))
 
     def create_acquisition_context(self):
         """Create a new CancellableImageAcquisitionContext.
