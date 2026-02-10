@@ -25,20 +25,9 @@ import numpy as np
 from PIL import Image
 
 from flakefinder.leica.units import Nosepiece
-from flakefinder.scan_utils import parse_white_balance
+from flakefinder.scan_utils import parse_position, parse_white_balance
 
 DEFAULT_OUTPUT_DIR = Path(__file__).parent / "calibration"
-
-
-def parse_position(value: str) -> tuple[float, float]:
-    """Parse X,Y position from string."""
-    parts = value.split(",")
-    if len(parts) != 2:
-        raise ValueError("Position must be X,Y (2 values)")
-    try:
-        return float(parts[0]), float(parts[1])
-    except ValueError as e:
-        raise ValueError("Position values must be numbers") from e
 
 
 def resolve_objective_mag(objective_mag: str | None, objective_pos: int | None) -> float:
@@ -212,7 +201,11 @@ Examples:
     )
     parser.add_argument("--objective-pos", type=int, metavar="POS", help="Objective by turret position (1-6)")
     parser.add_argument(
-        "--position", "-p", type=str, default=None, help="Stage position X,Y in µm (default: use current position)"
+        "--position",
+        "-p",
+        type=parse_position,
+        default=None,
+        help="Stage position X,Y in µm (default: use current position)",
     )
     parser.add_argument("--frames", "-n", type=int, default=5, help="Number of frames to average (default: 5)")
     parser.add_argument(
@@ -251,13 +244,7 @@ Examples:
         print(f"Error: {e}")
         return 1
 
-    position = None
-    if args.position:
-        try:
-            position = parse_position(args.position)
-        except ValueError as e:
-            print(f"Error: {e}")
-            return 1
+    position = args.position  # Already parsed by argparse via type=parse_position
 
     # Create output directory
     args.output.mkdir(parents=True, exist_ok=True)

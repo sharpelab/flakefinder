@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 
 from flakefinder.data_utils import compute_frame_size_um, require_microscope_description
-from flakefinder.scan_utils import build_lighting_meta, interpolate_position, parse_white_balance
+from flakefinder.scan_utils import build_lighting_meta, interpolate_position, parse_position, parse_white_balance
 from flakefinder.types import CameraMeta, OpticsMeta
 
 
@@ -50,27 +50,6 @@ def parse_area_rect(value: str) -> tuple[float, float, float, float]:
         raise ValueError(f"--area-rect: y_min and y_max cannot be equal ({y_min})")
 
     return (x_min, x_max, y_min, y_max)
-
-
-def parse_xy_position(value: str) -> tuple[float, float]:
-    """Parse XY position from comma-separated string.
-
-    Args:
-        value: "x,y" in µm
-
-    Returns:
-        (x, y) tuple
-
-    Raises:
-        ValueError: If format is invalid.
-    """
-    parts = value.split(",")
-    if len(parts) != 2:
-        raise ValueError("Position must be x,y (2 values)")
-    try:
-        return float(parts[0]), float(parts[1])
-    except ValueError:
-        raise ValueError("Position values must be numbers") from None
 
 
 def main():
@@ -143,7 +122,7 @@ Examples:
     )
     motion_group.add_argument(
         "--auto-focus-pos",
-        type=str,
+        type=parse_position,
         metavar="X,Y",
         help="XY position for autofocus calibration before scan (µm)",
     )
@@ -330,15 +309,9 @@ Examples:
         camera.gain_rgb = wb
         camera.gamma = args.gamma
 
-        # Parse autofocus position if specified (actual autofocus runs after context setup)
-        auto_focus_pos = None
+        # Autofocus position (already parsed by argparse via type=parse_position)
+        auto_focus_pos = args.auto_focus_pos
         af_result = None
-        if args.auto_focus_pos:
-            try:
-                auto_focus_pos = parse_xy_position(args.auto_focus_pos)
-            except ValueError as e:
-                print(f"Error parsing autofocus position: {e}")
-                return 1
 
         # Read camera properties for metadata
         frame_width_px, frame_height_px = camera.frame_size_px

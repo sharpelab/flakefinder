@@ -24,6 +24,27 @@ from flakefinder.types import (
 _BINNING_FACTOR = {0: 1, 1: 2, 2: 3}
 
 
+def parse_position(s: str) -> Point2F:
+    """Parse 'X,Y' position string into Point2F.
+
+    Intended as an argparse type= callback:
+        parser.add_argument("--position", type=parse_position, ...)
+
+    Args:
+        s: Comma-separated string (e.g., "50000,35000") in µm.
+
+    Returns:
+        Point2F(x, y).
+    """
+    parts = s.split(",")
+    if len(parts) != 2:
+        raise ArgumentTypeError(f"expected 2 comma-separated values (X,Y), got: {s}")
+    try:
+        return Point2F(float(parts[0]), float(parts[1]))
+    except ValueError as e:
+        raise ArgumentTypeError(f"values must be numbers, got: {s}") from e
+
+
 def parse_white_balance(s: str) -> GainRGB:
     """Parse 'B,G,R' white balance string into GainRGB.
 
