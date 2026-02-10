@@ -38,13 +38,12 @@ from flakefinder.data_utils import (
     require_microscope_description,
 )
 from flakefinder.scan_utils import (
-    build_lighting_meta,
+    build_microscope_meta,
     compute_planar_scan_plan,
     compute_plane_z,
     interpolate_position,
     parse_white_balance,
 )
-from flakefinder.types import CameraMeta, OpticsMeta
 
 
 def interpolate_z_position(t, z_samples):
@@ -401,9 +400,6 @@ Examples:
             else:
                 print(f"Objective: already at {scope.objective_mag}x")
 
-        objective_mag = scope.objective_mag
-        objective_idx = scope.nosepiece.position
-
         # Lighting
         scope.light_on()
 
@@ -419,25 +415,17 @@ Examples:
         camera.gain_rgb = wb
         camera.gamma = args.gamma
 
-        # Read camera properties
-        frame_width_px, frame_height_px = camera.frame_size_px
-        sensor_width_px, sensor_height_px = camera.sensor_size_px
-        pixel_size_x_um, pixel_size_y_um = camera.pixel_size_um
-        physical_pixel_x_um, physical_pixel_y_um = camera.physical_pixel_size_um
-        readout_time = camera.readout_time_s
-        actual_exposure = camera.exposure_time
-        actual_binning_idx = camera.binning
-        actual_binning = desc.camera.binning_levels[actual_binning_idx].factor
+        # Build microscope metadata (reads all values back from hardware)
+        micro_meta = build_microscope_meta(scope)
+        cam_meta = micro_meta["camera"]
+        optics_meta = micro_meta["optics"]
 
-        # Validate frame size against plan using actual binning
-        actual_frame_size = compute_frame_size_um(desc.camera, objective_mag, actual_binning_idx)
-        if actual_frame_size is None:
+        # Validate frame size against plan
+        frame_width_um = optics_meta["frame_width_um"]
+        frame_height_um = optics_meta["frame_height_um"]
+        if frame_width_um is None or frame_height_um is None:
             print("Error: Could not determine frame size. Check objective/camera.")
             return 1
-        frame_width_um, frame_height_um = actual_frame_size
-        sample_pixel_x_um = frame_width_um / frame_width_px
-        sample_pixel_y_um = frame_height_um / frame_height_px
-
         if abs(frame_width_um - plan.frame_width_um) > 1.0:
             print(f"ABORT: Camera frame width {frame_width_um:.1f} != plan {plan.frame_width_um:.1f} µm")
             return 1
@@ -445,13 +433,13 @@ Examples:
             print(f"ABORT: Camera frame height {frame_height_um:.1f} != plan {plan.frame_height_um:.1f} µm")
             return 1
 
-        exp_str = f"{actual_exposure * 1000:.2f}ms" if actual_exposure else "?"
-        print(f"Camera: {camera.name}")
-        print(f"  Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}, Gain: {args.gain}")
+        exp_str = f"{cam_meta['exposure_s'] * 1000:.2f}ms" if cam_meta["exposure_s"] else "?"
+        print(f"Camera: {cam_meta['name']}")
+        print(f"  Binning: {cam_meta['binning']}x{cam_meta['binning']}, Exposure: {exp_str}, Gain: {cam_meta['gain']}")
         print(f"  Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
-        print(f"  Frame: {frame_width_px}x{frame_height_px} px")
+        print(f"  Frame: {cam_meta['frame_width_px']}x{cam_meta['frame_height_px']} px")
         print(f"  FOV: {frame_width_um:.1f} x {frame_height_um:.1f} µm (matches plan)")
-        print(f"  Objective: {objective_mag}x")
+        print(f"  Objective: {optics_meta['objective_mag']}x")
         print()
 
         # ---- Set up acquisition context ----
@@ -935,32 +923,9 @@ Examples:
                     "z_jump_neg_um": dir_stats.get(-1, {}).get("z_jump_um"),
                 },
             },
-            "camera": CameraMeta(
-                name=camera.name,
-                exposure_s=actual_exposure,
-                gain=args.gain,
-                binning=actual_binning,
-                readout_time_s=readout_time,
-                frame_width_px=frame_width_px,
-                frame_height_px=frame_height_px,
-                pixel_size_x_um=pixel_size_x_um,
-                pixel_size_y_um=pixel_size_y_um,
-                sensor_width_px=sensor_width_px,
-                sensor_height_px=sensor_height_px,
-                physical_pixel_x_um=physical_pixel_x_um,
-                physical_pixel_y_um=physical_pixel_y_um,
-                white_balance_bgr=[wb.blue, wb.green, wb.red],
-                gamma=args.gamma,
-            ),
-            "optics": OpticsMeta(
-                objective_mag=objective_mag,
-                objective_idx=objective_idx,
-                sample_pixel_x_um=sample_pixel_x_um,
-                sample_pixel_y_um=sample_pixel_y_um,
-                frame_width_um=frame_width_um,
-                frame_height_um=frame_height_um,
-            ),
-            "lighting": build_lighting_meta(lamp=scope.lamp, shutter=scope.shutter),
+            "camera": cam_meta,
+            "optics": optics_meta,
+            "lighting": micro_meta["lighting"],
             "rows": rows_meta,
             "position_stream": all_position_samples,
             "frames": saved_frames_meta,

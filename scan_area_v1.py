@@ -15,8 +15,7 @@ import time
 from datetime import datetime
 
 from flakefinder.data_utils import compute_frame_size_um, require_microscope_description
-from flakefinder.scan_utils import build_lighting_meta, interpolate_position, parse_position, parse_white_balance
-from flakefinder.types import CameraMeta, OpticsMeta
+from flakefinder.scan_utils import build_microscope_meta, interpolate_position, parse_position, parse_white_balance
 
 
 def parse_area_rect(value: str) -> tuple[float, float, float, float]:
@@ -259,9 +258,6 @@ Examples:
             else:
                 print(f"Objective: already at {scope.objective_mag}x")
 
-        objective_mag = scope.objective_mag
-        objective_idx = scope.nosepiece.position
-
         # Move Z if requested (after objective switch, before scan)
         if args.z is not None:
             current_z = z.position_um
@@ -313,44 +309,41 @@ Examples:
         auto_focus_pos = args.auto_focus_pos
         af_result = None
 
-        # Read camera properties for metadata
-        frame_width_px, frame_height_px = camera.frame_size_px
-        sensor_width_px, sensor_height_px = camera.sensor_size_px
-        pixel_size_x_um, pixel_size_y_um = camera.pixel_size_um
-        physical_pixel_x_um, physical_pixel_y_um = camera.physical_pixel_size_um
-        readout_time = camera.readout_time_s
-        actual_exposure = camera.exposure_time
-        actual_binning_idx = camera.binning
-        actual_binning = desc.camera.binning_levels[actual_binning_idx].factor
+        # Build microscope metadata (reads all values back from hardware)
+        micro_meta = build_microscope_meta(scope)
+        cam_meta = micro_meta["camera"]
+        optics_meta = micro_meta["optics"]
+
+        # Validate frame size
+        frame_width_um = optics_meta["frame_width_um"]
+        frame_height_um = optics_meta["frame_height_um"]
+        if frame_width_um is None or frame_height_um is None:
+            print("Error: Could not determine frame size. Check objective/camera.")
+            return 1
 
         # Build readout info string
         readout_fps = ""
-        if readout_time:
-            readout_fps = f", Readout: {readout_time * 1000:.1f}ms ({1 / readout_time:.0f} fps)"
+        if cam_meta["readout_time_s"]:
+            rt = cam_meta["readout_time_s"]
+            readout_fps = f", Readout: {rt * 1000:.1f}ms ({1 / rt:.0f} fps)"
 
-        # Compute frame size in µm using actual binning
-        actual_frame_size = compute_frame_size_um(desc.camera, objective_mag, actual_binning_idx)
-        if actual_frame_size is None:
-            print("Error: Could not determine frame size. Check objective/camera.")
-            return 1
-        frame_width_um, frame_height_um = actual_frame_size
-        sample_pixel_x_um = frame_width_um / frame_width_px
-        sample_pixel_y_um = frame_height_um / frame_height_px
-
-        print(f"Camera: {camera.name}")
-        exp_str = f"{actual_exposure * 1000:.1f}ms" if actual_exposure else "?"
-        print(f"  Trigger: CONTINUOUS, Binning: {actual_binning}x{actual_binning}, Exposure: {exp_str}{readout_fps}")
-        print(f"  White balance (B,G,R): {wb.blue}, {wb.green}, {wb.red}")
-        print(f"  Gamma: {args.gamma}")
-        print(f"  Frame: {frame_width_px}x{frame_height_px} px")
+        print(f"Camera: {cam_meta['name']}")
+        exp_str = f"{cam_meta['exposure_s'] * 1000:.1f}ms" if cam_meta["exposure_s"] else "?"
+        binning = cam_meta["binning"]
+        print(f"  Trigger: CONTINUOUS, Binning: {binning}x{binning}, Exposure: {exp_str}{readout_fps}")
+        wb_bgr = cam_meta["white_balance_bgr"]
+        print(f"  White balance (B,G,R): {wb_bgr[0]}, {wb_bgr[1]}, {wb_bgr[2]}")
+        print(f"  Gamma: {cam_meta['gamma']}")
+        print(f"  Frame: {cam_meta['frame_width_px']}x{cam_meta['frame_height_px']} px")
         print(f"  FOV: {frame_width_um:.2f} x {frame_height_um:.2f} µm")
-        print(f"  Objective: {objective_mag}x")
+        print(f"  Objective: {optics_meta['objective_mag']}x")
         if args.downsample > 1:
             print(f"  Downsample: {args.downsample}x")
 
         # Print lighting info
-        print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
-        print(f"Shutter: {scope.shutter.name}, {'open' if scope.shutter.is_open else 'closed'}")
+        light = micro_meta["lighting"]
+        print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({light['lamp_intensity']}/{light['lamp_max_intensity']})")
+        print(f"Shutter: {light['shutter_name']}, {'open' if light['shutter_open'] else 'closed'}")
 
         # Set up acquisition context
         from LeicaMicrosystems.HardwareModel import Extensions
@@ -518,33 +511,10 @@ Examples:
             }
             if auto_focus_pos
             else None,
-            # Camera and optics metadata
-            "camera": CameraMeta(
-                name=camera.name,
-                exposure_s=actual_exposure,
-                gain=args.gain,
-                binning=actual_binning,
-                readout_time_s=readout_time,
-                frame_width_px=frame_width_px,
-                frame_height_px=frame_height_px,
-                pixel_size_x_um=pixel_size_x_um,
-                pixel_size_y_um=pixel_size_y_um,
-                sensor_width_px=sensor_width_px,
-                sensor_height_px=sensor_height_px,
-                physical_pixel_x_um=physical_pixel_x_um,
-                physical_pixel_y_um=physical_pixel_y_um,
-                white_balance_bgr=[wb.blue, wb.green, wb.red],
-                gamma=args.gamma,
-            ),
-            "optics": OpticsMeta(
-                objective_mag=objective_mag,
-                objective_idx=objective_idx,
-                sample_pixel_x_um=sample_pixel_x_um,
-                sample_pixel_y_um=sample_pixel_y_um,
-                frame_width_um=frame_width_um,
-                frame_height_um=frame_height_um,
-            ),
-            "lighting": build_lighting_meta(lamp=scope.lamp, shutter=scope.shutter),
+            # Microscope metadata (camera, optics, lighting)
+            "camera": cam_meta,
+            "optics": optics_meta,
+            "lighting": micro_meta["lighting"],
             "rows": [],
         }
 
