@@ -375,13 +375,13 @@ def main():
     parser.add_argument(
         "--contour-spacing-mm",
         type=float,
-        default=5.0,
+        default=15.0,
         help="Target spacing between contour points in mm (count = perimeter/spacing, clamped to 4-24)",
     )
     parser.add_argument(
         "--grid-spacing-um",
         type=float,
-        default=4500,
+        default=10000,
         help="Interior grid spacing in µm",
     )
     parser.add_argument(
