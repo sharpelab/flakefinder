@@ -239,10 +239,11 @@ def build_lighting_meta(
     *,
     lamp: Any = None,
     shutter: Any = None,
+    aperture: Any = None,
 ) -> LightingMeta:
     """Build lighting metadata dict from hardware objects.
 
-    lamp/shutter are Leica SDK objects (Lamp, Shutter) — typed as Any to avoid
+    lamp/shutter/aperture are Leica SDK objects — typed as Any to avoid
     coupling this module to the leica package.
     """
     return LightingMeta(
@@ -251,6 +252,8 @@ def build_lighting_meta(
         lamp_max_intensity=lamp.max_intensity if lamp else None,
         shutter_name=shutter.name if shutter else None,
         shutter_open=shutter.is_open if shutter else None,
+        aperture_value=aperture.value if aperture else None,
+        aperture_max_value=aperture.max_value if aperture else None,
     )
 
 
@@ -334,5 +337,5 @@ def build_microscope_meta(scope: Any) -> MicroscopeMeta:
     return MicroscopeMeta(
         camera=build_camera_meta(scope.camera),
         optics=build_optics_meta(nosepiece=scope.nosepiece, camera=scope.camera),
-        lighting=build_lighting_meta(lamp=scope.lamp, shutter=scope.shutter),
+        lighting=build_lighting_meta(lamp=scope.lamp, shutter=scope.shutter, aperture=scope.aperture),
     )

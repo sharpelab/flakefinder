@@ -7,7 +7,7 @@ Usage:
     python capture_util.py output.jpg --downsample 2     # Downsample 2x
     python capture_util.py output.jpg --lamp 80          # Set lamp to 80%
     python capture_util.py output.jpg --exposure 0.05    # 50ms exposure
-    python capture_util.py output.jpg --wb 1.2,1.0,0.9   # White balance (R,G,B)
+    python capture_util.py output.jpg --white-balance 2.51,1.02,1.41  # White balance (B,G,R)
 """
 
 import argparse
@@ -15,42 +15,9 @@ import sys
 
 from PIL import Image as PILImage
 
-from flakefinder.data_utils import require_microscope_description
+from cli_utils import report_status
 from flakefinder.leica import Microscope
-
-
-def report_status(scope: Microscope) -> None:
-    """Print current microscope status."""
-    # Stage XY
-    x, y = scope.stage.position_um
-    print(f"Stage X: {x:.1f} µm ({scope.stage.x.min_um:.0f} - {scope.stage.x.max_um:.0f})")
-    print(f"Stage Y: {y:.1f} µm ({scope.stage.y.min_um:.0f} - {scope.stage.y.max_um:.0f})")
-
-    # Z axis
-    print(f"Stage Z: {scope.z.position_um:.1f} µm ({scope.z.min_um:.0f} - {scope.z.max_um:.0f})")
-
-    # Nosepiece/objective
-    mag = scope.nosepiece.magnification
-    if mag:
-        print(f"Objective: position {scope.nosepiece.position} ({mag}x)")
-    else:
-        print(f"Objective: position {scope.nosepiece.position}")
-
-    # Lamp
-    print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
-
-    # Shutter
-    state = "open" if scope.shutter.is_open else "closed"
-    print(f"Shutter: {state}")
-
-    # Camera settings
-    camera = scope.camera
-    desc = require_microscope_description()
-    binning_str = desc.camera.binning_levels[camera.binning].name
-    w, h = camera.frame_size_px
-    r, g, b = camera.gain_rgb
-    print(f"Camera: {w}x{h} @ {binning_str} binning, {camera.exposure_time * 1000:.1f}ms exposure")
-    print(f"White balance: R={r:.2f} G={g:.2f} B={b:.2f}")
+from flakefinder.scan_utils import parse_white_balance
 
 
 def main() -> int:
@@ -71,14 +38,11 @@ def main() -> int:
         help="Exposure time in seconds (default: 0.001 = 1ms)",
     )
     parser.add_argument(
-        "--wb",
-        type=str,
-        default="1.41,1.02,2.51",
-        help="White balance as R,G,B (default: '1.41,1.02,2.51')",
+        "--white-balance",
+        type=parse_white_balance,
+        default="2.51,1.02,1.41",
+        help="White balance as B,G,R gains (default: '2.51,1.02,1.41')",
     )
-    parser.add_argument("--wb-red", type=float, help="Red channel gain")
-    parser.add_argument("--wb-green", type=float, help="Green channel gain")
-    parser.add_argument("--wb-blue", type=float, help="Blue channel gain")
     parser.add_argument("--gain", type=float, help="Camera gain (e.g., 4.0)")
     parser.add_argument("--quality", type=int, default=95, help="JPEG quality (default: 95)")
     parser.add_argument(
@@ -89,21 +53,6 @@ def main() -> int:
     )
     parser.add_argument("--z", type=float, help="Move to Z position in µm before capture")
     args = parser.parse_args()
-
-    # Parse white balance
-    wb_r, wb_g, wb_b = None, None, None
-    if args.wb:
-        parts = args.wb.split(",")
-        if len(parts) != 3:
-            print("Error: --wb must be R,G,B (e.g., '1.2,1.0,0.9')")
-            return 1
-        wb_r, wb_g, wb_b = float(parts[0]), float(parts[1]), float(parts[2])
-    if args.wb_red is not None:
-        wb_r = args.wb_red
-    if args.wb_green is not None:
-        wb_g = args.wb_green
-    if args.wb_blue is not None:
-        wb_b = args.wb_blue
 
     with Microscope() as scope:
         # Set lamp and open shutter
@@ -139,19 +88,18 @@ def main() -> int:
         if args.gain is not None:
             camera.gain = args.gain
 
-        if wb_r is not None or wb_g is not None or wb_b is not None:
-            current_r, current_g, current_b = camera.gain_rgb
-            camera.gain_rgb = (
-                wb_r if wb_r is not None else current_r,
-                wb_g if wb_g is not None else current_g,
-                wb_b if wb_b is not None else current_b,
-            )
+        camera.gain_rgb = args.white_balance
 
         # Report capture settings
         x, y = scope.stage.position_um
         print(f"Position: X={x:.1f} Y={y:.1f} Z={scope.z.position_um:.1f} µm")
         print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
         print(f"Shutter: {'open' if scope.shutter.is_open else 'closed'}")
+        ap = scope.aperture
+        ap_label = " (fully open)" if ap.value == ap.max_value else ""
+        print(f"Aperture: {ap.value}/{ap.max_value}{ap_label}")
+
+        from flakefinder.data_utils import require_microscope_description
 
         desc = require_microscope_description()
         binning_str = desc.camera.binning_levels[camera.binning].name

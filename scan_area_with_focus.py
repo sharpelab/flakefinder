@@ -1,5 +1,9 @@
 """Single-row scan with active Z focus tracking.
 
+NOTE: Unmaintained. Superseded by scan_area_v1.py + focus_map.py workflow.
+Kept for reference but not updated with new conventions (e.g. parse_white_balance,
+Aperture, cli_utils).
+
 Combines:
 - Camera capture loop from scan_area_v1.py
 - State feedback + feedforward Z controller from test_z_curve_tracking_v2.py

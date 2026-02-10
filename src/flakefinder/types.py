@@ -201,6 +201,8 @@ class LightingMeta(TypedDict):
     lamp_max_intensity: float | None
     shutter_name: str | None
     shutter_open: bool | None
+    aperture_value: int | None
+    aperture_max_value: int | None
 
 
 class MicroscopeMeta(TypedDict):

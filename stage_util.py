@@ -10,6 +10,7 @@ Usage:
     python stage_util.py --shutter open       # Open shutter
     python stage_util.py --shutter close      # Close shutter
     python stage_util.py --lamp 50            # Set lamp to 50%
+    python stage_util.py --aperture 500       # Set aperture diaphragm
     python stage_util.py --objective-mag 5x    # Switch to 5x objective (SDK handles z-hop)
     python stage_util.py --objective-pos 3    # Switch to position 3
     python stage_util.py --z-speed 5000       # Set Z velocity to 5000 µm/s
@@ -19,6 +20,7 @@ Usage:
 import argparse
 import sys
 
+from cli_utils import park_microscope, report_status
 from flakefinder.leica import Microscope, wait_all
 
 # =============================================================================
@@ -113,85 +115,6 @@ def _change_objective_pos(scope: Microscope, target_pos: int) -> None:
     # ...
 
 
-def park_microscope(scope: Microscope) -> None:
-    """Put microscope in a safe idle state.
-
-    Operations in order:
-    1. Retract Z to safe position (15000 µm)
-    2. Move XY to origin (0, 0)
-    3. Switch to 5x objective
-    4. Turn lamp off + close shutter
-    """
-    print("Parking microscope...")
-
-    # 1. Z retract first (safety)
-    z_target = 15000.0
-    scope.z.move_to(z_target)
-    print(f"  Z -> {scope.z.position_um:.0f} um [ok]")
-
-    # 2. XY to origin
-    hx, hy = scope.stage.move_to_async(0.0, 0.0)
-    wait_all([hx, hy])
-    print(f"  X -> {scope.stage.x.position_um:.0f} um [ok]")
-    print(f"  Y -> {scope.stage.y.position_um:.0f} um [ok]")
-
-    # 3. Switch to 5x objective
-    target_pos = None
-    for pos, mag in scope.nosepiece.magnifications.items():
-        if mag == 5.0:
-            target_pos = pos
-            break
-    if target_pos is not None:
-        scope.switch_objective_pos(target_pos)
-    print(f"  Objective -> {scope.objective_mag}x [ok]")
-
-    # 4. Lights off
-    scope.light_off()
-    print("  Lamp off [ok]")
-    print("  Shutter closed [ok]")
-
-    print("Parked.")
-
-
-def report_status(scope: Microscope, verbose: bool = False) -> None:
-    """Print current microscope status."""
-    # Stage XY
-    x, y = scope.stage.position_um
-    print(f"Stage X: {x:.1f} µm ({scope.stage.x.min_um:.0f} - {scope.stage.x.max_um:.0f})")
-    print(f"Stage Y: {y:.1f} µm ({scope.stage.y.min_um:.0f} - {scope.stage.y.max_um:.0f})")
-
-    # Z axis
-    print(f"Stage Z: {scope.z.position_um:.1f} µm ({scope.z.min_um:.0f} - {scope.z.max_um:.0f})")
-
-    # Velocity info (verbose mode)
-    if verbose:
-        print()
-        print("Velocity (from SDK converter):")
-        print(
-            f"  X: {scope.stage.x.velocity_um_s / 1000:.1f} mm/s "
-            f"(max: {scope.stage.x.max_velocity_um_s / 1000:.1f} mm/s)"
-        )
-        print(
-            f"  Y: {scope.stage.y.velocity_um_s / 1000:.1f} mm/s "
-            f"(max: {scope.stage.y.max_velocity_um_s / 1000:.1f} mm/s)"
-        )
-        print(f"  Z: {scope.z.velocity_um_s / 1000:.1f} mm/s (max: {scope.z.max_velocity_um_s / 1000:.1f} mm/s)")
-
-    # Nosepiece/objective
-    mag = scope.nosepiece.magnification
-    if mag:
-        print(f"Objective: position {scope.nosepiece.position} ({mag}x)")
-    else:
-        print(f"Objective: position {scope.nosepiece.position}")
-
-    # Lamp
-    print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
-
-    # Shutter
-    state = "open" if scope.shutter.is_open else "closed"
-    print(f"Shutter: {state}")
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Microscope stage status and position utility")
     parser.add_argument("--x", type=float, help="Target X position (µm)")
@@ -202,6 +125,7 @@ def main() -> int:
     parser.add_argument("--dz", type=float, help="Relative Z move (µm)")
     parser.add_argument("--shutter", choices=["open", "close"], help="Open or close shutter")
     parser.add_argument("--lamp", type=float, help="Set lamp intensity (0-100%%)")
+    parser.add_argument("--aperture", type=int, metavar="VALUE", help="Set aperture diaphragm value")
     parser.add_argument(
         "--objective-mag",
         type=str,
@@ -242,6 +166,13 @@ def main() -> int:
             scope.lamp.intensity_pct = args.lamp
             after_pct = scope.lamp.intensity_pct
             print(f"Lamp: {before_pct:.0f}% -> {after_pct:.0f}%")
+
+        # Aperture control
+        if args.aperture is not None:
+            before = scope.aperture.value
+            scope.aperture.value = args.aperture
+            after = scope.aperture.value
+            print(f"Aperture: {before} -> {after}")
 
         # Absolute XY move
         if args.x is not None or args.y is not None:
