@@ -83,20 +83,43 @@ def measure_x_cruise_speed(
     x_samples: list[PositionSample],
     t_x_started: float,
     t_deadline: float,
-    accel_skip_s: float = 0.1,
+    commanded_speed_um_s: float,
+    vel_tolerance: float = 0.5,
 ) -> tuple[float | None, dict[str, Any]]:
     """Measure actual X cruise speed from position samples via linear regression.
 
-    Uses samples from [t_x_started + accel_skip_s, t_deadline) to avoid the
-    acceleration zone (~80ms).
+    Filters samples to the cruise velocity band: only consecutive pairs whose
+    inter-sample speed is within ±vel_tolerance of commanded_speed_um_s are
+    kept.  This eliminates both stationary samples (stage hasn't started moving)
+    and acceleration-zone samples without relying on a fixed time offset.
 
     Returns:
         (measured_speed_um_s, measurement_dict) where speed is always positive
         and measurement_dict contains logging info.  Returns (None, {}) if
-        insufficient data.
+        insufficient data after filtering.
     """
-    t_start = t_x_started + accel_skip_s
-    cruise_samples = [s for s in x_samples if t_start <= s.t_before < t_deadline]
+    # Window to samples between move start and deadline
+    window = [s for s in x_samples if t_x_started <= s.t_before < t_deadline]
+
+    if len(window) < 2:
+        return None, {}
+
+    # Velocity filter: keep samples where inter-sample speed is within
+    # ±vel_tolerance of commanded speed
+    speed_lo = commanded_speed_um_s * (1 - vel_tolerance)
+    speed_hi = commanded_speed_um_s * (1 + vel_tolerance)
+    cruise_mask = [False] * len(window)
+    for i in range(1, len(window)):
+        dt = window[i].t_before - window[i - 1].t_before
+        if dt <= 0:
+            continue
+        speed = abs(window[i].x_um - window[i - 1].x_um) / dt
+        if speed_lo <= speed <= speed_hi:
+            cruise_mask[i - 1] = True
+            cruise_mask[i] = True
+
+    cruise_samples = [s for s, keep in zip(window, cruise_mask, strict=True) if keep]
+    n_filtered = len(window) - len(cruise_samples)
 
     if len(cruise_samples) < 5:
         return None, {}
@@ -117,9 +140,10 @@ def measure_x_cruise_speed(
     measurement = {
         "measured_x_speed_um_s": round(speed_um_s, 2),
         "n_samples": len(cruise_samples),
+        "n_total": len(window),
+        "n_filtered": n_filtered,
         "measurement_window_ms": round((times[-1] - times[0]) * 1000, 1),
         "r_squared": round(r_squared, 6),
-        "accel_skip_ms": round(accel_skip_s * 1000, 0),
     }
 
     return speed_um_s, measurement
@@ -339,7 +363,9 @@ def scan_row(
                 signed_dist = (chip_edge_x - x_now) * direction
                 if signed_dist / cfg.x_speed_um_s <= cfg.z_lead_s:
                     # Measure actual X cruise speed from lead-in samples
-                    measured_speed, speed_meas = measure_x_cruise_speed(x_samples, t_x_started, time.perf_counter())
+                    measured_speed, speed_meas = measure_x_cruise_speed(
+                        x_samples, t_x_started, time.perf_counter(), cfg.x_speed_um_s
+                    )
                     if measured_speed is not None:
                         z_vel_um_s = cfg.plane_a * direction * measured_speed
                         speed_meas["commanded_x_speed_um_s"] = cfg.x_speed_um_s
