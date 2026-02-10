@@ -50,9 +50,6 @@ exclude = ["src/flakefinder/driver/"]  # legacy package, not worth typing
 [tool.ty.environment]
 extra-paths = ["scripts"]
 
-[tool.ty.rules]
-unresolved-reference = "ignore"  # forward-ref string annotations — same as ruff F821
-
 [tool.ty.analysis]
 # .NET SDK modules only resolve on the microscope PC (pythonnet runtime)
 allowed-unresolved-imports = ["LeicaMicrosystems.**", "System.**"]

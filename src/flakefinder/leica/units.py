@@ -4,10 +4,16 @@ This module provides high-level classes for controlling microscope components
 with both blocking (sync) and non-blocking (async) operations.
 """
 
+from __future__ import annotations
+
 import contextlib
 import re
 import time
 import warnings
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .core import LeicaConnection
 
 from flakefinder.types import Point2F
 
@@ -27,7 +33,7 @@ from .types import (
 
 
 def wait_all(
-    handles: list["MoveHandle"],
+    handles: list[MoveHandle],
     timeout: float | None = None,
     poll_interval: float = 0.01,
     dispose: bool = True,
@@ -81,8 +87,8 @@ class MoveHandle:
 
     def __init__(
         self,
-        async_result: "AsyncResult",
-        halt_interface: "HaltControlValue | None" = None,
+        async_result: AsyncResult,
+        halt_interface: HaltControlValue | None = None,
     ):
         """Initialize move handle.
 
@@ -179,7 +185,7 @@ class Axis:
         axis.halt()
     """
 
-    def __init__(self, unit: "Unit"):
+    def __init__(self, unit: Unit):
         """Initialize axis from SDK unit.
 
         Args:
@@ -228,7 +234,7 @@ class Axis:
         return self._name
 
     @property
-    def unit(self) -> "Unit":
+    def unit(self) -> Unit:
         """Underlying SDK unit."""
         return self._unit
 
@@ -260,7 +266,7 @@ class Axis:
         return (t_before, t_after, self._converter.GetMetricsValue(native))
 
     @property
-    def bcv(self) -> "BasicControlValue":
+    def bcv(self) -> BasicControlValue:
         """Direct BasicControlValue interface for fast polling.
 
         Use this for tight polling loops where you need maximum performance.
@@ -269,7 +275,7 @@ class Axis:
         return self._bcv
 
     @property
-    def converter(self) -> "MetricsConverter":
+    def converter(self) -> MetricsConverter:
         """Microns converter for manual position conversion.
 
         Use with bcv for fast polling:
@@ -513,7 +519,7 @@ class Shutter:
         shutter.close()
     """
 
-    def __init__(self, unit: "Unit"):
+    def __init__(self, unit: Unit):
         """Initialize shutter from SDK unit.
 
         Args:
@@ -527,7 +533,7 @@ class Shutter:
         self._bcv: BasicControlValue = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE)
 
     @classmethod
-    def from_connection(cls, conn: "LeicaConnection", tid: TID = TID.MICROSCOPE_IL_SHUTTER) -> "Shutter":
+    def from_connection(cls, conn: LeicaConnection, tid: TID = TID.MICROSCOPE_IL_SHUTTER) -> Shutter:
         """Create Shutter from a LeicaConnection.
 
         Args:
@@ -577,7 +583,7 @@ class Lamp:
         lamp.intensity = 0  # Off
     """
 
-    def __init__(self, unit: "Unit"):
+    def __init__(self, unit: Unit):
         """Initialize lamp from SDK unit.
 
         Args:
@@ -593,7 +599,7 @@ class Lamp:
         self._max = self._bcv.MaxControlValue()
 
     @classmethod
-    def from_connection(cls, conn: "LeicaConnection") -> "Lamp":
+    def from_connection(cls, conn: LeicaConnection) -> Lamp:
         """Create Lamp from a LeicaConnection.
 
         Args:
@@ -682,7 +688,7 @@ class Nosepiece:
         6: 2.5,
     }
 
-    def __init__(self, unit: "Unit", magnifications: dict[int, float] | None = None):
+    def __init__(self, unit: Unit, magnifications: dict[int, float] | None = None):
         """Initialize nosepiece from SDK unit.
 
         Args:
@@ -701,9 +707,9 @@ class Nosepiece:
     @classmethod
     def from_connection(
         cls,
-        conn: "LeicaConnection",
+        conn: LeicaConnection,
         magnifications: dict[int, float] | None = None,
-    ) -> "Nosepiece":
+    ) -> Nosepiece:
         """Create Nosepiece from a LeicaConnection.
 
         Args:
@@ -736,7 +742,7 @@ class Nosepiece:
         """Set objective position (1-indexed)."""
         self._bcv.SetControlValue(value)
 
-    def set_position(self, value: int, z: "ZDrive") -> None:
+    def set_position(self, value: int, z: ZDrive) -> None:
         """Set objective position, temporarily maxing Z speed to avoid SDK timeout.
 
         .. deprecated::
@@ -843,7 +849,7 @@ class ZDrive(Axis):
         handle.wait()
     """
 
-    def __init__(self, unit: "Unit"):
+    def __init__(self, unit: Unit):
         """Initialize ZDrive from SDK unit.
 
         Args:
@@ -897,7 +903,7 @@ class ZDrive(Axis):
             self.move_to(position_um)
 
     @classmethod
-    def from_connection(cls, conn: "LeicaConnection") -> "ZDrive":
+    def from_connection(cls, conn: LeicaConnection) -> ZDrive:
         """Create ZDrive from a LeicaConnection.
 
         Args:
@@ -946,7 +952,7 @@ class Stage:
         self.y = y_axis
 
     @classmethod
-    def from_connection(cls, conn: "LeicaConnection") -> "Stage":
+    def from_connection(cls, conn: LeicaConnection) -> Stage:
         """Create Stage from a LeicaConnection.
 
         Args:

@@ -36,6 +36,10 @@ Wait for the user to explicitly approve before writing code.
 ## Coding Conventions
 
 - Prefer typed returns (NamedTuple/dataclass) over `list[dict]` for structured data; add `to_dict()` for serialization
+- **Types as documentation.** Prefer NamedTuple over bare tuples for return types — `GainRGB(red, green, blue)` over `tuple[float, float, float]`. Apply to properties too. Named fields are free documentation.
+- **Single source of truth.** Never hardcode values that already exist in a canonical source. Binning factors live in `microscope_description.json`, not in local dicts. If a helper exists in `scan_utils.py`, use it — don't re-derive.
+- **Use ruff --fix.** Run `uv run ruff check --fix . && uv run ruff format .` for lint/formatting. Don't manually reorder imports or fix whitespace.
+- **Multi-file refactors need review.** When a change touches 3+ files, present a summary of what changed (files, net effect) and wait for explicit approval before committing.
 
 ## Continuation Tasks
 

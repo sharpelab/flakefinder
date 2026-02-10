@@ -4,11 +4,18 @@ This module provides camera control for the Leica microscope using the UCAPI SDK
 Supports both single-shot capture and continuous streaming for scanning operations.
 """
 
+from __future__ import annotations
+
 import contextlib
 import queue
 import threading
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .core import LeicaConnection
+    from .units import Stage
 
 import numpy as np
 
@@ -50,7 +57,7 @@ class Camera:
                 process(frame.image)
     """
 
-    def __init__(self, unit: "Unit"):
+    def __init__(self, unit: Unit):
         """Initialize camera from SDK unit.
 
         Args:
@@ -89,7 +96,7 @@ class Camera:
         self._init_defaults()
 
     @classmethod
-    def from_connection(cls, conn: "LeicaConnection") -> "Camera":
+    def from_connection(cls, conn: LeicaConnection) -> Camera:
         """Create Camera from a LeicaConnection.
 
         Args:
@@ -354,7 +361,7 @@ class Camera:
             raise RuntimeError("Capture failed: no image acquired")
         return image
 
-    def stream(self, stage: "Stage | None" = None) -> "FrameStream":
+    def stream(self, stage: Stage | None = None) -> FrameStream:
         """Start continuous frame acquisition.
 
         Args:
@@ -370,7 +377,7 @@ class Camera:
         """
         return FrameStream(self, stage)
 
-    def deferred_stream(self, max_frames: int = 1000) -> "DeferredFrameStream":
+    def deferred_stream(self, max_frames: int = 1000) -> DeferredFrameStream:
         """Start deferred frame acquisition (keeps images in .NET memory).
 
         Higher fps by avoiding per-frame numpy conversion. Convert all frames
@@ -422,7 +429,7 @@ class FrameStream:
     def __init__(
         self,
         camera: Camera,
-        stage: "Stage | None" = None,
+        stage: Stage | None = None,
         max_buffer: int = 100,
     ):
         """Initialize frame stream.
@@ -595,7 +602,7 @@ class FrameStream:
         """Check if streaming is active."""
         return self._running
 
-    def __enter__(self) -> "FrameStream":
+    def __enter__(self) -> FrameStream:
         self.start()
         return self
 
@@ -749,7 +756,7 @@ class DeferredFrameStream:
             elapsed = time.monotonic() - self._start_time
             return self._frames_captured / elapsed if elapsed > 0 else 0.0
 
-    def __enter__(self) -> "DeferredFrameStream":
+    def __enter__(self) -> DeferredFrameStream:
         self.start()
         return self
 

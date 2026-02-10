@@ -124,6 +124,7 @@ class Microscope:
         if self._camera_initialized:
             return
         self._camera_initialized = True
+        assert self._conn is not None, "Camera init requires active connection"
         self._camera = Camera.from_connection(self._conn)
 
     @property
