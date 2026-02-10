@@ -60,3 +60,9 @@ include = ["src/flakefinder/cli.py"]
 [tool.ty.overrides.rules]
 all = "ignore"
 
+# scan_area_with_focus.py — reference only, not actively maintained
+[[tool.ty.overrides]]
+include = ["scan_area_with_focus.py"]
+[tool.ty.overrides.rules]
+all = "ignore"
+

@@ -18,7 +18,7 @@ from pathlib import Path
 
 # Improve Windows timer resolution to ~1ms
 with contextlib.suppress(Exception):  # Not on Windows or no permission
-    ctypes.windll.winmm.timeBeginPeriod(1)
+    ctypes.windll.winmm.timeBeginPeriod(1)  # type: ignore[attr-defined]  # Windows-only
 
 
 def main():
@@ -209,7 +209,7 @@ def main():
 
     # Restore Windows timer resolution
     with contextlib.suppress(Exception):
-        ctypes.windll.winmm.timeEndPeriod(1)
+        ctypes.windll.winmm.timeEndPeriod(1)  # type: ignore[attr-defined]  # Windows-only
 
     return 0
 

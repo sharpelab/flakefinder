@@ -243,6 +243,7 @@ def compute_metrics_from_frames(
             continue
         z_values.append(info["z_um"])
         img = cv2.imread(str(p))
+        assert img is not None, f"Failed to read image: {p}"
         for name, fn in METRICS:
             results[name].append(fn(img))
 
@@ -334,7 +335,7 @@ def plot_metrics_comparison(
             normed,
             "-",
             label=f"{name}{suffix}  (DR={dynamic_ranges[name]:.0f}%, best={best_zs[name]:.0f})",
-            **style,
+            **style,  # type: ignore[arg-type]  # matplotlib stub limitation
             alpha=0.85,
             zorder=3,
         )
@@ -452,11 +453,11 @@ def plot_sharpness_curve(
 
     if has_insets:
         # Main plot on left ~65%, inset panel on right ~35%
-        ax = fig.add_axes([0.08, 0.12, 0.55, 0.80])
+        ax = fig.add_axes((0.08, 0.12, 0.55, 0.80))
         inset_left = 0.66
         inset_width = 0.31
     else:
-        ax = fig.add_axes([0.08, 0.12, 0.88, 0.80])
+        ax = fig.add_axes((0.08, 0.12, 0.88, 0.80))
 
     # Plot coarse data
     if coarse_curve:
@@ -594,7 +595,7 @@ def plot_sharpness_curve(
             for i, (key, label) in enumerate(available):
                 img = inset_images[key]
                 y_pos = 0.12 + (n_insets - 1 - i) * (inset_h + 0.02)
-                ax_img = fig.add_axes([inset_left, y_pos, inset_width, inset_h])
+                ax_img = fig.add_axes((inset_left, y_pos, inset_width, inset_h))
                 ax_img.imshow(np.array(img))
                 ax_img.set_title(label, fontsize=8)
                 ax_img.axis("off")

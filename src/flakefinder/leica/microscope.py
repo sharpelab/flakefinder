@@ -163,9 +163,16 @@ class Microscope:
     # --- Computed properties ---
 
     @property
-    def objective_mag(self) -> float | None:
-        """Current objective magnification, or None if position unknown."""
-        return self.nosepiece.magnification
+    def objective_mag(self) -> float:
+        """Current objective magnification.
+
+        Raises:
+            RuntimeError: If position is not in the magnification table.
+        """
+        mag = self.nosepiece.magnification
+        if mag is None:
+            raise RuntimeError(f"No magnification for nosepiece position {self.nosepiece.position}")
+        return mag
 
     @property
     def position(self) -> Point3F:

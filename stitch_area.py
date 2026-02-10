@@ -68,9 +68,9 @@ def deskew_image(img, shear_px, bg_color=(0, 0, 0)):
 
     return img.transform(
         (width, height),
-        Image.AFFINE,
+        Image.Transform.AFFINE,
         (a, b, c, d, e, f),
-        resample=Image.BICUBIC,
+        resample=Image.Resampling.BICUBIC,
         fillcolor=(bg_color + (0,)) if img.mode == "RGBA" else bg_color,
     )
 
@@ -314,7 +314,7 @@ def stitch_row_to_global(
             img.draft("RGB", (frame_w, frame_h))
         img.load()
         if img.size[0] != frame_w or img.size[1] != frame_h:
-            img = img.resize((frame_w, frame_h), Image.LANCZOS)
+            img = img.resize((frame_w, frame_h), Image.Resampling.LANCZOS)
         img = img.convert("RGBA")
 
         if flatfield is not None:
@@ -512,7 +512,7 @@ def main():
             ff_resized = np.zeros((frame_h, frame_w, 3), dtype=np.float32)
             for c in range(3):
                 ff_channel = Image.fromarray(flatfield[:, :, c], mode="F")
-                ff_channel = ff_channel.resize((frame_w, frame_h), Image.LANCZOS)
+                ff_channel = ff_channel.resize((frame_w, frame_h), Image.Resampling.LANCZOS)
                 ff_resized[:, :, c] = np.array(ff_channel, dtype=np.float32)
             print(f"  Resized flatfield {ff_w}x{ff_h} -> {frame_w}x{frame_h}")
             flatfield = ff_resized

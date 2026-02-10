@@ -72,7 +72,7 @@ def make_flake_map(flakes: list[dict], scan_meta: dict, output_path: Path):
 
     # Color by thickness
     thicknesses = sorted(set(f["thickness"] for f in flakes))
-    cmap = plt.cm.tab10
+    cmap = plt.colormaps["tab10"]
     color_map = {t: cmap(i / max(len(thicknesses), 1)) for i, t in enumerate(thicknesses)}
 
     for t in thicknesses:

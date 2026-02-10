@@ -140,6 +140,8 @@ def create_comparison(
 
     best_img = cv2.imread(str(best_path))
     worst_img = cv2.imread(str(worst_path))
+    assert best_img is not None, f"Failed to read image: {best_path}"
+    assert worst_img is not None, f"Failed to read image: {worst_path}"
 
     # Add labels
     font = cv2.FONT_HERSHEY_SIMPLEX

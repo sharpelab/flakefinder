@@ -407,7 +407,7 @@ Examples:
             else:
                 print(f"Objective: already at {scope.objective_mag}x")
 
-        objective_mag = scope.nosepiece.magnification
+        objective_mag = scope.objective_mag
         objective_idx = scope.nosepiece.position
 
         # Lighting
@@ -442,8 +442,8 @@ Examples:
             print("Error: Could not determine frame size. Check objective/camera.")
             return 1
         frame_width_um, frame_height_um = actual_frame_size
-        sample_pixel_x_um = frame_width_um / frame_width_px if frame_width_px else None
-        sample_pixel_y_um = frame_height_um / frame_height_px if frame_height_px else None
+        sample_pixel_x_um = frame_width_um / frame_width_px
+        sample_pixel_y_um = frame_height_um / frame_height_px
 
         if abs(frame_width_um - plan.frame_width_um) > 1.0:
             print(f"ABORT: Camera frame width {frame_width_um:.1f} != plan {plan.frame_width_um:.1f} µm")

@@ -17,65 +17,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.interpolate import CubicSpline
-
-# Surface data (duplicated from test script for standalone analysis)
-SURFACE_DATA = {
-    "top": {
-        "y_um": 8175,
-        "points": [
-            (12112, -4.6),
-            (16612, +6.0),
-            (21112, +2.0),
-            (25612, -4.6),
-            (30112, +4.3),
-            (34612, -2.4),
-        ],
-    },
-    "middle": {
-        "y_um": 12675,
-        "points": [
-            (12112, -3.5),
-            (16612, -0.7),
-            (21112, +4.7),
-            (25612, -2.0),
-            (30112, +1.7),
-            (34612, -4.9),
-        ],
-    },
-}
-
-PLANE_FIT = {
-    "a_um_per_mm": 1.4722,
-    "b_um_per_mm": -0.6527,
-    "c_um": 24666.85,
-}
-
-
-def compute_ideal_z(surface_name: str, x_um: np.ndarray, z_offset: float) -> np.ndarray:
-    """Compute ideal Z profile for given X positions."""
-    surface = SURFACE_DATA[surface_name]
-    y_um = surface["y_um"]
-    points = surface["points"]
-
-    x_points = np.array([p[0] for p in points])
-    residuals = np.array([p[1] for p in points])
-
-    spline = CubicSpline(x_points, residuals, extrapolate=True)
-
-    a = PLANE_FIT["a_um_per_mm"]
-    b = PLANE_FIT["b_um_per_mm"]
-    c = PLANE_FIT["c_um"]
-    y_mm = y_um / 1000
-
-    z_ideal = []
-    for x in x_um:
-        x_mm = x / 1000
-        z_plane = a * x_mm + b * y_mm + c
-        z_residual = float(spline(x))
-        z_ideal.append(z_plane + z_residual + z_offset)
-
-    return np.array(z_ideal)
+from z_curve_data import SURFACE_DATA, compute_ideal_z
 
 
 def analyze_curve_tracking_v2(data: dict) -> dict:
@@ -433,7 +375,7 @@ def plot_comparison(data_list: list[tuple[str, dict]], output_path: Path | None 
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     fig.suptitle("V2 Tracking Comparison", fontsize=12)
 
-    colors = plt.cm.tab10(np.linspace(0, 1, n))
+    colors = plt.colormaps["tab10"](np.linspace(0, 1, n))
 
     # 1. Tracking error vs X (all runs)
     ax1 = axes[0, 0]

@@ -14,76 +14,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.interpolate import CubicSpline
-
-# Surface data (duplicated from test_z_curve_tracking.py for standalone analysis)
-SURFACE_DATA = {
-    "top": {
-        "y_um": 8175,
-        "points": [
-            (12112, -4.6),
-            (16612, +6.0),
-            (21112, +2.0),
-            (25612, -4.6),
-            (30112, +4.3),
-            (34612, -2.4),
-        ],
-    },
-    "middle": {
-        "y_um": 12675,
-        "points": [
-            (12112, -3.5),
-            (16612, -0.7),
-            (21112, +4.7),
-            (25612, -2.0),
-            (30112, +1.7),
-            (34612, -4.9),
-        ],
-    },
-}
-
-PLANE_FIT = {
-    "a_um_per_mm": 1.4722,
-    "b_um_per_mm": -0.6527,
-    "c_um": 24666.85,
-}
-
-
-def compute_ideal_z(surface_name: str, x_um: np.ndarray, z_offset: float) -> np.ndarray:
-    """Compute ideal Z profile for given X positions.
-
-    Args:
-        surface_name: "top" or "middle"
-        x_um: Array of X positions in µm
-        z_offset: Z offset applied in test
-
-    Returns:
-        Array of ideal Z positions in µm
-    """
-    surface = SURFACE_DATA[surface_name]
-    y_um = surface["y_um"]
-    points = surface["points"]
-
-    x_points = np.array([p[0] for p in points])
-    residuals = np.array([p[1] for p in points])
-
-    # Build spline for residuals
-    spline = CubicSpline(x_points, residuals, extrapolate=True)
-
-    # Plane contribution
-    a = PLANE_FIT["a_um_per_mm"]
-    b = PLANE_FIT["b_um_per_mm"]
-    c = PLANE_FIT["c_um"]
-    y_mm = y_um / 1000
-
-    z_ideal = []
-    for x in x_um:
-        x_mm = x / 1000
-        z_plane = a * x_mm + b * y_mm + c
-        z_residual = float(spline(x))
-        z_ideal.append(z_plane + z_residual + z_offset)
-
-    return np.array(z_ideal)
+from z_curve_data import SURFACE_DATA, compute_ideal_z
 
 
 def analyze_curve_tracking(data: dict) -> dict:
@@ -203,7 +134,6 @@ def plot_curve_tracking(data: dict, output_path: Path | None = None, title_suffi
 
     # Mark surface data points
     surface = SURFACE_DATA[params["surface_name"]]
-    analysis["commanded"]["z_offset_um"]
     for x_um, _residual in surface["points"]:
         x_mm = x_um / 1000
         ax2.axvline(x_mm, color="gray", linestyle=":", alpha=0.3)

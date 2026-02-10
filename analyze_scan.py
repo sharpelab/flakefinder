@@ -209,7 +209,7 @@ def plot_analysis(
         fig, (ax_zerr, ax_zmap_only) = plt.subplots(1, 2, figsize=(16, 5))
 
     # Color map for rows
-    cmap = plt.cm.viridis
+    cmap = plt.colormaps["viridis"]
     row_indices = sorted(set(f["row"] for f in frames))
     row_colors = {r: cmap(i / max(1, len(row_indices) - 1)) for i, r in enumerate(row_indices)}
 
@@ -275,6 +275,7 @@ def plot_analysis(
         return
 
     # --- Panel 2: Sharpness vs frame number ---
+    assert sharpness_data is not None  # guaranteed by has_sharpness branch above
     s_indices = sharpness_data["indices"]
     s_vals = sharpness_data["sharpness"]
     s_rows = sharpness_data["rows"]

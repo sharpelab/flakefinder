@@ -111,7 +111,7 @@ def make_mosaic(
         y = row * (thumb_h + margin)
 
         img = Image.open(path)
-        img.thumbnail((thumb_w, thumb_h), Image.LANCZOS)
+        img.thumbnail((thumb_w, thumb_h), Image.Resampling.LANCZOS)
         canvas.paste(img, (x, y))
 
         if labels:

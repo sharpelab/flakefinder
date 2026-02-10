@@ -47,7 +47,7 @@ class FocusMapSample:
             "type": self.point.type,
             "index": self.point.index,
         }
-        if self.error:
+        if self.error or self.af_result is None:
             d["error"] = True
         else:
             d.update(self.af_result.to_dict())
@@ -627,15 +627,15 @@ def main():
     print(f"\nFocus map saved to {output_path}")
 
     # Summary
-    successful = [s for s in sample_results if not s.error]
-    z_values = [s.af_result.selected_z_um for s in successful]
-    selected_sharpness_values = [s.af_result.selected_sharpness for s in successful]
-    final_sharpness_values = [s.af_result.final_sharpness for s in successful]
+    successful_results = [s.af_result for s in sample_results if s.af_result is not None]
+    z_values = [r.selected_z_um for r in successful_results]
+    selected_sharpness_values = [r.selected_sharpness for r in successful_results]
+    final_sharpness_values = [r.final_sharpness for r in successful_results]
 
     print("\nSummary:")
     print(f"  Duration: {duration_s:.1f}s")
     print(f"  Points sampled: {len(sample_results)}")
-    print(f"  Successful: {len(successful)}")
+    print(f"  Successful: {len(successful_results)}")
 
     if z_values:
         print(f"  Z range: {min(z_values):.1f} - {max(z_values):.1f} µm")

@@ -331,7 +331,7 @@ def main():
             PILImage.fromarray(after_img).save(after_path, quality=95)
             vprint(f"  Saved: {after_path}")
             vprint(f"  Sharpness: {after_sharpness:.2f}")
-            os.startfile(after_path)
+
         else:
             vprint("  Warning: Failed to capture after image")
             after_sharpness = af_result.final_sharpness

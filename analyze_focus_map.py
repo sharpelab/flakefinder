@@ -472,6 +472,7 @@ def create_mosaic(
         return
 
     first_img = cv2.imread(str(first_img_path))
+    assert first_img is not None, f"Failed to read image: {first_img_path}"
     img_h, img_w = first_img.shape[:2]
     img_aspect = img_w / img_h  # e.g., 1.5 for landscape
 

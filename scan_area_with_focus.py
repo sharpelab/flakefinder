@@ -405,7 +405,7 @@ Examples:
             else:
                 print(f"Objective: already at {scope.objective_mag}x")
 
-        objective_mag = scope.nosepiece.magnification
+        objective_mag = scope.objective_mag
         objective_idx = scope.nosepiece.position
 
         # Lighting and camera
