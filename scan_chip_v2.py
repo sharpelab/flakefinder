@@ -31,6 +31,7 @@ import json
 import os
 import queue
 import shutil
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -1007,6 +1008,7 @@ Examples:
         # Build metadata (scan_area_v1.py compatible for stitching)
         meta = {
             "timestamp": datetime.now().isoformat(),
+            "command": sys.argv,
             "x_min_um": min(r.x_min_um for r in plan.rows),
             "x_max_um": max(r.x_max_um for r in plan.rows),
             "y_min_um": plan.rows[0].y_um,

@@ -66,3 +66,9 @@ include = ["scan_area_with_focus.py"]
 [tool.ty.overrides.rules]
 all = "ignore"
 
+# focus_map.py — hardware scripts have scoping ty can't follow
+[[tool.ty.overrides]]
+include = ["focus_map.py"]
+[tool.ty.overrides.rules]
+unresolved-reference = "ignore"
+

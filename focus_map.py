@@ -6,6 +6,7 @@ runs autofocus at each point, and outputs a focus map with best Z positions.
 
 import argparse
 import json
+import sys
 import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -592,6 +593,7 @@ def main():
     # Build output
     output = {
         "timestamp": datetime.now().isoformat(),
+        "command": sys.argv,
         "duration_s": round(duration_s, 2),
         "chip_id": args.chip,
         "source_chips_meta": str(args.chips_meta),

@@ -26,6 +26,7 @@ import json
 import os
 import queue
 import shutil
+import sys
 import threading
 import time
 from datetime import datetime
@@ -812,6 +813,7 @@ Examples:
         # Build metadata (compatible with scan_area_v1.py for stitching)
         meta = {
             "timestamp": datetime.now().isoformat(),
+            "command": sys.argv,
             "x_min_um": x_min,
             "x_max_um": x_max,
             "y_min_um": y_min,

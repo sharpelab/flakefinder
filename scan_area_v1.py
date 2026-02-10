@@ -10,6 +10,7 @@ import os
 import queue
 import re
 import shutil
+import sys
 import threading
 import time
 from datetime import datetime
@@ -480,6 +481,7 @@ Examples:
 
         meta = {
             "timestamp": datetime.now().isoformat(),
+            "command": sys.argv,
             "x_min_um": x_min,
             "x_max_um": x_max,
             "y_min_um": y_min,

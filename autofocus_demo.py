@@ -12,6 +12,8 @@ import argparse
 import json
 import os
 import shutil
+import sys
+from datetime import datetime
 
 from PIL import Image as PILImage
 
@@ -334,6 +336,8 @@ def main():
         summary_path = None
         if args.output:
             summary = af_result.to_dict()
+            summary["timestamp"] = datetime.now().isoformat()
+            summary["command"] = sys.argv
             summary["params"] = {
                 "x_um": target_x,
                 "y_um": target_y,
