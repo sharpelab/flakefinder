@@ -26,6 +26,7 @@ Errors:
   - Attachment not referenced in entry text
 """
 
+import re
 import shutil
 import sys
 from datetime import datetime
@@ -72,6 +73,8 @@ def main():
             if not src_path.exists():
                 die(f"attachment not found: {src_path}")
             attachments.append((src_path, dest))
+        elif args[i].startswith("--"):
+            die(f"unknown flag: {args[i]}")
         else:
             text = args[i]
         i += 1
@@ -87,16 +90,27 @@ def main():
         if f"![[{dest}]]" not in text:
             die(f"attachment '{dest}' not referenced in entry (expected ![[{dest}]])")
 
-    # Copy attachments (fail if dest already exists)
+    # Validate attachment destinations don't already exist
     if attachments:
         ATTACH_DIR.mkdir(exist_ok=True)
-    for src_path, dest in attachments:
-        dest_path = ATTACH_DIR / dest
-        if dest_path.exists():
-            die(f"attachment already exists: {dest_path}")
-        shutil.copy2(src_path, dest_path)
+        for _, dest in attachments:
+            dest_path = ATTACH_DIR / dest
+            if dest_path.exists():
+                die(f"attachment already exists: {dest_path}\n  Hint: use --attach src.png:new_name.png to rename")
 
-    # Build entry
+    # Validate all ![[ref]] in entry text resolve to existing or about-to-be-copied attachments
+    pending_names = {dest for _, dest in attachments}
+    for ref in re.findall(r"!\[\[(.+?)]]", text):
+        if ref not in pending_names and not (ATTACH_DIR / ref).exists():
+            die(f"entry references ![[{ref}]] but no such file in {ATTACH_DIR}")
+
+    # --- All validation passed, now write ---
+
+    # Copy attachments
+    for src_path, dest in attachments:
+        shutil.copy2(src_path, ATTACH_DIR / dest)
+
+    # Build and write entry
     ts = datetime.now().strftime("%m-%d %H:%M")
     entry = f"**{ts}**\n{text}\n\n---\n\n{SENTINEL}"
 
