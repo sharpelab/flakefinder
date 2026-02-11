@@ -16,40 +16,13 @@ import time
 from datetime import datetime
 
 from flakefinder.data_utils import compute_frame_size_um, require_microscope_description
-from flakefinder.scan_utils import build_microscope_meta, interpolate_position, parse_position, parse_white_balance
-
-
-def parse_area_rect(value: str) -> tuple[float, float, float, float]:
-    """Parse area rectangle from comma-separated string.
-
-    Args:
-        value: "x_min,x_max,y_min,y_max" in µm
-
-    Returns:
-        (x_min, x_max, y_min, y_max) tuple, with coordinates sorted if swapped.
-
-    Raises:
-        ValueError: If format is invalid or values are degenerate.
-    """
-    parts = value.split(",")
-    if len(parts) != 4:
-        raise ValueError("--area-rect must be x_min,x_max,y_min,y_max (4 values)")
-    try:
-        x1, x2, y1, y2 = float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3])
-    except ValueError:
-        raise ValueError("--area-rect values must be numbers") from None
-
-    # Sort coordinates if swapped
-    x_min, x_max = min(x1, x2), max(x1, x2)
-    y_min, y_max = min(y1, y2), max(y1, y2)
-
-    # Check for degenerate (zero-area) rectangles
-    if x_min == x_max:
-        raise ValueError(f"--area-rect: x_min and x_max cannot be equal ({x_min})")
-    if y_min == y_max:
-        raise ValueError(f"--area-rect: y_min and y_max cannot be equal ({y_min})")
-
-    return (x_min, x_max, y_min, y_max)
+from flakefinder.scan_utils import (
+    build_microscope_meta,
+    interpolate_position,
+    parse_area_rect,
+    parse_position,
+    parse_white_balance,
+)
 
 
 def main():
@@ -80,7 +53,7 @@ Examples:
     )
     area_group.add_argument(
         "--area-rect",
-        type=str,
+        type=parse_area_rect,
         metavar="X1,X2,Y1,Y2",
         help="Explicit scan area as x_min,x_max,y_min,y_max in µm",
     )
@@ -132,8 +105,8 @@ Examples:
     frame_group.add_argument(
         "--x-overlap-percent",
         type=float,
-        default=50,
-        help="Target X overlap between saved frames, %% (default: 50). "
+        default=100,
+        help="Target X overlap between saved frames, %% (default: 100 = save all). "
         "Frames captured before advancing enough are discarded.",
     )
     frame_group.add_argument(
@@ -197,27 +170,23 @@ Examples:
 
     # Validate area-rect against stage limits
     if args.area_rect:
-        try:
-            x_min, x_max, y_min, y_max = parse_area_rect(args.area_rect)
-            desc_x_min = desc.stage.x.min_um
-            desc_x_max = desc.stage.x.max_um
-            desc_y_min = desc.stage.y.min_um
-            desc_y_max = desc.stage.y.max_um
+        x_min, x_max, y_min, y_max = args.area_rect
+        desc_x_min = desc.stage.x.min_um
+        desc_x_max = desc.stage.x.max_um
+        desc_y_min = desc.stage.y.min_um
+        desc_y_max = desc.stage.y.max_um
 
-            if x_min < desc_x_min:
-                print(f"Error: x_min ({x_min:.0f}) is below stage minimum ({desc_x_min:.0f})")
-                return 1
-            if x_max > desc_x_max:
-                print(f"Error: x_max ({x_max:.0f}) exceeds stage maximum ({desc_x_max:.0f})")
-                return 1
-            if y_min < desc_y_min:
-                print(f"Error: y_min ({y_min:.0f}) is below stage minimum ({desc_y_min:.0f})")
-                return 1
-            if y_max > desc_y_max:
-                print(f"Error: y_max ({y_max:.0f}) exceeds stage maximum ({desc_y_max:.0f})")
-                return 1
-        except ValueError as e:
-            print(f"Error: {e}")
+        if x_min < desc_x_min:
+            print(f"Error: x_min ({x_min:.0f}) is below stage minimum ({desc_x_min:.0f})")
+            return 1
+        if x_max > desc_x_max:
+            print(f"Error: x_max ({x_max:.0f}) exceeds stage maximum ({desc_x_max:.0f})")
+            return 1
+        if y_min < desc_y_min:
+            print(f"Error: y_min ({y_min:.0f}) is below stage minimum ({desc_y_min:.0f})")
+            return 1
+        if y_max > desc_y_max:
+            print(f"Error: y_max ({y_max:.0f}) exceeds stage maximum ({desc_y_max:.0f})")
             return 1
 
     # Estimate scan coverage if objective specified
@@ -396,7 +365,7 @@ Examples:
 
         # Calculate scan area bounds (already validated pre-connection)
         if args.area_rect:
-            x_min, x_max, y_min, y_max = parse_area_rect(args.area_rect)
+            x_min, x_max, y_min, y_max = args.area_rect
         else:
             margin = args.margin
             x_min = stage.x.min_um + margin

@@ -620,39 +620,38 @@ def main():
         if save_executor:
             save_executor.shutdown(wait=True)
 
-    duration_s = time.perf_counter() - start_time
+        # Save results before __exit__ (SDK Dispose can crash the process)
+        duration_s = time.perf_counter() - start_time
 
-    # Build output
-    output = {
-        "timestamp": datetime.now().isoformat(),
-        "command": sys.argv,
-        "duration_s": round(duration_s, 2),
-        "chip_id": args.chip,
-        "source_chips_meta": str(args.chips_meta),
-        "notes": args.notes,
-        "grid_params": {
-            "contour_samples": contour_samples,
-            "contour_spacing_mm": args.contour_spacing_mm,
-            "grid_spacing_um": args.grid_spacing_um,
-            "z_start_um": reference_z_um,
-            "z_range_um": args.z_range,
-            "z_speed_um_s": args.z_speed,
-            "fine_pass": not args.no_fine_pass,
-            "fine_range_um": args.fine_range,
-            "super_fine_pass": not args.no_super_fine,
-            "sharpness_method": args.sharpness_method,
-            "move_settle_s": args.move_settle,
-            "af_settle_s": args.af_settle,
-            "save_images": args.save_images,
-            "debug_dir": str(args.debug_dir) if args.debug_dir else None,
-        },
-        "sample_points": [s.to_dict() for s in sample_results],
-    }
+        output = {
+            "timestamp": datetime.now().isoformat(),
+            "command": sys.argv,
+            "duration_s": round(duration_s, 2),
+            "chip_id": args.chip,
+            "source_chips_meta": str(args.chips_meta),
+            "notes": args.notes,
+            "grid_params": {
+                "contour_samples": contour_samples,
+                "contour_spacing_mm": args.contour_spacing_mm,
+                "grid_spacing_um": args.grid_spacing_um,
+                "z_start_um": reference_z_um,
+                "z_range_um": args.z_range,
+                "z_speed_um_s": args.z_speed,
+                "fine_pass": not args.no_fine_pass,
+                "fine_range_um": args.fine_range,
+                "super_fine_pass": not args.no_super_fine,
+                "sharpness_method": args.sharpness_method,
+                "move_settle_s": args.move_settle,
+                "af_settle_s": args.af_settle,
+                "save_images": args.save_images,
+                "debug_dir": str(args.debug_dir) if args.debug_dir else None,
+            },
+            "sample_points": [s.to_dict() for s in sample_results],
+        }
 
-    # Save
-    output_path = output_dir / f"{stem}.json"
-    with open(output_path, "w") as f:
-        json.dump(output, f, indent=2)
+        output_path = output_dir / f"{stem}.json"
+        with open(output_path, "w") as f:
+            json.dump(output, f, indent=2)
 
     # Summary
     successful_results = [s.af_result for s in sample_results if s.af_result is not None]

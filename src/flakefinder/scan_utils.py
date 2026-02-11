@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from flakefinder.types import (
+    AreaRect,
     BBox,
     CameraMeta,
     GainRGB,
@@ -67,6 +68,36 @@ def parse_white_balance(s: str) -> GainRGB:
     except ValueError as e:
         raise ArgumentTypeError(f"values must be numbers, got: {s}") from e
     return GainRGB(red=r, green=g, blue=b)
+
+
+def parse_area_rect(s: str) -> AreaRect:
+    """Parse 'x_min,x_max,y_min,y_max' string into AreaRect.
+
+    Intended as an argparse type= callback:
+        parser.add_argument("--area-rect", type=parse_area_rect, ...)
+
+    Sorts min/max if swapped.  Validates non-zero extent.
+
+    Args:
+        s: Comma-separated string (e.g., "8000,95000,0,78000") in µm.
+
+    Returns:
+        AreaRect(x_min, x_max, y_min, y_max).
+    """
+    parts = s.split(",")
+    if len(parts) != 4:
+        raise ArgumentTypeError(f"expected 4 comma-separated values (x_min,x_max,y_min,y_max), got: {s}")
+    try:
+        x1, x2, y1, y2 = float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3])
+    except ValueError as e:
+        raise ArgumentTypeError(f"values must be numbers, got: {s}") from e
+    x_min, x_max = min(x1, x2), max(x1, x2)
+    y_min, y_max = min(y1, y2), max(y1, y2)
+    if x_min == x_max:
+        raise ArgumentTypeError(f"x_min and x_max cannot be equal ({x_min})")
+    if y_min == y_max:
+        raise ArgumentTypeError(f"y_min and y_max cannot be equal ({y_min})")
+    return AreaRect(x_min, x_max, y_min, y_max)
 
 
 # ============================================================================

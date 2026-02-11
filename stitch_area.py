@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 from scipy.signal import savgol_filter
 
-from flakefinder.scan_utils import apply_flatfield
+from flakefinder.scan_utils import apply_flatfield, parse_area_rect
 
 DEFAULT_SCAN_DIR = Path(__file__).parent / "test_area_2"
 CALIBRATION_DIR = Path(__file__).parent / "calibration"
@@ -468,7 +468,7 @@ def main():
     )
     parser.add_argument(
         "--crop",
-        type=str,
+        type=parse_area_rect,
         default=None,
         help="Crop to stage rect in µm: x_min,x_max,y_min,y_max (same as scan_area --area-rect)",
     )
@@ -731,17 +731,11 @@ def main():
         "y_max": max_y + fov_height_um / 2,
     }
 
-    # Apply crop to stage coordinate rect (x_min,x_max,y_min,y_max in µm)
+    # Apply crop to stage coordinate rect (already parsed by argparse type=parse_area_rect)
     crop_left_px = 0
     crop_top_px = 0
     if args.crop:
-        crop_parts = [float(x) for x in args.crop.split(",")]
-        if len(crop_parts) != 4:
-            print("Error: --crop must be x_min,x_max,y_min,y_max in µm")
-            return 1
-        crop_x_min, crop_x_max, crop_y_min, crop_y_max = crop_parts
-        crop_x_min, crop_x_max = min(crop_x_min, crop_x_max), max(crop_x_min, crop_x_max)
-        crop_y_min, crop_y_max = min(crop_y_min, crop_y_max), max(crop_y_min, crop_y_max)
+        crop_x_min, crop_x_max, crop_y_min, crop_y_max = args.crop
 
         # Clamp to actual stage bounds
         crop_x_min = max(crop_x_min, stage_bounds_um["x_min"])

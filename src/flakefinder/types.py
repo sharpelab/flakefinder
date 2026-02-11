@@ -37,6 +37,15 @@ class GainRGB(NamedTuple):
     blue: float
 
 
+class AreaRect(NamedTuple):
+    """Stage-coordinate rectangle in µm."""
+
+    x_min: float
+    x_max: float
+    y_min: float
+    y_max: float
+
+
 class ScanRow(NamedTuple):
     """A single row in a scan plan: (y_um, x_min_um, x_max_um)."""
 
