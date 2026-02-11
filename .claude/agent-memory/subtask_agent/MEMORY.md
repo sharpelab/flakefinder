@@ -31,10 +31,18 @@
 - Don't restate the problem — the operator already knows it. Just describe the fix/change, any new CLI flags, and sync status.
 - Keep summaries to 2-3 sentences max. No technical details like method signatures or try/finally mechanics.
 
+## Image Convention (2026-02-10)
+- All images in flakefinder are RGB uint8 numpy arrays (`RGBImage` type alias in `types.py`)
+- SDK returns BGR; `sdk_image_to_numpy()` converts at the boundary
+- Autofocus sharpness functions use `cv2.COLOR_RGB2GRAY` (correct for RGB)
+- Analysis scripts load from disk with `cv2.imread()` (returns BGR independently)
+- `stitch_area.py` loads with PIL `Image.open()` (returns RGB)
+
 ## Linting & Type Checking
 - Pre-commit hook: ruff check + format, then `uv run ty check` on staged files
 - Line length limit: 120 chars. Break long f-strings into multi-line or intermediate vars.
 - Ruff catches unused variables — don't create lookups/dicts you never reference.
+- `type X = ...` (PEP 695) preferred over `X: TypeAlias = ...` (UP040 rule)
 - **Imports**: Just add at the top of the block, let ruff isort handle placement.
 - **ty** (Astral's type checker): `uv run ty check src/flakefinder/` — config in pyproject.toml
   - `[tool.ty.src] exclude` only works on directory scans, NOT direct file args
@@ -54,6 +62,21 @@
 - Per-frame velocity deltas (`np.diff(x)/np.diff(t)`) are very noisy — always use `np.polyfit(t, x, 1)` for cruise speed.
 - Velocity converter native resolution: X ~0.0015 µm/s/step, Z ~0.0006 µm/s/step — quantization is negligible.
 - `BasicControlValueVelocity` (IID 0x108) and `DirectedControlValueAsyncVelocity` (IID 0x114) share same velocity converter per axis.
+
+## Deskew Void Contamination (2026-02-10)
+
+At high scan speeds, `deskew_image` creates a large triangular void filled with edge-replicated pixels. These have full alpha and contaminate blending at high-contrast edges. Fix: zero blend alpha in the void triangle in `load_frame`, not inside `deskew_image` (because `putalpha` replaces the alpha channel after deskew). The void grows linearly: `|shear_px| * y / frame_h` pixels from the affected edge.
+
+## Stitching Artifact Debugging
+
+Generate 4 variants (±deskew × ±blend) and compare. This immediately isolates which subsystem causes the artifact. The `--no-deskew` and `--no-blend` flags exist for this.
+
+## Don't Read Images — Use `show`
+
+Use `show <path>` to display images to the user. Do NOT use the Read tool on images — it wastes tokens.
+
+## Git Discipline
+- **Always include memory file changes in commits.** If MEMORY.md is dirty, stage it alongside the task changes. Don't leave it as perpetually uncommitted.
 
 ## Microscope
 - Do NOT run hardware commands (scans, autofocus, stage moves) — only the main scan session does that.
