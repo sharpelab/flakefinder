@@ -3,9 +3,9 @@
 Wraps the common overview workflow into a single command.
 
 Usage:
-    uv run python overview_pipeline.py scans/overview_5x
-    uv run python overview_pipeline.py scans/overview_5x --downsample 4 --show
-    uv run python overview_pipeline.py scans/overview_5x --local  # skip rsync
+    uv run python scripts/process_overview.py scans/overview_5x
+    uv run python scripts/process_overview.py scans/overview_5x --downsample 4 --show
+    uv run python scripts/process_overview.py scans/overview_5x --local  # skip rsync
 """
 
 import argparse
@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_DIR = Path(__file__).parent
+REPO_DIR = Path(__file__).parent.parent
 
 
 def main() -> int:

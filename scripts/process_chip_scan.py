@@ -3,9 +3,9 @@
 Wraps the common post-scan workflow into a single command.
 
 Usage:
-    uv run python analyze_pipeline.py scans/chip0_20x
-    uv run python analyze_pipeline.py scans/chip0_20x --sharpness --show
-    uv run python analyze_pipeline.py scans/chip0_20x --notes "v10 plane"
+    uv run python scripts/process_chip_scan.py scans/chip0_20x
+    uv run python scripts/process_chip_scan.py scans/chip0_20x --sharpness --show
+    uv run python scripts/process_chip_scan.py scans/chip0_20x --notes "v10 plane"
 """
 
 import argparse
@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_DIR = Path(__file__).parent
+REPO_DIR = Path(__file__).parent.parent
 
 
 def main() -> int:
