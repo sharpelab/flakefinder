@@ -18,6 +18,7 @@ import cv2
 import numpy as np
 
 from ..image_utils import sdk_image_to_numpy
+from ..types import RGBImage
 from .units import Axis, Nosepiece, ZDrive
 
 if TYPE_CHECKING:
@@ -35,7 +36,7 @@ WORKING_DISTANCES_UM: dict[int, float] = {
 }
 
 
-def sharpness_tenengrad(image: np.ndarray) -> float:
+def sharpness_tenengrad(image: RGBImage) -> float:
     """Compute Tenengrad sharpness (Sobel gradient magnitude mean).
 
     Args:
@@ -54,7 +55,7 @@ def sharpness_tenengrad(image: np.ndarray) -> float:
     return cv2.mean(cv2.magnitude(sobel_x, sobel_y))[0]
 
 
-def sharpness_laplacian(image: np.ndarray) -> float:
+def sharpness_laplacian(image: RGBImage) -> float:
     """Compute Laplacian variance sharpness.
 
     More reliable than Tenengrad for detecting actual focus quality.
@@ -75,7 +76,7 @@ def sharpness_laplacian(image: np.ndarray) -> float:
     return lap.var()
 
 
-def sharpness_brenner(image: np.ndarray) -> float:
+def sharpness_brenner(image: RGBImage) -> float:
     """Brenner gradient sharpness."""
     if len(image.shape) == 3:
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
@@ -86,7 +87,7 @@ def sharpness_brenner(image: np.ndarray) -> float:
     return np.mean(diff**2)
 
 
-def sharpness_normalized_variance(image: np.ndarray) -> float:
+def sharpness_normalized_variance(image: RGBImage) -> float:
     """Normalized variance sharpness."""
     if len(image.shape) == 3:
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
@@ -96,7 +97,7 @@ def sharpness_normalized_variance(image: np.ndarray) -> float:
     return gray.var() / mu if mu > 0 else 0
 
 
-def sharpness_vollath_f4(image: np.ndarray) -> float:
+def sharpness_vollath_f4(image: RGBImage) -> float:
     """Vollath F4 autocorrelation sharpness."""
     if len(image.shape) == 3:
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
@@ -117,7 +118,7 @@ ALL_SHARPNESS_METRICS = {
 }
 
 
-def sharpness(image: np.ndarray, method: str = "tenengrad") -> float:
+def sharpness(image: RGBImage, method: str = "tenengrad") -> float:
     """Compute sharpness using specified method.
 
     Args:

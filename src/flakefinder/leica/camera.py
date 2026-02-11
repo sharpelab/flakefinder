@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 import numpy as np
 
-from flakefinder.types import GainRGB, Point2F
+from flakefinder.types import GainRGB, Point2F, RGBImage
 
 from .core import find_unit, get_interface_required
 from .enums import IID, UCAPI_IID, UCAPI_PROP, UCAPI_TID
@@ -31,7 +31,7 @@ from .types import Unit
 class Frame:
     """A captured image frame with metadata."""
 
-    image: np.ndarray
+    image: RGBImage
     timestamp: float  # time.monotonic() when frame was received
     position: Point2F | None = None  # (x_um, y_um) if stage provided
     frame_number: int = 0
@@ -326,8 +326,8 @@ class Camera:
         self._image_ready.set()
 
     @staticmethod
-    def _image_to_numpy(image) -> np.ndarray:
-        """Convert SDK Image to numpy array.
+    def _image_to_numpy(image) -> RGBImage:
+        """Convert SDK Image to RGB numpy array.
 
         Delegates to flakefinder.image_utils.sdk_image_to_numpy.
         Kept for backward compatibility with callers using Camera._image_to_numpy.
