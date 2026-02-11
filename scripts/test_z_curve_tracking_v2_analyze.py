@@ -384,7 +384,7 @@ def plot_comparison(data_list: list[tuple[str, dict]], output_path: Path | None 
         x_pos = analysis["x_pos"]
         z_error = analysis["z_error"]
         cv_mask = analysis["cv_mask"]
-        label = Path(fname).stem.split("_")[-1]  # Use timestamp as label
+        label = Path(_fname).stem.split("_")[-1]  # Use timestamp as label
 
         params = analysis["params"]
         label = f"Kp={params['kp']}, Kv={params['kv']}"
