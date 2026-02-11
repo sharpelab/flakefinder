@@ -12,6 +12,8 @@ import numpy as np
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 from scipy.signal import savgol_filter
 
+from flakefinder.scan_utils import apply_flatfield
+
 DEFAULT_SCAN_DIR = Path(__file__).parent / "test_area_2"
 CALIBRATION_DIR = Path(__file__).parent / "calibration"
 
@@ -222,7 +224,6 @@ def stitch_row_to_global(
     hysteresis_um=0,
     savgol_window=15,
     flatfield=None,
-    flatfield_mean=None,
     num_threads=1,
 ):
     """
@@ -375,10 +376,9 @@ def stitch_row_to_global(
         img = img.convert("RGBA")
 
         if flatfield is not None:
-            img_arr = np.array(img, dtype=np.float32)
-            for c in range(3):
-                img_arr[:, :, c] = (img_arr[:, :, c] / flatfield[:, :, c]) * flatfield_mean
-            img_arr = np.clip(img_arr, 0, 255).astype(np.uint8)
+            img_arr = np.array(img)
+            img_rgb = apply_flatfield(img_arr[:, :, :3], flatfield)
+            img_arr[:, :, :3] = img_rgb
             img = Image.fromarray(img_arr, mode="RGBA")
 
         # Apply per-frame deskew (rolling shutter correction).
@@ -536,7 +536,6 @@ def main():
 
     # Load flatfield for vignetting correction
     flatfield = None
-    flatfield_mean = None
     flatfield_path = None
 
     if args.no_flatfield:
@@ -556,7 +555,6 @@ def main():
             return 1
 
         flatfield = np.load(flatfield_path).astype(np.float32)
-        flatfield_mean = np.mean(flatfield)
         if not args.quiet:
             print(f"Flatfield: {flatfield_path}")
 
@@ -595,7 +593,6 @@ def main():
             if not args.quiet:
                 print(f"  Resized flatfield {ff_w}x{ff_h} -> {frame_w}x{frame_h}")
             flatfield = ff_resized
-            flatfield_mean = np.mean(flatfield)
 
     if not args.quiet:
         print(f"Scan: {len(meta['rows'])} rows, {meta['frame_count']} frames")
@@ -674,7 +671,6 @@ def main():
             hysteresis_um=args.hysteresis,
             savgol_window=args.savgol_window,
             flatfield=flatfield,
-            flatfield_mean=flatfield_mean,
             num_threads=args.threads,
         )
 
