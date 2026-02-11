@@ -34,6 +34,7 @@ def main() -> int:
     )
     parser.add_argument("--show", action="store_true", help="Open the chip detection image")
     parser.add_argument("--local", action="store_true", help="Skip rsync (data already local)")
+    parser.add_argument("--no-flatfield", action="store_true", help="Skip flatfield correction")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show full stitch output")
     args = parser.parse_args()
 
@@ -61,6 +62,8 @@ def main() -> int:
         "--downsample",
         str(args.downsample),
     ]
+    if args.no_flatfield:
+        cmd.append("--no-flatfield")
     print("Stitching...")
     if args.verbose:
         result = subprocess.run(cmd)
