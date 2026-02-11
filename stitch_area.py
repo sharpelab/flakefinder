@@ -273,6 +273,7 @@ def stitch_row_to_global(
     blend=True,
     deskew=True,
     hysteresis_um=0,
+    savgol_window=15,
     flatfield=None,
     flatfield_mean=None,
     num_threads=1,
@@ -309,17 +310,37 @@ def stitch_row_to_global(
         last_moving = len(all_row_frames)
     row_frames = all_row_frames[first_moving:last_moving]
 
-    # Savgol smooth ALL frame positions (handles accel zones naturally).
-    # Window=15 (~225ms) absorbs camera timing jitter (occasional 20ms gaps
-    # that cause velocity spikes in narrower windows). polyorder=2 tracks
-    # quadratic accel profiles well.
+    # Fix capture bubble positions before smoothing.
+    # Bubbles: a delayed capture (large gap before) followed by an immediate
+    # one (small gap after, frame was already in camera buffer). Both frames
+    # have inaccurate interpolated positions because the actual exposure time
+    # differs from t_start. Fix by replacing bubble positions with linear
+    # interpolation from their clean neighbors.
     raw_positions = np.array([f["x_start"] for f in row_frames])
+    raw_times = np.array([(f["t_start"] + f["t_end"]) / 2 for f in row_frames])
     n = len(raw_positions)
-    if n >= 15:
-        window = min(15, n if n % 2 == 1 else n - 1)
-        all_positions = savgol_filter(raw_positions, window, 2).tolist()
-    elif n >= 7:
-        window = min(7, n if n % 2 == 1 else n - 1)
+
+    if n >= 5:
+        dt = np.diff(raw_times)
+        median_dt = np.median(dt)
+        # A bubble is a gap > 1.5x median followed by a gap < 0.7x median
+        for i in range(len(dt) - 1):
+            if dt[i] > 1.5 * median_dt and dt[i + 1] < 0.7 * median_dt:
+                # Frames i+1 (delayed) and i+2 (immediate-after) have bad positions.
+                # Interpolate from neighbors based on time.
+                # Find clean neighbors: i (before bubble) and i+3 or later (after)
+                left = i
+                right = min(i + 3, n - 1)
+                if right > left:
+                    t_left, t_right = raw_times[left], raw_times[right]
+                    x_left, x_right = raw_positions[left], raw_positions[right]
+                    for j in range(left + 1, right):
+                        frac = (raw_times[j] - t_left) / (t_right - t_left)
+                        raw_positions[j] = x_left + frac * (x_right - x_left)
+
+    # Savgol smooth positions. Absorbs residual position polling noise.
+    if savgol_window > 0 and n >= savgol_window:
+        window = min(savgol_window, n if n % 2 == 1 else n - 1)
         all_positions = savgol_filter(raw_positions, window, 2).tolist()
     else:
         all_positions = raw_positions.tolist()
@@ -540,6 +561,13 @@ def main():
     parser.add_argument("--row-labels", action="store_true", help="Draw row index+direction labels (e.g., 0+, 1-, 2+)")
     parser.add_argument("--draw-frame-outlines", action="store_true", help="Draw outline of each placed frame (debug)")
     parser.add_argument(
+        "--savgol-window",
+        type=int,
+        default=15,
+        help="Savgol smoothing window for positions (0=disabled, default: 15)",
+    )
+    parser.add_argument("-q", "--quiet", action="store_true", help="Suppress per-row progress output")
+    parser.add_argument(
         "-o",
         "--output",
         type=str,
@@ -588,7 +616,8 @@ def main():
 
         flatfield = np.load(flatfield_path).astype(np.float32)
         flatfield_mean = np.mean(flatfield)
-        print(f"Flatfield: {flatfield_path}")
+        if not args.quiet:
+            print(f"Flatfield: {flatfield_path}")
 
     # Parse row range if specified
     if args.rows:
@@ -622,18 +651,22 @@ def main():
                 ff_channel = Image.fromarray(flatfield[:, :, c], mode="F")
                 ff_channel = ff_channel.resize((frame_w, frame_h), Image.Resampling.LANCZOS)
                 ff_resized[:, :, c] = np.array(ff_channel, dtype=np.float32)
-            print(f"  Resized flatfield {ff_w}x{ff_h} -> {frame_w}x{frame_h}")
+            if not args.quiet:
+                print(f"  Resized flatfield {ff_w}x{ff_h} -> {frame_w}x{frame_h}")
             flatfield = ff_resized
             flatfield_mean = np.mean(flatfield)
 
-    print(f"Scan: {len(meta['rows'])} rows, {meta['frame_count']} frames")
-    print(f"Processing: {len(rows)} rows")
-    print(f"Calibration: {um_per_px:.3f} µm/px (downsample {downsample}x{args.downsample})")
-    print(f"Frame: {frame_w}x{frame_h} px = {fov_width_um:.0f}x{fov_height_um:.0f} µm")
-    print(f"Y step: {y_step_um:.0f} µm, Y overlap: {y_overlap_um:.0f} µm ({y_overlap_um / fov_height_um * 100:.0f}%)")
+    if not args.quiet:
+        print(f"Scan: {len(meta['rows'])} rows, {meta['frame_count']} frames")
+        print(f"Processing: {len(rows)} rows")
+        print(f"Calibration: {um_per_px:.3f} µm/px (downsample {downsample}x{args.downsample})")
+        print(f"Frame: {frame_w}x{frame_h} px = {fov_width_um:.0f}x{fov_height_um:.0f} µm")
+        overlap_pct = y_overlap_um / fov_height_um * 100
+        print(f"Y step: {y_step_um:.0f} µm, Y overlap: {y_overlap_um:.0f} µm ({overlap_pct:.0f}%)")
 
     # Process each row to find CV regions and global X bounds
-    print("\nAnalyzing rows...")
+    if not args.quiet:
+        print("\nAnalyzing rows...")
     row_results = []
 
     for row in rows:
@@ -659,14 +692,18 @@ def main():
             }
         )
 
-        print(f"  Row {row['row_idx']:2d}: {len(row_frames)} frames ({cv_count} CV), X: {x_min:.0f} - {x_max:.0f} µm")
+        if not args.quiet:
+            print(  # noqa: E501
+                f"  Row {row['row_idx']:2d}: {len(row_frames)} frames ({cv_count} CV), X: {x_min:.0f} - {x_max:.0f} µm"
+            )
 
     # Find global X bounds: union of all rows (including accel zones)
     global_x_min = min(r["x_min"] for r in row_results)
     global_x_max = max(r["x_max"] for r in row_results)
     global_x_range = global_x_max - global_x_min + fov_width_um
 
-    print(f"\nGlobal X bounds: {global_x_min:.0f} - {global_x_max:.0f} µm ({global_x_range:.0f} µm total)")
+    if not args.quiet:
+        print(f"\nGlobal X bounds: {global_x_min:.0f} - {global_x_max:.0f} µm ({global_x_range:.0f} µm total)")
 
     # Calculate final canvas dimensions
     n_rows = len(rows)
@@ -675,7 +712,8 @@ def main():
     canvas_w = int(global_x_range / um_per_px)
     canvas_h = int(total_height_um / um_per_px)
 
-    print(f"Final canvas: {canvas_w}x{canvas_h} px ({global_x_range:.0f}x{total_height_um:.0f} µm)")
+    if not args.quiet:
+        print(f"Final canvas: {canvas_w}x{canvas_h} px ({global_x_range:.0f}x{total_height_um:.0f} µm)")
 
     # Y blend width
     y_overlap_px = int(y_overlap_um / um_per_px)
@@ -684,7 +722,8 @@ def main():
     # Create final canvas
     canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
 
-    print("\nStitching rows...")
+    if not args.quiet:
+        print("\nStitching rows...")
     all_frame_rects = []  # (x, y, w, h) in final canvas coords
 
     for result in row_results:
@@ -705,6 +744,7 @@ def main():
             blend=not args.no_blend,
             deskew=not args.no_deskew,
             hysteresis_um=args.hysteresis,
+            savgol_window=args.savgol_window,
             flatfield=flatfield,
             flatfield_mean=flatfield_mean,
             num_threads=args.threads,
@@ -750,7 +790,8 @@ def main():
         for fx, fy, fw, fh in frame_rects:
             all_frame_rects.append((fx, fy + y_offset_px, fw, fh))
 
-        print(f"  Row {row_idx}: {frames_placed} frames, y={y_offset_px} px")
+        if not args.quiet:
+            print(f"  Row {row_idx}: {frames_placed} frames, y={y_offset_px} px")
 
     # Convert to RGB with background color
     background = Image.new("RGB", canvas.size, bg_color)
@@ -792,10 +833,11 @@ def main():
         stage_bounds_um["x_min"] += crop_left_um
         stage_bounds_um["x_max"] -= crop_right_um
 
-        print(
-            f"\nCropped: top={crop_top_um:.0f} right={crop_right_um:.0f} "
-            f"bottom={crop_bottom_um:.0f} left={crop_left_um:.0f} µm"
-        )
+        if not args.quiet:
+            print(
+                f"\nCropped: top={crop_top_um:.0f} right={crop_right_um:.0f} "
+                f"bottom={crop_bottom_um:.0f} left={crop_left_um:.0f} µm"
+            )
 
     # Draw grid overlay
     if args.grid_spacing_um > 0:
@@ -807,7 +849,8 @@ def main():
             args.grid_line_color,
             args.grid_line_width,
         )
-        print(f"Grid: {args.grid_spacing_um:.0f} µm spacing")
+        if not args.quiet:
+            print(f"Grid: {args.grid_spacing_um:.0f} µm spacing")
 
     # Draw row labels
     if args.row_labels:
@@ -816,7 +859,8 @@ def main():
     # Draw frame outlines
     if args.draw_frame_outlines:
         background = draw_frame_outlines(background, all_frame_rects, (crop_left_px, crop_top_px))
-        print(f"Frame outlines: {len(all_frame_rects)} frames")
+        if not args.quiet:
+            print(f"Frame outlines: {len(all_frame_rects)} frames")
 
     # Save image
     if args.output:
