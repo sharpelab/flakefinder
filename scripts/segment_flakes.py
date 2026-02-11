@@ -107,12 +107,14 @@ def segment_frame(
         region_pixels = image[component]
         mean_contrast = float(np.mean(region_pixels.astype(np.float32) - bg_modes))
 
-        detections.append({
-            "bbox": [x_min, y_min, x_max - x_min, y_max - y_min],
-            "center": [round(cx, 1), round(cy, 1)],
-            "size_px": size,
-            "mean_contrast": round(mean_contrast, 1),
-        })
+        detections.append(
+            {
+                "bbox": [x_min, y_min, x_max - x_min, y_max - y_min],
+                "center": [round(cx, 1), round(cy, 1)],
+                "size_px": size,
+                "mean_contrast": round(mean_contrast, 1),
+            }
+        )
 
     detections.sort(key=lambda d: d["size_px"], reverse=True)
     return detections
@@ -145,7 +147,7 @@ def save_plot(image: np.ndarray, detections: list[dict], title: str, output_path
         color = "lime" if s > 1000 else "yellow" if s > 500 else "red"
         lw = 2 if s > 1000 else 1
         ax1.add_patch(Rectangle((bx, by), bw, bh, linewidth=lw, edgecolor=color, facecolor="none"))
-        ax1.text(bx, by - 4, f'{s}px', color=color, fontsize=7, fontweight="bold")
+        ax1.text(bx, by - 4, f"{s}px", color=color, fontsize=7, fontweight="bold")
     ax1.set_title(f"{title}\n{len(detections)} detections")
 
     bg_modes = np.array([histogram_mode(image, c) for c in range(3)])
@@ -168,7 +170,12 @@ def main():
     parser.add_argument("--contrast-offset", type=float, default=15.0, help="Threshold above bg mode")
     parser.add_argument("--min-size", type=int, default=1000, help="Min detection size (px)")
     parser.add_argument("--edge-margin", type=int, default=50, help="Ignore detections near frame edge (px)")
-    parser.add_argument("--dark-frac-cutoff", type=float, default=0.05, help="Skip frame if dark pixel fraction exceeds this (edge/off-chip filter)")
+    parser.add_argument(
+        "--dark-frac-cutoff",
+        type=float,
+        default=0.05,
+        help="Skip frame if dark pixel fraction exceeds this (edge/off-chip filter)",
+    )
     parser.add_argument("--output", "-o", type=Path, default=None, help="Output image path")
     parser.add_argument("--save-plot", action="store_true", help="Also save matplotlib analysis plot")
     args = parser.parse_args()
