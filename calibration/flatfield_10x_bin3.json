@@ -1,0 +1,98 @@
+{
+  "objective_mag": 10.0,
+  "binning": 3,
+  "lamp_pct": 100,
+  "exposure_s": 0.001,
+  "gain": 1.0,
+  "white_balance_rgb": [
+    1.41,
+    1.02,
+    2.51
+  ],
+  "gamma": 1.0,
+  "frame_size_px": [
+    1824,
+    1216
+  ],
+  "z_um": 24703.534,
+  "positions_um": [
+    [
+      52608.6,
+      7809.3
+    ],
+    [
+      62037.4,
+      7809.3
+    ],
+    [
+      71466.1,
+      7809.3
+    ],
+    [
+      80894.8,
+      7809.3
+    ],
+    [
+      52608.6,
+      13606.6
+    ],
+    [
+      62037.4,
+      13606.6
+    ],
+    [
+      71466.1,
+      13606.6
+    ],
+    [
+      80894.8,
+      13606.6
+    ],
+    [
+      52608.6,
+      19404.0
+    ],
+    [
+      62037.4,
+      19404.0
+    ],
+    [
+      71466.1,
+      19404.0
+    ],
+    [
+      80894.8,
+      19404.0
+    ]
+  ],
+  "num_positions": 12,
+  "num_frames_kept": 11,
+  "source": {
+    "type": "chips_meta",
+    "chips_meta_path": "scans/run_20260210_2028/overview_5x_stitch_chips.json",
+    "chip_index": 1
+  },
+  "mean_bgr": [
+    45.23,
+    55.46,
+    136.16
+  ],
+  "reference_wb_bgr": [
+    1.226,
+    1.0,
+    0.407
+  ],
+  "flatfield_stats": {
+    "shape": [
+      1216,
+      1824,
+      3
+    ],
+    "mean": 78.9,
+    "center_brightness": 85.5,
+    "corner_brightness": 69.6,
+    "vignetting_pct": 18.6
+  },
+  "captured_at": "2026-02-11T00:31:42.297882",
+  "notes": null
+}

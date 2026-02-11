@@ -3,6 +3,10 @@
 Runs on the microscope. Captures at each position, validates brightness
 consistency and uniformity, builds median flatfield from good frames.
 
+To recalibrate all objectives, run once per objective with AF beforehand:
+    autofocus_demo.py --objective-mag X --x CX --y CY --z Z_REF --fine -q
+    build_flatfield.py --objective-mag X --chips-meta ... --chip N -o calibration/flatfield_Xx_bin3.npy
+
 Usage:
     # Auto-generate grid from chip bbox (Z from current position)
     uv run python scripts/build_flatfield.py --objective-mag 2.5 \

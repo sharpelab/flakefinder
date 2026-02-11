@@ -34,6 +34,9 @@ Objectives are parfocal — Z focus is similar across magnifications.
 | Set 1 | 20x (pos 3) | ~24690 | autofocus runs (af_g01: 24699, af_g01_v6: 24690) | 2026-02-05 |
 | Set 2 | 20x (pos 3) | ~24699 | af_20x_chip0_center_slow, chip 0 centroid | 2026-02-06 |
 | Set 2 | 2.5x (pos 6) | ~24591 | af_2.5x_chip0, chip 0 centroid | 2026-02-11 |
+| Set 2 | 5x (pos 1) | ~24707 | af_5x_chip1_ff, chip 1 centroid | 2026-02-11 |
+| Set 2 | 10x (pos 2) | ~24704 | af_10x_chip1_ff, chip 1 centroid | 2026-02-11 |
+| Set 2 | 20x (pos 3) | ~24718 | af_20x_chip1_ff, chip 1 centroid | 2026-02-11 |
 
 Z is sample-dependent — different substrates shift focus. The ±250 µm autofocus range covers typical variation. Use as starting `--z` for `autofocus_demo.py`.
 
