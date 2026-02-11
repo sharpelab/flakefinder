@@ -45,7 +45,7 @@ At the start of each session:
 
 **Autofocus at a point:**
 ```
-ssh sharpelab-microscope 'cd flakefinder && uv run python autofocus_demo.py --x [X] --y [Y] --z [Z_REF] --fine --z-speed 1250 --settle-time 0.2 --white-balance 2.51,1.02,1.41 --output afs/[name] --clean'
+ssh sharpelab-microscope 'cd flakefinder && uv run python autofocus_demo.py --x [X] --y [Y] --z [Z_REF] --fine --z-speed 1250 --settle-time 0.2 --white-balance 2.51,1.02,1.41 --output afs/[name] --clean -q'
 ```
 - Always use `--z` with a known reference Z (from notebook or microscope_reference.md)
 - Default to 1/4 Z speed (1250 µm/s) for 20x
@@ -67,13 +67,35 @@ ssh sharpelab-microscope 'cd flakefinder && uv run python capture_util.py --x [X
 - Use `-q` to suppress verbose output
 - If needed, use `scripts/image_stats.py` after grabbing locally to check brightness, clipping, and channel balance
 
+**Switch objective:**
+```
+ssh sharpelab-microscope 'cd flakefinder && uv run python stage_util.py --objective-pos [POS] -q'
+```
+- Positions: 6=2.5x, 1=5x, 2=10x, 3=20x, 4=50x, 5=150x
+- Z shifts on swap (parfocal adjustment) — note the new Z
+
+**Process overview scan (local):**
+```
+uv run python scripts/process_overview.py scans/[overview_dir] --show
+```
+- Rsyncs from microscope, stitches, detects chips, shows detection image
+- Use `--local` if data already downloaded, `--no-flatfield` if no calibration file
+- Use `-v` to see stitch output on error
+
+**Process chip scan (local):**
+```
+uv run python scripts/process_chip_scan.py scans/[run_dir]/chip_[N]/scan_20x --show
+```
+- Rsyncs from microscope, runs analyze_scan, shows analysis plot
+- Use `--verbose` for per-row detail, `--sharpness` to compute frame sharpness
+
 **Code changes:**
 - Use `/start_subtask` for code changes — handles both new subtasks and continuations to existing ones.
 - Only make extremely small fixes yourself (one-liners) and `scp` them directly.
 
 ### Context Management
 - **Write analysis helpers early** — if you're about to run the same inline python analysis more than twice, write it as a script first.
-- **Don't use `--verbose` on analyze_pipeline unless you need per-row detail.**
+- **Don't use `--verbose` on process_chip_scan unless you need per-row detail.**
 - **Delegate code exploration to subtasks** — reading SDK code, tracing velocity paths, auditing metrics. These burn context and the subtask can summarize findings.
 
 ### Key Parameters
@@ -83,7 +105,7 @@ ssh sharpelab-microscope 'cd flakefinder && uv run python capture_util.py --x [X
 - Min sharpness filter: 20 (for focus map analysis)
 - Mosaic max-dim: 4500 px
 - Analysis plots: +Y down
-- Quiet flags: use `-q` on `capture_util.py`, `stitch_area.py`, `analyze_focus_map.py`
+- Quiet flags: use `-q` on `autofocus_demo.py`, `capture_util.py`, `stage_util.py`, `stitch_area.py`, `analyze_focus_map.py`
 
 ## Context Files
 
