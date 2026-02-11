@@ -59,3 +59,7 @@ experiments/*
 !experiments/.gitkeep
 downloads/*
 !downloads/.gitkeep
+afs/*
+!afs/.gitkeep
+captures/*
+!captures/.gitkeep

@@ -31,7 +31,11 @@ At the start of each session:
   - **Log user decisions immediately** — when the user picks a value, makes a judgment call, or decides on a plan, write it to the notebook right away. Don't wait to be reminded.
   - **The log is strictly append-only.** Never edit or strike through existing entries — if something was wrong, append a correction.
   - **Appending to the log:** Use `scan-nb <slug>` — auto-timestamps and appends before the sentinel. Use `--attach src[:dest]` for images (Obsidian `![[file]]` syntax, validates all attachments are referenced).
-- **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `rsync -a --quiet` for all transfers (single files and bulk). Download one-off files (manual AF images, etc.) into `downloads/`, not the project root. Scan data goes in `scans/`.
+- **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `rsync -a --quiet` for all transfers (single files and bulk). File routing:
+  - `scans/` — pipeline scan data (overview, chip scans, focus maps from `find_flakes.py`)
+  - `afs/` — one-off autofocus runs
+  - `captures/` — one-off captures (`capture_util.py`)
+  - `downloads/` — reference data, downloaded flakes, analysis artifacts
 - **Images**: `show` results for the user automatically after analysis runs. "show" = open file for the user.
 - **Images in notebook**: Use `scan-nb --attach`, not manual copy + link.
 - **After every microscope run or analysis**: (1) show results to the user, (2) update the notebook. Every time. No exceptions. Do both before moving on.
@@ -41,7 +45,7 @@ At the start of each session:
 
 **Autofocus at a point:**
 ```
-ssh sharpelab-microscope 'cd flakefinder && uv run python autofocus_demo.py --x [X] --y [Y] --z [Z_REF] --fine --z-speed 1250 --settle-time 0.2 --output [name] --clean'
+ssh sharpelab-microscope 'cd flakefinder && uv run python autofocus_demo.py --x [X] --y [Y] --z [Z_REF] --fine --z-speed 1250 --settle-time 0.2 --white-balance 2.51,1.02,1.41 --output afs/[name] --clean'
 ```
 - Always use `--z` with a known reference Z (from notebook or microscope_reference.md)
 - Default to 1/4 Z speed (1250 µm/s) for 20x
@@ -55,6 +59,13 @@ ssh sharpelab-microscope 'cd flakefinder && uv run python focus_map.py --chips-m
 - Grab results: `rsync -a --quiet sharpelab-microscope:flakefinder/scans/focus_map_chip[N]* scans/`
 - Run analysis: `uv run python analyze_focus_map.py scans/focus_map_chip[N].json --export-plane scans/focus_map_chip[N]_plane.json --min-sharpness 20 --quiet`
 - Open all three outputs (analysis, mosaic, contour)
+
+**Capture at a point:**
+```
+ssh sharpelab-microscope 'cd flakefinder && uv run python capture_util.py --x [X] --y [Y] --z [Z] --white-balance 2.51,1.02,1.41 -q captures/[name].png'
+```
+- Use `-q` to suppress verbose output
+- If needed, use `scripts/image_stats.py` after grabbing locally to check brightness, clipping, and channel balance
 
 **Code changes:**
 - Use `/start_subtask` for code changes — handles both new subtasks and continuations to existing ones.
@@ -72,6 +83,7 @@ ssh sharpelab-microscope 'cd flakefinder && uv run python focus_map.py --chips-m
 - Min sharpness filter: 20 (for focus map analysis)
 - Mosaic max-dim: 4500 px
 - Analysis plots: +Y down
+- Quiet flags: use `-q` on `capture_util.py`, `stitch_area.py`, `analyze_focus_map.py`
 
 ## Context Files
 
