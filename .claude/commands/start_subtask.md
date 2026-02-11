@@ -48,6 +48,7 @@ Pick from this menu based on relevance to the task. The subtask will read these 
 | `docs/continuous_autofocus_plan.md` | Focus system design |
 | `docs/scan_metadata.md` | Scan data format reference |
 | `docs/microscope_reference.md` | Reference Z values, hardware specs |
+| `scans/*_stitch_chips_detected.png` | Chip detection results (1500px thumbnail with boxes) — use instead of raw stitch JPGs |
 
 Also include any files the user specifically mentions, plus files you know are relevant from the current session.
 

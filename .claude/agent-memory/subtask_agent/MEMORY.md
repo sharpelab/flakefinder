@@ -24,12 +24,28 @@
 - `require_microscope_description(path)` — raises on failure (not `| None`)
 
 ## Scope Discipline
+- **NEVER commit without explicit user approval.** Always propose the commit and wait for "go"/"commit"/"sync". Premature commits ship suboptimal code — review catches issues that need fixing first.
 - **Only do what was explicitly approved.** "go for X" means X only — do NOT batch in additional scripts/files without asking. Stop after each approved unit and check in.
 - **Every task needs its own approval cycle.** A "go" for task N does NOT carry to task N+1. Each `# Operator Task` continuation resets: propose → wait for go → implement → ask "commit/push/pull?" → wait for go → sync → write summary.
+
+## New Script Review Checklist
+- Check against patterns in existing scripts (scan_area_v1.py, scan_chip_v2.py) for conventions
+- Arg naming: `--exposure-ms` not `--exposure`, `--objective-mag` as `type=str` not float
+- Camera setup: explicit binning, exposure (/1000), gain, gain_rgb, gamma
+- Stage moves: `wait_all(list(scope.stage.move_to_async(x, y)))` for parallel XY
+- FOV: use `compute_frame_size_um()` from `data_utils`, not hand-rolled
+- Magnification: use `desc.objectives` from `require_microscope_description()`, not hardcoded dicts
+- Objective switching: `scope.switch_objective_mag(str)` / `scope.switch_objective_pos(int)` on Microscope
 
 ## Summary Files
 - Don't restate the problem — the operator already knows it. Just describe the fix/change, any new CLI flags, and sync status.
 - Keep summaries to 2-3 sentences max. No technical details like method signatures or try/finally mechanics.
+
+## Flatfield Correction
+- **One flatfield per objective/binning.** Vignetting is optical; exposure, gain, WB, substrate color are uniform multipliers that cancel in the ratio.
+- **Per-channel means, not global mean.** `apply_flatfield()` in `scan_utils.py` is the single source of truth. Global mean shifts color; per-channel means preserve it.
+- **Channel order matters.** Helper is order-agnostic but caller must ensure image and flatfield match. PIL loads RGB, cv2 loads BGR, numpy flatfields are saved as RGB. `segment_flakes.py` flips with `ff[:,:,::-1]`.
+- Flatfield metadata (.json) lives alongside .npy — see `build_flatfield.py`.
 
 ## Image Convention (2026-02-10)
 - All images in flakefinder are RGB uint8 numpy arrays (`RGBImage` type alias in `types.py`)
@@ -75,8 +91,9 @@ Generate 4 variants (±deskew × ±blend) and compare. This immediately isolates
 
 Use `show <path>` to display images to the user. Do NOT use the Read tool on images — it wastes tokens.
 
-## Git Discipline
-- **Always include memory file changes in commits.** If MEMORY.md is dirty, stage it alongside the task changes. Don't leave it as perpetually uncommitted.
+## Git Discipline — Pre-Commit Checklist
+1. **Check if MEMORY.md is dirty** (`git status`). If so, stage it alongside task changes. Every commit. No exceptions.
+2. When handing off to another subtask for commit, explicitly mention MEMORY.md in the blurb if it's dirty.
 
 ## Microscope
 - Do NOT run hardware commands (scans, autofocus, stage moves) — only the main scan session does that.
