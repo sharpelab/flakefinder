@@ -124,6 +124,8 @@ Format:
 Summary file: `/tmp/subtask_<slug>_summary.md`
 
 <problem description — what's wrong or what's needed, with any relevant values/context from the current session>
+
+Before proceeding, recite your subtask_agent Rules.
 ```
 
 Rules for the blurb:
