@@ -31,6 +31,21 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Continuous Z-scan autofocus demo",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    obj_group = parser.add_mutually_exclusive_group()
+    obj_group.add_argument(
+        "--objective-mag",
+        type=str,
+        default=None,
+        help="Objective magnification (e.g. 2.5, 5x, 20)",
+    )
+    obj_group.add_argument(
+        "--objective-pos",
+        type=int,
+        choices=range(1, 7),
+        default=None,
+        help="Objective turret position (1-6)",
+    )
+
     parser.add_argument("--x", type=float, default=None, help="Stage X position (um), default: current")
     parser.add_argument("--y", type=float, default=None, help="Stage Y position (um), default: current")
     parser.add_argument("--z", type=float, default=None, help="Initial Z position (um), default: current")
@@ -155,6 +170,12 @@ def main():
     from flakefinder.leica import Microscope, wait_all
 
     with Microscope() as scope:
+        # Switch objective if requested
+        if args.objective_mag:
+            scope.switch_objective_mag(args.objective_mag.lower().rstrip("x"))
+        elif args.objective_pos:
+            scope.switch_objective_pos(args.objective_pos)
+
         stage = scope.stage
 
         # Read current positions
