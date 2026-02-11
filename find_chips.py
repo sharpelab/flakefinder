@@ -93,6 +93,46 @@ def extract_chip_geometry(contour: np.ndarray, meta: dict) -> dict:
     }
 
 
+def _multi_otsu_3class(gray: np.ndarray) -> tuple[int, int]:
+    """Find two thresholds that maximize 3-class between-class variance.
+
+    Standard extension of Otsu's method for trimodal histograms.
+    Operates on the 256-bin histogram (not pixel data), so cost is O(256²).
+
+    Returns:
+        (t1, t2) where t1 < t2 are the two optimal thresholds.
+    """
+    hist = cv2.calcHist([gray], [0], None, [256], [0, 256]).ravel()
+    total = hist.sum()
+
+    cum_sum = np.cumsum(hist)
+    cum_mean = np.cumsum(hist * np.arange(256))
+    global_mean = cum_mean[-1] / total
+
+    best_sigma = 0.0
+    best_t1, best_t2 = 0, 0
+
+    for t1 in range(1, 254):
+        w0 = cum_sum[t1]
+        if w0 == 0:
+            continue
+        m0 = cum_mean[t1] / w0
+        for t2 in range(t1 + 1, 255):
+            w1 = cum_sum[t2] - cum_sum[t1]
+            w2 = total - cum_sum[t2]
+            if w1 == 0 or w2 == 0:
+                continue
+            m1 = (cum_mean[t2] - cum_mean[t1]) / w1
+            m2 = (cum_mean[-1] - cum_mean[t2]) / w2
+
+            sigma = w0 * (m0 - global_mean) ** 2 + w1 * (m1 - global_mean) ** 2 + w2 * (m2 - global_mean) ** 2
+            if sigma > best_sigma:
+                best_sigma = sigma
+                best_t1, best_t2 = t1, t2
+
+    return best_t1, best_t2
+
+
 def find_chips(
     image_path: Path,
     min_area_um2: float = 1e6,
@@ -123,9 +163,15 @@ def find_chips(
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     gray = lab[:, :, 0]  # L channel
 
-    # Apply Otsu's threshold
-    # Chips are brighter than dark substrate, so we want bright regions
-    threshold, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # 3-class multi-Otsu threshold.
+    # The histogram is trimodal: dark background, medium-bright chips, and
+    # very bright metal sheath/artifacts. Standard 2-class Otsu can split
+    # between (background+chips) vs sheath, misclassifying chips as dark.
+    # 3-class Otsu finds two thresholds; we use the lower one to separate
+    # background from everything bright (chips + sheath).
+    t1, _t2 = _multi_otsu_3class(gray)
+    threshold = int(t1)
+    binary = np.where(gray > threshold, 255, 0).astype(np.uint8)
 
     # Morphological cleanup
     kernel_px = max(3, int(morph_kernel_um / scale))
