@@ -130,6 +130,13 @@ Examples:
     # Frame options
     frame_group = parser.add_argument_group("Frame capture")
     frame_group.add_argument(
+        "--x-overlap-percent",
+        type=float,
+        default=50,
+        help="Target X overlap between saved frames, %% (default: 50). "
+        "Frames captured before advancing enough are discarded.",
+    )
+    frame_group.add_argument(
         "--y-overlap-percent",
         type=float,
         default=12,
@@ -342,6 +349,10 @@ Examples:
         if args.downsample > 1:
             print(f"  Downsample: {args.downsample}x")
 
+        # Compute position-based frame skip threshold
+        target_advance_um = frame_width_um * (1 - args.x_overlap_percent / 100)
+        print(f"  X overlap target: {args.x_overlap_percent:.0f}% (advance {target_advance_um:.0f} µm between saves)")
+
         # Print lighting info
         light = micro_meta["lighting"]
         print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({light['lamp_intensity']}/{light['lamp_max_intensity']})")
@@ -488,6 +499,8 @@ Examples:
             "y_min_um": y_min,
             "y_max_um": y_max,
             "y_step_um": y_step,
+            "x_overlap_percent": args.x_overlap_percent,
+            "target_advance_um": target_advance_um,
             "y_overlap_percent": args.y_overlap_percent,
             "downsample": args.downsample,
             # Scan parameters
@@ -559,6 +572,9 @@ Examples:
             row_start = time.perf_counter()
             row_frame_start = global_frame_idx
             row_frame_count = 0
+            row_capture_count = 0
+            row_skip_count = 0
+            last_saved_x = None
 
             # Warm up camera with a few captures before starting move
             for _ in range(args.warmup_frames):
@@ -578,21 +594,31 @@ Examples:
                 t_end = time.perf_counter()
 
                 if current_image[0] is not None:
-                    # Queue frame immediately for background saving
-                    save_queue.put(
-                        (
-                            global_frame_idx,
-                            row_idx,
-                            t_start,
-                            t_end,
-                            current_image[0],
-                            row_y,
-                            x_samples,
-                            total_scan_start,
+                    row_capture_count += 1
+                    x_now = x_samples[-1][2] if x_samples else None
+
+                    # Position-based frame save/skip
+                    if last_saved_x is not None and x_now is not None and abs(x_now - last_saved_x) < target_advance_um:
+                        current_image[0].Dispose()
+                        row_skip_count += 1
+                    else:
+                        # Queue frame for background saving
+                        save_queue.put(
+                            (
+                                global_frame_idx,
+                                row_idx,
+                                t_start,
+                                t_end,
+                                current_image[0],
+                                row_y,
+                                x_samples,
+                                total_scan_start,
+                            )
                         )
-                    )
-                    global_frame_idx += 1
-                    row_frame_count += 1
+                        if x_now is not None:
+                            last_saved_x = x_now
+                        global_frame_idx += 1
+                        row_frame_count += 1
 
             row_end = time.perf_counter()
             handle.dispose()
@@ -609,7 +635,11 @@ Examples:
             ]
 
             if not args.quiet:
-                print(f"  {row_frame_count} frames, {len(row_x_samples)} pos samples, {row_duration:.2f}s")
+                skip_str = f", {row_skip_count} skipped" if row_skip_count > 0 else ""
+                print(
+                    f"  {row_frame_count} frames ({row_capture_count} captured{skip_str}),"
+                    f" {len(row_x_samples)} pos samples, {row_duration:.2f}s"
+                )
 
             # Add position samples to global list (with adjusted timestamps)
             for t_before, t_after, x_um in row_x_samples:
@@ -630,6 +660,8 @@ Examples:
                     "direction": direction,
                     "frame_start": row_frame_start,
                     "frame_end": global_frame_idx,
+                    "captures": row_capture_count,
+                    "skipped": row_skip_count,
                     "duration_s": row_duration,
                     "position_samples": len(row_x_samples),
                 }
@@ -659,6 +691,10 @@ Examples:
         meta["frames"] = saved_frames_meta
         meta["scan_duration_s"] = total_duration
         meta["frame_count"] = global_frame_idx
+        total_captures = sum(r["captures"] for r in meta["rows"])
+        total_skipped = sum(r["skipped"] for r in meta["rows"])
+        meta["total_captures"] = total_captures
+        meta["total_skipped"] = total_skipped
         meta["position_sample_count"] = len(all_position_samples)
         meta["position_stream"] = all_position_samples
 
@@ -680,7 +716,12 @@ Examples:
         print("SCAN SUMMARY:")
         print(f"  Total time: {total_duration:.1f}s")
         print(f"  Rows: {num_rows}")
-        print(f"  Total frames: {global_frame_idx}")
+        print(f"  Total frames saved: {global_frame_idx}")
+        if total_skipped > 0:
+            print(
+                f"  Total captured: {total_captures}"
+                f" ({total_skipped} skipped, {args.x_overlap_percent:.0f}% X overlap target)"
+            )
         print(f"  Total position samples: {len(all_position_samples)}")
         print(f"  Avg FPS: {global_frame_idx / total_duration:.1f}")
 
