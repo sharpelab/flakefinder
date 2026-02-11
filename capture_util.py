@@ -8,6 +8,7 @@ Usage:
     python capture_util.py output.jpg --lamp 80          # Set lamp to 80%
     python capture_util.py output.jpg --exposure 0.05    # 50ms exposure
     python capture_util.py output.jpg --white-balance 2.51,1.02,1.41  # White balance (B,G,R)
+    python capture_util.py output.jpg --x 5000 --y 14441 # Move then capture
 """
 
 import argparse
@@ -48,12 +49,8 @@ def main() -> int:
     parser.add_argument("--gamma", type=float, help="Gamma correction (e.g., 1.0)")
     parser.add_argument("--quality", type=int, default=95, help="JPEG quality (default: 95)")
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress verbose output; print only saved filename")
-    parser.add_argument(
-        "--xy",
-        type=str,
-        metavar="X,Y",
-        help="Move to X,Y position in µm before capture (e.g., '5000,14441')",
-    )
+    parser.add_argument("--x", type=float, default=None, help="Move to X position in µm before capture")
+    parser.add_argument("--y", type=float, default=None, help="Move to Y position in µm before capture")
     parser.add_argument("--z", type=float, help="Move to Z position in µm before capture")
     args = parser.parse_args()
 
@@ -62,12 +59,10 @@ def main() -> int:
         scope.light_on(args.lamp)
 
         # Move to XY position if specified
-        if args.xy:
-            parts = args.xy.split(",")
-            if len(parts) != 2:
-                print("Error: --xy must be X,Y (e.g., '5000,14441')")
-                return 1
-            target_x, target_y = float(parts[0]), float(parts[1])
+        if args.x is not None or args.y is not None:
+            cur_x, cur_y = scope.stage.position_um
+            target_x = args.x if args.x is not None else cur_x
+            target_y = args.y if args.y is not None else cur_y
             print(f"Moving to X={target_x:.0f}, Y={target_y:.0f} µm...")
             scope.stage.move_to(target_x, target_y)
             x, y = scope.stage.position_um
