@@ -916,7 +916,7 @@ def main() -> int:
     if not args.no_sharpness:
         if not args.quiet:
             print(f"Computing sharpness (sample every {args.sample})...")
-        sharpness_data = compute_sharpness_values(scan_dir, meta, sample_every=args.sample)
+        sharpness_data = compute_sharpness_values(scan_dir, meta, sample_every=max(1, args.sample))
 
     # Print summary
     print_summary(meta, z_stats, sharpness_data, args.min_sharpness, slope_metrics, quiet=args.quiet)
