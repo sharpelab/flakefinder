@@ -552,7 +552,7 @@ def main():
 
         if not flatfield_path.exists():
             print(f"Error: Flatfield not found: {flatfield_path}")
-            print("  Run capture_flatfield.py or specify --no-flatfield to skip correction.")
+            print("  Run scripts/build_flatfield.py or specify --no-flatfield to skip correction.")
             return 1
 
         flatfield = np.load(flatfield_path).astype(np.float32)

@@ -24,9 +24,11 @@ import argparse
 import json
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from flakefinder.data_utils import compute_frame_size_um, require_microscope_description
 from flakefinder.leica import Microscope, wait_all
@@ -151,6 +153,7 @@ def main() -> int:
     parser.add_argument("--settle", type=float, default=0.1)
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress per-capture output")
     parser.add_argument("--dry-run", action="store_true", help="Print positions and exit without capturing")
+    parser.add_argument("--notes", type=str, default=None, help="Notes about substrate/conditions")
     args = parser.parse_args()
 
     # Resolve magnification for FOV computation
@@ -266,6 +269,69 @@ def main() -> int:
     outpath.parent.mkdir(parents=True, exist_ok=True)
     np.save(outpath, flatfield)
     print(f"Saved to {outpath}")
+
+    # Save .png preview
+    png_path = outpath.with_suffix(".png")
+    ff_uint8 = np.clip(flatfield, 0, 255).astype(np.uint8)
+    Image.fromarray(ff_uint8).save(png_path)
+    print(f"Saved preview: {png_path}")
+
+    # Compute calibration values (mean BGR + reference white balance)
+    mean_b = float(flatfield[:, :, 0].mean())
+    mean_g = float(flatfield[:, :, 1].mean())
+    mean_r = float(flatfield[:, :, 2].mean())
+    mean_bgr = [round(mean_b, 2), round(mean_g, 2), round(mean_r, 2)]
+
+    wb_b = mean_g / mean_b if mean_b > 0 else 1.0
+    wb_r = mean_g / mean_r if mean_r > 0 else 1.0
+    reference_wb_bgr = [round(wb_b, 3), 1.0, round(wb_r, 3)]
+
+    # Build source info
+    if args.chips_meta:
+        source = {
+            "type": "chips_meta",
+            "chips_meta_path": args.chips_meta,
+            "chip_index": args.chip,
+        }
+    else:
+        source = {"type": "manual"}
+
+    # Save .json metadata
+    meta = {
+        "objective_mag": mag,
+        "binning": int(np.array([1, 2, 3])[args.binning]),
+        "lamp_pct": args.lamp,
+        "exposure_s": args.exposure_ms / 1000.0,
+        "gain": args.gain,
+        "white_balance_rgb": [
+            args.white_balance.red,
+            args.white_balance.green,
+            args.white_balance.blue,
+        ],
+        "gamma": args.gamma,
+        "frame_size_px": [int(flatfield.shape[1]), int(flatfield.shape[0])],
+        "z_um": args.z,
+        "positions_um": [[round(x, 1), round(y, 1)] for x, y in positions],
+        "num_positions": len(positions),
+        "num_frames_kept": len(good_frames),
+        "source": source,
+        "mean_bgr": mean_bgr,
+        "reference_wb_bgr": reference_wb_bgr,
+        "flatfield_stats": {
+            "shape": list(flatfield.shape),
+            "mean": round(float(flatfield.mean()), 1),
+            "center_brightness": round(float(center), 1),
+            "corner_brightness": round(float(corners), 1),
+            "vignetting_pct": round(float(vignette_pct), 1),
+        },
+        "captured_at": datetime.now().isoformat(),
+        "notes": args.notes,
+    }
+
+    json_path = outpath.with_suffix(".json")
+    with open(json_path, "w") as f:
+        json.dump(meta, f, indent=2)
+    print(f"Saved metadata: {json_path}")
 
     return 0
 
