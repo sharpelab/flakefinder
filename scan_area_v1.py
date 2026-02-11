@@ -415,8 +415,8 @@ Examples:
 
         # Move to start of first row
         print(f"Moving to start (X={x_min:.0f}, Y={row_y_positions[0]:.0f})...")
-        stage.x.move_to(x_min)
-        stage.y.move_to(row_y_positions[0])
+        hx, hy = stage.move_to_async(x_min, row_y_positions[0])
+        wait_all([hx, hy])
 
         # Switch to scan speed for scanning
         actual_speed_mm = set_stage_speed(scan_speed_mm, "scan")
@@ -537,8 +537,8 @@ Examples:
 
             # Move to row start if not already there
             if row_idx > 0:
-                stage.y.move_to(row_y)
-                stage.x.move_to(x_start_pos)
+                hx, hy = stage.move_to_async(x_start_pos, row_y)
+                wait_all([hx, hy])
 
             # Set up position polling for this row
             x_samples = []
