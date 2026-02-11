@@ -322,7 +322,7 @@ Examples:
     log_file = None
     if not args.dry_run:
         log_path = run_dir / "pipeline.log"
-        log_file = open(log_path, "a")  # noqa: SIM115
+        log_file = open(log_path, "a", encoding="utf-8")  # noqa: SIM115
         log_file.write(f"\n{'=' * 70}\n")
         log_file.write(f"=== Invocation {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
         log_file.write(f"{'=' * 70}\n\n")

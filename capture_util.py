@@ -16,7 +16,7 @@ import sys
 
 from PIL import Image as PILImage
 
-from cli_utils import report_status
+from flakefinder.cli_utils import report_status
 from flakefinder.leica import Microscope
 from flakefinder.scan_utils import parse_white_balance
 

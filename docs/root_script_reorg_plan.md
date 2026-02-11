@@ -1,6 +1,6 @@
 # Root Script Reorganization Plan
 
-**Status**: Planned (needs downtime to execute)
+**Status**: Phase 1 complete
 
 ## Goal
 
@@ -69,7 +69,7 @@ Can be done independently, no downtime needed.
 |--------|--------|
 | `mosaic_util.py` | Utility script, not part of live scanning |
 | `analyze_autofocus.py` | Post-hoc analysis of autofocus runs |
-| `analyze_scan.py` | Post-hoc analysis of completed scans |
+| `analyze_scan.py` → `analyze_chip_scan.py` | Post-hoc analysis of completed scans |
 | `plot_frame_pacing.py` | Diagnostic plotting |
 | `plot_zjump_polling.py` | Diagnostic plotting |
 | `plot_zjump_timing.py` | Diagnostic plotting |

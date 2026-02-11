@@ -20,7 +20,7 @@ Usage:
 import argparse
 import sys
 
-from cli_utils import park_microscope, report_status
+from flakefinder.cli_utils import park_microscope, report_status
 from flakefinder.leica import Microscope, wait_all
 
 # =============================================================================

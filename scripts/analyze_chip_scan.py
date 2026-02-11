@@ -4,8 +4,8 @@ Reads scan_meta.json from a scan directory, computes per-frame sharpness
 from saved JPGs, and produces quality metrics and plots.
 
 Usage:
-    uv run python analyze_scan.py scans/chip1_20x/
-    uv run python analyze_scan.py scans/chip1_20x/ --sample 5 --min-sharpness 15
+    uv run python scripts/analyze_chip_scan.py scans/chip1_20x/
+    uv run python scripts/analyze_chip_scan.py scans/chip1_20x/ --sample 5 --min-sharpness 15
 """
 
 import argparse
