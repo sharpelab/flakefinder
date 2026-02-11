@@ -4,7 +4,6 @@ This module provides the low-level connection to the Leica hardware model
 and utilities for finding units in the device tree.
 """
 
-import contextlib
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -106,16 +105,21 @@ class LeicaConnection:
         return self
 
     def disconnect(self) -> None:
-        """Disconnect and release SDK resources."""
-        if self._root is not None:
-            with contextlib.suppress(Exception):  # Ignore cleanup errors
-                self._root.Dispose()
-            self._root = None
+        """Disconnect and release SDK resources.
 
-        if self._hwm is not None:
-            with contextlib.suppress(Exception):  # Ignore cleanup errors
-                self._hwm.Dispose()
-            self._hwm = None
+        Each Dispose is wrapped individually so a failure in one
+        (e.g. .NET AccessViolationException) doesn't prevent the
+        other from running.  BaseException catches .NET exceptions
+        that may not map to Python's Exception hierarchy.
+        """
+        for label, obj in [("root unit", self._root), ("hardware model", self._hwm)]:
+            if obj is not None:
+                try:
+                    obj.Dispose()
+                except BaseException as e:
+                    print(f"Warning: {label} dispose failed: {e}")
+        self._root = None
+        self._hwm = None
 
     @property
     def connected(self) -> bool:

@@ -34,6 +34,8 @@ from datetime import datetime
 import numpy as np
 from scipy.interpolate import CubicSpline
 
+from flakefinder.scan_utils import parse_area_rect
+
 # ============================================================================
 # Surface Data (from autofocus measurements)
 # ============================================================================
@@ -180,25 +182,6 @@ def interpolate_z_position(t, z_samples):
     return z0 + alpha * (z1 - z0)
 
 
-def parse_area_rect(value: str) -> tuple[float, float, float, float]:
-    """Parse area rectangle from comma-separated string."""
-    parts = value.split(",")
-    if len(parts) != 4:
-        raise ValueError("--area-rect must be x_min,x_max,y_min,y_max (4 values)")
-    try:
-        x1, x2, y1, y2 = float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3])
-    except ValueError as e:
-        raise ValueError("--area-rect values must be numbers") from e
-
-    x_min, x_max = min(x1, x2), max(x1, x2)
-    y_min, y_max = min(y1, y2), max(y1, y2)
-
-    if x_min == x_max:
-        raise ValueError(f"--area-rect: x_min and x_max cannot be equal ({x_min})")
-
-    return (x_min, x_max, y_min, y_max)
-
-
 # ============================================================================
 # Main Scan
 # ============================================================================
@@ -226,7 +209,7 @@ Examples:
     area_group = parser.add_argument_group("Scan area")
     area_group.add_argument(
         "--area-rect",
-        type=str,
+        type=parse_area_rect,
         required=True,
         metavar="X1,X2,Y1,Y2",
         help="Scan area as x_min,x_max,y_min,y_max in µm (Y values should match for single row)",
@@ -307,12 +290,8 @@ Examples:
         print("Error: --white-balance values must be numbers")
         return 1
 
-    # Parse area
-    try:
-        x_min, x_max, y_min, y_max = parse_area_rect(args.area_rect)
-    except ValueError as e:
-        print(f"Error: {e}")
-        return 1
+    # Parse area (already parsed by argparse type=parse_area_rect)
+    x_min, x_max, y_min, y_max = args.area_rect
 
     # For single-row scan, use the Y center
     row_y = (y_min + y_max) / 2

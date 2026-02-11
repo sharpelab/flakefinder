@@ -4,8 +4,6 @@ Consolidates hardware access behind a single context manager, eliminating
 per-script boilerplate for connection, subsystem lookup, and UCAPI registration.
 """
 
-import contextlib
-
 from flakefinder.types import MicroscopeDescription, Point3F
 
 from .camera import Camera
@@ -61,15 +59,21 @@ class Microscope:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Dispose acquisition context, camera, and disconnect."""
-        if self._context is not None:
-            with contextlib.suppress(Exception):
-                self._context.Dispose()
-        if self._camera is not None:
-            with contextlib.suppress(Exception):
-                self._camera.dispose()
-        if self._conn is not None:
-            self._conn.disconnect()
+        """Dispose acquisition context, camera, and disconnect.
+
+        Each cleanup step is wrapped individually so a failure in one
+        (e.g. .NET AccessViolationException during Dispose) doesn't
+        prevent the others from running.
+        """
+        for label, cleanup in [
+            ("acquisition context", lambda: self._context and self._context.Dispose()),
+            ("camera", lambda: self._camera and self._camera.dispose()),
+            ("connection", lambda: self._conn and self._conn.disconnect()),
+        ]:
+            try:
+                cleanup()
+            except BaseException as e:
+                print(f"Warning: {label} cleanup failed: {e}")
 
     # --- Subsystem properties ---
 
