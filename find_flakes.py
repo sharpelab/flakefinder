@@ -70,6 +70,7 @@ DEFAULT_AREA_RECT = "8000,95000,0,78000"
 DEFAULT_INITIAL_Z = 24690
 DEFAULT_SCAN_SPEED = 5
 DEFAULT_SCAN_Z_SPEED = 1250
+DEFAULT_WHITE_BALANCE = "2.51,1.02,1.41"  # hBN BGR gains
 
 SCRIPT_DIR = Path(__file__).parent
 
@@ -251,6 +252,12 @@ Examples:
         help=f"Focus map AF Z speed in µm/s (default: {DEFAULT_SCAN_Z_SPEED})",
     )
     parser.add_argument(
+        "--white-balance",
+        type=str,
+        default=DEFAULT_WHITE_BALANCE,
+        help=f"White balance as B,G,R gains, passed to all capture scripts (default: {DEFAULT_WHITE_BALANCE})",
+    )
+    parser.add_argument(
         "--notes",
         type=str,
         default=None,
@@ -295,6 +302,7 @@ Examples:
     print(f"Initial Z:     {args.initial_z} µm")
     print(f"Scan speed:    {args.scan_speed} mm/s")
     print(f"AF Z speed:    {args.scan_z_speed} µm/s")
+    print(f"White balance: {args.white_balance} (B,G,R)")
     if chip_filter:
         print(f"Chips:         {chip_filter}")
     if args.after is not None:
@@ -361,6 +369,8 @@ Examples:
                 args.area_rect,
                 "--downsample",
                 "4",
+                "--white-balance",
+                args.white_balance,
                 "--clean",
             ],
             dry_run=args.dry_run,
@@ -523,6 +533,8 @@ Examples:
                     str(int(args.scan_z_speed)),
                     "--af-settle",
                     "0.2",
+                    "--white-balance",
+                    args.white_balance,
                     "--output-dir",
                     str(chip_dir),
                     "-q",
@@ -580,6 +592,8 @@ Examples:
                     "20x",
                     "--speed-mm",
                     str(args.scan_speed),
+                    "--white-balance",
+                    args.white_balance,
                     "--clean",
                     "-q",
                 ],

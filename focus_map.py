@@ -21,6 +21,7 @@ from PIL import Image as PILImage
 from flakefinder.data_utils import load_chip_geometry
 from flakefinder.leica.autofocus import ALL_SHARPNESS_METRICS, AutofocusResult
 from flakefinder.leica.microscope import Microscope
+from flakefinder.scan_utils import parse_white_balance
 from flakefinder.types import Point2F
 
 
@@ -459,6 +460,12 @@ def main():
         help="Settle time in seconds after autofocus (before image capture)",
     )
     parser.add_argument(
+        "--white-balance",
+        type=parse_white_balance,
+        default="2.51,1.02,1.41",
+        help="White balance as B,G,R gains (default: 2.51,1.02,1.41)",
+    )
+    parser.add_argument(
         "--suffix",
         type=str,
         default=None,
@@ -550,6 +557,7 @@ def main():
         camera.trigger_mode = 0  # CONTINUOUS
         camera.binning = 2  # 3x3 binning for speed
         camera.exposure_time = 0.001  # 1ms
+        camera.gain_rgb = args.white_balance
 
         if not quiet:
             print(f"Camera: {camera.name}")
