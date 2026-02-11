@@ -5,6 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple, TypedDict
 
+import numpy as np
+
+# Image type alias — all images in flakefinder are RGB uint8 numpy arrays.
+# The SDK returns BGR; sdk_image_to_numpy() converts at the boundary.
+type RGBImage = np.ndarray  # (H, W, 3) uint8, RGB channel order
+
 # Geometric points
 
 
