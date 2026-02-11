@@ -22,9 +22,7 @@ def segment_image(img, threshold=15, min_size=200, edge_margin=50):
     Returns list of dicts with keys: id, size, center, bbox, contrast, mask.
     """
     arr = np.array(img, dtype=float)
-    bg = np.array(
-        [stats.mode(arr[:, :, c], axis=None, keepdims=False).mode for c in range(3)]
-    )
+    bg = np.array([stats.mode(arr[:, :, c], axis=None, keepdims=False).mode for c in range(3)])
 
     mask = np.any(arr > bg + threshold, axis=2)
     mask = ndimage.binary_opening(mask, iterations=2)
