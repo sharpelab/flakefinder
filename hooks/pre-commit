@@ -1,14 +1,15 @@
 #!/bin/sh
-# Pre-commit hook: run ruff and ty on staged Python files
+# Pre-commit hook: fix staged files, check whole repo
 # Setup: git config core.hooksPath hooks/
 
 STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$')
 [ -z "$STAGED" ] && exit 0
 
+# Auto-fix and format staged files
 uv run ruff check --fix -- $STAGED && uv run ruff format -- $STAGED
 
 # Re-stage files that ruff modified
 echo "$STAGED" | xargs git add
 
-# Type check (per-file overrides in pyproject.toml handle exclusions)
-uv run ty check -- $STAGED
+# Check whole repo (matches CI, catches pre-existing issues)
+uv run ruff check . && uv run ruff format --check . && uv run ty check
