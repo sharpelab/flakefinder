@@ -1,0 +1,125 @@
+"""Download favorited flakes (images + metadata) from flakes.sharpelab.science."""
+
+import argparse
+import gzip
+import json
+import sys
+from pathlib import Path
+
+import requests
+
+BASE_URL = "https://flakes.sharpelab.science"
+AUTH = ("dgglab", "REDACTED")
+
+# Images to attempt downloading for each flake
+FLAKE_IMAGES = ["eval_img.jpg", "raw_img.png", "flake_mask.png", "overview_marked.jpg"]
+# Magnification images use the pattern {mag}x.png — derived from flake metadata
+
+
+def api_get(path: str, params: dict | None = None) -> list | dict:
+    """GET from the API, handling gzip-compressed JSON responses."""
+    r = requests.get(f"{BASE_URL}/api/{path}", params=params, auth=AUTH)
+    r.raise_for_status()
+    # Backend returns gzip-compressed JSON
+    try:
+        data = gzip.decompress(r.content)
+        return json.loads(data)
+    except gzip.BadGzipFile:
+        return r.json()
+
+
+def download_image(url: str, dest: Path) -> int | None:
+    """Download a single image. Returns size in bytes, or None if 404."""
+    r = requests.get(url, auth=AUTH, stream=True)
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with open(dest, "wb") as f:
+        for chunk in r.iter_content(chunk_size=8192):
+            f.write(chunk)
+    return dest.stat().st_size
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("scan_id", type=int, help="Scan ID to download from")
+    parser.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        help="Target directory (default: downloads/flakes_scan<id>)",
+    )
+    args = parser.parse_args()
+
+    # Fetch scan metadata
+    print(f"Fetching scan {args.scan_id} metadata...")
+    scans = api_get("scans", {"scan_id": args.scan_id})
+    if not scans:
+        print(f"Error: scan {args.scan_id} not found", file=sys.stderr)
+        sys.exit(1)
+    scan_meta = scans[0]
+    scan_name = scan_meta["scan_name"]
+    print(f"  Scan: {scan_name} (user: {scan_meta['scan_user']})")
+
+    # Fetch favorited flakes
+    print("Fetching favorited flakes...")
+    flakes = api_get("flakes", {"scan_id": args.scan_id, "flake_favorite": 1})
+    if not flakes:
+        print("No favorited flakes found.", file=sys.stderr)
+        sys.exit(1)
+    print(f"  Found {len(flakes)} favorited flakes")
+
+    # Resolve target directory
+    if args.target:
+        target = Path(args.target)
+    else:
+        target = Path("downloads") / f"flakes_scan{args.scan_id}"
+    target.mkdir(parents=True, exist_ok=True)
+    print(f"  Saving to: {target}")
+
+    # Save metadata
+    meta_path = target / "flakes_meta.json"
+    meta_path.write_text(json.dumps({"scan": scan_meta, "flakes": flakes}, indent=2))
+    print(f"  Wrote {meta_path}")
+
+    # Download images
+    total_bytes = 0
+    total_files = 0
+
+    for i, flake in enumerate(flakes):
+        flake_path = flake["flake_path"]  # e.g. "SF118_ABCD_E13-16/Chip_4/Flake_7"
+        # Strip scan name prefix to get relative chip/flake path
+        rel_path = "/".join(flake_path.split("/")[1:])  # "Chip_4/Flake_7"
+        flake_dir = target / rel_path
+        flake_id = flake["flake_id"]
+
+        print(f"  [{i + 1}/{len(flakes)}] Flake {flake_id} ({rel_path})")
+
+        # Standard images
+        for filename in FLAKE_IMAGES:
+            url = f"{BASE_URL}/images/{flake_path}/{filename}"
+            dest = flake_dir / filename
+            size = download_image(url, dest)
+            if size is not None:
+                total_bytes += size
+                total_files += 1
+                print(f"    {filename} ({size / 1024:.0f} KB)")
+
+        # Magnification images
+        for mag in flake.get("flake_available_magnifications", []):
+            mag_str = f"{mag:g}x"  # e.g. "10x", "50x"
+            filename = f"{mag_str}.png"
+            url = f"{BASE_URL}/images/{flake_path}/{filename}"
+            dest = flake_dir / filename
+            size = download_image(url, dest)
+            if size is not None:
+                total_bytes += size
+                total_files += 1
+                print(f"    {filename} ({size / 1024:.0f} KB)")
+
+    print(f"\nDone: {total_files} files, {total_bytes / 1024 / 1024:.1f} MB total")
+
+
+if __name__ == "__main__":
+    main()
