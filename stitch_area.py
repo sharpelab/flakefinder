@@ -207,59 +207,6 @@ def draw_frame_outlines(background, frame_rects, crop_offset=(0, 0)):
     return result.convert("RGB")
 
 
-def find_constant_velocity_frames(frames):
-    """
-    Find frames in the constant-velocity portion of the scan.
-    Returns (start_idx, end_idx, velocity) for the CV region.
-    """
-    if len(frames) < 3:
-        return 0, len(frames), 0
-
-    # Get frame-to-frame deltas
-    deltas = [frames[i + 1]["x_start"] - frames[i]["x_start"] for i in range(len(frames) - 1)]
-
-    # Find median delta (robust estimate of constant velocity spacing)
-    sorted_deltas = sorted(deltas, key=abs)
-    median_delta = sorted_deltas[len(sorted_deltas) // 2]
-
-    if abs(median_delta) < 1e-6:
-        return 0, len(frames), 0
-
-    # Frames are "constant velocity" if delta is within 20% of median
-    tolerance = 0.2
-    cv_mask = [abs(d - median_delta) / abs(median_delta) < tolerance for d in deltas]
-
-    # Find first and last CV frame
-    try:
-        first_cv = next(i for i, m in enumerate(cv_mask) if m)
-        last_cv = len(cv_mask) - 1 - next(i for i, m in enumerate(reversed(cv_mask)) if m)
-    except StopIteration:
-        return 0, len(frames), 0
-
-    # Estimate velocity from median delta and frame timing
-    avg_dt = sum(frames[i + 1]["t_start"] - frames[i]["t_start"] for i in range(first_cv, last_cv)) / max(
-        1, last_cv - first_cv
-    )
-    velocity = median_delta / avg_dt if avg_dt > 0 else 0
-
-    return first_cv, last_cv + 1, velocity
-
-
-def smooth_positions_savgol(frames, cv_start, cv_end, window=7, polyorder=2):
-    """Smooth CV frame positions with Savitzky-Golay filter.
-
-    Uses a local polynomial fit that tracks the actual stage trajectory
-    while reducing position jitter (~100 µm from SDK readout noise).
-    """
-    cv_frames = frames[cv_start:cv_end]
-    raw_x = np.array([f["x_start"] for f in cv_frames])
-
-    if len(raw_x) < window:
-        return raw_x.tolist()
-
-    return savgol_filter(raw_x, window, polyorder).tolist()
-
-
 def stitch_row_to_global(
     meta,
     row,
@@ -378,21 +325,17 @@ def stitch_row_to_global(
         indices = list(range(num_frames))
 
     # Compute per-frame velocity for deskew using savgol derivative.
-    # A wider window (31 samples, ~450ms) gives smooth velocity estimates
-    # that aren't distorted by camera timing jitter (e.g., 20ms gaps that
-    # cause position-differencing to spike). The stage velocity is physically
-    # smooth, so a wide polynomial fit recovers it well.
+    # Uses bubble-fixed positions (raw_positions) so timing bubbles don't
+    # produce velocity spikes. A wider window (31 samples, ~450ms) gives
+    # smooth estimates; the stage velocity is physically smooth.
     if deskew:
         readout_time = meta["camera"]["readout_time_s"]
-        times = np.array([(f["t_start"] + f["t_end"]) / 2 for f in row_frames])
-        raw_pos = np.array([f["x_start"] for f in row_frames])
         vel_window = min(31, n if n % 2 == 1 else n - 1)
         if vel_window >= 5:
-            # dt = mean time step for converting savgol derivative to velocity
-            dt = np.mean(np.diff(times))
-            frame_velocities = savgol_filter(raw_pos, vel_window, 2, deriv=1, delta=dt)
+            dt = np.mean(np.diff(raw_times))
+            frame_velocities = savgol_filter(raw_positions, vel_window, 2, deriv=1, delta=dt)
         else:
-            frame_velocities = np.gradient(np.array(all_positions), times)
+            frame_velocities = np.gradient(np.array(all_positions), raw_times)
     else:
         frame_velocities = np.zeros(num_frames)
 
@@ -517,8 +460,6 @@ def main():
         help="Additional downsample factor (e.g., 2 = half resolution)",
     )
     parser.add_argument("--rows", type=str, default=None, help="Row range to process (e.g., '0-5' or '10')")
-    # TODO: Investigate source of ~100 µm hysteresis between +X and -X scan directions.
-    # Likely candidates: stage backlash, encoder offset, or position readout timing.
     parser.add_argument(
         "--hysteresis",
         type=float,
@@ -528,8 +469,8 @@ def main():
     parser.add_argument(
         "--crop",
         type=str,
-        default="0,0,0,0",
-        help="Crop margins in µm: TOP,RIGHT,BOTTOM,LEFT (default: 0,0,0,0)",
+        default=None,
+        help="Crop to stage rect in µm: x_min,x_max,y_min,y_max (same as scan_area --area-rect)",
     )
     parser.add_argument(
         "--flatfield",
@@ -671,31 +612,15 @@ def main():
 
     for row in rows:
         row_frames = meta["frames"][row["frame_start"] : row["frame_end"]]
-        cv_start, cv_end, _velocity = find_constant_velocity_frames(row_frames)
-        cv_count = cv_end - cv_start
 
-        # Get smoothed X positions for CV region (used for cv_stats only)
-        smoothed = smooth_positions_savgol(row_frames, cv_start, cv_end)
-
-        # Use all frames' positions for global bounds (includes accel zones)
         all_x = [f["x_start"] for f in row_frames]
         x_min = min(all_x)
         x_max = max(all_x)
 
-        row_results.append(
-            {
-                "row": row,
-                "cv_count": cv_count,
-                "x_min": x_min,
-                "x_max": x_max,
-                "smoothed": smoothed,
-            }
-        )
+        row_results.append({"row": row, "x_min": x_min, "x_max": x_max})
 
         if not args.quiet:
-            print(  # noqa: E501
-                f"  Row {row['row_idx']:2d}: {len(row_frames)} frames ({cv_count} CV), X: {x_min:.0f} - {x_max:.0f} µm"
-            )
+            print(f"  Row {row['row_idx']:2d}: {len(row_frames)} frames, X: {x_min:.0f} - {x_max:.0f} µm")
 
     # Find global X bounds: union of all rows (including accel zones)
     global_x_min = min(r["x_min"] for r in row_results)
@@ -726,6 +651,9 @@ def main():
         print("\nStitching rows...")
     all_frame_rects = []  # (x, y, w, h) in final canvas coords
 
+    min_y = min(r["y_um"] for r in rows)
+    max_y = max(r["y_um"] for r in rows)
+
     for result in row_results:
         row = result["row"]
         row_idx = row["row_idx"]
@@ -751,7 +679,6 @@ def main():
         )
 
         # Calculate Y position for this row (min Y = top of image)
-        min_y = min(r["y_um"] for r in rows)
         row_y = row["y_um"]
         y_offset_um = row_y - min_y
         y_offset_px = int(y_offset_um / um_per_px)
@@ -759,8 +686,8 @@ def main():
         # Apply Y blending
         # is_first_y = don't fade top edge, is_last_y = don't fade bottom edge
         if not args.no_blend:
-            is_at_top = row_y == min(r["y_um"] for r in rows)
-            is_at_bottom = row_y == max(r["y_um"] for r in rows)
+            is_at_top = row_y == min_y
+            is_at_bottom = row_y == max_y
 
             row_alpha = row_img.split()[3]
             y_blend = create_blend_alpha(
@@ -804,39 +731,44 @@ def main():
     stage_bounds_um = {
         "x_min": global_x_min - fov_width_um / 2,
         "x_max": global_x_max + fov_width_um / 2,
-        "y_min": min(r["y_um"] for r in rows) - fov_height_um / 2,
-        "y_max": max(r["y_um"] for r in rows) + fov_height_um / 2,
+        "y_min": min_y - fov_height_um / 2,
+        "y_max": max_y + fov_height_um / 2,
     }
 
-    # Apply crop margins (top, right, bottom, left in µm)
-    crop_parts = [float(x) for x in args.crop.split(",")]
-    if len(crop_parts) != 4:
-        print("Error: --crop must be TOP,RIGHT,BOTTOM,LEFT (e.g., '15000,0,7000,0')")
-        return 1
-    crop_top_um, crop_right_um, crop_bottom_um, crop_left_um = crop_parts
-
+    # Apply crop to stage coordinate rect (x_min,x_max,y_min,y_max in µm)
     crop_left_px = 0
     crop_top_px = 0
-    if any(c != 0 for c in crop_parts):
-        crop_top_px = int(crop_top_um / um_per_px)
-        crop_right_px = int(crop_right_um / um_per_px)
-        crop_bottom_px = int(crop_bottom_um / um_per_px)
-        crop_left_px = int(crop_left_um / um_per_px)
+    if args.crop:
+        crop_parts = [float(x) for x in args.crop.split(",")]
+        if len(crop_parts) != 4:
+            print("Error: --crop must be x_min,x_max,y_min,y_max in µm")
+            return 1
+        crop_x_min, crop_x_max, crop_y_min, crop_y_max = crop_parts
+        crop_x_min, crop_x_max = min(crop_x_min, crop_x_max), max(crop_x_min, crop_x_max)
+        crop_y_min, crop_y_max = min(crop_y_min, crop_y_max), max(crop_y_min, crop_y_max)
 
-        w, h = background.size
-        box = (crop_left_px, crop_top_px, w - crop_right_px, h - crop_bottom_px)
-        background = background.crop(box)
+        # Clamp to actual stage bounds
+        crop_x_min = max(crop_x_min, stage_bounds_um["x_min"])
+        crop_x_max = min(crop_x_max, stage_bounds_um["x_max"])
+        crop_y_min = max(crop_y_min, stage_bounds_um["y_min"])
+        crop_y_max = min(crop_y_max, stage_bounds_um["y_max"])
 
-        # Image top = low Y, bottom = high Y
-        stage_bounds_um["y_min"] += crop_top_um
-        stage_bounds_um["y_max"] -= crop_bottom_um
-        stage_bounds_um["x_min"] += crop_left_um
-        stage_bounds_um["x_max"] -= crop_right_um
+        crop_left_px = int((crop_x_min - stage_bounds_um["x_min"]) / um_per_px)
+        crop_top_px = int((crop_y_min - stage_bounds_um["y_min"]) / um_per_px)
+        crop_right_px = int((crop_x_max - stage_bounds_um["x_min"]) / um_per_px)
+        crop_bottom_px = int((crop_y_max - stage_bounds_um["y_min"]) / um_per_px)
+
+        background = background.crop((crop_left_px, crop_top_px, crop_right_px, crop_bottom_px))
+
+        stage_bounds_um["x_min"] = crop_x_min
+        stage_bounds_um["x_max"] = crop_x_max
+        stage_bounds_um["y_min"] = crop_y_min
+        stage_bounds_um["y_max"] = crop_y_max
 
         if not args.quiet:
             print(
-                f"\nCropped: top={crop_top_um:.0f} right={crop_right_um:.0f} "
-                f"bottom={crop_bottom_um:.0f} left={crop_left_um:.0f} µm"
+                f"\nCropped to stage rect: X=[{crop_x_min:.0f}, {crop_x_max:.0f}] "
+                f"Y=[{crop_y_min:.0f}, {crop_y_max:.0f}] µm"
             )
 
     # Draw grid overlay
@@ -874,20 +806,22 @@ def main():
     print(f"Saved to {out_path}")
     print(f"Final size: {background.width}x{background.height} px")
 
-    # Compute average CV X overlap across all rows
-    all_cv_steps = []
+    # Compute average frame step from raw positions (median across all rows)
+    all_steps = []
     for rr in row_results:
-        smoothed = rr["smoothed"]
-        if len(smoothed) >= 2:
-            steps = [abs(smoothed[i + 1] - smoothed[i]) for i in range(len(smoothed) - 1)]
-            all_cv_steps.extend(steps)
+        row = rr["row"]
+        row_frames = meta["frames"][row["frame_start"] : row["frame_end"]]
+        positions = [f["x_start"] for f in row_frames]
+        if len(positions) >= 2:
+            steps = [abs(positions[i + 1] - positions[i]) for i in range(len(positions) - 1)]
+            all_steps.extend(steps)
 
-    if all_cv_steps:
-        avg_cv_step = sum(all_cv_steps) / len(all_cv_steps)
-        avg_cv_overlap_pct = (fov_width_um - avg_cv_step) / fov_width_um * 100
+    if all_steps:
+        avg_step = float(np.median(all_steps))
+        avg_overlap_pct = (fov_width_um - avg_step) / fov_width_um * 100
     else:
-        avg_cv_step = None
-        avg_cv_overlap_pct = None
+        avg_step = None
+        avg_overlap_pct = None
 
     duration_s = time.perf_counter() - start_time
     stitch_meta = {
@@ -905,8 +839,8 @@ def main():
             "file": str(flatfield_path) if flatfield is not None else None,
         },
         "cv_stats": {
-            "avg_step_um": round(avg_cv_step, 1) if avg_cv_step else None,
-            "avg_overlap_pct": round(avg_cv_overlap_pct, 1) if avg_cv_overlap_pct else None,
+            "avg_step_um": round(avg_step, 1) if avg_step else None,
+            "avg_overlap_pct": round(avg_overlap_pct, 1) if avg_overlap_pct else None,
             "frame_width_um": round(fov_width_um, 1),
         },
     }

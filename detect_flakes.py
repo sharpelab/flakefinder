@@ -25,16 +25,25 @@ def check_server(server_url: str) -> bool:
         return False
 
 
-def predict_frame(server_url: str, frame_path: Path, seg_model: str, size_threshold: int) -> list[dict]:
+def predict_frame(
+    server_url: str,
+    frame_path: Path,
+    seg_model: str,
+    size_threshold: int,
+    cls_model: str | None = None,
+) -> list[dict]:
+    data = {
+        "segmentation_model": seg_model,
+        "size_threshold": size_threshold,
+        "return_bbox": True,
+    }
+    if cls_model:
+        data["classification_model"] = cls_model
     with open(frame_path, "rb") as f:
         r = requests.post(
             f"{server_url}/predict",
             files={"files": (frame_path.name, f, "image/jpeg")},
-            data={
-                "segmentation_model": seg_model,
-                "size_threshold": size_threshold,
-                "return_bbox": True,
-            },
+            data=data,
             timeout=30,
         )
     r.raise_for_status()
@@ -99,6 +108,7 @@ def main():
     parser.add_argument("scan_dir", type=Path, help="Path to scan directory")
     parser.add_argument("--server", default="http://localhost:8000", help="MaskTerial server URL")
     parser.add_argument("--seg-model", default="M2F-GrapheneH", help="Segmentation model (e.g. M2F-GrapheneH)")
+    parser.add_argument("--cls-model", default=None, help="Classification model (e.g. AMM-hBN_Thin)")
     parser.add_argument("--size-threshold", type=int, default=200, help="Min flake size in pixels")
     parser.add_argument("--output", type=Path, default=None, help="Output directory (default: <scan_dir>/detections/)")
     parser.add_argument("--start", type=int, default=0, help="Start at frame index N (for testing)")
@@ -155,7 +165,7 @@ def main():
         frame_meta = frames[frame_idx]
 
         try:
-            detections = predict_frame(args.server, frame_path, args.seg_model, args.size_threshold)
+            detections = predict_frame(args.server, frame_path, args.seg_model, args.size_threshold, args.cls_model)
         except Exception as e:
             print(f"  Error on {frame_path.name}: {e}")
             continue
@@ -196,6 +206,7 @@ def main():
         "timestamp": datetime.now().isoformat(),
         "um_per_px": um_per_px,
         "seg_model": args.seg_model,
+        "cls_model": args.cls_model,
         "size_threshold": args.size_threshold,
         "total_frames": total,
         "total_flakes": len(all_flakes),

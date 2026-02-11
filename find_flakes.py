@@ -30,12 +30,40 @@ Usage:
 """
 
 import argparse
+import io
 import json
 import subprocess
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
+
+
+class TeeWriter:
+    """Write to both a stream and a log file."""
+
+    def __init__(self, stream, log_file):
+        self._stream = stream
+        self._log = log_file
+
+    def write(self, data):
+        self._stream.write(data)
+        self._stream.flush()
+        # Replace \r with \n in log so progress lines become separate lines
+        self._log.write(data.replace("\r", "\n"))
+        self._log.flush()
+
+    def flush(self):
+        self._stream.flush()
+        self._log.flush()
+
+    def fileno(self):
+        return self._stream.fileno()
+
+    @property
+    def encoding(self):
+        return getattr(self._stream, "encoding", "utf-8")
+
 
 # Defaults
 DEFAULT_AREA_RECT = "8000,95000,0,78000"
@@ -114,16 +142,20 @@ def run_step(name, cmd, dry_run=False, pause=False):
 
     print()
     start = time.perf_counter()
-    result = subprocess.run(cmd, cwd=SCRIPT_DIR)
+    proc = subprocess.Popen(cmd, cwd=SCRIPT_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    assert proc.stdout is not None
+    for line in io.TextIOWrapper(proc.stdout, encoding="utf-8", errors="replace"):
+        sys.stdout.write(line)
+    proc.wait()
     duration = time.perf_counter() - start
 
-    if result.returncode != 0:
-        print(f"\nFAILED: {name} (exit code {result.returncode})")
+    if proc.returncode != 0:
+        print(f"\nFAILED: {name} (exit code {proc.returncode})")
         print(f"  Command: {cmd_str}")
-        sys.exit(result.returncode)
+        sys.exit(proc.returncode)
 
     print(f"\n  [{name}] completed in {format_duration(duration)}")
-    return duration, result.returncode
+    return duration, proc.returncode
 
 
 def format_duration(seconds):
@@ -278,6 +310,18 @@ Examples:
     if not args.dry_run:
         run_dir.mkdir(parents=True, exist_ok=True)
 
+    # Set up log file tee (append mode for resume support)
+    log_file = None
+    if not args.dry_run:
+        log_path = run_dir / "pipeline.log"
+        log_file = open(log_path, "a")  # noqa: SIM115
+        log_file.write(f"\n{'=' * 70}\n")
+        log_file.write(f"=== Invocation {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+        log_file.write(f"{'=' * 70}\n\n")
+        log_file.flush()
+        sys.stdout = TeeWriter(sys.__stdout__, log_file)
+        sys.stderr = TeeWriter(sys.__stderr__, log_file)
+
     # Load checkpoint
     checkpoint = load_checkpoint(run_dir)
 
@@ -339,6 +383,7 @@ Examples:
                 "python",
                 "stitch_area.py",
                 str(overview_dir),
+                "-q",
             ],
             dry_run=args.dry_run,
             pause=args.pause,
@@ -588,6 +633,13 @@ Examples:
             "limit": args.limit,
         }
         save_checkpoint(run_dir, checkpoint)
+
+    # Close log file
+    if log_file is not None:
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
+        log_file.close()
+        print(f"Log: {run_dir / 'pipeline.log'}")
 
     return 0
 
