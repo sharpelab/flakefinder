@@ -13,9 +13,8 @@ from pathlib import Path
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
-
 from mosaic_util import make_mosaic
+from PIL import Image, ImageDraw, ImageFont
 
 
 def load_summary(dir_path: Path) -> dict:

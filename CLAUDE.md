@@ -14,7 +14,7 @@ FlakeFinder is a microscope automation system for the Sharpe Lab's Leica DM6M mi
 | `stage_util.py` | Stage/objective control utility |
 | `capture_util.py` | Single image capture utility |
 | `scripts/process_overview.py` | Overview post-processing pipeline (rsync + stitch + detect chips) |
-| `scripts/process_chip_scan.py` | Chip scan analysis pipeline (rsync + analyze_scan) |
+| `scripts/process_chip_scan.py` | Chip scan analysis pipeline (rsync + analyze_chip_scan) |
 
 ## Tools
 

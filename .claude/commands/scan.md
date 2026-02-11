@@ -86,7 +86,7 @@ uv run python scripts/process_overview.py scans/[overview_dir] --show
 ```
 uv run python scripts/process_chip_scan.py scans/[run_dir]/chip_[N]/scan_20x --show
 ```
-- Rsyncs from microscope, runs analyze_scan, shows analysis plot
+- Rsyncs from microscope, runs analyze_chip_scan, shows analysis plot
 - Use `--verbose` for per-row detail, `--sharpness` to compute frame sharpness
 
 **Code changes:**
@@ -109,8 +109,8 @@ uv run python scripts/process_chip_scan.py scans/[run_dir]/chip_[N]/scan_20x --s
 
 **Image mosaic:**
 ```
-uv run python mosaic_util.py --glob 'pattern' -o output.png --labels
-uv run python mosaic_util.py --glob 'pattern' -o output.png --label-text "a,b,c" --label-size 24 --label-bg 0,0,0,180
+uv run python scripts/mosaic_util.py --glob 'pattern' -o output.png --labels
+uv run python scripts/mosaic_util.py --glob 'pattern' -o output.png --label-text "a,b,c" --label-size 24 --label-bg 0,0,0,180
 ```
 - `--rows N` for multi-row layouts (default 1)
 - `--max-dim 5000` controls canvas size

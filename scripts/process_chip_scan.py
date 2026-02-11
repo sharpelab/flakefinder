@@ -32,12 +32,12 @@ def main() -> int:
         help="Enable sharpness computation (disabled by default for speed)",
     )
     parser.add_argument("--show", action="store_true", help="Open the analysis plot after generation")
-    # Pass-through args for analyze_scan.py
+    # Pass-through args for analyze_chip_scan.py
     parser.add_argument("--notes", type=str, default=None, help="Label for plot title")
     parser.add_argument("--sample", type=int, default=None, help="Sharpness: process every Nth frame")
     parser.add_argument("--min-sharpness", type=float, default=None, help="Sharpness threshold for flagging")
     parser.add_argument("--spatial-z", action="store_true", help="Include spatial Z error map panel")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Full analyze_scan output (default: quiet)")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Full analyze_chip_scan output (default: quiet)")
     args = parser.parse_args()
 
     local_scan_dir = REPO_DIR / args.remote_scan_dir
@@ -51,8 +51,8 @@ def main() -> int:
         print(f"Error: rsync failed (exit {result.returncode})")
         return 1
 
-    # --- Step 2: run analyze_scan.py ---
-    cmd = [sys.executable, str(REPO_DIR / "analyze_scan.py"), str(local_scan_dir)]
+    # --- Step 2: run analyze_chip_scan.py ---
+    cmd = [sys.executable, str(REPO_DIR / "scripts" / "analyze_chip_scan.py"), str(local_scan_dir)]
     if not args.verbose:
         cmd.append("--quiet")
     if not args.sharpness:
@@ -69,7 +69,7 @@ def main() -> int:
     print(f"Running: {' '.join(cmd)}")
     result = subprocess.run(cmd)
     if result.returncode != 0:
-        print(f"Error: analyze_scan failed (exit {result.returncode})")
+        print(f"Error: analyze_chip_scan failed (exit {result.returncode})")
         return 1
 
     # --- Step 3: determine plot path and optionally show ---
