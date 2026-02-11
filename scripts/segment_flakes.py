@@ -16,33 +16,7 @@ import cv2
 import numpy as np
 from scipy import ndimage
 
-
-def build_flatfield(scan_dir: Path, sample_every: int = 60) -> np.ndarray:
-    """Build flatfield from median of sampled frames."""
-    frames = sorted(scan_dir.glob("frame_*.jpg"))
-    sampled = frames[::sample_every]
-    print(f"Building flatfield from {len(sampled)}/{len(frames)} frames")
-
-    stack = []
-    for f in sampled:
-        img = cv2.imread(str(f))
-        if img is None:
-            continue
-        if img.mean() < 20:
-            continue
-        stack.append(img.astype(np.float32))
-
-    flatfield = np.median(stack, axis=0).astype(np.float32)
-    print(f"Flatfield shape: {flatfield.shape}, mean: {flatfield.mean():.1f}")
-    return flatfield
-
-
-def apply_flatfield(image: np.ndarray, flatfield: np.ndarray, target_bg: float = 140.0) -> np.ndarray:
-    """Apply flatfield correction: divide by flatfield, scale to target brightness."""
-    ff = flatfield.astype(np.float32)
-    ff[ff < 1] = 1
-    corrected = (image.astype(np.float32) / ff) * target_bg
-    return np.clip(corrected, 0, 255).astype(np.uint8)
+from flakefinder.scan_utils import apply_flatfield
 
 
 def histogram_mode(image: np.ndarray, channel: int | None = None) -> float:
@@ -166,7 +140,6 @@ def main():
     parser = argparse.ArgumentParser(description="Segment flakes via flatfield + contrast threshold")
     parser.add_argument("input", type=Path, help="Frame image")
     parser.add_argument("--flatfield", type=Path, default=None, help="Flatfield .npy file")
-    parser.add_argument("--target-bg", type=float, default=140.0, help="Target background brightness")
     parser.add_argument("--contrast-offset", type=float, default=15.0, help="Threshold above bg mode")
     parser.add_argument("--min-size", type=int, default=1000, help="Min detection size (px)")
     parser.add_argument("--edge-margin", type=int, default=50, help="Ignore detections near frame edge (px)")
@@ -186,8 +159,9 @@ def main():
         return 1
 
     if args.flatfield:
-        ff = np.load(str(args.flatfield))
-        corrected = apply_flatfield(raw, ff, args.target_bg)
+        ff = np.load(str(args.flatfield)).astype(np.float32)
+        ff = ff[:, :, ::-1]  # RGB (numpy save convention) -> BGR (cv2)
+        corrected = apply_flatfield(raw, ff)
     else:
         corrected = raw
 
@@ -220,7 +194,6 @@ def main():
         "frame_shape": list(raw.shape),
         "flatfield": str(args.flatfield) if args.flatfield else None,
         "params": {
-            "target_bg": args.target_bg,
             "contrast_offset": args.contrast_offset,
             "min_size_px": args.min_size,
             "edge_margin_px": args.edge_margin,
