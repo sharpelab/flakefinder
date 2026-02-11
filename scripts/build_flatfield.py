@@ -4,20 +4,25 @@ Runs on the microscope. Captures at each position, validates brightness
 consistency and uniformity, builds median flatfield from good frames.
 
 Usage:
-    # Auto-generate grid from chip bbox
+    # Auto-generate grid from chip bbox (Z from current position)
     uv run python scripts/build_flatfield.py --objective-mag 2.5 \
         --chips-meta scans/overview_5x_stitch_chips.json \
-        --chip 1 --z 24591 -o calibration/flatfield_2.5x_bin3.npy
+        --chip 1 -o calibration/flatfield_2.5x_bin3.npy
+
+    # Explicit Z
+    uv run python scripts/build_flatfield.py --objective-mag 2.5 \
+        --chips-meta scans/chips.json --chip 1 --z 24591 \
+        -o calibration/ff.npy
 
     # Dry run — show positions without capturing
     uv run python scripts/build_flatfield.py --objective-mag 2.5 \
-        --chips-meta scans/chips.json --chip 1 --z 24591 \
+        --chips-meta scans/chips.json --chip 1 \
         -o calibration/ff.npy --dry-run
 
     # Manual positions
     uv run python scripts/build_flatfield.py --objective-mag 2.5 \
         --positions "57000,8000 60000,13000" \
-        --z 24591 -o calibration/flatfield_2.5x_bin3.npy
+        -o calibration/flatfield_2.5x_bin3.npy
 """
 
 import argparse
@@ -138,7 +143,7 @@ def main() -> int:
         default=0,
         help="Chip index to sample (with --chips-meta, default: 0)",
     )
-    parser.add_argument("--z", type=float, required=True)
+    parser.add_argument("--z", type=float, default=None, help="Z position in µm (default: current microscope Z)")
     parser.add_argument("-o", "--output", type=str, required=True)
     parser.add_argument(
         "--white-balance",
@@ -186,12 +191,11 @@ def main() -> int:
         print(f"Chip {args.chip} @ {mag}x: {len(positions)} positions (FOV {fov.x:.0f}x{fov.y:.0f} µm)")
 
     if args.dry_run:
-        print(f"\nDry run — {len(positions)} positions:")
+        z_info = f" at Z={args.z:.1f}" if args.z is not None else " (Z will use current position)"
+        print(f"\nDry run — {len(positions)} positions{z_info}:")
         for i, (x, y) in enumerate(positions):
             print(f"  [{i + 1}] ({x:.0f}, {y:.0f})")
         return 0
-
-    print(f"Building flatfield from {len(positions)} positions at Z={args.z}")
 
     all_frames = []
     with Microscope() as scope:
@@ -201,8 +205,13 @@ def main() -> int:
         else:
             scope.switch_objective_pos(args.objective_pos)
 
+        # Resolve Z: explicit or current position
+        z_um = args.z if args.z is not None else scope.z.position_um
+        z_source = "from --z" if args.z is not None else "current position"
+        print(f"Building flatfield from {len(positions)} positions at Z={z_um:.1f} µm ({z_source})")
+
         scope.light_on(args.lamp)
-        scope.z.move_to(args.z)
+        scope.z.move_to(z_um)
 
         camera = scope.camera
         camera.binning = args.binning
@@ -310,7 +319,7 @@ def main() -> int:
         ],
         "gamma": args.gamma,
         "frame_size_px": [int(flatfield.shape[1]), int(flatfield.shape[0])],
-        "z_um": args.z,
+        "z_um": z_um,
         "positions_um": [[round(x, 1), round(y, 1)] for x, y in positions],
         "num_positions": len(positions),
         "num_frames_kept": len(good_frames),
