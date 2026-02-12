@@ -51,7 +51,7 @@ def segment_frame(
     above = image.astype(np.float32) - bg_modes[np.newaxis, np.newaxis, :]
     mask = np.any(above > contrast_offset, axis=2)
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     mask_clean = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
     mask_clean = cv2.morphologyEx(mask_clean, cv2.MORPH_OPEN, kernel)
 
@@ -78,8 +78,15 @@ def segment_frame(
         if cy < edge_margin_px or cy > h - edge_margin_px:
             continue
 
-        region_pixels = image[component]
-        mean_contrast = float(np.mean(region_pixels.astype(np.float32) - bg_modes))
+        region_pixels = image[component].astype(np.float32)
+        mean_contrast = float(np.mean(region_pixels - bg_modes))
+
+        # Per-channel normalized contrast: (flake - bg) / bg
+        ch_means = region_pixels.mean(axis=0)  # BGR
+        norm_contrast_bgr = (ch_means - bg_modes) / np.maximum(bg_modes, 1.0)
+        contrast_r = round(float(norm_contrast_bgr[2]), 4)
+        contrast_g = round(float(norm_contrast_bgr[1]), 4)
+        contrast_b = round(float(norm_contrast_bgr[0]), 4)
 
         detections.append(
             {
@@ -87,6 +94,7 @@ def segment_frame(
                 "center": [round(cx, 1), round(cy, 1)],
                 "size_px": size,
                 "mean_contrast": round(mean_contrast, 1),
+                "contrast_rgb": [contrast_r, contrast_g, contrast_b],
             }
         )
 
@@ -94,16 +102,45 @@ def segment_frame(
     return detections
 
 
-def draw_detections(image: np.ndarray, detections: list[dict]) -> np.ndarray:
+def draw_scale_bar(image: np.ndarray, um_per_px: float) -> None:
+    """Draw a scale bar in the bottom-right corner of *image* (mutates in place)."""
+    h, w = image.shape[:2]
+    for candidate_um in [500, 200, 100, 50, 20, 10]:
+        candidate_px = int(candidate_um / um_per_px)
+        if candidate_px <= w * 0.20:
+            break
+    bar_px = int(candidate_um / um_per_px)
+    bar_h = max(4, h // 200)
+    margin = max(15, h // 60)
+    bx = w - margin - bar_px
+    by = h - margin - bar_h
+    cv2.rectangle(image, (bx - 1, by - 1), (bx + bar_px + 1, by + bar_h + 1), (0, 0, 0), -1)
+    cv2.rectangle(image, (bx, by), (bx + bar_px, by + bar_h), (255, 255, 255), -1)
+    label = f"{candidate_um} um"
+    font_scale = max(0.4, h / 2000)
+    thick = max(1, int(h / 800))
+    (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thick)
+    lx = bx + (bar_px - lw) // 2
+    ly = by - max(4, int(h / 200))
+    cv2.putText(image, label, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), thick + 2)
+    cv2.putText(image, label, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), thick)
+
+
+def draw_detections(image: np.ndarray, detections: list[dict], um_per_px: float = 0.0) -> np.ndarray:
     """Draw bounding boxes on image. Returns a copy."""
     vis = image.copy()
-    for d in detections:
+    for i, d in enumerate(detections):
         bx, by, bw, bh = d["bbox"]
         s = d["size_px"]
+        c = d.get("mean_contrast", 0)
         color = (0, 255, 0) if s > 1000 else (0, 255, 255) if s > 500 else (0, 0, 255)
         thickness = 2 if s > 1000 else 1
         cv2.rectangle(vis, (bx, by), (bx + bw, by + bh), color, thickness)
-        cv2.putText(vis, f"{s}px", (bx, by - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        label = f"#{i} {s}px c={c:.0f}"
+        cv2.putText(vis, label, (bx, by - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 3)
+        cv2.putText(vis, label, (bx, by - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
+    if um_per_px > 0:
+        draw_scale_bar(vis, um_per_px)
     return vis
 
 
@@ -151,6 +188,12 @@ def main():
     )
     parser.add_argument("--output", "-o", type=Path, default=None, help="Output image path")
     parser.add_argument("--save-plot", action="store_true", help="Also save matplotlib analysis plot")
+    parser.add_argument(
+        "--pixel-size",
+        type=float,
+        default=0.36,
+        help="µm per pixel (default: 0.36 for 20x bin3)",
+    )
     args = parser.parse_args()
 
     raw = cv2.imread(str(args.input))
@@ -180,7 +223,7 @@ def main():
 
     # Output image — draw on raw to preserve true colors
     out = args.output or args.input.with_suffix(".seg.jpg")
-    vis = draw_detections(raw, dets)
+    vis = draw_detections(raw, dets, um_per_px=args.pixel_size)
     cv2.imwrite(str(out), vis)
     print(f"Saved: {out}")
 

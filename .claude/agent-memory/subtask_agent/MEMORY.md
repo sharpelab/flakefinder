@@ -20,8 +20,7 @@
 - `scope.create_acquisition_context()` — creates a NEW context caller must dispose. For streaming/per-thread use.
 - `scope.light_on()` / `scope.light_off()` — shutter + lamp combined
 - `scope.switch_objective_pos(pos)` / `switch_objective_mag("20x")` — handles z-speed maxing internally
-- `wait_all(handles)` — module-level function in `units.py` (not on `Stage`)
-- `require_microscope_description(path)` — raises on failure (not `| None`)
+- `wait_all(handles)` — module-level function in `units.py`
 
 ## Scope Discipline
 - **NEVER commit without explicit user approval.** Always propose the commit and wait for "go"/"commit"/"sync". Premature commits ship suboptimal code — review catches issues that need fixing first.
@@ -105,10 +104,6 @@ Use `show <path>` to display images to the user. Do NOT use the Read tool on ima
 - `cli_utils.py` lives at `src/flakefinder/cli_utils.py` — import as `from flakefinder.cli_utils import ...`
 - `analyze_scan.py` renamed to `scripts/analyze_chip_scan.py`
 - When moving files with ty overrides, update the include path in pyproject.toml
-
-## Context Management
-- **NEVER read large notebooks/docs directly.** When the user says "use the task tool to have sonnet/haiku read X", they mean delegate the reading to save context. Ask how to delegate if mechanism isn't clear — don't just read it yourself.
-- Two scan notebooks (02-09, 02-10) were ~1300 lines combined and savaged context. A 10-line summary would have sufficed.
 
 ## Microscope
 - Do NOT run hardware commands (scans, autofocus, stage moves) — only the main scan session does that.

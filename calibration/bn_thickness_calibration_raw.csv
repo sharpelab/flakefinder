@@ -1,0 +1,13 @@
+f,Flake ID,50x image from Leica,Contrast in R,Contrast in G,Stack,Thickness from AFM (nm),Classification,Notes
+19.07.2025,SF102IJ,,-0.6,0.286,,4.6,Very Thin,
+,SF102IJ,,-0.671,0.079,SF96I3,5.6,Very Thin,
+,2025-08 E3-E5,,-0.597,0.219,,6.3,Very Thin,
+,SF103 EFGH,,-0.645,0.313,SF96I6,7,Very Thin,
+28.06.2025,SF102F 2367,,-0.649,0.376,SF96H5,8.1,Very Thin,
+,E7-E10_run4,,-0.67,0.409,SF96I3,8.6,Very Thin,
+,SF103 EFGH,,-0.673,0.526,SF96I6,10.2,Very Thin,
+,S102 IJ,,-0.692,0.948,,14.1,Very Thin,
+26.06.2025,SF102D 1705,,-0.481,1.613,,18,Medium Thin,
+26.06.2025,SF102D 1890,,0.421,2.907,,26,Medium,
+28.06.2025,SF102G 2587,,-0.026,2.356,SF96H5,,Medium,
+31.07.2025,benalex_2025_07_31_hbn_05-09 8967,,2.52,4.636,B25_003,46,Thick,AFM thickness was computed via planefit + find distances between peaks in histogram of height in flattened afm image
