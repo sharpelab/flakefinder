@@ -1,0 +1,6 @@
+#!/bin/bash
+# Launch Claude Code as scan operator
+REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+cd "$REPO_DIR"
+export PATH="$REPO_DIR/tools:$PATH"
+claude --model opus --append-system-prompt-file "$REPO_DIR/.claude/commands/scan.md" "$@"
