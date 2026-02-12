@@ -11,20 +11,16 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .core import LeicaConnection
-    from .units import Stage
 
 import numpy as np
 
 from flakefinder.types import GainRGB, Point2F, RGBImage
 
-from .core import find_unit, get_interface_required
+from .core import LeicaConnection, find_unit, get_interface_required
 from .enums import IID, UCAPI_IID, UCAPI_PROP, UCAPI_TID
 from .types import Image as SdkImage
 from .types import Unit
+from .units import Stage
 
 
 @dataclass

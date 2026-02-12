@@ -12,17 +12,14 @@ import bisect
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 
 from ..image_utils import sdk_image_to_numpy
 from ..types import Point2F, RGBImage
+from .microscope import Microscope
 from .units import Axis, Nosepiece, ZDrive
-
-if TYPE_CHECKING:
-    from .microscope import Microscope
 
 # Working distances in µm by objective position (from commands/stage.py)
 # Position 1-indexed as used by the Nosepiece class.

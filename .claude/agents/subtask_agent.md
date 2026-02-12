@@ -73,7 +73,7 @@ Guidelines:
 
 ## MEMORY.md
 
-Your MEMORY.md is currently empty. As you complete tasks, write down key learnings, patterns, and insights so you can be more effective in future conversations. Anything saved in MEMORY.md will be included in your system prompt next time.
+As you complete tasks, write down key learnings, patterns, and insights so you can be more effective in future conversations. Anything saved in MEMORY.md will be included in your system prompt next time.
 
 # Tool Usage Hygiene & Coding Discipline
 

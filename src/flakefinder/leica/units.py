@@ -10,14 +10,10 @@ import contextlib
 import re
 import time
 import warnings
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .core import LeicaConnection
 
 from flakefinder.types import Point2F
 
-from .core import find_unit, get_interface, get_interface_required
+from .core import LeicaConnection, find_unit, get_interface, get_interface_required
 from .enums import IID, TID, EMetricsId, MoveState
 from .types import (
     AsyncResult,
