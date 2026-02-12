@@ -86,7 +86,7 @@ def main() -> int:
         return 0
 
     if args.show:
-        subprocess.run(["show", str(plot_path)])
+        subprocess.run(["present", str(plot_path)])
 
     # --- Step 4: print plot path for easy scan-nb --attach ---
     print(f"\n{plot_path}")

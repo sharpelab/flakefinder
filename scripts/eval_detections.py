@@ -262,9 +262,6 @@ def main():
     parser.add_argument("--pixel-size", type=float, default=0.36, help="µm per pixel (20x bin3)")
     parser.add_argument("--contrast-offset", type=float, default=15.0, help="Threshold above bg mode")
     parser.add_argument("--min-size", type=int, default=1000, help="Min detection size (px)")
-    parser.add_argument(
-        "--min-solidity", type=float, default=0.0, help="Filter detections below this solidity (tape rejection)"
-    )
     parser.add_argument("--match-radius", type=int, default=100, help="Target matching radius (px)")
     parser.add_argument("-o", "--output", type=Path, required=True, help="Output directory")
     parser.add_argument("--show", action="store_true", help="Open results after generation")
@@ -313,7 +310,6 @@ def main():
             corrected,
             contrast_offset=args.contrast_offset,
             min_size_px=args.min_size,
-            min_solidity=args.min_solidity,
         )
 
         # Compute target centroid
