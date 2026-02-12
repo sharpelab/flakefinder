@@ -6,6 +6,7 @@ Usage:
     uv run python scripts/process_chip_scan.py scans/chip0_20x
     uv run python scripts/process_chip_scan.py scans/chip0_20x --sharpness --show
     uv run python scripts/process_chip_scan.py scans/chip0_20x --notes "v10 plane"
+    uv run python scripts/process_chip_scan.py scans/chip0_20x --local  # skip rsync
 """
 
 import argparse
@@ -22,9 +23,9 @@ def main() -> int:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "remote_scan_dir",
+        "scan_dir",
         type=str,
-        help="Scan directory relative to flakefinder/ on microscope (e.g. scans/chip0_20x)",
+        help="Scan directory relative to flakefinder/ (e.g. scans/chip0_20x)",
     )
     parser.add_argument(
         "--sharpness",
@@ -32,6 +33,7 @@ def main() -> int:
         help="Enable sharpness computation (disabled by default for speed)",
     )
     parser.add_argument("--show", action="store_true", help="Open the analysis plot after generation")
+    parser.add_argument("--local", action="store_true", help="Skip rsync (data already local)")
     # Pass-through args for analyze_chip_scan.py
     parser.add_argument("--notes", type=str, default=None, help="Label for plot title")
     parser.add_argument("--sample", type=int, default=None, help="Sharpness: process every Nth frame")
@@ -40,15 +42,20 @@ def main() -> int:
     parser.add_argument("--verbose", "-v", action="store_true", help="Full analyze_chip_scan output (default: quiet)")
     args = parser.parse_args()
 
-    local_scan_dir = REPO_DIR / args.remote_scan_dir
+    local_scan_dir = (REPO_DIR / args.scan_dir).resolve()
 
     # --- Step 1: rsync from microscope ---
-    remote = f"sharpelab-microscope:flakefinder/{args.remote_scan_dir}/"
-    local = f"{local_scan_dir}/"
-    print(f"Syncing {remote} -> {local}")
-    result = subprocess.run(["rsync", "-a", "--quiet", remote, local])
-    if result.returncode != 0:
-        print(f"Error: rsync failed (exit {result.returncode})")
+    if not args.local:
+        remote = f"sharpelab-microscope:flakefinder/{args.scan_dir}/"
+        local = f"{local_scan_dir}/"
+        print(f"Syncing {remote} -> {local}")
+        result = subprocess.run(["rsync", "-a", "--quiet", remote, local])
+        if result.returncode != 0:
+            print(f"Error: rsync failed (exit {result.returncode})")
+            return 1
+
+    if not local_scan_dir.is_dir():
+        print(f"Error: Not a directory: {local_scan_dir}")
         return 1
 
     # --- Step 2: run analyze_chip_scan.py ---
