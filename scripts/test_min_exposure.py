@@ -6,7 +6,7 @@ minimal motion blur. Tests various exposure times and compares mean brightness.
 
 Usage:
     uv run python scripts/test_min_exposure.py
-    uv run python scripts/test_min_exposure.py --exposures 0.001,0.0005,0.0001
+    uv run python scripts/test_min_exposure.py --exposures-ms 1,0.5,0.1
     uv run python scripts/test_min_exposure.py --frames 10 --lamp 128
 """
 
@@ -86,10 +86,10 @@ def test_exposure(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Test minimum camera exposure times")
     parser.add_argument(
-        "--exposures",
+        "--exposures-ms",
         type=str,
-        default="0.002,0.0015,0.001,0.0005,0.0002,0.0001",
-        help="Comma-separated exposure times in seconds (default: 2ms,1.5ms,1ms,0.5ms,0.2ms,0.1ms)",
+        default="2,1.5,1,0.5,0.2,0.1",
+        help="Comma-separated exposure times in milliseconds (default: 2,1.5,1,0.5,0.2,0.1)",
     )
     parser.add_argument("--frames", type=int, default=5, help="Number of frames per exposure setting (default: 5)")
     parser.add_argument("--lamp", type=int, default=255, help="Lamp intensity (default: 255 = 100%%)")
@@ -108,8 +108,8 @@ def main() -> int:
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # Parse exposure times
-    exposure_times = [float(x.strip()) for x in args.exposures.split(",")]
+    # Parse exposure times (ms -> seconds for camera API)
+    exposure_times = [float(x.strip()) / 1000.0 for x in args.exposures_ms.split(",")]
 
     print("=" * 60)
     print("Leica K5C Minimum Exposure Time Test")

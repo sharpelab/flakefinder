@@ -6,7 +6,7 @@ Usage:
     python capture_util.py output.png --binning 0        # Full resolution (1x1)
     python capture_util.py output.jpg --downsample 2     # Downsample 2x
     python capture_util.py output.jpg --lamp 80          # Set lamp to 80%
-    python capture_util.py output.jpg --exposure 0.05    # 50ms exposure
+    python capture_util.py output.jpg --exposure-ms 50    # 50ms exposure
     python capture_util.py output.jpg --white-balance 2.51,1.02,1.41  # White balance (B,G,R)
     python capture_util.py output.jpg --x 5000 --y 14441 # Move then capture
 """
@@ -33,10 +33,10 @@ def main() -> int:
     )
     parser.add_argument("--downsample", type=int, default=1, help="Downsample factor after capture (default: 1)")
     parser.add_argument(
-        "--exposure",
+        "--exposure-ms",
         type=float,
-        default=0.001,
-        help="Exposure time in seconds (default: 0.001 = 1ms)",
+        default=1.0,
+        help="Exposure time in milliseconds (default: 1.0)",
     )
     parser.add_argument(
         "--white-balance",
@@ -80,8 +80,8 @@ def main() -> int:
         if args.binning is not None:
             camera.binning = args.binning
 
-        if args.exposure is not None:
-            camera.exposure_time = args.exposure
+        if args.exposure_ms is not None:
+            camera.exposure_time = args.exposure_ms / 1000.0
 
         if args.gain is not None:
             camera.gain = args.gain
