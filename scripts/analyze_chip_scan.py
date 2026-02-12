@@ -24,6 +24,74 @@ import matplotlib.pyplot as plt
 from flakefinder.leica.autofocus import sharpness
 
 
+def plot_row_map(meta: dict, output_path: Path, *, notes: str | None = None) -> None:
+    """Plot chip hull outline with per-row extents and lead-in arrows."""
+    rows = meta.get("rows", [])
+    if not rows:
+        print("  No row data for row map")
+        return
+
+    lead_in = meta.get("scan_params", {}).get("lead_in_um", 2000)
+
+    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+
+    # All rows as light background
+    for r in rows:
+        ax.plot([r["x_min_um"], r["x_max_um"]], [r["y_um"], r["y_um"]], color="lightblue", linewidth=1, alpha=0.5)
+
+    # Hull outline from row extents
+    left_edge = [(r["x_min_um"], r["y_um"]) for r in rows]
+    right_edge = [(r["x_max_um"], r["y_um"]) for r in rows]
+    outline_x = [p[0] for p in left_edge] + [p[0] for p in reversed(right_edge)] + [left_edge[0][0]]
+    outline_y = [p[1] for p in left_edge] + [p[1] for p in reversed(right_edge)] + [left_edge[0][1]]
+    ax.plot(outline_x, outline_y, "k-", linewidth=1.5, alpha=0.7, label=f"Chip hull ({len(rows)} rows)")
+
+    # Highlight rows with colors (cycle through a palette)
+    palette = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628", "#f781bf", "#999999"]
+    # For large row counts, only label every Nth row
+    label_every = max(1, len(rows) // 15)
+    for i, r in enumerate(rows):
+        ri = r["row_idx"]
+        d = r["direction"]
+        x_min, x_max = r["x_min_um"], r["x_max_um"]
+        color = palette[i % len(palette)]
+        width_mm = (x_max - x_min) / 1000
+        label = f"Row {ri} ({width_mm:.1f}mm)" if i % label_every == 0 else None
+        ax.plot([x_min, x_max], [r["y_um"], r["y_um"]], color=color, linewidth=2, label=label)
+
+        # Lead-in arrow
+        if d == 1:
+            x_start = x_min - lead_in
+            ax.annotate(
+                "",
+                xy=(x_min, r["y_um"]),
+                xytext=(x_start, r["y_um"]),
+                arrowprops={"arrowstyle": "->", "color": color, "lw": 1.2, "ls": "--"},
+            )
+        else:
+            x_start = x_max + lead_in
+            ax.annotate(
+                "",
+                xy=(x_max, r["y_um"]),
+                xytext=(x_start, r["y_um"]),
+                arrowprops={"arrowstyle": "->", "color": color, "lw": 1.2, "ls": "--"},
+            )
+
+    ax.set_xlabel("X (µm)")
+    ax.set_ylabel("Y (µm)")
+    title = "Row Map — Hull extents with lead-in"
+    if notes:
+        title += f" ({notes})"
+    ax.set_title(title)
+    ax.invert_yaxis()
+    ax.legend(loc="lower right", fontsize=8)
+    ax.set_aspect("equal")
+    plt.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    print(f"  Row map saved to {output_path}")
+
+
 def load_scan_meta(scan_dir: Path) -> dict:
     """Load scan_meta.json from a scan directory."""
     meta_path = scan_dir / "scan_meta.json"
@@ -885,6 +953,11 @@ def main() -> int:
         help="Compact output: one-line scan info + Z quality verdict only",
     )
     parser.add_argument(
+        "--row-map",
+        action="store_true",
+        help="Generate chip hull + row extent plot with lead-in arrows",
+    )
+    parser.add_argument(
         "--compare",
         type=Path,
         default=None,
@@ -954,6 +1027,12 @@ def main() -> int:
         notes=args.notes,
         spatial_z=args.spatial_z,
     )
+
+    # Row map plot
+    if args.row_map:
+        suffix = f"_{args.notes}" if args.notes else ""
+        row_map_path = scan_dir / f"row_map{suffix}.png"
+        plot_row_map(meta, row_map_path, notes=args.notes)
 
     return 0
 

@@ -52,6 +52,24 @@ def _make_detection(
     ch_means = region_pixels.mean(axis=0)  # BGR
     norm_contrast_bgr = (ch_means - bg_modes) / np.maximum(bg_modes, 1.0)
 
+    # Shape metrics via contour analysis
+    comp_u8 = component.astype(np.uint8) * 255
+    contours, _ = cv2.findContours(comp_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cnt = max(contours, key=cv2.contourArea) if contours else None
+    if cnt is not None:
+        area = cv2.contourArea(cnt)
+        perim = cv2.arcLength(cnt, True)
+        hull_area = cv2.contourArea(cv2.convexHull(cnt))
+        solidity = area / max(hull_area, 1)
+        circularity = (4 * np.pi * area) / max(perim**2, 1)
+    else:
+        solidity = 0.0
+        circularity = 0.0
+
+    # Color uniformity: std of per-pixel normalized R contrast within blob
+    r_norm = (image[:, :, 2].astype(np.float32) - bg_modes[2]) / max(float(bg_modes[2]), 1.0)
+    r_std = float(r_norm[component].std())
+
     return {
         "bbox": [x_min, y_min, x_max - x_min, y_max - y_min],
         "center": [round((x_min + x_max) / 2, 1), round((y_min + y_max) / 2, 1)],
@@ -62,6 +80,9 @@ def _make_detection(
             round(float(norm_contrast_bgr[1]), 4),
             round(float(norm_contrast_bgr[0]), 4),
         ],
+        "solidity": round(solidity, 4),
+        "circularity": round(circularity, 4),
+        "r_std": round(r_std, 4),
     }
 
 
@@ -129,11 +150,13 @@ def segment_frame(
     contrast_offset: float = 15.0,
     min_size_px: int = 1000,
     edge_margin_px: int = 50,
+    min_solidity: float = 0.0,
 ) -> list[dict]:
     """Segment flakes by thresholding above background mode + offset.
 
     Returns list of detected regions with bbox, size, center, mean_contrast.
     Large blobs with bimodal R contrast are sub-segmented by thickness.
+    Detections with solidity below *min_solidity* are filtered out (tape rejection).
     """
     bg_modes = np.array([histogram_mode(image, c) for c in range(3)])
 
@@ -164,6 +187,19 @@ def segment_frame(
             continue
         if cy < edge_margin_px or cy > h - edge_margin_px:
             continue
+
+        # Solidity filter on parent blob (before sub-segmentation).
+        # Sub-segments inherit the pass — their irregular Otsu-split
+        # boundaries would falsely fail solidity checks.
+        if min_solidity > 0:
+            comp_u8 = component.astype(np.uint8) * 255
+            contours, _ = cv2.findContours(comp_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if contours:
+                cnt = max(contours, key=cv2.contourArea)
+                hull_area = cv2.contourArea(cv2.convexHull(cnt))
+                parent_solidity = cv2.contourArea(cnt) / max(hull_area, 1)
+                if parent_solidity < min_solidity:
+                    continue
 
         # Try contrast-based sub-segmentation for large blobs
         sub_components = _subsegment_by_contrast(image, component, bg_modes, min_size_px)
@@ -261,6 +297,12 @@ def main():
     parser.add_argument("--min-size", type=int, default=1000, help="Min detection size (px)")
     parser.add_argument("--edge-margin", type=int, default=50, help="Ignore detections near frame edge (px)")
     parser.add_argument(
+        "--min-solidity",
+        type=float,
+        default=0.0,
+        help="Filter detections below this solidity (tape rejection, try 0.7)",
+    )
+    parser.add_argument(
         "--dark-frac-cutoff",
         type=float,
         default=0.05,
@@ -296,7 +338,7 @@ def main():
         dets = []
         print(f"{args.input.name}: SKIPPED (dark_frac={dark_frac:.3f} > {args.dark_frac_cutoff})")
     else:
-        dets = segment_frame(corrected, args.contrast_offset, args.min_size, args.edge_margin)
+        dets = segment_frame(corrected, args.contrast_offset, args.min_size, args.edge_margin, args.min_solidity)
         print(f"{args.input.name}: {len(dets)} detections (dark_frac={dark_frac:.3f})")
         for i, d in enumerate(dets):
             print(f"  #{i}: size={d['size_px']}px, center={d['center']}, contrast={d['mean_contrast']}")

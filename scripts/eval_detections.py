@@ -53,14 +53,13 @@ COLOR_NON_HBN = (128, 128, 128)  # gray
 COLOR_TARGET = (255, 255, 255)  # white outline for target matches
 
 
-def cal_r_predicted(g: float) -> float:
-    """Predicted R contrast from calibration polynomial."""
-    return CAL_POLY[0] * g**2 + CAL_POLY[1] * g + CAL_POLY[2]
+_G_CURVE = np.linspace(-0.5, 6.0, 500)
+_R_CURVE = np.polyval(CAL_POLY, _G_CURVE)
 
 
 def cal_distance(r: float, g: float) -> float:
-    """Absolute R residual from calibration curve."""
-    return abs(r - cal_r_predicted(g))
+    """Perpendicular distance from (g, r) to calibration curve."""
+    return float(np.sqrt((_G_CURVE - g) ** 2 + (_R_CURVE - r) ** 2).min())
 
 
 def classify_detection(r: float, g: float) -> tuple[str, tuple[int, int, int]]:
@@ -263,6 +262,9 @@ def main():
     parser.add_argument("--pixel-size", type=float, default=0.36, help="µm per pixel (20x bin3)")
     parser.add_argument("--contrast-offset", type=float, default=15.0, help="Threshold above bg mode")
     parser.add_argument("--min-size", type=int, default=1000, help="Min detection size (px)")
+    parser.add_argument(
+        "--min-solidity", type=float, default=0.0, help="Filter detections below this solidity (tape rejection)"
+    )
     parser.add_argument("--match-radius", type=int, default=100, help="Target matching radius (px)")
     parser.add_argument("-o", "--output", type=Path, required=True, help="Output directory")
     parser.add_argument("--show", action="store_true", help="Open results after generation")
@@ -311,6 +313,7 @@ def main():
             corrected,
             contrast_offset=args.contrast_offset,
             min_size_px=args.min_size,
+            min_solidity=args.min_solidity,
         )
 
         # Compute target centroid
