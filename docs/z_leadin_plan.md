@@ -117,6 +117,10 @@ From current scan session:
 - 20x DOF: ~1.7 µm
 - Z speed limit: 5000 µm/s max
 
+## Idea: Skip Z preposition entirely for rows 1+
+
+In a snake scan, Z at the end of row N is already within ~1-2µm of the target for row N+1 (adjacent sides of the chip, small Y step). Instead of any Z position move (blocking or async), skip it entirely and let the phase 2 control loop close the gap during the 400ms lead-in. Row 0 keeps `move_to_corrected` since it needs to reach the initial Z from an arbitrary starting position.
+
 ---
 
 *Plan date: 2026-02-12*
