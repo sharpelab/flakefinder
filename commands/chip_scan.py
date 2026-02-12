@@ -373,7 +373,6 @@ def scan_row(
                         x_samples, t_x_started, time.perf_counter(), cfg.x_speed_um_s
                     )
                     if measured_speed is not None:
-                        z_vel_um_s = cfg.plane_a * direction * measured_speed
                         speed_meas["commanded_x_speed_um_s"] = cfg.x_speed_um_s
                         speed_meas["z_vel_commanded_um_s"] = round(abs(cfg.plane_a * cfg.x_speed_um_s), 4)
                         speed_meas["z_vel_corrected_um_s"] = round(abs(cfg.plane_a * measured_speed), 4)
