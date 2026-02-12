@@ -429,6 +429,7 @@ def run(
     chip: int = 0,
     contour_spacing_mm: float = 15.0,
     grid_spacing_um: float = 10000,
+    objective_mag: str | None = None,
     z_range: float | None = None,
     fine_pass: bool = True,
     fine_range: float = 50.0,
@@ -476,6 +477,15 @@ def run(
     from flakefinder.leica.autofocus import continuous_autofocus
 
     start_time = time.perf_counter()
+
+    # Switch objective if requested
+    if objective_mag is not None:
+        if scope.switch_objective_mag(objective_mag):
+            if not quiet:
+                print(f"Switched objective to {scope.objective_mag}x")
+        else:
+            if not quiet:
+                print(f"Objective: already at {scope.objective_mag}x")
 
     scope.light_on()
 
@@ -729,6 +739,12 @@ def _build_parser():
         help="Notes to display on rendered mosaic",
     )
     parser.add_argument(
+        "--objective-mag",
+        type=str,
+        metavar="MAG",
+        help="Objective by magnification (e.g., 5, 5x, 20, 2.5) - switches before running",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print sample points without running autofocus",
@@ -770,6 +786,7 @@ def main() -> int:
                 chip=args.chip,
                 contour_spacing_mm=args.contour_spacing_mm,
                 grid_spacing_um=args.grid_spacing_um,
+                objective_mag=args.objective_mag,
                 z_range=args.z_range,
                 fine_pass=not args.no_fine_pass,
                 fine_range=args.fine_range,
