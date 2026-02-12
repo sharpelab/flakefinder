@@ -614,7 +614,7 @@ def main() -> int:
                 run_in_process(f"Chip {ci} - Analyze Focus Map", lambda: None, dry_run=True)
                 run_in_process(f"Chip {ci} - 20x Scan", lambda: None, dry_run=True)
         else:
-            print("\n  Per-chip steps: Focus Map → Analyze → 20x Scan (chips not yet detected)")
+            print("\n  Per-chip steps: Focus Map -> Analyze -> 20x Scan (chips not yet detected)")
         return 0
 
     # Create run directory and set up log tee
