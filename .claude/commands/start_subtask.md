@@ -79,7 +79,7 @@ Write a prompt file to `/tmp/subtask_<descriptive_slug>.prompt.md`. Structure:
 <full description of what to build/modify, including any specific requirements, code snippets, or values from the current session>
 ```
 
-**Never instruct the subtask to commit or sync directly.** The subtask's default behavior is to propose a plan and wait for approval. Don't override that — the user reviews before anything is committed.
+**NEVER include "commit", "push", or sync instructions in the prompt.** The subtask's default behavior is to propose a plan and wait for approval. Don't override that — the user reviews before anything is committed.
 
 ### 5. Inject session-specific details
 
