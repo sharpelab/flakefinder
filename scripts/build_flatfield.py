@@ -116,17 +116,11 @@ def main() -> int:
         description="Build median flatfield from bare-substrate captures.",
     )
 
-    obj_group = parser.add_mutually_exclusive_group(required=True)
-    obj_group.add_argument(
+    parser.add_argument(
         "--objective-mag",
         type=str,
+        required=True,
         help="Objective magnification (e.g. 2.5, 5x, 20)",
-    )
-    obj_group.add_argument(
-        "--objective-pos",
-        type=int,
-        choices=range(1, 7),
-        help="Objective turret position (1-6)",
     )
 
     pos_group = parser.add_mutually_exclusive_group(required=True)
@@ -167,14 +161,7 @@ def main() -> int:
 
     # Resolve magnification for FOV computation
     desc = require_microscope_description()
-    if args.objective_mag:
-        mag = float(args.objective_mag.lower().rstrip("x"))
-    else:
-        obj_info = desc.objectives.get(args.objective_pos)
-        if obj_info is None:
-            print(f"Error: Unknown objective position {args.objective_pos}")
-            return 1
-        mag = obj_info.magnification
+    mag = float(args.objective_mag.lower().rstrip("x"))
 
     # Resolve positions
     if args.positions:
@@ -204,10 +191,7 @@ def main() -> int:
     all_frames = []
     with Microscope() as scope:
         # Switch objective
-        if args.objective_mag:
-            scope.switch_objective_mag(args.objective_mag)
-        else:
-            scope.switch_objective_pos(args.objective_pos)
+        scope.switch_objective_mag(args.objective_mag)
 
         # Resolve Z: explicit or current position
         z_um = args.z if args.z is not None else scope.z.position_um

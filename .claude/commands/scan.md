@@ -69,9 +69,9 @@ ssh sharpelab-microscope 'cd flakefinder && uv run python capture_util.py --x [X
 
 **Switch objective:**
 ```
-ssh sharpelab-microscope 'cd flakefinder && uv run python commands/stage.py --objective-pos [POS] -q'
+ssh sharpelab-microscope 'cd flakefinder && uv run python commands/stage.py --objective-mag [MAG] -q'
 ```
-- Positions: 6=2.5x, 1=5x, 2=10x, 3=20x, 4=50x, 5=150x
+- Magnifications: 2.5x, 5x, 10x, 20x, 50x, 150x
 - Z shifts on swap (parfocal adjustment) — note the new Z
 
 **Process overview scan (local):**

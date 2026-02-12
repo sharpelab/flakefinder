@@ -564,7 +564,6 @@ def _plan(
     chip: int,
     plane_path: Path,
     objective_mag: str | None = None,
-    objective_pos: int | None = None,
     binning: int = 3,
     x_overlap_percent: float = 30,
     y_overlap_percent: float = 12,
@@ -579,9 +578,6 @@ def _plan(
     Raises:
         ValueError: On invalid inputs or failed validation.
     """
-    # Validate objective args are mutually exclusive
-    if objective_mag is not None and objective_pos is not None:
-        raise ValueError("--objective-mag and --objective-pos are mutually exclusive")
 
     # ---- Load chip data ----
     if not chips_meta.exists():
@@ -618,23 +614,17 @@ def _plan(
     # ---- Compute frame dimensions from microscope description ----
     desc = require_microscope_description()
 
+    if objective_mag is None:
+        raise ValueError("--objective-mag is required")
+
     obj_mag_for_plan: float | None = None
-    if objective_mag is not None:
-        mag_str = objective_mag.lower().rstrip("x")
-        for obj in desc.objectives.values():
-            if str(obj.magnification) == mag_str:
-                obj_mag_for_plan = obj.magnification
-                break
-        if obj_mag_for_plan is None:
-            raise ValueError(f"Unknown objective magnification '{objective_mag}'")
-    elif objective_pos is not None:
-        obj_info = desc.objectives.get(objective_pos)
-        if obj_info:
-            obj_mag_for_plan = obj_info.magnification
-        else:
-            raise ValueError(f"Unknown objective position {objective_pos}")
-    else:
-        raise ValueError("--objective-mag or --objective-pos required")
+    mag_str = objective_mag.lower().rstrip("x")
+    for obj in desc.objectives.values():
+        if str(obj.magnification) == mag_str:
+            obj_mag_for_plan = obj.magnification
+            break
+    if obj_mag_for_plan is None:
+        raise ValueError(f"Unknown objective magnification '{objective_mag}'")
 
     frame_size = compute_frame_size_um(desc.camera, obj_mag_for_plan, binning_idx)
     if frame_size is None:
@@ -687,7 +677,6 @@ def run(
     lead_in_um: float = 2000,
     z_lead_ms: float = 30,
     objective_mag: str | None = None,
-    objective_pos: int | None = None,
     speed_mm: float = 5.0,
     move_speed_mm: float = 40,
     exposure_ms: float = 0.25,
@@ -714,7 +703,6 @@ def run(
         chip=chip,
         plane_path=plane_path,
         objective_mag=objective_mag,
-        objective_pos=objective_pos,
         binning=binning,
         x_overlap_percent=x_overlap_percent,
         y_overlap_percent=y_overlap_percent,
@@ -767,13 +755,6 @@ def run(
         if scope.switch_objective_mag(objective_mag):
             if not quiet:
                 print(f"Switched objective to {scope.objective_mag}x")
-        else:
-            if not quiet:
-                print(f"Objective: already at {scope.objective_mag}x")
-    elif objective_pos is not None:
-        if scope.switch_objective_pos(objective_pos):
-            if not quiet:
-                print(f"Switched objective to position {objective_pos} ({scope.objective_mag}x)")
         else:
             if not quiet:
                 print(f"Objective: already at {scope.objective_mag}x")
@@ -1275,13 +1256,6 @@ Examples:
         metavar="MAG",
         help="Objective by magnification (e.g., 5, 5x, 20, 2.5) - switches before scan",
     )
-    optics_group.add_argument(
-        "--objective-pos",
-        type=int,
-        metavar="POS",
-        help="Objective by turret position (1-6) - switches before scan",
-    )
-
     # Motion
     motion_group = parser.add_argument_group("Motion")
     motion_group.add_argument("--speed-mm", type=float, default=5.0, help="Scan speed in mm/s (default: 5)")
@@ -1336,7 +1310,6 @@ def main() -> int:
                 chip=args.chip,
                 plane_path=args.plane_path,
                 objective_mag=args.objective_mag,
-                objective_pos=args.objective_pos,
                 binning=args.binning,
                 x_overlap_percent=args.x_overlap_percent,
                 y_overlap_percent=args.y_overlap_percent,
@@ -1376,7 +1349,6 @@ def main() -> int:
                 lead_in_um=args.lead_in_um,
                 z_lead_ms=args.z_lead_ms,
                 objective_mag=args.objective_mag,
-                objective_pos=args.objective_pos,
                 speed_mm=args.speed_mm,
                 move_speed_mm=args.move_speed_mm,
                 exposure_ms=args.exposure_ms,
