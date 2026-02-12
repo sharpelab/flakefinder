@@ -869,18 +869,26 @@ def compute_robust_plane_fit(
     cf_threshold: float = 20.0,
     corner_margin_um: float = 5000.0,
     min_sharpness: float = 0.0,
+    mad_sigma_threshold: float = 3.0,
+    max_reject_frac: float = 0.3,
+    min_points_after_reject: int = 4,
 ) -> dict:
     """Compute robust plane fit with outlier rejection and coverage analysis.
 
-    Uses coarse-fine disagreement and sharpness floor as quality metrics.
-    Points with low disagreement and sufficient sharpness are high-confidence
-    and used for the plane fit. Corner coverage is checked separately.
+    Two-stage filtering:
+      Stage 1 (pre-filter): Exclude stayed_at_initial points (AF gave up),
+        coarse-fine disagreement > cf_threshold, and sharpness < min_sharpness.
+      Stage 2 (post-fit): MAD-based residual rejection. Fit initial plane,
+        compute MAD of residuals, reject points > mad_sigma_threshold * robust_sigma.
 
     Args:
         data: Focus map data dict.
         cf_threshold: Max coarse-fine disagreement in µm for high-confidence points.
         corner_margin_um: Distance from edge to consider "corner" region.
         min_sharpness: Minimum selected_sharpness to include a point in the fit.
+        mad_sigma_threshold: Reject residuals beyond this many robust-sigma (MAD * 1.4826).
+        max_reject_frac: Never reject more than this fraction of pre-filtered points.
+        min_points_after_reject: Require at least this many points after rejection.
 
     Returns:
         Dict with plane parameters, quality metrics, and coverage info.
@@ -896,21 +904,79 @@ def compute_robust_plane_fit(
     z = np.array([p["selected"]["z_um"] for p in points])
     sel_sharpness = np.array([p["selected"]["sharpness"] for p in points])
     final_sharpness = np.array([p["final_sharpness"] for p in points])
+    stayed = np.array([p.get("stayed_at_initial", False) for p in points])
 
     # Compute quality metrics
     drift_pct = np.clip((sel_sharpness - final_sharpness) / sel_sharpness * 100, 0, 100)
     coarse_best_z = np.array([p.get("coarse", {}).get("best_z_um", p["selected"]["z_um"]) for p in points])
     coarse_fine_diff = np.abs(coarse_best_z - z)
 
-    # High-confidence mask: low coarse-fine disagreement AND above sharpness floor
-    high_conf_mask = (coarse_fine_diff <= cf_threshold) & (sel_sharpness >= min_sharpness)
+    # --- Stage 1: Pre-filter ---
+    # Exclude stayed_at_initial, high coarse-fine disagreement, low sharpness
+    prefilter_mask = (coarse_fine_diff <= cf_threshold) & (sel_sharpness >= min_sharpness) & (~stayed)
 
-    if high_conf_mask.sum() < 3:
-        # Fall back to all points if not enough high-confidence
-        print(f"  Warning: Only {high_conf_mask.sum()} high-confidence points, using all points")
-        high_conf_mask = np.ones(len(points), dtype=bool)
+    if prefilter_mask.sum() < 3:
+        # Fall back to all points if not enough pass pre-filter
+        print(f"  Warning: Only {prefilter_mask.sum()} pre-filtered points, using all points")
+        prefilter_mask = np.ones(len(points), dtype=bool)
 
-    # Fit plane to high-confidence points
+    # Classify pre-filter drop reasons (order matters: first match wins)
+    prefilter_reasons: dict[int, str] = {}
+    for i in range(len(points)):
+        if not prefilter_mask[i]:
+            if stayed[i]:
+                prefilter_reasons[i] = "stayed_at_initial"
+            elif sel_sharpness[i] < min_sharpness:
+                prefilter_reasons[i] = "low_sharpness"
+            else:
+                prefilter_reasons[i] = "cf_disagreement"
+
+    # --- Stage 2: MAD-based residual rejection ---
+    # Initial plane fit on pre-filtered points
+    x_pf = x[prefilter_mask]
+    y_pf = y[prefilter_mask]
+    z_pf = z[prefilter_mask]
+
+    A_pf = np.column_stack([x_pf, y_pf, np.ones_like(x_pf)])
+    coeffs_pf, _, _, _ = np.linalg.lstsq(A_pf, z_pf, rcond=None)
+
+    # Compute residuals for all pre-filtered points
+    z_pred_pf = coeffs_pf[0] * x_pf + coeffs_pf[1] * y_pf + coeffs_pf[2]
+    residuals_pf = z_pf - z_pred_pf
+
+    # MAD-based outlier detection
+    mad = float(np.median(np.abs(residuals_pf)))
+    robust_sigma = mad * 1.4826  # Scale to match Gaussian sigma
+    mad_threshold_um = mad_sigma_threshold * robust_sigma if robust_sigma > 0 else float("inf")
+
+    # Identify outliers among pre-filtered points
+    pf_indices = np.where(prefilter_mask)[0]
+    mad_reject_mask = np.abs(residuals_pf) > mad_threshold_um
+
+    # Safety: don't reject too many points
+    n_prefiltered = int(prefilter_mask.sum())
+    n_would_reject = int(mad_reject_mask.sum())
+    n_remaining = n_prefiltered - n_would_reject
+
+    too_few = n_remaining < min_points_after_reject
+    too_many = n_would_reject > max_reject_frac * n_prefiltered
+    if n_would_reject > 0 and (too_few or too_many):
+        print(
+            f"  Warning: MAD would reject {n_would_reject}/{n_prefiltered} points "
+            f"(remaining {n_remaining} < {min_points_after_reject} or "
+            f">{max_reject_frac:.0%}), skipping residual rejection"
+        )
+        mad_reject_mask = np.zeros_like(mad_reject_mask, dtype=bool)
+
+    # Build final mask: pre-filtered minus MAD-rejected
+    high_conf_mask = prefilter_mask.copy()
+    mad_reject_reasons: dict[int, float] = {}  # index -> residual
+    for j, pf_idx in enumerate(pf_indices):
+        if mad_reject_mask[j]:
+            high_conf_mask[pf_idx] = False
+            mad_reject_reasons[pf_idx] = float(residuals_pf[j])
+
+    # Final plane fit on surviving points
     x_hc = x[high_conf_mask]
     y_hc = y[high_conf_mask]
     z_hc = z[high_conf_mask]
@@ -948,6 +1014,28 @@ def compute_robust_plane_fit(
         else:
             corners_extrapolated.append(corner_name)
 
+    # Build points_dropped with specific reasons
+    points_dropped = []
+    for i in range(len(points)):
+        if high_conf_mask[i]:
+            continue
+        entry = {
+            "type": points[i]["type"],
+            "index": points[i]["index"],
+            "x_um": float(x[i]),
+            "y_um": float(y[i]),
+            "z_um": float(z[i]),
+            "selected_sharpness": float(sel_sharpness[i]),
+        }
+        if i in mad_reject_reasons:
+            entry["reason"] = "residual_outlier"
+            entry["residual_um"] = mad_reject_reasons[i]
+        elif i in prefilter_reasons:
+            entry["reason"] = prefilter_reasons[i]
+        else:
+            entry["reason"] = "unknown"
+        points_dropped.append(entry)
+
     # Build result
     result = {
         "plane": {
@@ -963,6 +1051,9 @@ def compute_robust_plane_fit(
             "residual_max_um": float(np.max(np.abs(residuals))),
             "points_total": len(points),
             "points_used": int(high_conf_mask.sum()),
+            "points_prefiltered": n_prefiltered,
+            "residual_outliers_rejected": int(mad_reject_mask.sum()),
+            "mad_threshold_um": float(mad_threshold_um),
             "cf_threshold_um": cf_threshold,
             "min_sharpness": min_sharpness,
         },
@@ -992,19 +1083,7 @@ def compute_robust_plane_fit(
             for i in range(len(points))
             if high_conf_mask[i]
         ],
-        "points_dropped": [
-            {
-                "type": points[i]["type"],
-                "index": points[i]["index"],
-                "x_um": float(x[i]),
-                "y_um": float(y[i]),
-                "z_um": float(z[i]),
-                "selected_sharpness": float(sel_sharpness[i]),
-                "reason": "low_sharpness" if sel_sharpness[i] < min_sharpness else "cf_disagreement",
-            }
-            for i in range(len(points))
-            if not high_conf_mask[i]
-        ],
+        "points_dropped": points_dropped,
     }
 
     # Compute interpolated Z grid from good points
