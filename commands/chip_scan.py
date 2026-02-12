@@ -41,7 +41,7 @@ from flakefinder.data_utils import (
     load_chip_geometry,
     require_microscope_description,
 )
-from flakefinder.leica import Microscope
+from flakefinder.leica import Microscope, wait_all
 from flakefinder.scan_utils import (
     DEFAULT_WB,
     build_microscope_meta,
@@ -201,6 +201,7 @@ class RowResult:
     position_samples: list[dict[str, Any]]  # [{t_before, t_after, x_um, row}]
     z_start_x_um: float | None
     speed_measurement: dict[str, Any] | None  # X speed measurement from lead-in
+    z_leadin_target_um: float | None  # Z preposition target (plane at lead-in start)
 
 
 def scan_row(
@@ -254,8 +255,10 @@ def scan_row(
         dir_str = "-X"
 
     # Z at chip edge (where tracking begins) and scan end
-    z_start = compute_plane_z(cfg.plane_a, cfg.plane_b, cfg.plane_c, chip_edge_x, row_y)
+    z_chip_edge = compute_plane_z(cfg.plane_a, cfg.plane_b, cfg.plane_c, chip_edge_x, row_y)
     z_end = compute_plane_z(cfg.plane_a, cfg.plane_b, cfg.plane_c, x_end_pos, row_y)
+    # Z at lead-in start (focus plane extrapolated into lead-in region)
+    z_leadin_target = compute_plane_z(cfg.plane_a, cfg.plane_b, cfg.plane_c, x_start_pos, row_y)
 
     # Z velocity: dZ/dt = plane_a * direction * x_speed
     # Initial estimate from commanded speed; corrected below from measured X speed
@@ -267,12 +270,12 @@ def scan_row(
         print(
             f"Row {row_idx}/{total_rows - 1}: Y={row_y:.0f}um, {dir_str}, "
             f"X=[{row_x_min:.0f},{row_x_max:.0f}] ({row_width_mm:.1f}mm), "
-            f"Z={z_start:.0f}->{z_end:.0f}"
+            f"Z={z_chip_edge:.0f}->{z_end:.0f}"
         )
 
     # Runtime Z safety check
-    if max(z_start, z_end) > cfg.z_max:
-        print(f"  SKIP: Z would exceed limit ({max(z_start, z_end):.0f} > {cfg.z_max:.0f})")
+    if max(z_chip_edge, z_end) > cfg.z_max:
+        print(f"  SKIP: Z would exceed limit ({max(z_chip_edge, z_end):.0f} > {cfg.z_max:.0f})")
         return RowResult(
             frames_saved=0,
             frames_skipped=0,
@@ -281,6 +284,7 @@ def scan_row(
             position_samples=[],
             z_start_x_um=None,
             speed_measurement=None,
+            z_leadin_target_um=None,
         )
 
     # ---- 1. Parallel preposition ----
@@ -288,17 +292,15 @@ def scan_row(
 
     hy = stage.y.move_to_async(row_y)
     hx = stage.x.move_to_async(x_start_pos)
-    # Z corrected is blocking — runs concurrently while X/Y are async
-    z_drive.move_to_corrected(z_start)
-    hx.wait()
-    hy.wait()
-    hx.dispose()
-    hy.dispose()
+    # Async Z to focus-plane-extrapolated lead-in start position
+    hz = z_drive.move_to_async(z_leadin_target)
+    wait_all([hx, hy, hz])
 
     t_preposition_end = time.perf_counter()
 
     # ---- 2. Settle ----
-    time.sleep(cfg.row_settle_s)
+    if cfg.row_settle_s > 0:
+        time.sleep(cfg.row_settle_s)
     t_settle_end = time.perf_counter()
 
     # ---- 3. Start per-row polling threads ----
@@ -482,6 +484,7 @@ def scan_row(
         position_samples=position_samples,
         z_start_x_um=z_start_x_um,
         speed_measurement=speed_measurement,
+        z_leadin_target_um=z_leadin_target,
     )
 
 
@@ -738,7 +741,6 @@ def run(
     from PIL import Image as PILImage
 
     from flakefinder.image_utils import sdk_image_to_numpy
-    from flakefinder.leica import wait_all
 
     scope.validate_description(p.desc)
     stage = scope.stage
@@ -1041,6 +1043,32 @@ def run(
             "z_jump_um": float(np.mean(z_jumps)) if z_jumps else None,
         }
 
+    # Per-row frame1 error and drift metrics
+    row_frame1_errors: list[float | None] = []
+    row_drift_values: list[float | None] = []
+    for ri in range(len(plan.rows)):
+        chip_frames = [
+            f
+            for f in saved_frames_meta
+            if f["row"] == ri and not f.get("in_lead_in", False) and f["z_error"] is not None
+        ]
+        if chip_frames:
+            row_frame1_errors.append(chip_frames[0]["z_error"])
+        else:
+            row_frame1_errors.append(None)
+        if len(chip_frames) >= 10:
+            first5 = float(np.mean([f["z_error"] for f in chip_frames[:5]]))
+            last5 = float(np.mean([f["z_error"] for f in chip_frames[-5:]]))
+            row_drift_values.append(abs(first5 - last5))
+        else:
+            row_drift_values.append(None)
+
+    # Aggregate frame1/drift
+    valid_frame1 = [e for e in row_frame1_errors if e is not None]
+    valid_drift = [d for d in row_drift_values if d is not None]
+    frame1_abs = np.abs(valid_frame1) if valid_frame1 else np.array([])
+    drift_arr = np.array(valid_drift) if valid_drift else np.array([])
+
     # Build rows metadata
     rows_meta = []
     for row_idx, (row_y, row_x_min, row_x_max) in enumerate(plan.rows):
@@ -1069,6 +1097,8 @@ def run(
                 "position_samples": len(row_pos_samples),
                 "timing_s": timing,
                 "speed_measurement": row_speed_measurements[row_idx],
+                "z_frame1_error_um": row_frame1_errors[row_idx],
+                "z_drift_um": row_drift_values[row_idx],
             }
         )
 
@@ -1092,6 +1122,7 @@ def run(
             "lead_in_um": lead_in_um,
             "z_lead_ms": z_lead_ms,
             "row_limit": row_limit,
+            "row_settle_s": row_settle,
         },
         "chip_info": {
             "chips_meta": str(p.chips_meta),
@@ -1117,6 +1148,10 @@ def run(
                 "mean_error_neg_um": dir_stats.get(-1, {}).get("mean_error_um"),
                 "z_jump_pos_um": dir_stats.get(1, {}).get("z_jump_um"),
                 "z_jump_neg_um": dir_stats.get(-1, {}).get("z_jump_um"),
+                "frame1_mean_abs_error_um": float(np.mean(frame1_abs)) if len(frame1_abs) else None,
+                "frame1_max_abs_error_um": float(np.max(frame1_abs)) if len(frame1_abs) else None,
+                "drift_mean_um": float(np.mean(drift_arr)) if len(drift_arr) else None,
+                "drift_max_um": float(np.max(drift_arr)) if len(drift_arr) else None,
             },
         },
         **micro_meta,
@@ -1168,6 +1203,10 @@ def run(
             if neg:
                 zj = f", z-jump={neg['z_jump_um']:.2f}" if neg["z_jump_um"] is not None else ""
                 print(f"  -X rows: mean err={neg['mean_error_um']:+.2f}{zj} um")
+        if len(frame1_abs):
+            print(f"  Frame 1 Z error: mean={float(np.mean(frame1_abs)):.3f}, max={float(np.max(frame1_abs)):.3f} um")
+        if len(drift_arr):
+            print(f"  Z drift: mean={float(np.mean(drift_arr)):.3f}, max={float(np.max(drift_arr)):.3f} um")
     print(f"  Output: {output}/")
     print()
     print("Done.")
@@ -1230,8 +1269,8 @@ Examples:
     scan_group.add_argument(
         "--row-settle",
         type=float,
-        default=0.1,
-        help="Settle time in seconds after pre-position (default: 0.1)",
+        default=0.0,
+        help="Settle time in seconds after pre-position (default: 0.0)",
     )
     scan_group.add_argument(
         "--lead-in-um",
