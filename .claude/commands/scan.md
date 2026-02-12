@@ -88,7 +88,7 @@ sls commands/stage.py --objective-mag [MAG] -q
 
 **Full pipeline (find_flakes):**
 ```
-sls find_flakes.py --initial-z [Z_REF] --notes "[description]"
+sls find_flakes.py --initial-z [Z_REF] --notes "[description]" -q
 ```
 - Runs: overview → detect chips → per-chip focus map + scan + analysis
 - Output: `scans/run_YYYYMMDD_HHMM/`
@@ -125,7 +125,6 @@ uv run python scripts/process_chip_scan.py scans/[run_dir]/chip_[N]/scan_20x --s
 - Min sharpness filter: 20 (for focus map analysis)
 - Mosaic max-dim: 4500 px
 - Analysis plots: +Y down
-- Quiet flags: use `-q` on `autofocus_demo.py`, `capture_util.py`, `commands/stage.py`, `commands/stitch.py`, `commands/focus_map.py`, `commands/analyze_focus_map.py`
 
 ### Utilities
 
