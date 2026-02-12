@@ -18,6 +18,9 @@ import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
+from flakefinder.scan_utils import parse_area_rect_i
+from flakefinder.types import AreaRectI
+
 
 def _parse_color(s):
     """Parse 'R,G,B' or 'R,G,B,A' string into a tuple."""
@@ -68,11 +71,13 @@ def make_mosaic(
     label_size=None,
     label_color=(255, 255, 255),
     label_bg=None,
+    crop: AreaRectI | None = None,
 ):
     """Tile images into a grid mosaic.
 
-    All thumbnails use the aspect ratio of the first image.
+    All thumbnails use the aspect ratio of the first image (after cropping).
     *labels* is an optional list of strings (one per image) to overlay.
+    *crop* applies a uniform crop box to every image before thumbnailing.
     Returns the composited PIL Image.
     """
     if not image_paths:
@@ -86,8 +91,10 @@ def make_mosaic(
         cols = math.ceil(n / rows)
     total_slots = rows * cols
 
-    # Load first image to get aspect ratio
+    # Load first image to get aspect ratio (after crop)
     first_img = Image.open(image_paths[0])
+    if crop is not None:
+        first_img = first_img.crop((crop.x_min, crop.y_min, crop.x_max, crop.y_max))
     aspect = first_img.width / first_img.height
 
     # Compute thumbnail size to fit within max_dim
@@ -136,6 +143,8 @@ def make_mosaic(
         y = row * (thumb_h + margin)
 
         img = Image.open(path)
+        if crop is not None:
+            img = img.crop((crop.x_min, crop.y_min, crop.x_max, crop.y_max))
         img.thumbnail((thumb_w, thumb_h), Image.Resampling.LANCZOS)
         canvas.paste(img, (x, y))
 
@@ -182,6 +191,9 @@ def main():
     parser.add_argument(
         "--label-text", type=str, default=None, help="Comma-separated manual labels (overrides auto-detection)"
     )
+    parser.add_argument(
+        "--crop", type=parse_area_rect_i, default=None, help="Crop as x_min,x_max,y_min,y_max applied to all images"
+    )
     args = parser.parse_args()
 
     # Collect image paths
@@ -209,6 +221,7 @@ def main():
         label_size=args.label_size,
         label_color=args.label_color,
         label_bg=args.label_bg,
+        crop=args.crop,
     )
     canvas.save(args.output, quality=95)
     print(f"Saved {canvas.width}x{canvas.height} -> {args.output}")

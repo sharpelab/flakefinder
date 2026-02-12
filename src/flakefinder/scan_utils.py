@@ -11,6 +11,7 @@ import numpy as np
 
 from flakefinder.types import (
     AreaRect,
+    AreaRectI,
     BBox,
     CameraMeta,
     GainRGB,
@@ -125,6 +126,15 @@ def parse_area_rect(s: str) -> AreaRect:
     if y_min == y_max:
         raise ArgumentTypeError(f"y_min and y_max cannot be equal ({y_min})")
     return AreaRect(x_min, x_max, y_min, y_max)
+
+
+def parse_area_rect_i(s: str) -> AreaRectI:
+    """Parse 'x_min,x_max,y_min,y_max' string into AreaRectI (integer pixels).
+
+    Delegates to :func:`parse_area_rect` and truncates to int.
+    """
+    r = parse_area_rect(s)
+    return AreaRectI(int(r.x_min), int(r.x_max), int(r.y_min), int(r.y_max))
 
 
 # ============================================================================
