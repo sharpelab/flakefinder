@@ -1,0 +1,20 @@
+#!/bin/bash
+# ff-ssh: Run commands on the microscope via Git Bash
+# Pipes commands via stdin to bypass PowerShell command interpretation.
+#
+# Usage: ff-ssh <script.py> [args...]   →  uv run python <script> <args>
+#        ff-ssh git <cmd> [args...]     →  git <cmd> <args>
+#        ff-ssh -- <cmd> [args...]      →  <cmd> <args> (raw)
+REMOTE="sharpelab-microscope"
+BASH='"C:\Program Files\Git\bin\bash.exe"'
+
+case "$1" in
+    git) shift; CMD="git $(printf '%q ' "$@")" ;;
+    --)  shift; CMD="$(printf '%q ' "$@")" ;;
+    *)   CMD="uv run python $(printf '%q ' "$@")" ;;
+esac
+
+ssh "$REMOTE" "$BASH" <<EOF
+cd flakefinder
+$CMD
+EOF

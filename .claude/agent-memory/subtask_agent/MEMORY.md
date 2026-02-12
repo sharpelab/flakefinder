@@ -106,6 +106,10 @@ Use `show <path>` to display images to the user. Do NOT use the Read tool on ima
 - `analyze_scan.py` renamed to `scripts/analyze_chip_scan.py`
 - When moving files with ty overrides, update the include path in pyproject.toml
 
+## Context Management
+- **NEVER read large notebooks/docs directly.** When the user says "use the task tool to have sonnet/haiku read X", they mean delegate the reading to save context. Ask how to delegate if mechanism isn't clear — don't just read it yourself.
+- Two scan notebooks (02-09, 02-10) were ~1300 lines combined and savaged context. A 10-line summary would have sufficed.
+
 ## Microscope
 - Do NOT run hardware commands (scans, autofocus, stage moves) — only the main scan session does that.
 - SSH reads, git pulls, and file checks are fine.
