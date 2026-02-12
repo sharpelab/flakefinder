@@ -31,6 +31,7 @@ Usage:
 """
 
 import argparse
+import contextlib
 import json
 import sys
 import time
@@ -47,13 +48,15 @@ from flakefinder.types import AreaRect, GainRGB
 class TeeWriter:
     """Write to both a stream and a log file."""
 
-    def __init__(self, stream, log_file):
+    def __init__(self, stream, log_file, *, suppress_console: bool = False):
         self._stream = stream
         self._log = log_file
+        self.suppress_console = suppress_console
 
     def write(self, data):
-        self._stream.write(data)
-        self._stream.flush()
+        if not self.suppress_console:
+            self._stream.write(data)
+            self._stream.flush()
         # Replace \r with \n in log so progress lines become separate lines
         self._log.write(data.replace("\r", "\n"))
         self._log.flush()
@@ -107,7 +110,7 @@ def mark_step(run_dir, checkpoint, step_key, duration=0):
     save_checkpoint(run_dir, checkpoint)
 
 
-def run_in_process(name, fn, *, dry_run=False, pause=False):
+def run_in_process(name, fn, *, dry_run=False, pause=False, quiet=False):
     """Run a pipeline step by calling fn() in-process.
 
     Args:
@@ -115,6 +118,7 @@ def run_in_process(name, fn, *, dry_run=False, pause=False):
         fn: Callable that raises on failure or returns a result.
         dry_run: If True, print step name but don't execute.
         pause: If True, prompt user before running.
+        quiet: If True, suppress banner/progress output (console already suppressed).
 
     Returns:
         (duration_s, result) tuple. (0, None) for dry runs.
@@ -122,34 +126,40 @@ def run_in_process(name, fn, *, dry_run=False, pause=False):
     Raises:
         SystemExit if step fails.
     """
-    print()
-    print("=" * 70)
-    print(f"STEP: {name}")
-    print("=" * 70)
+    if not quiet:
+        print()
+        print("=" * 70)
+        print(f"STEP: {name}")
+        print("=" * 70)
 
     if dry_run:
-        print("  [dry-run] skipped")
+        if not quiet:
+            print("  [dry-run] skipped")
         return 0, None
 
     if pause:
-        try:
-            response = input("\nPress Enter to run, or 'q' to quit: ").strip().lower()
-        except EOFError:
-            response = ""
-        if response in ("q", "quit", "exit"):
-            print("Aborted by user.")
-            sys.exit(0)
+        with _always_console():
+            try:
+                response = input("\nPress Enter to run, or 'q' to quit: ").strip().lower()
+            except EOFError:
+                response = ""
+            if response in ("q", "quit", "exit"):
+                print("Aborted by user.")
+                sys.exit(0)
 
-    print()
+    if not quiet:
+        print()
     start = time.perf_counter()
     try:
         result = fn()
     except Exception as e:
-        print(f"\nFAILED: {name} ({e})")
+        with _always_console():
+            print(f"\nFAILED: {name} ({e})")
         sys.exit(1)
     duration = time.perf_counter() - start
 
-    print(f"\n  [{name}] completed in {format_duration(duration)}")
+    if not quiet:
+        print(f"\n  [{name}] completed in {format_duration(duration)}")
     return duration, result
 
 
@@ -164,6 +174,38 @@ def format_duration(seconds):
     hours = int(minutes // 60)
     mins = minutes % 60
     return f"{hours}h {mins}m {secs:.0f}s"
+
+
+def _format_duration_compact(seconds):
+    """Format seconds as compact string (e.g., 3m07s, 1h23m)."""
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    if minutes < 60:
+        return f"{minutes}m{secs:02d}s"
+    hours = int(minutes // 60)
+    mins = minutes % 60
+    return f"{hours}h{mins:02d}m"
+
+
+@contextlib.contextmanager
+def _always_console():
+    """Temporarily force console output, restoring previous state on exit.
+
+    In quiet mode (TeeWriter.suppress_console=True), this unsuppresses so
+    summary lines always reach the terminal. In verbose mode it's a no-op.
+    """
+    prev: list[tuple[TeeWriter, bool]] = []
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, TeeWriter):
+            prev.append((stream, stream.suppress_console))
+            stream.suppress_console = False
+    try:
+        yield
+    finally:
+        for stream, was_suppressed in prev:
+            stream.suppress_console = was_suppressed
 
 
 @dataclass
@@ -320,6 +362,12 @@ Examples:
         action="store_true",
         help="Prompt for confirmation before each step",
     )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Print one summary line per step (full output still in pipeline.log)",
+    )
     return parser
 
 
@@ -377,6 +425,50 @@ def _resolve_chip_indices(p: _Preflight) -> list[int]:
     return chip_indices
 
 
+def _print_focus_map_summary(chip_idx: int, plane_path: Path) -> None:
+    """Print [chip N] focus_map summary line from exported plane JSON."""
+    with _always_console():
+        if plane_path.exists():
+            with open(plane_path) as f:
+                plane_data = json.load(f)
+            q = plane_data.get("quality", {})
+            pts_used = q.get("points_used", "?")
+            pts_total = q.get("points_total", "?")
+            r2 = q.get("r_squared", 0)
+            resid = q.get("residual_std_um", 0)
+            print(
+                f"[chip {chip_idx}] focus_map {pts_used}/{pts_total} pts, "
+                f"R\u00b2={r2:.3f}, residual {resid:.1f} \u00b5m"
+            )
+
+
+def _print_chip_scan_summary(chip_idx: int, scan_dir: Path) -> None:
+    """Print [chip N] scan summary line from chip scan metadata."""
+    with _always_console():
+        meta_path = scan_dir / "scan_meta.json"
+        if meta_path.exists():
+            with open(meta_path) as f:
+                csm = json.load(f)
+            frames = csm.get("frame_count", "?")
+            rows = len(csm.get("rows", []))
+            dur = csm.get("scan_duration_s", 0)
+            te = csm.get("tracking_error", {})
+            z_std = te.get("std_um")
+            z_max_err = te.get("max_um")
+            z_str = ""
+            if z_std is not None and z_max_err is not None:
+                dof_20x = 1.7
+                verdict = "PASS" if z_max_err < dof_20x else "NOTE"
+                z_str = f", Z std {z_std:.2f} \u00b5m {verdict}"
+            print(f"[chip {chip_idx}] scan {frames} frames, {rows} rows, {_format_duration_compact(dur)}{z_str}")
+
+
+def _print_chip_summary(chip_idx: int, plane_path: Path, scan_dir: Path) -> None:
+    """Print both focus_map and scan summaries for a chip."""
+    _print_focus_map_summary(chip_idx, plane_path)
+    _print_chip_scan_summary(chip_idx, scan_dir)
+
+
 def run(scope: Microscope, p: _Preflight) -> int:
     """Execute the flake-finding pipeline with a live Microscope.
 
@@ -386,8 +478,12 @@ def run(scope: Microscope, p: _Preflight) -> int:
     validate_area_rect(p.area, scope.stage)
 
     args = p.args
+    quiet = args.quiet
     run_dir = p.run_dir
     checkpoint = load_checkpoint(run_dir)
+
+    with _always_console():
+        print(f"[run] {run_dir}/")
 
     notes = args.notes or checkpoint.get("notes")
     if notes:
@@ -418,10 +514,22 @@ def run(scope: Microscope, p: _Preflight) -> int:
                 downsample=4,
                 white_balance=p.wb,
                 clean=True,
+                quiet=quiet,
             ),
             pause=args.pause,
+            quiet=quiet,
         )
         mark_step(run_dir, checkpoint, "overview_scan", duration)
+
+    with _always_console():
+        meta_path = p.overview_dir / "scan_meta.json"
+        if meta_path.exists():
+            with open(meta_path) as f:
+                scan_meta = json.load(f)
+            frames = scan_meta.get("frame_count", "?")
+            rows = len(scan_meta.get("rows", []))
+            dur = checkpoint["step_timing"].get("overview_scan", 0)
+            print(f"[overview] {frames} frames, {rows} rows, {_format_duration_compact(dur)}")
 
     # ----------------------------------------------------------------
     # Step 2: Stitch overview
@@ -433,8 +541,17 @@ def run(scope: Microscope, p: _Preflight) -> int:
             "Stitch Overview",
             lambda: stitch.run(scan_dir=p.overview_dir, quiet=True),
             pause=args.pause,
+            quiet=quiet,
         )
         mark_step(run_dir, checkpoint, "stitch", duration)
+
+    with _always_console():
+        stitch_meta_path = p.stitch_path.with_name(p.stitch_path.stem + "_meta.json")
+        if stitch_meta_path.exists():
+            with open(stitch_meta_path) as f:
+                sm = json.load(f)
+            w, h = sm["image_size_px"]
+            print(f"[stitch] {w}x{h} px")
 
     # ----------------------------------------------------------------
     # Step 3: Detect chips
@@ -446,11 +563,17 @@ def run(scope: Microscope, p: _Preflight) -> int:
             "Detect Chips",
             lambda: find_chips.run(image_path=p.stitch_path),
             pause=args.pause,
+            quiet=quiet,
         )
         n_chips = len(result.get("chips", []))
         checkpoint["n_chips"] = n_chips
         checkpoint["chip_indices"] = list(range(n_chips))
         mark_step(run_dir, checkpoint, "detect_chips", duration)
+
+    with _always_console():
+        with open(p.chips_json_path) as f:
+            chips_data = json.load(f)
+        print(f"[detect] {len(chips_data.get('chips', []))} chips")
 
     # ----------------------------------------------------------------
     # Step 4: Switch to 20x
@@ -462,6 +585,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
             "Switch to 20x",
             lambda: stage.run(scope=scope, objective_mag="20x"),
             pause=args.pause,
+            quiet=quiet,
         )
         mark_step(run_dir, checkpoint, "switch_20x", duration)
 
@@ -485,6 +609,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
 
         if step_done(checkpoint, fm_key) and step_done(checkpoint, an_key) and step_done(checkpoint, sc_key):
             print(f"\n  [checkpoint] Skipping chip {chip_idx} (all steps complete)")
+            _print_chip_summary(chip_idx, plane_path, scan_20x_dir)
             continue
 
         print(f"\n{'#' * 70}")
@@ -509,6 +634,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
                     quiet=True,
                 ),
                 pause=args.pause,
+                quiet=quiet,
             )
             mark_step(run_dir, checkpoint, fm_key, duration)
 
@@ -525,8 +651,12 @@ def run(scope: Microscope, p: _Preflight) -> int:
                     quiet=True,
                 ),
                 pause=args.pause,
+                quiet=quiet,
             )
             mark_step(run_dir, checkpoint, an_key, duration)
+
+        # Summary: focus_map (after analyze exports plane)
+        _print_focus_map_summary(chip_idx, plane_path)
 
         # Step 5c: 20x scan
         if step_done(checkpoint, sc_key):
@@ -547,8 +677,12 @@ def run(scope: Microscope, p: _Preflight) -> int:
                     quiet=True,
                 ),
                 pause=args.pause,
+                quiet=quiet,
             )
             mark_step(run_dir, checkpoint, sc_key, duration)
+
+        # Summary: chip scan
+        _print_chip_scan_summary(chip_idx, scan_20x_dir)
 
     # ----------------------------------------------------------------
     # Summary
@@ -556,31 +690,35 @@ def run(scope: Microscope, p: _Preflight) -> int:
     pipeline_duration = time.perf_counter() - pipeline_start
     t = checkpoint["step_timing"]
 
-    print()
-    print("=" * 70)
-    print("PIPELINE SUMMARY")
-    print("=" * 70)
-    print(f"{'Step':<30} {'Duration':>12}")
-    print("-" * 42)
-    print(f"{'Overview scan':<30} {format_duration(t.get('overview_scan', 0)):>12}")
-    print(f"{'Stitch':<30} {format_duration(t.get('stitch', 0)):>12}")
-    print(f"{'Detect chips':<30} {format_duration(t.get('detect_chips', 0)):>12}")
-    print(f"{'Switch to 20x':<30} {format_duration(t.get('switch_20x', 0)):>12}")
+    with _always_console():
+        print(f"[done] {len(chip_indices)} chips, {_format_duration_compact(pipeline_duration)} total")
 
-    for chip_idx in chip_indices:
-        fm = t.get(f"chip_{chip_idx}_focus_map", 0)
-        an = t.get(f"chip_{chip_idx}_analyze", 0)
-        sc = t.get(f"chip_{chip_idx}_scan", 0)
-        print(f"{'  Chip ' + str(chip_idx) + ' focus map':<30} {format_duration(fm):>12}")
-        print(f"{'  Chip ' + str(chip_idx) + ' analyze':<30} {format_duration(an):>12}")
-        print(f"{'  Chip ' + str(chip_idx) + ' 20x scan':<30} {format_duration(sc):>12}")
+    if not quiet:
+        print()
+        print("=" * 70)
+        print("PIPELINE SUMMARY")
+        print("=" * 70)
+        print(f"{'Step':<30} {'Duration':>12}")
+        print("-" * 42)
+        print(f"{'Overview scan':<30} {format_duration(t.get('overview_scan', 0)):>12}")
+        print(f"{'Stitch':<30} {format_duration(t.get('stitch', 0)):>12}")
+        print(f"{'Detect chips':<30} {format_duration(t.get('detect_chips', 0)):>12}")
+        print(f"{'Switch to 20x':<30} {format_duration(t.get('switch_20x', 0)):>12}")
 
-    total_recorded = sum(t.values())
-    print("-" * 42)
-    print(f"{'Total (recorded)':<30} {format_duration(total_recorded):>12}")
-    print(f"{'This invocation':<30} {format_duration(pipeline_duration):>12}")
-    print()
-    print(f"Output: {run_dir}/")
+        for chip_idx in chip_indices:
+            fm = t.get(f"chip_{chip_idx}_focus_map", 0)
+            an = t.get(f"chip_{chip_idx}_analyze", 0)
+            sc = t.get(f"chip_{chip_idx}_scan", 0)
+            print(f"{'  Chip ' + str(chip_idx) + ' focus map':<30} {format_duration(fm):>12}")
+            print(f"{'  Chip ' + str(chip_idx) + ' analyze':<30} {format_duration(an):>12}")
+            print(f"{'  Chip ' + str(chip_idx) + ' 20x scan':<30} {format_duration(sc):>12}")
+
+        total_recorded = sum(t.values())
+        print("-" * 42)
+        print(f"{'Total (recorded)':<30} {format_duration(total_recorded):>12}")
+        print(f"{'This invocation':<30} {format_duration(pipeline_duration):>12}")
+        print()
+        print(f"Output: {run_dir}/")
 
     # Save args to checkpoint for reference
     checkpoint["args"] = {
@@ -620,8 +758,9 @@ def main() -> int:
     # Create run directory and set up log tee
     p.run_dir.mkdir(parents=True, exist_ok=True)
     log_file = open(p.run_dir / "pipeline.log", "a")  # noqa: SIM115
-    sys.stdout = TeeWriter(sys.__stdout__, log_file)
-    sys.stderr = TeeWriter(sys.__stderr__, log_file)
+    quiet = args.quiet
+    sys.stdout = TeeWriter(sys.__stdout__, log_file, suppress_console=quiet)
+    sys.stderr = TeeWriter(sys.__stderr__, log_file, suppress_console=quiet)
 
     try:
         _print_header(p)
