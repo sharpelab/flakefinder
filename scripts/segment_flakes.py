@@ -36,6 +36,94 @@ def compute_dark_frac(image: np.ndarray, threshold: float = 30.0) -> float:
     return float((image.mean(axis=2) < threshold).mean())
 
 
+def _make_detection(
+    image: np.ndarray,
+    component: np.ndarray,
+    bg_modes: np.ndarray,
+) -> dict:
+    """Build a detection dict from a binary component mask."""
+    ys, xs = np.where(component)
+    x_min, x_max = int(xs.min()), int(xs.max())
+    y_min, y_max = int(ys.min()), int(ys.max())
+
+    region_pixels = image[component].astype(np.float32)
+    mean_contrast = float(np.mean(region_pixels - bg_modes))
+
+    ch_means = region_pixels.mean(axis=0)  # BGR
+    norm_contrast_bgr = (ch_means - bg_modes) / np.maximum(bg_modes, 1.0)
+
+    return {
+        "bbox": [x_min, y_min, x_max - x_min, y_max - y_min],
+        "center": [round((x_min + x_max) / 2, 1), round((y_min + y_max) / 2, 1)],
+        "size_px": int(component.sum()),
+        "mean_contrast": round(mean_contrast, 1),
+        "contrast_rgb": [
+            round(float(norm_contrast_bgr[2]), 4),
+            round(float(norm_contrast_bgr[1]), 4),
+            round(float(norm_contrast_bgr[0]), 4),
+        ],
+    }
+
+
+def _subsegment_by_contrast(
+    image: np.ndarray,
+    component: np.ndarray,
+    bg_modes: np.ndarray,
+    min_size_px: int,
+) -> list[np.ndarray]:
+    """Split a blob into sub-regions if internal R contrast is bimodal.
+
+    Uses Otsu thresholding on normalized R contrast within the blob.
+    Returns list of sub-component masks (may be just [component] if no split).
+    """
+    # Compute per-pixel normalized R contrast within blob
+    r_contrast = (image[:, :, 2].astype(np.float32) - bg_modes[2]) / max(bg_modes[2], 1.0)
+    blob_r = r_contrast[component]
+
+    # Only attempt split if internal R contrast has high variance
+    if blob_r.std() < 0.8:
+        return [component]
+
+    # Otsu on the R contrast values within the blob
+    # Shift to 0-255 range for cv2.threshold
+    r_min, r_max = blob_r.min(), blob_r.max()
+    if r_max - r_min < 0.5:
+        return [component]
+
+    r_scaled = ((blob_r - r_min) / (r_max - r_min) * 255).astype(np.uint8)
+    thresh_val, _ = cv2.threshold(r_scaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Convert threshold back to R contrast space
+    r_thresh = r_min + (thresh_val / 255) * (r_max - r_min)
+
+    # Split into low-R and high-R sub-masks
+    sub_components = []
+    for is_high in [False, True]:
+        if is_high:
+            sub_mask = component & (r_contrast >= r_thresh)
+        else:
+            sub_mask = component & (r_contrast < r_thresh)
+
+        # Clean up: morphological open to remove noise, then re-label
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        sub_clean = cv2.morphologyEx(sub_mask.astype(np.uint8), cv2.MORPH_OPEN, kernel)
+        sub_labels, n_sub = ndimage.label(sub_clean)
+
+        for j in range(1, n_sub + 1):
+            sub_comp = sub_labels == j
+            if int(sub_comp.sum()) >= min_size_px // 2:
+                sub_components.append(sub_comp)
+
+    # Use sub-segmentation if we got pieces that together cover most of the blob
+    if len(sub_components) >= 2:
+        return sub_components
+    # Even with one qualifying sub-component, use it if it purifies the contrast
+    # (the other side was too small but removing it cleans the detection)
+    if len(sub_components) == 1 and int(sub_components[0].sum()) < int(component.sum()) * 0.95:
+        return sub_components
+    return [component]
+
+
 def segment_frame(
     image: np.ndarray,
     contrast_offset: float = 15.0,
@@ -45,6 +133,7 @@ def segment_frame(
     """Segment flakes by thresholding above background mode + offset.
 
     Returns list of detected regions with bbox, size, center, mean_contrast.
+    Large blobs with bimodal R contrast are sub-segmented by thickness.
     """
     bg_modes = np.array([histogram_mode(image, c) for c in range(3)])
 
@@ -68,35 +157,26 @@ def segment_frame(
             continue
 
         ys, xs = np.where(component)
-        x_min, x_max = int(xs.min()), int(xs.max())
-        y_min, y_max = int(ys.min()), int(ys.max())
-        cx = (x_min + x_max) / 2
-        cy = (y_min + y_max) / 2
+        cx = (int(xs.min()) + int(xs.max())) / 2
+        cy = (int(ys.min()) + int(ys.max())) / 2
 
         if cx < edge_margin_px or cx > w - edge_margin_px:
             continue
         if cy < edge_margin_px or cy > h - edge_margin_px:
             continue
 
-        region_pixels = image[component].astype(np.float32)
-        mean_contrast = float(np.mean(region_pixels - bg_modes))
+        # Try contrast-based sub-segmentation for large blobs
+        sub_components = _subsegment_by_contrast(image, component, bg_modes, min_size_px)
 
-        # Per-channel normalized contrast: (flake - bg) / bg
-        ch_means = region_pixels.mean(axis=0)  # BGR
-        norm_contrast_bgr = (ch_means - bg_modes) / np.maximum(bg_modes, 1.0)
-        contrast_r = round(float(norm_contrast_bgr[2]), 4)
-        contrast_g = round(float(norm_contrast_bgr[1]), 4)
-        contrast_b = round(float(norm_contrast_bgr[0]), 4)
-
-        detections.append(
-            {
-                "bbox": [x_min, y_min, x_max - x_min, y_max - y_min],
-                "center": [round(cx, 1), round(cy, 1)],
-                "size_px": size,
-                "mean_contrast": round(mean_contrast, 1),
-                "contrast_rgb": [contrast_r, contrast_g, contrast_b],
-            }
-        )
+        for sub_comp in sub_components:
+            det = _make_detection(image, sub_comp, bg_modes)
+            # Re-check edge margin for sub-components
+            scx, scy = det["center"]
+            if scx < edge_margin_px or scx > w - edge_margin_px:
+                continue
+            if scy < edge_margin_px or scy > h - edge_margin_px:
+                continue
+            detections.append(det)
 
     detections.sort(key=lambda d: d["size_px"], reverse=True)
     return detections
