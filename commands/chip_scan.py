@@ -290,12 +290,11 @@ def scan_row(
     # ---- 1. Parallel preposition ----
     t_preposition_start = time.perf_counter()
 
-    z_drive.set_velocity_um_s(z_drive.max_velocity_um_s)
     hy = stage.y.move_to_async(row_y)
     hx = stage.x.move_to_async(x_start_pos)
-    # Async Z to focus-plane-extrapolated lead-in start position
-    hz = z_drive.move_to_async(z_leadin_target)
-    wait_all([hx, hy, hz])
+    # Blocking corrected Z runs while X/Y move async
+    z_drive.move_to_corrected(z_leadin_target)
+    wait_all([hx, hy])
 
     t_preposition_end = time.perf_counter()
 
