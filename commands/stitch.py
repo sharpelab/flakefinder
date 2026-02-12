@@ -1,10 +1,18 @@
-"""Multi-row position-based stitch for snake scan patterns."""
+"""Multi-row position-based stitch for snake scan patterns.
+
+Usage:
+    uv run python commands/stitch.py scans/overview_5x
+    uv run python commands/stitch.py scans/overview_5x --downsample 4
+    uv run python commands/stitch.py scans/overview_5x --no-flatfield -q
+"""
 
 import argparse
 import json
 import math
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -13,21 +21,39 @@ from PIL import Image, ImageColor, ImageDraw, ImageFont
 from scipy.signal import savgol_filter
 
 from flakefinder.scan_utils import apply_flatfield, parse_area_rect
+from flakefinder.types import AreaRect, AreaRectI, Point2I, ScanRowMeta
 
-DEFAULT_SCAN_DIR = Path(__file__).parent / "test_area_2"
-CALIBRATION_DIR = Path(__file__).parent / "calibration"
+REPO_DIR = Path(__file__).parent.parent
+DEFAULT_SCAN_DIR = REPO_DIR / "test_area_2"
+CALIBRATION_DIR = REPO_DIR / "calibration"
+
+
+@dataclass
+class StitchResult:
+    """Output from stitch run()."""
+
+    output_path: Path
+
+
+@dataclass
+class RowStitchResult:
+    """Output from stitching a single row."""
+
+    image: Image.Image
+    frames_placed: int
+    frame_rects: list[AreaRectI]
 
 
 def create_blend_alpha(
-    width,
-    height,
-    blend_width_x,
-    blend_width_y=0,
-    is_first_x=False,
-    is_last_x=False,
-    is_first_y=False,
-    is_last_y=False,
-):
+    width: int,
+    height: int,
+    blend_width_x: int,
+    blend_width_y: int = 0,
+    is_first_x: bool = False,
+    is_last_x: bool = False,
+    is_first_y: bool = False,
+    is_last_y: bool = False,
+) -> Image.Image:
     """
     Create alpha mask with linear gradient edges for blending in both X and Y.
     """
@@ -55,7 +81,7 @@ def create_blend_alpha(
     return Image.fromarray((alpha * 255).astype("uint8"), mode="L")
 
 
-def deskew_image(img, shear_px):
+def deskew_image(img: Image.Image, shear_px: float) -> Image.Image:
     """Apply horizontal shear to correct rolling shutter skew.
 
     Positive shear_px: bottom of image shifts RIGHT
@@ -97,13 +123,20 @@ def deskew_image(img, shear_px):
     return result.crop((x_crop, 0, x_crop + width, height))
 
 
-def draw_grid(background, stage_bounds_um, um_per_px, spacing_um, line_color, line_width):
+def draw_grid(
+    background: Image.Image,
+    stage_bounds_um: AreaRect,
+    um_per_px: float,
+    spacing_um: float,
+    line_color: str,
+    line_width: int,
+) -> Image.Image:
     """Draw stage-coordinate grid lines and mm labels on the stitched image."""
     w, h = background.size
-    x_min = stage_bounds_um["x_min"]
-    x_max = stage_bounds_um["x_max"]
-    y_min = stage_bounds_um["y_min"]
-    y_max = stage_bounds_um["y_max"]
+    x_min = stage_bounds_um.x_min
+    x_max = stage_bounds_um.x_max
+    y_min = stage_bounds_um.y_min
+    y_max = stage_bounds_um.y_max
 
     color = ImageColor.getrgb(line_color)
     if len(color) == 3:
@@ -151,10 +184,15 @@ def draw_grid(background, stage_bounds_um, um_per_px, spacing_um, line_color, li
     return result.convert("RGB")
 
 
-def draw_row_labels(background, rows, um_per_px, stage_bounds_um):
+def draw_row_labels(
+    background: Image.Image,
+    rows: list[ScanRowMeta],
+    um_per_px: float,
+    stage_bounds_um: AreaRect,
+) -> Image.Image:
     """Draw row index + direction labels (e.g., '0+', '1-') on the left edge."""
     w, h = background.size
-    y_min_stage = stage_bounds_um["y_min"]
+    y_min_stage = stage_bounds_um.y_min
 
     overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -188,18 +226,23 @@ def draw_row_labels(background, rows, um_per_px, stage_bounds_um):
     return result.convert("RGB")
 
 
-def draw_frame_outlines(background, frame_rects, crop_offset=(0, 0)):
+def draw_frame_outlines(
+    background: Image.Image,
+    frame_rects: list[AreaRectI],
+    crop_offset: Point2I | None = None,
+) -> Image.Image:
     """Draw outline rectangles for each placed frame."""
+    if crop_offset is None:
+        crop_offset = Point2I(0, 0)
     w, h = background.size
     overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
-    ox, oy = crop_offset
 
-    for fx, fy, fw, fh in frame_rects:
-        x0 = fx - ox
-        y0 = fy - oy
-        x1 = x0 + fw - 1
-        y1 = y0 + fh - 1
+    for rect in frame_rects:
+        x0 = rect.x_min - crop_offset.x
+        y0 = rect.y_min - crop_offset.y
+        x1 = rect.x_max - crop_offset.x
+        y1 = rect.y_max - crop_offset.y
         # Skip if fully outside
         if x1 < 0 or y1 < 0 or x0 >= w or y0 >= h:
             continue
@@ -210,22 +253,23 @@ def draw_frame_outlines(background, frame_rects, crop_offset=(0, 0)):
 
 
 def stitch_row_to_global(
-    meta,
-    row,
-    frame_w,
-    frame_h,
-    um_per_px,
-    output_downsample,
-    scan_dir,
-    global_x_min,
-    global_x_max,
-    blend=True,
-    deskew=True,
-    hysteresis_um=0,
-    savgol_window=15,
-    flatfield=None,
-    num_threads=1,
-):
+    meta: dict,
+    row: ScanRowMeta,
+    frame_w: int,
+    frame_h: int,
+    um_per_px: float,
+    output_downsample: int,
+    scan_dir: Path,
+    global_x_min: float,
+    global_x_max: float,
+    *,
+    blend: bool = True,
+    deskew: bool = True,
+    hysteresis_um: float = 0,
+    savgol_window: int = 15,
+    flatfield: np.ndarray | None = None,
+    num_threads: int = 1,
+) -> RowStitchResult:
     """
     Stitch a single row directly into global X coordinate space.
 
@@ -325,20 +369,19 @@ def stitch_row_to_global(
     else:
         indices = list(range(num_frames))
 
-    # Compute per-frame velocity for deskew using savgol derivative.
+    # Compute per-frame velocity using savgol derivative.
     # Uses bubble-fixed positions (raw_positions) so timing bubbles don't
     # produce velocity spikes. A wider window (31 samples, ~450ms) gives
     # smooth estimates; the stage velocity is physically smooth.
+    vel_window = min(31, n if n % 2 == 1 else n - 1)
+    if vel_window >= 5:
+        dt = np.mean(np.diff(raw_times))
+        frame_velocities = savgol_filter(raw_positions, vel_window, 2, deriv=1, delta=dt)
+    else:
+        frame_velocities = np.gradient(np.array(all_positions), raw_times)
+
     if deskew:
         readout_time = meta["camera"]["readout_time_s"]
-        vel_window = min(31, n if n % 2 == 1 else n - 1)
-        if vel_window >= 5:
-            dt = np.mean(np.diff(raw_times))
-            frame_velocities = savgol_filter(raw_positions, vel_window, 2, deriv=1, delta=dt)
-        else:
-            frame_velocities = np.gradient(np.array(all_positions), raw_times)
-    else:
-        frame_velocities = np.zeros(num_frames)
 
     # Build work list: filter to frames that overlap canvas
     canvas_right_um = global_x_max + fov_width_um
@@ -421,7 +464,7 @@ def stitch_row_to_global(
         loaded = [load_frame(item) for item in work_items]
 
     frames_placed = 0
-    frame_rects = []  # (x, y=0, w, h) of each placed frame in row-local coords
+    frame_rects: list[AreaRectI] = []
     for img, (_, _, x_offset, _) in zip(loaded, work_items, strict=True):
         # Clamp to canvas bounds
         actual_x = x_offset
@@ -436,149 +479,102 @@ def stitch_row_to_global(
 
         if img.width > 0 and img.height > 0:
             canvas.alpha_composite(img, (actual_x, 0))
-            frame_rects.append((actual_x, 0, actual_w, img.height))
+            frame_rects.append(AreaRectI(actual_x, actual_x + actual_w - 1, 0, img.height - 1))
             frames_placed += 1
 
-    return canvas, frames_placed, frame_rects
+    return RowStitchResult(image=canvas, frames_placed=frames_placed, frame_rects=frame_rects)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Stitch multi-row snake scan into 2D image")
-    parser.add_argument(
-        "scan_dir",
-        nargs="?",
-        type=Path,
-        default=DEFAULT_SCAN_DIR,
-        help="Scan directory (default: test_area_2)",
-    )
-    parser.add_argument("--no-deskew", action="store_true", help="Disable rolling shutter deskew")
-    parser.add_argument("--no-blend", action="store_true", help="Disable gradient blending")
-    parser.add_argument(
-        "--downsample",
-        type=int,
-        default=1,
-        help="Additional downsample factor (e.g., 2 = half resolution)",
-    )
-    parser.add_argument("--rows", type=str, default=None, help="Row range to process (e.g., '0-5' or '10')")
-    parser.add_argument(
-        "--hysteresis",
-        type=float,
-        default=0,
-        help="Hysteresis correction in µm (applied to -X rows)",
-    )
-    parser.add_argument(
-        "--crop",
-        type=parse_area_rect,
-        default=None,
-        help="Crop to stage rect in µm: x_min,x_max,y_min,y_max (same as scan_area --area-rect)",
-    )
-    parser.add_argument(
-        "--flatfield",
-        type=Path,
-        default=None,
-        help="Path to flatfield .npy file (default: auto-load from calibration/)",
-    )
-    parser.add_argument("--no-flatfield", action="store_true", help="Disable flatfield correction")
-    parser.add_argument(
-        "--threads",
-        type=int,
-        default=4,
-        help="Number of threads for parallel frame loading (default: 4)",
-    )
-    parser.add_argument("--bg", type=str, default="black", help="Background color: name or #RRGGBB (default: black)")
-    parser.add_argument(
-        "--grid-spacing-um",
-        type=float,
-        default=0,
-        help="Grid line spacing in µm (0 = no grid, 1000 = 1mm)",
-    )
-    parser.add_argument(
-        "--grid-line-color",
-        type=str,
-        default="#FFFFFF50",
-        help="Grid line color: name or #RRGGBBAA (default: #FFFFFF50)",
-    )
-    parser.add_argument("--grid-line-width", type=int, default=1, help="Grid line width in pixels (default: 1)")
-    parser.add_argument("--row-labels", action="store_true", help="Draw row index+direction labels (e.g., 0+, 1-, 2+)")
-    parser.add_argument("--draw-frame-outlines", action="store_true", help="Draw outline of each placed frame (debug)")
-    parser.add_argument(
-        "--savgol-window",
-        type=int,
-        default=15,
-        help="Savgol smoothing window for positions (0=disabled, default: 15)",
-    )
-    parser.add_argument("-q", "--quiet", action="store_true", help="Suppress per-row progress output")
-    parser.add_argument(
-        "-o",
-        "--output",
-        type=str,
-        default=None,
-        help="Output filename (default: {scan_dir}_stitch.png)",
-    )
-    args = parser.parse_args()
+def run(
+    scan_dir: Path,
+    *,
+    deskew: bool = True,
+    blend: bool = True,
+    downsample: int = 1,
+    rows_range: str | None = None,
+    hysteresis: float = 0,
+    crop: AreaRect | None = None,
+    flatfield_path: Path | None = None,
+    no_flatfield: bool = False,
+    threads: int = 4,
+    bg: str = "black",
+    grid_spacing_um: float = 0,
+    grid_line_color: str = "#FFFFFF50",
+    grid_line_width: int = 1,
+    row_labels: bool = False,
+    show_frame_outlines: bool = False,
+    savgol_window: int = 15,
+    quiet: bool = False,
+    output: str | None = None,
+) -> StitchResult:
+    """Stitch multi-row snake scan into 2D image.
 
-    bg_color = ImageColor.getrgb(args.bg)
+    Returns:
+        StitchResult with path to the saved stitch image.
+
+    Raises:
+        ValueError: On invalid input (missing rows, missing flatfield).
+    """
+    bg_color = ImageColor.getrgb(bg)
 
     start_time = time.perf_counter()
-    scan_dir = args.scan_dir
 
     # Load metadata
     with open(scan_dir / "scan_meta.json") as f:
         meta = json.load(f)
 
     if "rows" not in meta:
-        print("Error: scan_meta.json has no 'rows' array. Use stitch_position.py for single-row scans.")
-        return
+        raise ValueError("scan_meta.json has no 'rows' array — is this a valid scan directory?")
 
     rows = meta["rows"]
     optics = meta["optics"]
-    downsample = meta["downsample"]
+    scan_downsample = meta["downsample"]
 
     # Load flatfield for vignetting correction
     flatfield = None
-    flatfield_path = None
 
-    if args.no_flatfield:
-        print("Flatfield: disabled (--no-flatfield)")
+    if no_flatfield:
+        if not quiet:
+            print("Flatfield: disabled (--no-flatfield)")
     else:
-        if args.flatfield:
-            flatfield_path = args.flatfield
-        else:
+        if not flatfield_path:
             # Auto-load based on objective and binning
             obj_mag = optics["objective_mag"]
             binning = meta["camera"]["binning"]
             flatfield_path = CALIBRATION_DIR / f"flatfield_{obj_mag}x_bin{binning}.npy"
 
         if not flatfield_path.exists():
-            print(f"Error: Flatfield not found: {flatfield_path}")
-            print("  Run scripts/build_flatfield.py or specify --no-flatfield to skip correction.")
-            return 1
+            raise ValueError(
+                f"Flatfield not found: {flatfield_path}\n"
+                "  Run scripts/build_flatfield.py or specify --no-flatfield to skip correction."
+            )
 
         flatfield = np.load(flatfield_path).astype(np.float32)
-        if not args.quiet:
+        if not quiet:
             print(f"Flatfield: {flatfield_path}")
 
     # Parse row range if specified
-    if args.rows:
-        if "-" in args.rows:
-            start, end = map(int, args.rows.split("-"))
+    if rows_range:
+        if "-" in rows_range:
+            start, end = map(int, rows_range.split("-"))
             rows = [r for r in rows if start <= r["row_idx"] <= end]
         else:
-            row_idx = int(args.rows)
+            row_idx = int(rows_range)
             rows = [r for r in rows if r["row_idx"] == row_idx]
 
     # Calibration
-    um_per_px = optics["sample_pixel_x_um"] * downsample * args.downsample
+    um_per_px = optics["sample_pixel_x_um"] * scan_downsample * downsample
     fov_width_um = optics["frame_width_um"]
     fov_height_um = optics["frame_height_um"]
     y_step_um = meta["y_step_um"]
     y_overlap_um = fov_height_um - y_step_um
 
-    # Get frame dimensions
+    # Get frame dimensions (on-disk frames are already scan-downsampled)
     first_img = Image.open(scan_dir / "frame_0000.jpg")
     frame_w, frame_h = first_img.size
-    frame_w //= args.downsample
-    frame_h //= args.downsample
+    if downsample > 1:
+        frame_w //= downsample
+        frame_h //= downsample
 
     # Resize flatfield to match working frame dimensions
     if flatfield is not None:
@@ -590,20 +586,21 @@ def main():
                 ff_channel = Image.fromarray(flatfield[:, :, c], mode="F")
                 ff_channel = ff_channel.resize((frame_w, frame_h), Image.Resampling.LANCZOS)
                 ff_resized[:, :, c] = np.array(ff_channel, dtype=np.float32)
-            if not args.quiet:
+            if not quiet:
                 print(f"  Resized flatfield {ff_w}x{ff_h} -> {frame_w}x{frame_h}")
             flatfield = ff_resized
 
-    if not args.quiet:
+    if not quiet:
         print(f"Scan: {len(meta['rows'])} rows, {meta['frame_count']} frames")
         print(f"Processing: {len(rows)} rows")
-        print(f"Calibration: {um_per_px:.3f} µm/px (downsample {downsample}x{args.downsample})")
+        ds_total = scan_downsample * downsample
+        print(f"Calibration: {um_per_px:.3f} µm/px (scan {scan_downsample}x, stitch {downsample}x, total {ds_total}x)")
         print(f"Frame: {frame_w}x{frame_h} px = {fov_width_um:.0f}x{fov_height_um:.0f} µm")
         overlap_pct = y_overlap_um / fov_height_um * 100
         print(f"Y step: {y_step_um:.0f} µm, Y overlap: {y_overlap_um:.0f} µm ({overlap_pct:.0f}%)")
 
     # Process each row to find CV regions and global X bounds
-    if not args.quiet:
+    if not quiet:
         print("\nAnalyzing rows...")
     row_results = []
 
@@ -616,7 +613,7 @@ def main():
 
         row_results.append({"row": row, "x_min": x_min, "x_max": x_max})
 
-        if not args.quiet:
+        if not quiet:
             print(f"  Row {row['row_idx']:2d}: {len(row_frames)} frames, X: {x_min:.0f} - {x_max:.0f} µm")
 
     # Find global X bounds: union of all rows (including accel zones)
@@ -624,7 +621,7 @@ def main():
     global_x_max = max(r["x_max"] for r in row_results)
     global_x_range = global_x_max - global_x_min + fov_width_um
 
-    if not args.quiet:
+    if not quiet:
         print(f"\nGlobal X bounds: {global_x_min:.0f} - {global_x_max:.0f} µm ({global_x_range:.0f} µm total)")
 
     # Calculate final canvas dimensions
@@ -634,19 +631,19 @@ def main():
     canvas_w = int(global_x_range / um_per_px)
     canvas_h = int(total_height_um / um_per_px)
 
-    if not args.quiet:
+    if not quiet:
         print(f"Final canvas: {canvas_w}x{canvas_h} px ({global_x_range:.0f}x{total_height_um:.0f} µm)")
 
     # Y blend width
     y_overlap_px = int(y_overlap_um / um_per_px)
-    blend_width_y = y_overlap_px // 2 if not args.no_blend else 0
+    blend_width_y = y_overlap_px // 2 if blend else 0
 
     # Create final canvas
     canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
 
-    if not args.quiet:
+    if not quiet:
         print("\nStitching rows...")
-    all_frame_rects = []  # (x, y, w, h) in final canvas coords
+    all_frame_rects: list[AreaRectI] = []
 
     min_y = min(r["y_um"] for r in rows)
     max_y = max(r["y_um"] for r in rows)
@@ -656,23 +653,24 @@ def main():
         row_idx = row["row_idx"]
 
         # Stitch this row in global coordinates
-        row_img, frames_placed, frame_rects = stitch_row_to_global(
+        row_stitch = stitch_row_to_global(
             meta,
             row,
             frame_w,
             frame_h,
             um_per_px,
-            args.downsample,
+            downsample,
             scan_dir,
             global_x_min,
             global_x_max,
-            blend=not args.no_blend,
-            deskew=not args.no_deskew,
-            hysteresis_um=args.hysteresis,
-            savgol_window=args.savgol_window,
+            blend=blend,
+            deskew=deskew,
+            hysteresis_um=hysteresis,
+            savgol_window=savgol_window,
             flatfield=flatfield,
-            num_threads=args.threads,
+            num_threads=threads,
         )
+        row_img = row_stitch.image
 
         # Calculate Y position for this row (min Y = top of image)
         row_y = row["y_um"]
@@ -681,7 +679,7 @@ def main():
 
         # Apply Y blending
         # is_first_y = don't fade top edge, is_last_y = don't fade bottom edge
-        if not args.no_blend:
+        if blend:
             is_at_top = row_y == min_y
             is_at_bottom = row_y == max_y
 
@@ -710,11 +708,13 @@ def main():
         canvas.alpha_composite(row_img, (0, y_offset_px))
 
         # Collect frame rects in global canvas coords
-        for fx, fy, fw, fh in frame_rects:
-            all_frame_rects.append((fx, fy + y_offset_px, fw, fh))
+        for rect in row_stitch.frame_rects:
+            all_frame_rects.append(
+                AreaRectI(rect.x_min, rect.x_max, rect.y_min + y_offset_px, rect.y_max + y_offset_px)
+            )
 
-        if not args.quiet:
-            print(f"  Row {row_idx}: {frames_placed} frames, y={y_offset_px} px")
+        if not quiet:
+            print(f"  Row {row_idx}: {row_stitch.frames_placed} frames, y={y_offset_px} px")
 
     # Convert to RGB with background color
     background = Image.new("RGB", canvas.size, bg_color)
@@ -724,69 +724,66 @@ def main():
     # Note: reported positions are frame CENTERS, so coverage extends ±FOV/2
     # - X: global_x_min - fov/2 to global_x_max + fov/2
     # - Y: last row's y - fov/2 to first row's y + fov/2
-    stage_bounds_um = {
-        "x_min": global_x_min - fov_width_um / 2,
-        "x_max": global_x_max + fov_width_um / 2,
-        "y_min": min_y - fov_height_um / 2,
-        "y_max": max_y + fov_height_um / 2,
-    }
+    stage_bounds_um = AreaRect(
+        x_min=global_x_min - fov_width_um / 2,
+        x_max=global_x_max + fov_width_um / 2,
+        y_min=min_y - fov_height_um / 2,
+        y_max=max_y + fov_height_um / 2,
+    )
 
     # Apply crop to stage coordinate rect (already parsed by argparse type=parse_area_rect)
-    crop_left_px = 0
-    crop_top_px = 0
-    if args.crop:
-        crop_x_min, crop_x_max, crop_y_min, crop_y_max = args.crop
+    crop_offset = Point2I(0, 0)
+    if crop:
+        crop_x_min, crop_x_max, crop_y_min, crop_y_max = crop
 
         # Clamp to actual stage bounds
-        crop_x_min = max(crop_x_min, stage_bounds_um["x_min"])
-        crop_x_max = min(crop_x_max, stage_bounds_um["x_max"])
-        crop_y_min = max(crop_y_min, stage_bounds_um["y_min"])
-        crop_y_max = min(crop_y_max, stage_bounds_um["y_max"])
+        crop_x_min = max(crop_x_min, stage_bounds_um.x_min)
+        crop_x_max = min(crop_x_max, stage_bounds_um.x_max)
+        crop_y_min = max(crop_y_min, stage_bounds_um.y_min)
+        crop_y_max = min(crop_y_max, stage_bounds_um.y_max)
 
-        crop_left_px = int((crop_x_min - stage_bounds_um["x_min"]) / um_per_px)
-        crop_top_px = int((crop_y_min - stage_bounds_um["y_min"]) / um_per_px)
-        crop_right_px = int((crop_x_max - stage_bounds_um["x_min"]) / um_per_px)
-        crop_bottom_px = int((crop_y_max - stage_bounds_um["y_min"]) / um_per_px)
+        crop_left_px = int((crop_x_min - stage_bounds_um.x_min) / um_per_px)
+        crop_top_px = int((crop_y_min - stage_bounds_um.y_min) / um_per_px)
+        crop_right_px = int((crop_x_max - stage_bounds_um.x_min) / um_per_px)
+        crop_bottom_px = int((crop_y_max - stage_bounds_um.y_min) / um_per_px)
 
         background = background.crop((crop_left_px, crop_top_px, crop_right_px, crop_bottom_px))
+        crop_offset = Point2I(crop_left_px, crop_top_px)
 
-        stage_bounds_um["x_min"] = crop_x_min
-        stage_bounds_um["x_max"] = crop_x_max
-        stage_bounds_um["y_min"] = crop_y_min
-        stage_bounds_um["y_max"] = crop_y_max
+        stage_bounds_um = AreaRect(crop_x_min, crop_x_max, crop_y_min, crop_y_max)
 
-        if not args.quiet:
+        if not quiet:
             print(
                 f"\nCropped to stage rect: X=[{crop_x_min:.0f}, {crop_x_max:.0f}] "
                 f"Y=[{crop_y_min:.0f}, {crop_y_max:.0f}] µm"
             )
 
     # Draw grid overlay
-    if args.grid_spacing_um > 0:
+    if grid_spacing_um > 0:
         background = draw_grid(
             background,
             stage_bounds_um,
             um_per_px,
-            args.grid_spacing_um,
-            args.grid_line_color,
-            args.grid_line_width,
+            grid_spacing_um,
+            grid_line_color,
+            grid_line_width,
         )
-        if not args.quiet:
-            print(f"Grid: {args.grid_spacing_um:.0f} µm spacing")
+        if not quiet:
+            print(f"Grid: {grid_spacing_um:.0f} µm spacing")
 
     # Draw row labels
-    if args.row_labels:
+    if row_labels:
         background = draw_row_labels(background, rows, um_per_px, stage_bounds_um)
 
     # Draw frame outlines
-    if args.draw_frame_outlines:
-        background = draw_frame_outlines(background, all_frame_rects, (crop_left_px, crop_top_px))
-        if not args.quiet:
+    if show_frame_outlines:
+        background = draw_frame_outlines(background, all_frame_rects, crop_offset)
+        if not quiet:
             print(f"Frame outlines: {len(all_frame_rects)} frames")
 
     # Save image
-    if args.output:
-        out_path = Path(args.output)
+    if output:
+        out_path = Path(output)
     else:
         out_path = scan_dir.parent / f"{scan_dir.name}_stitch.jpg"
     if out_path.suffix.lower() in (".jpg", ".jpeg"):
@@ -819,11 +816,11 @@ def main():
         "duration_s": round(duration_s, 2),
         "image_file": out_path.name,
         "image_size_px": [background.width, background.height],
-        "stage_bounds_um": stage_bounds_um,
+        "stage_bounds_um": stage_bounds_um._asdict(),
         "scale_um_per_px": um_per_px,
         "source_scan": f"{scan_dir.name}/scan_meta.json",
         "objective_mag": optics["objective_mag"],
-        "downsample": downsample * args.downsample,
+        "downsample": scan_downsample * downsample,
         "flatfield_correction": {
             "applied": flatfield is not None,
             "file": str(flatfield_path) if flatfield is not None else None,
@@ -840,6 +837,70 @@ def main():
         json.dump(stitch_meta, f, indent=2)
     print(f"Saved metadata to {meta_path}")
 
+    return StitchResult(output_path=out_path)
+
+
+def _build_parser():
+    parser = argparse.ArgumentParser(description="Stitch multi-row snake scan into 2D image")
+    parser.add_argument("scan_dir", nargs="?", type=Path, default=DEFAULT_SCAN_DIR, help="Scan directory")
+    parser.add_argument("--no-deskew", action="store_true", help="Disable rolling shutter deskew")
+    parser.add_argument("--no-blend", action="store_true", help="Disable gradient blending")
+    parser.add_argument("--downsample", type=int, default=1, help="Additional downsample factor")
+    parser.add_argument("--rows", type=str, default=None, help="Row range (e.g., '0-5' or '10')")
+    parser.add_argument("--hysteresis", type=float, default=0, help="Hysteresis correction in µm (-X rows)")
+    parser.add_argument(
+        "--crop", type=parse_area_rect, default=None, help="Crop to stage rect: x_min,x_max,y_min,y_max"
+    )
+    parser.add_argument("--flatfield", type=Path, default=None, help="Path to flatfield .npy file")
+    parser.add_argument("--no-flatfield", action="store_true", help="Disable flatfield correction")
+    parser.add_argument("--threads", type=int, default=4, help="Threads for parallel frame loading")
+    parser.add_argument("--bg", type=str, default="black", help="Background color")
+    parser.add_argument("--grid-spacing-um", type=float, default=0, help="Grid line spacing in µm")
+    parser.add_argument("--grid-line-color", type=str, default="#FFFFFF50", help="Grid line color")
+    parser.add_argument("--grid-line-width", type=int, default=1, help="Grid line width")
+    parser.add_argument("--row-labels", action="store_true", help="Draw row labels")
+    parser.add_argument(
+        "--frame-outlines",
+        action="store_true",
+        dest="show_frame_outlines",
+        help="Draw frame outlines",
+    )
+    parser.add_argument("--savgol-window", type=int, default=15, help="Savgol smoothing window")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Suppress progress output")
+    parser.add_argument("-o", "--output", type=str, default=None, help="Output filename")
+    return parser
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
+
+    try:
+        run(
+            args.scan_dir,
+            deskew=not args.no_deskew,
+            blend=not args.no_blend,
+            downsample=args.downsample,
+            rows_range=args.rows,
+            hysteresis=args.hysteresis,
+            crop=args.crop,
+            flatfield_path=args.flatfield,
+            no_flatfield=args.no_flatfield,
+            threads=args.threads,
+            bg=args.bg,
+            grid_spacing_um=args.grid_spacing_um,
+            grid_line_color=args.grid_line_color,
+            grid_line_width=args.grid_line_width,
+            row_labels=args.row_labels,
+            show_frame_outlines=args.show_frame_outlines,
+            savgol_window=args.savgol_window,
+            quiet=args.quiet,
+            output=args.output,
+        )
+    except ValueError as e:
+        print(f"Error: {e}")
+        return 1
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

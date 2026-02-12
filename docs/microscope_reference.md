@@ -50,6 +50,8 @@ Z is sample-dependent — different substrates shift focus. The ±250 µm autofo
 
 **Z convention:** +Z = closer to sample (crash risk at high Z). Retract by decreasing Z.
 
+**Default scan rect:** `8000,95000,0,78000` (x_min, x_max, y_min, y_max in µm). Inset from stage edges to avoid metal sheath at origin and edge clipping.
+
 ## Camera (Leica K5C)
 
 | Binning | Factor | Frame Size (px) |

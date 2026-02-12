@@ -21,7 +21,7 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from src.flakefinder.leica.autofocus import sharpness
+from flakefinder.leica.autofocus import sharpness
 
 
 def load_scan_meta(scan_dir: Path) -> dict:

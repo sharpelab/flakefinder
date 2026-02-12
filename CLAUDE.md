@@ -8,10 +8,14 @@ FlakeFinder is a microscope automation system for the Sharpe Lab's Leica DM6M mi
 
 | Script | Purpose |
 |--------|---------|
-| `scan_area_v1.py` | Multi-row snake scan with continuous motion capture |
-| `stitch_area.py` | Stitch scan frames into 2D overview image |
-| `find_chips.py` | Detect chips in stitched image using Otsu thresholding |
-| `stage_util.py` | Stage/objective control utility |
+| `find_flakes.py` | Full pipeline orchestrator (overview → chips → focus → chip scan) |
+| `commands/scan.py` | Multi-row snake scan with continuous motion capture |
+| `commands/stitch.py` | Stitch scan frames into 2D overview image |
+| `commands/find_chips.py` | Detect chips in stitched image using Otsu thresholding |
+| `commands/focus_map.py` | Autofocus grid sampling across a chip |
+| `commands/analyze_focus_map.py` | Analyze focus map, fit tilt plane |
+| `commands/chip_scan.py` | Chip scan with continuous Z tracking |
+| `commands/stage.py` | Stage/objective control utility |
 | `capture_util.py` | Single image capture utility |
 | `scripts/process_overview.py` | Overview post-processing pipeline (rsync + stitch + detect chips) |
 | `scripts/process_chip_scan.py` | Chip scan analysis pipeline (rsync + analyze_chip_scan) |
@@ -78,9 +82,9 @@ Workflow:
 4. Then execute
 
 Requires approval:
-- Running scans (`scan_area_v1.py`)
+- Running scans (`commands/scan.py`)
 - Capturing images (`capture_util.py`)
-- Moving stage (`stage_util.py`)
+- Moving stage (`commands/stage.py`)
 - Any script that connects to the Leica hardware
 
 Does NOT require approval:

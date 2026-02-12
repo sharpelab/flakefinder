@@ -57,7 +57,7 @@ def main() -> int:
     # --- Step 2: stitch (capture output, suppress unless verbose/error) ---
     cmd = [
         sys.executable,
-        str(REPO_DIR / "stitch_area.py"),
+        str(REPO_DIR / "commands" / "stitch.py"),
         str(local_scan_dir),
         "--downsample",
         str(args.downsample),
@@ -74,7 +74,7 @@ def main() -> int:
             print(result.stdout)
         if not args.verbose and result.stderr:
             print(result.stderr, file=sys.stderr)
-        print(f"Error: stitch_area failed (exit {result.returncode})")
+        print(f"Error: stitch failed (exit {result.returncode})")
         return 1
 
     # --- Step 3: find chips (output passes through — already compact) ---
@@ -83,7 +83,7 @@ def main() -> int:
         print(f"Error: expected stitch not found at {stitch_path}")
         return 1
 
-    cmd = [sys.executable, str(REPO_DIR / "find_chips.py"), str(stitch_path)]
+    cmd = [sys.executable, str(REPO_DIR / "commands" / "find_chips.py"), str(stitch_path)]
     result = subprocess.run(cmd)
     if result.returncode != 0:
         print(f"Error: find_chips failed (exit {result.returncode})")
