@@ -34,7 +34,7 @@ At the start of each session:
 - **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `rsync -a --quiet` for all transfers (single files and bulk). File routing:
   - `scans/` — pipeline scan data (overview, chip scans, focus maps from `find_flakes.py`)
   - `afs/` — one-off autofocus runs
-  - `captures/` — one-off captures (`capture_util.py`)
+  - `captures/` — one-off captures (`capture_util.py`, stays at root)
   - `downloads/` — reference data, downloaded flakes, analysis artifacts
 - **Images**: `show` results for the user automatically after analysis runs. "show" = open file for the user.
 - **Images in notebook**: Use `scan-nb --attach`, not manual copy + link.
@@ -53,11 +53,11 @@ ssh sharpelab-microscope 'cd flakefinder && uv run python autofocus_demo.py --x 
 
 **Focus map for a chip:**
 ```
-ssh sharpelab-microscope 'cd flakefinder && uv run python focus_map.py --chips-meta scans/[prefix]_chips.json --chip [N] --save-images --z-speed 1250 --z [Z_REF] --af-settle 0.2'
+ssh sharpelab-microscope 'cd flakefinder && uv run python commands/focus_map.py --chips-meta scans/[prefix]_chips.json --chip [N] --save-images --z-speed 1250 --z [Z_REF] --af-settle 0.2'
 ```
 - `--z` is required — use the autofocused Z at chip centroid
 - Grab results: `rsync -a --quiet sharpelab-microscope:flakefinder/scans/focus_map_chip[N]* scans/`
-- Run analysis: `uv run python analyze_focus_map.py scans/focus_map_chip[N].json --export-plane scans/focus_map_chip[N]_plane.json --min-sharpness 20 --quiet`
+- Run analysis: `uv run python commands/analyze_focus_map.py scans/focus_map_chip[N].json --export-plane scans/focus_map_chip[N]_plane.json --min-sharpness 20 --quiet`
 - Open all three outputs (analysis, mosaic, contour)
 
 **Capture at a point:**
@@ -69,7 +69,7 @@ ssh sharpelab-microscope 'cd flakefinder && uv run python capture_util.py --x [X
 
 **Switch objective:**
 ```
-ssh sharpelab-microscope 'cd flakefinder && uv run python stage_util.py --objective-pos [POS] -q'
+ssh sharpelab-microscope 'cd flakefinder && uv run python commands/stage.py --objective-pos [POS] -q'
 ```
 - Positions: 6=2.5x, 1=5x, 2=10x, 3=20x, 4=50x, 5=150x
 - Z shifts on swap (parfocal adjustment) — note the new Z
@@ -105,7 +105,7 @@ uv run python scripts/process_chip_scan.py scans/[run_dir]/chip_[N]/scan_20x --s
 - Min sharpness filter: 20 (for focus map analysis)
 - Mosaic max-dim: 4500 px
 - Analysis plots: +Y down
-- Quiet flags: use `-q` on `autofocus_demo.py`, `capture_util.py`, `stage_util.py`, `stitch_area.py`, `analyze_focus_map.py`
+- Quiet flags: use `-q` on `autofocus_demo.py`, `capture_util.py`, `commands/stage.py`, `commands/stitch.py`, `commands/analyze_focus_map.py`
 
 **Image mosaic:**
 ```

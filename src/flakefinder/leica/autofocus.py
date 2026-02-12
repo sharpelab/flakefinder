@@ -18,13 +18,13 @@ import cv2
 import numpy as np
 
 from ..image_utils import sdk_image_to_numpy
-from ..types import RGBImage
+from ..types import Point2F, RGBImage
 from .units import Axis, Nosepiece, ZDrive
 
 if TYPE_CHECKING:
     from .microscope import Microscope
 
-# Working distances in µm by objective position (from stage_util.py)
+# Working distances in µm by objective position (from commands/stage.py)
 # Position 1-indexed as used by the Nosepiece class.
 WORKING_DISTANCES_UM: dict[int, float] = {
     1: 12700,  # 5x
@@ -198,6 +198,7 @@ class AutofocusResult:
     scan_duration_s: float
     frame_count: int
     z_sample_count: int
+    position_um: Point2F  # Stage XY position where autofocus was performed
     # Diagnostic fields for debugging autofocus issues
     coarse_z_start_um: float = 0.0
     coarse_z_end_um: float = 0.0
@@ -226,6 +227,7 @@ class AutofocusResult:
             "final_sharpness": self.final_sharpness,
             "dynamic_range": self.dynamic_range,
             "stayed_at_initial": self.stayed_at_initial,
+            "position_um": list(self.position_um),
             "scan": {
                 "z_range_um": self.z_range_um,
                 "duration_s": self.scan_duration_s,
@@ -689,6 +691,7 @@ def continuous_autofocus(
         scan_duration_s=scan_duration,
         frame_count=frame_count,
         z_sample_count=z_sample_count,
+        position_um=Point2F(*scope.stage.position_um),
         coarse_z_start_um=z_start,
         coarse_z_end_um=z_end,
         coarse_best_z_um=coarse_best_z,

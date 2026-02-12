@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, NamedTuple, TypedDict
+from typing import Any, NamedTuple, Protocol, TypedDict
 
 import numpy as np
 
@@ -19,6 +19,13 @@ class Point2F(NamedTuple):
 
     x: float
     y: float
+
+
+class Point2I(NamedTuple):
+    """2D integer point (x, y) in pixels."""
+
+    x: int
+    y: int
 
 
 class Point3F(NamedTuple):
@@ -44,6 +51,15 @@ class AreaRect(NamedTuple):
     x_max: float
     y_min: float
     y_max: float
+
+
+class AreaRectI(NamedTuple):
+    """Integer pixel rectangle."""
+
+    x_min: int
+    x_max: int
+    y_min: int
+    y_max: int
 
 
 class ScanRow(NamedTuple):
@@ -96,6 +112,24 @@ class ObjectiveDescription:
     position: int
     magnification: float
     name: str
+
+
+class AxisBounds(Protocol):
+    """Anything with min/max position in µm (Axis, AxisDescription, etc.)."""
+
+    @property
+    def min_um(self) -> float: ...
+    @property
+    def max_um(self) -> float: ...
+
+
+class StageBounds(Protocol):
+    """Anything with x/y axes that have min/max bounds."""
+
+    @property
+    def x(self) -> AxisBounds: ...
+    @property
+    def y(self) -> AxisBounds: ...
 
 
 @dataclass
@@ -175,6 +209,16 @@ class PlanarScanPlan:
 # ============================================================================
 # Scan output metadata
 # ============================================================================
+
+
+class ScanRowMeta(TypedDict):
+    """Row metadata from scan_meta.json rows array."""
+
+    row_idx: int
+    direction: int
+    y_um: float
+    frame_start: int
+    frame_end: int
 
 
 class CameraMeta(TypedDict):

@@ -2,6 +2,11 @@
 
 Loads focus_map_chip*.json, identifies out-of-focus points, fits a tilt plane,
 and generates surface plots.
+
+Usage:
+    uv run python commands/analyze_focus_map.py scans/focus_map_chip0.json
+    uv run python commands/analyze_focus_map.py scans/focus_map_chip0.json --export-plane scans/plane.json
+    uv run python commands/analyze_focus_map.py scans/focus_map_chip0.json --min-sharpness 20 -q
 """
 
 import argparse
@@ -1144,117 +1149,67 @@ def export_plane(data: dict, output_path: Path, cf_threshold: float = 20.0, min_
     return result
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Analyze focus map data",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument(
-        "focus_map",
-        type=Path,
-        help="Path to focus_map_chip*.json",
-    )
-    parser.add_argument(
-        "--output",
-        "-o",
-        type=Path,
-        default=None,
-        help="Output plot path (default: focus_map_analysis.png in same dir)",
-    )
-    parser.add_argument(
-        "--no-plot",
-        action="store_true",
-        help="Skip generating plot",
-    )
-    parser.add_argument(
-        "--max-dim",
-        type=int,
-        default=4500,
-        help="Maximum canvas dimension for mosaic in pixels",
-    )
-    parser.add_argument(
-        "--margin",
-        type=int,
-        default=5,
-        help="Gap between images in mosaic (pixels)",
-    )
-    parser.add_argument(
-        "--no-mosaic",
-        action="store_true",
-        help="Skip generating mosaic image",
-    )
-    parser.add_argument(
-        "--export-plane",
-        type=Path,
-        default=None,
-        help="Export robust plane fit to JSON file (for scan_area focus tracking)",
-    )
-    parser.add_argument(
-        "--cf-threshold",
-        type=float,
-        default=20.0,
-        help="Coarse-fine disagreement threshold (um) for high-confidence points",
-    )
-    parser.add_argument(
-        "--min-sharpness",
-        type=float,
-        default=20.0,
-        help="Minimum selected_sharpness to include in plane fit (default: 20)",
-    )
-    parser.add_argument(
-        "--quiet",
-        "-q",
-        action="store_true",
-        help="Suppress verbose output (just generate files)",
-    )
-    args = parser.parse_args()
+def run(
+    focus_map_path: Path,
+    *,
+    output: Path | None = None,
+    plot: bool = True,
+    max_dim: int = 4500,
+    margin: int = 5,
+    mosaic: bool = True,
+    export_plane_path: Path | None = None,
+    cf_threshold: float = 20.0,
+    min_sharpness: float = 20.0,
+    quiet: bool = False,
+) -> None:
+    """Analyze focus map data, generate plots/mosaic, optionally export plane fit.
 
-    if not args.focus_map.exists():
-        print(f"Error: File not found: {args.focus_map}")
-        return 1
+    Args:
+        focus_map_path: Path to focus_map_chip*.json.
+        output: Output plot path (default: auto from focus_map_path).
+        plot: Generate analysis plot.
+        max_dim: Maximum canvas dimension for mosaic.
+        margin: Gap between images in mosaic (pixels).
+        mosaic: Generate mosaic image.
+        export_plane_path: Export robust plane fit to this JSON path.
+        cf_threshold: Coarse-fine disagreement threshold (µm).
+        min_sharpness: Minimum sharpness to include in plane fit.
+        quiet: Suppress verbose output.
+
+    Raises:
+        FileNotFoundError: If focus_map_path doesn't exist.
+    """
+    if not focus_map_path.exists():
+        raise FileNotFoundError(f"File not found: {focus_map_path}")
 
     # Load data
-    data = load_focus_map(args.focus_map)
+    data = load_focus_map(focus_map_path)
 
     # Analyze
     analysis = analyze_focus_map(data)
 
     # Print report
-    if not args.quiet:
+    if not quiet:
         print_report(data, analysis)
 
     # Generate plot
-    if not args.no_plot:
-        output_path = args.output or args.focus_map.with_name(args.focus_map.stem + "_analysis.png")
-        plot_focus_map(data, analysis, output_path, quiet=args.quiet)
+    if plot:
+        output_path = output or focus_map_path.with_name(focus_map_path.stem + "_analysis.png")
+        plot_focus_map(data, analysis, output_path, quiet=quiet)
 
     # Generate mosaic
-    if not args.no_mosaic:
-        # Find images directory
-        images_dir = args.focus_map.with_name(args.focus_map.stem + "_images")
+    if mosaic:
+        images_dir = focus_map_path.with_name(focus_map_path.stem + "_images")
         if images_dir.exists():
-            mosaic_path = args.focus_map.with_name(args.focus_map.stem + "_mosaic.jpg")
-            create_mosaic(
-                data,
-                images_dir,
-                mosaic_path,
-                max_dim=args.max_dim,
-                margin_px=args.margin,
-                quiet=args.quiet,
-            )
-        else:
-            if not args.quiet:
-                print(f"Images directory not found: {images_dir}")
-                print("  (Run focus_map.py with --save-images to generate)")
+            mosaic_path = focus_map_path.with_name(focus_map_path.stem + "_mosaic.jpg")
+            create_mosaic(data, images_dir, mosaic_path, max_dim=max_dim, margin_px=margin, quiet=quiet)
+        elif not quiet:
+            print(f"Images directory not found: {images_dir}")
+            print("  (Run focus_map.py with --save-images to generate)")
 
     # Export plane fit
-    if args.export_plane:
-        result = export_plane(
-            data,
-            args.export_plane,
-            cf_threshold=args.cf_threshold,
-            min_sharpness=args.min_sharpness,
-        )
+    if export_plane_path:
+        result = export_plane(data, export_plane_path, cf_threshold=cf_threshold, min_sharpness=min_sharpness)
 
         q = result["quality"]
         t = result["tilt"]
@@ -1268,10 +1223,10 @@ def main():
             f"analyze_focus_map: {q['points_used']}/{q['points_total']} pts, "
             f"R\u00b2={q['r_squared']:.3f}, residual={q['residual_std_um']:.1f}\u00b5m, "
             f"tilt={t['magnitude_um_per_mm']:.2f}\u00b5m/mm, "
-            f"corners: {corners_str}, {args.export_plane}"
+            f"corners: {corners_str}, {export_plane_path}"
         )
 
-        if not args.quiet:
+        if not quiet:
             print()
             print("=" * 60)
             print("ROBUST PLANE FIT EXPORT")
@@ -1289,12 +1244,50 @@ def main():
             print(f"Corners covered: {', '.join(c['corners_covered']) or 'none'}")
             print(f"Corners extrapolated: {', '.join(c['corners_extrapolated']) or 'none'}")
             print()
-            print(f"Exported to: {args.export_plane}")
+            print(f"Exported to: {export_plane_path}")
 
         # Generate contour map
-        contour_path = args.export_plane.with_name(args.export_plane.stem.replace("_plane", "") + "_contour.png")
-        plot_contour_map(result, contour_path, quiet=args.quiet)
+        contour_path = export_plane_path.with_name(export_plane_path.stem.replace("_plane", "") + "_contour.png")
+        plot_contour_map(result, contour_path, quiet=quiet)
 
+
+def _build_parser():
+    parser = argparse.ArgumentParser(
+        description="Analyze focus map data",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("focus_map", type=Path, help="Path to focus_map_chip*.json")
+    parser.add_argument("--output", "-o", type=Path, default=None, help="Output plot path")
+    parser.add_argument("--no-plot", action="store_true", help="Skip generating plot")
+    parser.add_argument("--max-dim", type=int, default=4500, help="Max canvas dimension for mosaic")
+    parser.add_argument("--margin", type=int, default=5, help="Gap between images in mosaic")
+    parser.add_argument("--no-mosaic", action="store_true", help="Skip generating mosaic image")
+    parser.add_argument("--export-plane", type=Path, default=None, help="Export plane fit to JSON")
+    parser.add_argument("--cf-threshold", type=float, default=20.0, help="Coarse-fine disagreement threshold (um)")
+    parser.add_argument("--min-sharpness", type=float, default=20.0, help="Min sharpness for plane fit")
+    parser.add_argument("--quiet", "-q", action="store_true", help="Suppress verbose output")
+    return parser
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
+
+    try:
+        run(
+            args.focus_map,
+            output=args.output,
+            plot=not args.no_plot,
+            max_dim=args.max_dim,
+            margin=args.margin,
+            mosaic=not args.no_mosaic,
+            export_plane_path=args.export_plane,
+            cf_threshold=args.cf_threshold,
+            min_sharpness=args.min_sharpness,
+            quiet=args.quiet,
+        )
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Error: {e}")
+        return 1
     return 0
 
 

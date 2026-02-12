@@ -29,7 +29,7 @@
 - **Every task needs its own approval cycle.** A "go" for task N does NOT carry to task N+1. Each `# Operator Task` continuation resets: propose → wait for go → implement → ask "commit/push/pull?" → wait for go → sync → write summary.
 
 ## New Script Review Checklist
-- Check against patterns in existing scripts (scan_area_v1.py, scan_chip_v2.py) for conventions
+- Check against patterns in existing scripts (commands/scan.py, commands/chip_scan.py) for conventions
 - Arg naming: `--exposure-ms` not `--exposure`, `--objective-mag` as `type=str` not float
 - Camera setup: explicit binning, exposure (/1000), gain, gain_rgb, gamma
 - Stage moves: `wait_all(list(scope.stage.move_to_async(x, y)))` for parallel XY
@@ -52,7 +52,7 @@
 - SDK returns BGR; `sdk_image_to_numpy()` converts at the boundary
 - Autofocus sharpness functions use `cv2.COLOR_RGB2GRAY` (correct for RGB)
 - Analysis scripts load from disk with `cv2.imread()` (returns BGR independently)
-- `stitch_area.py` loads with PIL `Image.open()` (returns RGB)
+- `commands/stitch.py` loads with PIL `Image.open()` (returns RGB)
 
 ## Linting & Type Checking
 - Pre-commit hook: ruff check + format, then `uv run ty check` on staged files
@@ -74,7 +74,7 @@
 
 ## X/Z Velocity & Measurement
 - X motor runs ~0.27% slower than commanded (4987 vs 5000 µm/s). Z is accurate (+0.05%).
-- `scan_chip_v2.py` measures actual X cruise speed via regression during lead-in, uses it for Z velocity.
+- `commands/chip_scan.py` measures actual X cruise speed via regression during lead-in, uses it for Z velocity.
 - Per-frame velocity deltas (`np.diff(x)/np.diff(t)`) are very noisy — always use `np.polyfit(t, x, 1)` for cruise speed.
 - Velocity converter native resolution: X ~0.0015 µm/s/step, Z ~0.0006 µm/s/step — quantization is negligible.
 - `BasicControlValueVelocity` (IID 0x108) and `DirectedControlValueAsyncVelocity` (IID 0x114) share same velocity converter per axis.
@@ -94,6 +94,17 @@ Use `show <path>` to display images to the user. Do NOT use the Read tool on ima
 ## Git Discipline — Pre-Commit Checklist
 1. **Check if MEMORY.md is dirty** (`git status`). If so, stage it alongside task changes. Every commit. No exceptions.
 2. When handing off to another subtask for commit, explicitly mention MEMORY.md in the blurb if it's dirty.
+
+## Root Script Reorg (2026-02-11)
+- Phase 0 (AreaRect type) done in aab788f. Phase 1 (file moves) done in 2efbce9. Phase 2 (in-process pipeline) done (pending commit).
+- All 7 pipeline scripts now in `commands/`: scan.py, stitch.py, find_chips.py, focus_map.py, analyze_focus_map.py, chip_scan.py, stage.py
+- Each command exposes `run()` with typed kwargs; `main()` is CLI wrapper calling `run()`
+- Hardware commands use `scope: Microscope | None = None` + `nullcontext(scope) if scope else Microscope()` pattern
+- `find_flakes.py` calls `run()` in-process with shared Microscope connection (no more subprocesses)
+- `archive/` exists for superseded scripts; ty overrides exclude `archive/**`
+- `cli_utils.py` lives at `src/flakefinder/cli_utils.py` — import as `from flakefinder.cli_utils import ...`
+- `analyze_scan.py` renamed to `scripts/analyze_chip_scan.py`
+- When moving files with ty overrides, update the include path in pyproject.toml
 
 ## Microscope
 - Do NOT run hardware commands (scans, autofocus, stage moves) — only the main scan session does that.

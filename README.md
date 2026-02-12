@@ -62,13 +62,16 @@ See [docs/setup.md](docs/setup.md) for detailed setup instructions.
 ├── scans/                   # Scan output data (gitignored)
 ├── experiments/             # Experiment data and plots (gitignored)
 ├── calibration/             # Flatfield calibration images
-├── scan_area_v1.py          # Multi-row snake scan with continuous motion
-├── stitch_area.py           # Stitch scan frames into overview image
-├── find_chips.py            # Detect chips in stitched image
-├── focus_map.py             # Autofocus grid sampling across a chip
-├── analyze_focus_map.py     # Analyze focus map, fit tilt plane
+├── find_flakes.py           # Full pipeline orchestrator
+├── commands/                # Command modules with run() + main() entry points
+│   ├── scan.py              # Multi-row snake scan with continuous motion
+│   ├── stitch.py            # Stitch scan frames into overview image
+│   ├── find_chips.py        # Detect chips in stitched image
+│   ├── focus_map.py         # Autofocus grid sampling across a chip
+│   ├── analyze_focus_map.py # Analyze focus map, fit tilt plane
+│   ├── chip_scan.py         # Chip scan with continuous Z tracking
+│   └── stage.py             # Stage/objective control utility
 ├── autofocus_demo.py        # Single-point Z autofocus
-├── stage_util.py            # Stage/objective control utility
 ├── capture_util.py          # Single image capture utility
 └── archive/                 # Superseded scripts kept for reference
 ```

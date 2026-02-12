@@ -2,7 +2,15 @@
 
 Samples points along the chip's convex hull edge and on an interior grid,
 runs autofocus at each point, and outputs a focus map with best Z positions.
+
+Usage:
+    uv run python commands/focus_map.py --chips-meta scans/chips.json --chip 0
+    uv run python commands/focus_map.py --chips-meta scans/chips.json --chip 0 --dry-run
+    uv run python commands/focus_map.py --chips-meta scans/chips.json --chip 0 \\
+        --save-images --suffix v6 --z 24700
 """
+
+from __future__ import annotations
 
 import argparse
 import json
@@ -21,8 +29,8 @@ from PIL import Image as PILImage
 from flakefinder.data_utils import load_chip_geometry
 from flakefinder.leica.autofocus import ALL_SHARPNESS_METRICS, AutofocusResult
 from flakefinder.leica.microscope import Microscope
-from flakefinder.scan_utils import parse_white_balance
-from flakefinder.types import Point2F
+from flakefinder.scan_utils import DEFAULT_WB, parse_white_balance
+from flakefinder.types import ChipGeometry, GainRGB, Point2F
 
 
 class SamplePoint(NamedTuple):
@@ -219,9 +227,9 @@ def run_focus_map(
     all_metrics: bool = False,
     move_settle_s: float = 0,
     af_settle_s: float = 0,
-    images_dir: "Path | None" = None,
-    debug_dir: "Path | None" = None,
-    save_executor: "ThreadPoolExecutor | None" = None,
+    images_dir: Path | None = None,
+    debug_dir: Path | None = None,
+    save_executor: ThreadPoolExecutor | None = None,
     quiet: bool = False,
 ) -> list[FocusMapSample]:
     """Run autofocus at each sample point and return results.
@@ -356,7 +364,250 @@ def run_focus_map(
     return sample_results
 
 
-def main():
+@dataclass
+class _Preflight:
+    """Validated sample points and chip geometry from _plan()."""
+
+    points: list[SamplePoint]
+    chip_geo: ChipGeometry
+    contour_count: int
+    grid_count: int
+    perimeter_mm: float
+
+    def print_summary(self, contour_spacing_mm: float) -> None:
+        actual_mm = self.perimeter_mm / self.contour_count
+        print(f"{len(self.points)} sample points")
+        print(f"  Perimeter: {self.perimeter_mm:.1f} mm, spacing: {contour_spacing_mm:.1f} mm")
+        print(f"  Contour: {self.contour_count} points ({actual_mm:.1f} mm apart)")
+        print(f"  Grid: {self.grid_count} points")
+
+
+def _plan(
+    *,
+    chips_meta: Path,
+    chip: int = 0,
+    contour_spacing_mm: float = 15.0,
+    grid_spacing_um: float = 10000,
+) -> _Preflight:
+    """Compute sample points for focus map (pure computation, no hardware).
+
+    Raises:
+        ValueError: On invalid inputs (missing file, bad chip index).
+        FileNotFoundError: If chips_meta file doesn't exist.
+    """
+    chip_geo = load_chip_geometry(str(chips_meta), chip)
+    convex_hull = chip_geo.polygon
+
+    # Compute contour sample count from perimeter and target spacing
+    perimeter_mm = hull_perimeter_um(convex_hull) / 1000
+    contour_samples = max(4, min(24, round(perimeter_mm / contour_spacing_mm)))
+
+    # Generate sample points
+    contour_points = sample_contour_points(convex_hull, contour_samples)
+    grid_points = sample_grid_points(convex_hull, grid_spacing_um)
+
+    # All sample points with labels
+    all_points: list[SamplePoint] = []
+    for i, (x, y) in enumerate(contour_points):
+        all_points.append(SamplePoint(x, y, "contour", i))
+    for i, (x, y) in enumerate(grid_points):
+        all_points.append(SamplePoint(x, y, "grid", i))
+
+    return _Preflight(
+        points=all_points,
+        chip_geo=chip_geo,
+        contour_count=len(contour_points),
+        grid_count=len(grid_points),
+        perimeter_mm=perimeter_mm,
+    )
+
+
+def run(
+    scope: Microscope,
+    *,
+    chips_meta: Path,
+    chip: int = 0,
+    contour_spacing_mm: float = 15.0,
+    grid_spacing_um: float = 10000,
+    z_range: float | None = None,
+    fine_pass: bool = True,
+    fine_range: float = 50.0,
+    super_fine_pass: bool = True,
+    all_metrics: bool = False,
+    output_dir: Path | None = None,
+    save_images: bool = False,
+    debug_dir: Path | None = None,
+    sharpness_method: str = "tenengrad",
+    z: float | None = None,
+    z_speed: float | None = None,
+    move_settle: float = 0,
+    af_settle: float = 0,
+    white_balance: GainRGB = DEFAULT_WB,
+    suffix: str | None = None,
+    notes: str | None = None,
+    quiet: bool = False,
+) -> None:
+    """Run focus map computation.
+
+    Raises:
+        ValueError: On invalid inputs.
+        FileNotFoundError: If chips_meta file doesn't exist.
+    """
+    p = _plan(
+        chips_meta=chips_meta,
+        chip=chip,
+        contour_spacing_mm=contour_spacing_mm,
+        grid_spacing_um=grid_spacing_um,
+    )
+    all_points = p.points
+    chip_geo = p.chip_geo
+
+    if not quiet:
+        p.print_summary(contour_spacing_mm)
+
+    # Output directory and stem
+    output_dir = output_dir or chips_meta.parent
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"focus_map_chip{chip}_{suffix}" if suffix else f"focus_map_chip{chip}"
+
+    # Import hardware libraries
+    from flakefinder.leica import wait_all
+    from flakefinder.leica.autofocus import continuous_autofocus
+
+    start_time = time.perf_counter()
+
+    scope.light_on()
+
+    if not quiet:
+        x, y = scope.stage.position_um
+        print(f"\nCurrent position: X={x:.1f}, Y={y:.1f}, Z={scope.z.position_um:.1f} µm")
+
+    # Configure camera for fast capture
+    camera = scope.camera
+    camera.trigger_mode = 0  # CONTINUOUS
+    camera.binning = 2  # 3x3 binning for speed
+    camera.exposure_time = 0.001  # 1ms
+    camera.gain_rgb = white_balance
+
+    if not quiet:
+        print(f"Camera: {camera.name}")
+        print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
+
+    # Resolve reference Z
+    if z is not None:
+        reference_z_um = z
+    else:
+        cx, cy = chip_geo.centroid
+        cx_mm, cy_mm = cx / 1000, cy / 1000
+        if not quiet:
+            print(f"\nNo --z provided, autofocusing at centroid ({cx_mm:.2f}, {cy_mm:.2f}) mm...")
+        hx, hy = scope.stage.move_to_async(cx, cy)
+        wait_all([hx, hy])
+        centroid_af = continuous_autofocus(
+            scope,
+            z_range_um=z_range,
+            z_speed_um_s=z_speed,
+            fine_pass=fine_pass,
+            fine_range_um=fine_range,
+            super_fine_pass=super_fine_pass,
+            sharpness_method=sharpness_method,
+        )
+        reference_z_um = centroid_af.selected_z_um
+        sharpness = centroid_af.selected_sharpness
+        if not quiet:
+            print(f"  Centroid AF: Z={reference_z_um:.1f} µm, sharpness={sharpness:.1f}")
+
+    # Create images directory if saving images
+    images_dir = None
+    if save_images:
+        images_dir = output_dir / f"{stem}_images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        if not quiet:
+            print(f"Saving images to {images_dir}")
+
+    save_executor = ThreadPoolExecutor(max_workers=1) if (debug_dir or save_images) else None
+
+    sample_results = run_focus_map(
+        all_points=all_points,
+        reference_z_um=reference_z_um,
+        scope=scope,
+        z_range_um=z_range,
+        z_speed_um_s=z_speed,
+        fine_pass=fine_pass,
+        fine_range_um=fine_range,
+        super_fine_pass=super_fine_pass,
+        sharpness_method=sharpness_method,
+        all_metrics=all_metrics,
+        move_settle_s=move_settle,
+        af_settle_s=af_settle,
+        images_dir=images_dir,
+        debug_dir=debug_dir,
+        save_executor=save_executor,
+        quiet=quiet,
+    )
+
+    # Wait for background saves to finish
+    if save_executor:
+        save_executor.shutdown(wait=True)
+
+    # Save results before __exit__ (SDK Dispose can crash the process)
+    duration_s = time.perf_counter() - start_time
+
+    output = {
+        "timestamp": datetime.now().isoformat(),
+        "command": sys.argv,
+        "duration_s": round(duration_s, 2),
+        "chip_id": chip,
+        "source_chips_meta": str(chips_meta),
+        "notes": notes,
+        "grid_params": {
+            "contour_samples": p.contour_count,
+            "contour_spacing_mm": contour_spacing_mm,
+            "grid_spacing_um": grid_spacing_um,
+            "z_start_um": reference_z_um,
+            "z_range_um": z_range,
+            "z_speed_um_s": z_speed,
+            "fine_pass": fine_pass,
+            "fine_range_um": fine_range,
+            "super_fine_pass": super_fine_pass,
+            "sharpness_method": sharpness_method,
+            "move_settle_s": move_settle,
+            "af_settle_s": af_settle,
+            "save_images": save_images,
+            "debug_dir": str(debug_dir) if debug_dir else None,
+        },
+        "sample_points": [s.to_dict() for s in sample_results],
+    }
+
+    output_path = output_dir / f"{stem}.json"
+    with open(output_path, "w") as f:
+        json.dump(output, f, indent=2)
+
+    # Summary
+    successful_results = [s.af_result for s in sample_results if s.af_result is not None]
+    z_values = [r.selected_z_um for r in successful_results]
+    n_ok = len(successful_results)
+    n_total = len(sample_results)
+
+    # One-line summary (always printed)
+    z_range_str = f"Z={min(z_values):.0f}-{max(z_values):.0f} µm" if z_values else "no Z data"
+    print(f"focus_map: {n_ok}/{n_total} OK, {z_range_str}, {duration_s:.1f}s, {output_path}")
+
+    if not quiet and z_values:
+        selected_sharpness_values = [r.selected_sharpness for r in successful_results]
+        final_sharpness_values = [r.final_sharpness for r in successful_results]
+        sel_mean = np.mean(selected_sharpness_values)
+        sel_std = np.std(selected_sharpness_values)
+        fin_mean = np.mean(final_sharpness_values)
+        fin_std = np.std(final_sharpness_values)
+        print(f"\n  Z mean: {np.mean(z_values):.1f} µm")
+        print(f"  Z std: {np.std(z_values):.1f} µm")
+        print(f"  Sharpness (selected): {sel_mean:.1f} ± {sel_std:.1f}")
+        print(f"  Sharpness (final): {fin_mean:.1f} ± {fin_std:.1f}")
+
+
+def _build_parser():
     parser = argparse.ArgumentParser(
         description="Compute focus map for a chip using autofocus",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -488,195 +739,60 @@ def main():
         action="store_true",
         help="Suppress verbose output; print one summary line",
     )
-    args = parser.parse_args()
+    return parser
 
-    # Load chip geometry
-    quiet = args.quiet
-    if not quiet:
-        print(f"Loading chips metadata from {args.chips_meta}")
-    try:
-        chip_geo = load_chip_geometry(str(args.chips_meta), args.chip)
-    except (FileNotFoundError, ValueError) as e:
-        print(f"Error: {e}")
-        return 1
 
-    if not quiet:
-        print(f"Processing chip {args.chip}")
-    convex_hull = chip_geo.polygon
-
-    # Compute contour sample count from perimeter and target spacing
-    perimeter_mm = hull_perimeter_um(convex_hull) / 1000
-    contour_samples = max(4, min(24, round(perimeter_mm / args.contour_spacing_mm)))
-
-    # Generate sample points
-    contour_points = sample_contour_points(convex_hull, contour_samples)
-    grid_points = sample_grid_points(convex_hull, args.grid_spacing_um)
-
-    spacing_mm = args.contour_spacing_mm
-    actual_mm = perimeter_mm / len(contour_points)
-    if not quiet:
-        print(f"Sample points (perimeter={perimeter_mm:.1f} mm, spacing={spacing_mm:.1f} mm):")
-        print(f"  Contour: {len(contour_points)} points ({actual_mm:.1f} mm apart)")
-        print(f"  Grid: {len(grid_points)} points")
-        print(f"  Total: {len(contour_points) + len(grid_points)} points")
-
-    # All sample points with labels
-    all_points: list[SamplePoint] = []
-    for i, (x, y) in enumerate(contour_points):
-        all_points.append(SamplePoint(x, y, "contour", i))
-    for i, (x, y) in enumerate(grid_points):
-        all_points.append(SamplePoint(x, y, "grid", i))
+def main() -> int:
+    args = _build_parser().parse_args()
 
     if args.dry_run:
+        try:
+            p = _plan(
+                chips_meta=args.chips_meta,
+                chip=args.chip,
+                contour_spacing_mm=args.contour_spacing_mm,
+                grid_spacing_um=args.grid_spacing_um,
+            )
+        except (ValueError, FileNotFoundError) as e:
+            print(f"Error: {e}")
+            return 1
+        p.print_summary(args.contour_spacing_mm)
         print("\n[DRY RUN] Would autofocus at these points:")
-        for pt in all_points:
+        for pt in p.points:
             print(f"  {pt.type:7} {pt.index:2}: ({pt.x_um / 1000:.2f}, {pt.y_um / 1000:.2f}) mm")
         return 0
 
-    # Output directory and stem
-    output_dir = args.output_dir or args.chips_meta.parent
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"focus_map_chip{args.chip}_{args.suffix}" if args.suffix else f"focus_map_chip{args.chip}"
-
-    # Import hardware libraries (after dry-run check)
-    from flakefinder.leica import wait_all
-    from flakefinder.leica.autofocus import continuous_autofocus
-
-    start_time = time.perf_counter()
-
-    with Microscope() as scope:
-        scope.light_on()
-
-        if not quiet:
-            x, y = scope.stage.position_um
-            print(f"\nCurrent position: X={x:.1f}, Y={y:.1f}, Z={scope.z.position_um:.1f} µm")
-
-        # Configure camera for fast capture
-        camera = scope.camera
-        camera.trigger_mode = 0  # CONTINUOUS
-        camera.binning = 2  # 3x3 binning for speed
-        camera.exposure_time = 0.001  # 1ms
-        camera.gain_rgb = args.white_balance
-
-        if not quiet:
-            print(f"Camera: {camera.name}")
-            print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
-
-        # Resolve reference Z
-        if args.z is not None:
-            reference_z_um = args.z
-        else:
-            cx, cy = chip_geo.centroid
-            cx_mm, cy_mm = cx / 1000, cy / 1000
-            if not quiet:
-                print(f"\nNo --z provided, autofocusing at centroid ({cx_mm:.2f}, {cy_mm:.2f}) mm...")
-            hx, hy = scope.stage.move_to_async(cx, cy)
-            wait_all([hx, hy])
-            centroid_af = continuous_autofocus(
+    try:
+        with Microscope() as scope:
+            run(
                 scope,
-                z_range_um=args.z_range,
-                z_speed_um_s=args.z_speed,
+                chips_meta=args.chips_meta,
+                chip=args.chip,
+                contour_spacing_mm=args.contour_spacing_mm,
+                grid_spacing_um=args.grid_spacing_um,
+                z_range=args.z_range,
                 fine_pass=not args.no_fine_pass,
-                fine_range_um=args.fine_range,
+                fine_range=args.fine_range,
                 super_fine_pass=not args.no_super_fine,
+                all_metrics=args.all_metrics,
+                output_dir=args.output_dir,
+                save_images=args.save_images,
+                debug_dir=args.debug_dir,
                 sharpness_method=args.sharpness_method,
+                z=args.z,
+                z_speed=args.z_speed,
+                move_settle=args.move_settle,
+                af_settle=args.af_settle,
+                white_balance=args.white_balance,
+                suffix=args.suffix,
+                notes=args.notes,
+                quiet=args.quiet,
             )
-            reference_z_um = centroid_af.selected_z_um
-            sharpness = centroid_af.selected_sharpness
-            if not quiet:
-                print(f"  Centroid AF: Z={reference_z_um:.1f} µm, sharpness={sharpness:.1f}")
-
-        # Create images directory if saving images
-        images_dir = None
-        if args.save_images:
-            images_dir = output_dir / f"{stem}_images"
-            images_dir.mkdir(parents=True, exist_ok=True)
-            if not quiet:
-                print(f"Saving images to {images_dir}")
-
-        save_executor = ThreadPoolExecutor(max_workers=1) if (args.debug_dir or args.save_images) else None
-
-        sample_results = run_focus_map(
-            all_points=all_points,
-            reference_z_um=reference_z_um,
-            scope=scope,
-            z_range_um=args.z_range,
-            z_speed_um_s=args.z_speed,
-            fine_pass=not args.no_fine_pass,
-            fine_range_um=args.fine_range,
-            super_fine_pass=not args.no_super_fine,
-            sharpness_method=args.sharpness_method,
-            all_metrics=args.all_metrics,
-            move_settle_s=args.move_settle,
-            af_settle_s=args.af_settle,
-            images_dir=images_dir,
-            debug_dir=args.debug_dir,
-            save_executor=save_executor,
-            quiet=quiet,
-        )
-
-        # Wait for background saves to finish
-        if save_executor:
-            save_executor.shutdown(wait=True)
-
-        # Save results before __exit__ (SDK Dispose can crash the process)
-        duration_s = time.perf_counter() - start_time
-
-        output = {
-            "timestamp": datetime.now().isoformat(),
-            "command": sys.argv,
-            "duration_s": round(duration_s, 2),
-            "chip_id": args.chip,
-            "source_chips_meta": str(args.chips_meta),
-            "notes": args.notes,
-            "grid_params": {
-                "contour_samples": contour_samples,
-                "contour_spacing_mm": args.contour_spacing_mm,
-                "grid_spacing_um": args.grid_spacing_um,
-                "z_start_um": reference_z_um,
-                "z_range_um": args.z_range,
-                "z_speed_um_s": args.z_speed,
-                "fine_pass": not args.no_fine_pass,
-                "fine_range_um": args.fine_range,
-                "super_fine_pass": not args.no_super_fine,
-                "sharpness_method": args.sharpness_method,
-                "move_settle_s": args.move_settle,
-                "af_settle_s": args.af_settle,
-                "save_images": args.save_images,
-                "debug_dir": str(args.debug_dir) if args.debug_dir else None,
-            },
-            "sample_points": [s.to_dict() for s in sample_results],
-        }
-
-        output_path = output_dir / f"{stem}.json"
-        with open(output_path, "w") as f:
-            json.dump(output, f, indent=2)
-
-    # Summary
-    successful_results = [s.af_result for s in sample_results if s.af_result is not None]
-    z_values = [r.selected_z_um for r in successful_results]
-    n_ok = len(successful_results)
-    n_total = len(sample_results)
-
-    # One-line summary (always printed)
-    z_range_str = f"Z={min(z_values):.0f}-{max(z_values):.0f} µm" if z_values else "no Z data"
-    print(f"focus_map: {n_ok}/{n_total} OK, {z_range_str}, {duration_s:.1f}s, {output_path}")
-
-    if not quiet and z_values:
-        selected_sharpness_values = [r.selected_sharpness for r in successful_results]
-        final_sharpness_values = [r.final_sharpness for r in successful_results]
-        sel_mean = np.mean(selected_sharpness_values)
-        sel_std = np.std(selected_sharpness_values)
-        fin_mean = np.mean(final_sharpness_values)
-        fin_std = np.std(final_sharpness_values)
-        print(f"\n  Z mean: {np.mean(z_values):.1f} µm")
-        print(f"  Z std: {np.std(z_values):.1f} µm")
-        print(f"  Sharpness (selected): {sel_mean:.1f} ± {sel_std:.1f}")
-        print(f"  Sharpness (final): {fin_mean:.1f} ± {fin_std:.1f}")
-
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Error: {e}")
+        return 1
     return 0
 
 
 if __name__ == "__main__":
-    exit(main())
+    sys.exit(main())

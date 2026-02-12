@@ -19,7 +19,7 @@ def main():
 
         cmd = [
             sys.executable,
-            "scan_area_v1.py",
+            "commands/scan.py",
             "-o",
             output,
             "--objective-mag",

@@ -40,10 +40,13 @@ Pick from this menu based on relevance to the task. The subtask will read these 
 | `src/flakefinder/leica/core.py` | Connection management, LeicaConnection |
 | `src/flakefinder/leica/enums.py` | SDK constants, interface IDs |
 | `autofocus_demo.py` | Autofocus logic, Z scanning patterns |
-| `scan_area_v1.py` | Scanning patterns, position polling, frame capture |
-| `focus_map.py` | Focus map grid autofocus |
-| `stitch_area.py` | Image stitching |
-| `find_chips.py` | Chip detection |
+| `commands/scan.py` | Scanning patterns, position polling, frame capture |
+| `commands/focus_map.py` | Focus map grid autofocus |
+| `commands/stitch.py` | Image stitching |
+| `commands/find_chips.py` | Chip detection |
+| `commands/chip_scan.py` | Chip scan with Z tracking |
+| `commands/stage.py` | Stage/objective control |
+| `commands/analyze_focus_map.py` | Focus map analysis, plane fitting |
 | `docs/architecture.md` | System overview, stage speeds, design |
 | `docs/continuous_autofocus_plan.md` | Focus system design |
 | `docs/scan_metadata.md` | Scan data format reference |

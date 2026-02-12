@@ -1,4 +1,9 @@
-"""Detect chips in stitched microscope images using Otsu thresholding."""
+"""Detect chips in stitched microscope images using Otsu thresholding.
+
+Usage:
+    uv run python commands/find_chips.py scans/overview_5x_stitch.jpg
+    uv run python commands/find_chips.py scans/overview_5x_stitch.jpg --min-area-um2 500000
+"""
 
 import argparse
 import json
@@ -293,7 +298,6 @@ def find_chips(
 
     # Add scale bar
     # Choose largest round number that fits in 10-20% of image width
-    img_w * scale
     bar_length_um = 1000  # default 1mm
     for candidate_um in [20000, 10000, 5000, 2000, 1000]:
         candidate_px = int(candidate_um / scale)
@@ -358,7 +362,55 @@ def find_chips(
     return results
 
 
-def main():
+def run(
+    image_path: Path,
+    *,
+    min_area_um2: float = 1e6,
+    morph_kernel_um: float = 50,
+) -> dict:
+    """Detect chips in a stitched image, save results JSON, return results.
+
+    Args:
+        image_path: Path to stitched image.
+        min_area_um2: Minimum chip area in µm² (default 1mm²).
+        morph_kernel_um: Morphological kernel size in µm.
+
+    Returns:
+        Detection results dict (also saved to {image_stem}_chips.json).
+    """
+    if not image_path.exists():
+        raise FileNotFoundError(f"Image not found: {image_path}")
+
+    print(f"Processing {image_path}")
+    results = find_chips(
+        image_path,
+        min_area_um2=min_area_um2,
+        morph_kernel_um=morph_kernel_um,
+    )
+
+    # Save results
+    out_path = image_path.with_name(image_path.stem + "_chips.json")
+    with open(out_path, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"Results saved to {out_path}")
+
+    # Summary
+    print("\nDetection summary:")
+    print(f"  Otsu threshold: {results['detection_params']['otsu_threshold']}")
+    print(f"  Chips found: {len(results['chips'])}")
+    print(f"  Rejected (edge-clipped): {len(results['rejected'])}")
+
+    if results["chips"]:
+        print("\nChips:")
+        for chip in results["chips"]:
+            cx, cy = chip["centroid_stage_um"]
+            area_mm2 = chip["area_um2"] / 1e6
+            print(f"  #{chip['id']}: center=({cx / 1000:.1f}, {cy / 1000:.1f}) mm, area={area_mm2:.2f} mm²")
+
+    return results
+
+
+def _build_parser():
     parser = argparse.ArgumentParser(description="Detect chips in stitched microscope images")
     parser.add_argument(
         "image",
@@ -377,38 +429,13 @@ def main():
         default=50,
         help="Morphological kernel size in µm (default: 50)",
     )
-    args = parser.parse_args()
+    return parser
 
-    if not args.image.exists():
-        print(f"Error: Image not found: {args.image}")
-        return 1
 
-    print(f"Processing {args.image}")
-    results = find_chips(
-        args.image,
-        min_area_um2=args.min_area_um2,
-        morph_kernel_um=args.morph_kernel_um,
-    )
+def main():
+    args = _build_parser().parse_args()
 
-    # Save results
-    out_path = args.image.with_name(args.image.stem + "_chips.json")
-    with open(out_path, "w") as f:
-        json.dump(results, f, indent=2)
-    print(f"Results saved to {out_path}")
-
-    # Summary
-    print("\nDetection summary:")
-    print(f"  Otsu threshold: {results['detection_params']['otsu_threshold']}")
-    print(f"  Chips found: {len(results['chips'])}")
-    print(f"  Rejected (edge-clipped): {len(results['rejected'])}")
-
-    if results["chips"]:
-        print("\nChips:")
-        for chip in results["chips"]:
-            cx, cy = chip["centroid_stage_um"]
-            area_mm2 = chip["area_um2"] / 1e6
-            print(f"  #{chip['id']}: center=({cx / 1000:.1f}, {cy / 1000:.1f}) mm, area={area_mm2:.2f} mm²")
-
+    run(args.image, min_area_um2=args.min_area_um2, morph_kernel_um=args.morph_kernel_um)
     return 0
 
 

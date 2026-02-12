@@ -21,6 +21,7 @@ from flakefinder.types import (
     Point2F,
     PositionSample,
     ScanRow,
+    StageBounds,
 )
 
 # Binning index (SDK) -> binning factor (NxN)
@@ -48,6 +49,10 @@ def parse_position(s: str) -> Point2F:
         raise ArgumentTypeError(f"values must be numbers, got: {s}") from e
 
 
+# Default white balance for hBN on SiO2 (calibrated on Sharpe Lab DM6M)
+DEFAULT_WB = GainRGB(red=1.41, green=1.02, blue=2.51)
+
+
 def parse_white_balance(s: str) -> GainRGB:
     """Parse 'B,G,R' white balance string into GainRGB.
 
@@ -68,6 +73,28 @@ def parse_white_balance(s: str) -> GainRGB:
     except ValueError as e:
         raise ArgumentTypeError(f"values must be numbers, got: {s}") from e
     return GainRGB(red=r, green=g, blue=b)
+
+
+def validate_area_rect(area: AreaRect, stage: StageBounds) -> None:
+    """Validate area rect against stage limits.
+
+    Args:
+        area: Scan area rectangle in µm.
+        stage: Anything with x/y axes that have min/max bounds
+            (StageDescription for dry runs, live Stage for connected runs).
+
+    Raises:
+        ValueError: If area exceeds stage limits.
+    """
+    x_min, x_max, y_min, y_max = area
+    if x_min < stage.x.min_um:
+        raise ValueError(f"x_min ({x_min:.0f}) is below stage minimum ({stage.x.min_um:.0f})")
+    if x_max > stage.x.max_um:
+        raise ValueError(f"x_max ({x_max:.0f}) exceeds stage maximum ({stage.x.max_um:.0f})")
+    if y_min < stage.y.min_um:
+        raise ValueError(f"y_min ({y_min:.0f}) is below stage minimum ({stage.y.min_um:.0f})")
+    if y_max > stage.y.max_um:
+        raise ValueError(f"y_max ({y_max:.0f}) exceeds stage maximum ({stage.y.max_um:.0f})")
 
 
 def parse_area_rect(s: str) -> AreaRect:
