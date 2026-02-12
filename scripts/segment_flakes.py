@@ -93,47 +93,33 @@ def _analyze_component(
     }
 
 
-def _subsegment_by_contrast(
-    image: np.ndarray,
+def _otsu_split(
+    contrast_channels: np.ndarray,
     component: np.ndarray,
-    bg_modes: np.ndarray,
     min_size_px: int,
-) -> list[np.ndarray]:
-    """Split a blob into sub-regions if internal R contrast is bimodal.
+) -> list[np.ndarray] | None:
+    """Try one Otsu split on the highest-variance channel. Returns sub-components or None."""
+    # Pick the channel with highest within-blob variance
+    stds = [contrast_channels[:, :, c][component].std() for c in range(3)]
+    best_ch = int(np.argmax(stds))
+    ch_map = contrast_channels[:, :, best_ch]
+    blob_vals = ch_map[component]
 
-    Uses Otsu thresholding on normalized R contrast within the blob.
-    Returns list of sub-component masks (may be just [component] if no split).
-    """
-    # Compute per-pixel normalized R contrast within blob
-    r_contrast = (image[:, :, 2].astype(np.float32) - bg_modes[2]) / max(bg_modes[2], 1.0)
-    blob_r = r_contrast[component]
+    if blob_vals.std() < 0.8:
+        return None
 
-    # Only attempt split if internal R contrast has high variance
-    if blob_r.std() < 0.8:
-        return [component]
+    v_min, v_max = blob_vals.min(), blob_vals.max()
+    if v_max - v_min < 0.5:
+        return None
 
-    # Otsu on the R contrast values within the blob
-    # Shift to 0-255 range for cv2.threshold
-    r_min, r_max = blob_r.min(), blob_r.max()
-    if r_max - r_min < 0.5:
-        return [component]
+    scaled = ((blob_vals - v_min) / (v_max - v_min) * 255).astype(np.uint8)
+    thresh_val, _ = cv2.threshold(scaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    thresh = v_min + (thresh_val / 255) * (v_max - v_min)
 
-    r_scaled = ((blob_r - r_min) / (r_max - r_min) * 255).astype(np.uint8)
-    thresh_val, _ = cv2.threshold(r_scaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    # Convert threshold back to R contrast space
-    r_thresh = r_min + (thresh_val / 255) * (r_max - r_min)
-
-    # Split into low-R and high-R sub-masks
     sub_components = []
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     for is_high in [False, True]:
-        if is_high:
-            sub_mask = component & (r_contrast >= r_thresh)
-        else:
-            sub_mask = component & (r_contrast < r_thresh)
-
-        # Clean up: morphological open to remove noise, then re-label
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        sub_mask = component & ((ch_map >= thresh) if is_high else (ch_map < thresh))
         sub_clean = cv2.morphologyEx(sub_mask.astype(np.uint8), cv2.MORPH_OPEN, kernel)
         sub_labels, n_sub = ndimage.label(sub_clean)
 
@@ -142,14 +128,48 @@ def _subsegment_by_contrast(
             if int(sub_comp.sum()) >= min_size_px // 2:
                 sub_components.append(sub_comp)
 
-    # Use sub-segmentation if we got pieces that together cover most of the blob
     if len(sub_components) >= 2:
         return sub_components
-    # Even with one qualifying sub-component, use it if it purifies the contrast
-    # (the other side was too small but removing it cleans the detection)
     if len(sub_components) == 1 and int(sub_components[0].sum()) < int(component.sum()) * 0.95:
         return sub_components
-    return [component]
+    return None
+
+
+def _subsegment_by_contrast(
+    image: np.ndarray,
+    component: np.ndarray,
+    bg_modes: np.ndarray,
+    min_size_px: int,
+    max_depth: int = 3,
+) -> list[np.ndarray]:
+    """Iteratively split a blob using Otsu on the highest-variance color channel.
+
+    Each split produces sub-components that are checked again for further
+    splitting, up to *max_depth* levels. This handles cases where extreme
+    outlier pixels pull the first Otsu threshold away from subtler gradients.
+    """
+    contrast_channels = (image.astype(np.float32) - bg_modes[np.newaxis, np.newaxis, :]) / np.maximum(
+        bg_modes[np.newaxis, np.newaxis, :], 1.0
+    )
+
+    # Iterative: keep a work queue of components to try splitting
+    final = []
+    queue = [(component, 0)]
+
+    while queue:
+        comp, depth = queue.pop()
+        if depth >= max_depth:
+            final.append(comp)
+            continue
+
+        pieces = _otsu_split(contrast_channels, comp, min_size_px)
+        if pieces is None:
+            final.append(comp)
+        else:
+            for piece in pieces:
+                queue.append((piece, depth + 1))
+
+    return final if final else [component]
 
 
 def segment_frame(
