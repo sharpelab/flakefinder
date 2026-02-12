@@ -45,7 +45,6 @@ ignore = [
 ]
 
 [tool.ty.src]
-exclude = ["src/flakefinder/driver/"]  # legacy package, not worth typing
 
 [tool.ty.environment]
 extra-paths = ["scripts"]
