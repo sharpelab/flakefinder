@@ -12,6 +12,8 @@ import argparse
 import json
 import re
 import subprocess
+import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -52,12 +54,20 @@ def main() -> int:
     parser.add_argument("--name", type=str, default=None, help="Name for mosaic/crops (e.g. v4_entropy)")
     parser.add_argument("--no-dedup", action="store_true", help="Skip spatial deduplication")
     parser.add_argument(
+        "--plane",
+        type=Path,
+        default=None,
+        help="Focus plane JSON — enables revisit JSON output for top N",
+    )
+    parser.add_argument(
         "--dedup-radius",
         type=float,
         default=50.0,
         help="Merge radius for dedup in µm",
     )
     args = parser.parse_args()
+
+    t0 = time.monotonic()
 
     summary_path = args.seg_dir / "summary.json"
     if not summary_path.exists():
@@ -119,6 +129,8 @@ def main() -> int:
     summary["stats"]["tier_3"] = tier_counts[3]
     summary["detections_by_frame"] = all_detections
     summary["reranked_at"] = datetime.now().isoformat()
+    summary["rerank_command"] = sys.argv
+    summary["rerank_duration_s"] = round(time.monotonic() - t0, 2)
 
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)
@@ -157,7 +169,7 @@ def main() -> int:
                 fx, fy = frame_positions[frame_n]
                 px_x, px_y = d["center"]
                 d["stage_x"] = fx + (px_x - frame_w_px / 2) * um_per_px
-                d["stage_y"] = fy - (px_y - frame_h_px / 2) * um_per_px
+                d["stage_y"] = fy + (px_y - frame_h_px / 2) * um_per_px
 
             # Greedy NMS: sorted by (tier, -score), keep if no kept detection within radius
             sorted_all = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
@@ -279,6 +291,28 @@ def main() -> int:
                 print(f"\nSaved mosaic: {mosaic_path}")
                 print(f"Saved {len(crop_paths)} crops: {crops_dir}/")
                 subprocess.Popen(["present", str(mosaic_path)])
+
+    # Write revisit JSON for top N
+    if args.plane and all_flat:
+        with open(args.plane) as f:
+            plane = json.load(f)["plane"]
+        a, b, c = plane["a"], plane["b"], plane["c"]
+
+        points = []
+        for i, d in enumerate(ranked[: args.top]):
+            sx = d.get("stage_x")
+            sy = d.get("stage_y")
+            if sx is None:
+                continue
+            z = a * sx + b * sy + c
+            label = f"rank{i + 1:02d}_{d['frame']}_d{d.get('det_idx', 0)}"
+            points.append({"x": round(sx, 2), "y": round(sy, 2), "z": round(z, 2), "label": label})
+
+        revisit_name = f"revisit_{args.name}.json" if args.name else f"revisit_top{args.top}.json"
+        revisit_path = args.seg_dir / revisit_name
+        with open(revisit_path, "w") as f:
+            json.dump(points, f, indent=2)
+        print(f"\nSaved revisit JSON ({len(points)} points): {revisit_path}")
 
     return 0
 

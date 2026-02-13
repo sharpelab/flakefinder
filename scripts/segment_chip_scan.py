@@ -9,6 +9,7 @@ Usage:
 import argparse
 import json
 import re
+import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
@@ -19,6 +20,9 @@ import cv2
 import numpy as np
 
 from flakefinder.scan_utils import apply_flatfield
+
+_cached_ff: np.ndarray | None = None
+_cached_ff_path: str | None = None
 
 
 class FrameResult(NamedTuple):
@@ -45,9 +49,12 @@ def _process_frame(
         return FrameResult(frame_name, [], 0.0, True)
 
     if flatfield_path:
-        ff = np.load(flatfield_path).astype(np.float32)
-        ff = ff[:, :, ::-1]  # RGB -> BGR
-        corrected = apply_flatfield(raw, ff)
+        global _cached_ff, _cached_ff_path
+        if _cached_ff_path != flatfield_path:
+            _cached_ff = np.load(flatfield_path).astype(np.float32)[:, :, ::-1]
+            _cached_ff_path = flatfield_path
+        assert _cached_ff is not None
+        corrected = apply_flatfield(raw, _cached_ff)
     else:
         corrected = raw
 
@@ -178,6 +185,8 @@ def main() -> int:
 
     summary = {
         "timestamp": datetime.now().isoformat(),
+        "command": sys.argv,
+        "duration_s": round(elapsed, 2),
         "scan_dir": str(args.scan_dir),
         "params": {
             "flatfield": flatfield_str,
