@@ -1,8 +1,11 @@
 """Apply brightness/contrast/saturation adjustments to microscope images.
 
+Matches CSS filter behavior: no intermediate clamping, CSS saturate() color
+matrix, contrast pivots on 128.
+
 Usage:
     python scripts/enhance_image.py input.png -o output.jpg
-    python scripts/enhance_image.py input.png -o output.jpg --brightness 2.75 --contrast 4.5
+    python scripts/enhance_image.py input.png -o output.jpg --brightness 1.46 --contrast 4.47
     python scripts/enhance_image.py input.png -o output.jpg --saturation 2.0 --crop-preset center
 """
 
@@ -33,26 +36,36 @@ def crop_rect(image: np.ndarray, x1: int, y1: int, x2: int, y2: int) -> np.ndarr
     return image[y1:y2, x1:x2]
 
 
-def adjust_brightness(image: np.ndarray, factor: float) -> np.ndarray:
-    """Scale all pixel values by factor, clipped to 0-255."""
-    return np.clip(image.astype(np.float32) * factor, 0, 255).astype(np.uint8)
+def apply_brightness(img_f: np.ndarray, factor: float) -> np.ndarray:
+    """Scale all pixel values by factor (float32 in/out, no clamping)."""
+    return img_f * factor
 
 
-def adjust_contrast(image: np.ndarray, factor: float) -> np.ndarray:
-    """Apply contrast: (pixel - mean) * factor + mean, per channel, clipped to 0-255."""
-    img_f = image.astype(np.float32)
-    for c in range(img_f.shape[2]):
-        ch = img_f[:, :, c]
-        mean = ch.mean()
-        img_f[:, :, c] = (ch - mean) * factor + mean
-    return np.clip(img_f, 0, 255).astype(np.uint8)
+def apply_contrast(img_f: np.ndarray, factor: float) -> np.ndarray:
+    """CSS-style contrast: (pixel - 128) * factor + 128 (float32 in/out, no clamping)."""
+    return (img_f - 128) * factor + 128
 
 
-def adjust_saturation(image: np.ndarray, factor: float) -> np.ndarray:
-    """Multiply S channel in HSV by factor, clipped."""
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV).astype(np.float32)
-    hsv[:, :, 1] = np.clip(hsv[:, :, 1] * factor, 0, 255)
-    return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+def apply_saturation(img_f: np.ndarray, factor: float) -> np.ndarray:
+    """CSS-style saturate(): linear color matrix in RGB (float32 in/out, no clamping).
+
+    Input is BGR (OpenCV convention), converted to RGB for the matrix, then back.
+    """
+    # CSS saturate matrix coefficients (ITU-R BT.601 luma)
+    s = factor
+    mat = np.array(
+        [
+            [0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s],
+            [0.213 - 0.213 * s, 0.715 + 0.285 * s, 0.072 - 0.072 * s],
+            [0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s],
+        ],
+        dtype=np.float32,
+    )
+    # BGR → RGB, apply matrix, RGB → BGR
+    rgb = img_f[:, :, ::-1]
+    h, w, _ = rgb.shape
+    result_rgb = (rgb.reshape(-1, 3) @ mat.T).reshape(h, w, 3)
+    return result_rgb[:, :, ::-1]
 
 
 def main():
@@ -62,6 +75,13 @@ def main():
     parser.add_argument("--brightness", type=float, default=1.0, help="Brightness multiplier (default: 1.0)")
     parser.add_argument("--contrast", type=float, default=1.0, help="Contrast multiplier (default: 1.0)")
     parser.add_argument("--saturation", type=float, default=1.0, help="Saturation multiplier (default: 1.0)")
+
+    parser.add_argument(
+        "--order",
+        type=str,
+        default="bsc",
+        help="Apply order for brightness/contrast/saturation (default: bsc)",
+    )
 
     crop_group = parser.add_mutually_exclusive_group()
     crop_group.add_argument(
@@ -77,6 +97,10 @@ def main():
 
     args = parser.parse_args()
 
+    if sorted(args.order) != ["b", "c", "s"]:
+        print(f"--order must be a permutation of 'bcs', got '{args.order}'")
+        return 1
+
     image = cv2.imread(str(args.input))
     if image is None:
         print(f"Failed to read {args.input}")
@@ -85,7 +109,7 @@ def main():
     h, w = image.shape[:2]
     print(f"Input: {args.input} ({w}x{h})")
 
-    # Apply order: crop → brightness → contrast → saturation
+    # Crop first (always before enhancements)
     if args.crop_preset:
         image = crop_preset(image, args.crop_preset)
         print(f"Cropped ({args.crop_preset}): {image.shape[1]}x{image.shape[0]}")
@@ -97,17 +121,20 @@ def main():
         image = crop_rect(image, *coords)
         print(f"Cropped (rect): {image.shape[1]}x{image.shape[0]}")
 
-    if args.brightness != 1.0:
-        image = adjust_brightness(image, args.brightness)
-        print(f"Brightness: {args.brightness}")
+    # Apply enhancements in --order (float32 throughout, single clamp at end)
+    ops = {
+        "b": ("Brightness", args.brightness, apply_brightness),
+        "c": ("Contrast", args.contrast, apply_contrast),
+        "s": ("Saturation", args.saturation, apply_saturation),
+    }
+    img_f = image.astype(np.float32)
+    for key in args.order:
+        label, factor, fn = ops[key]
+        if factor != 1.0:
+            img_f = fn(img_f, factor)
+            print(f"{label}: {factor}")
 
-    if args.contrast != 1.0:
-        image = adjust_contrast(image, args.contrast)
-        print(f"Contrast: {args.contrast}")
-
-    if args.saturation != 1.0:
-        image = adjust_saturation(image, args.saturation)
-        print(f"Saturation: {args.saturation}")
+    image = np.clip(img_f, 0, 255).astype(np.uint8)
 
     cv2.imwrite(str(args.output), image)
     print(f"Saved: {args.output}")
