@@ -74,23 +74,18 @@ Write a prompt file to `/tmp/subtask_<descriptive_slug>.prompt.md`. Structure:
 
 <bulleted list of context files to read>
 
-## Task details
+## Requirements
 
-<full description of what to build/modify, including any specific requirements, code snippets, or values from the current session>
+<what the user asked for — pass through their requirements, not your interpretation of the implementation>
 ```
+
+**Requirements, not implementation.** Describe *what* is needed and *why*, not *how* to build it. The subtask reads the context files and figures out the approach — that's its job. Don't specify CLI flag names, function signatures, data formats, or step-by-step implementation plans unless the user explicitly dictated them.
+
+Include session-specific values when relevant (Z positions, file paths, measurements, error messages) — these are requirements context, not implementation detail. Also include test plans where applicable (e.g. dry-run verification, local unit tests, CLI smoke tests) — but NOT microscope hardware tests, those are operator-managed.
 
 **NEVER include "commit", "push", or sync instructions in the prompt.** The subtask's default behavior is to propose a plan and wait for approval. Don't override that — the user reviews before anything is committed.
 
-### 5. Inject session-specific details
-
-If relevant, pull details from the current session into the prompt:
-- Current Z reference values (from notebook)
-- Chip numbers and coordinates
-- Scan prefixes and file paths
-- Code snippets or function signatures the subtask needs
-- Specific decisions made during this session
-
-### 6. Spawn
+### 5. Spawn
 
 ```bash
 newclaude ~/sharpelab/flakefinder --agent subtask_agent -f /tmp/subtask_<slug>.prompt.md
@@ -98,7 +93,7 @@ newclaude ~/sharpelab/flakefinder --agent subtask_agent -f /tmp/subtask_<slug>.p
 
 Tell the user: the subtask is running in a new terminal. It will propose its plan before writing any code, and write a summary to `/tmp/<name>_summary.md` when done.
 
-### 7. After spawning
+### 6. After spawning
 
 - Log the spawn in the scan notebook: what task, what prompt file
 - When the user says the subtask is done (or you read its summary), review the output
