@@ -12,6 +12,7 @@ import bisect
 import threading
 import time
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 import cv2
 import numpy as np
@@ -178,6 +179,12 @@ class AutofocusFrame:
     image: np.ndarray | None = None  # Only populated if store_frames=True
 
 
+class FocusCaptureTiming(NamedTuple):
+    position_s: float  # Move to z_start
+    scan_s: float  # Z scan
+    total_s: float  # End-to-end
+
+
 @dataclass
 class FocusCaptureResult:
     """Result from focus_and_capture: best-focus image from a single Z scan."""
@@ -188,8 +195,9 @@ class FocusCaptureResult:
     frame_count: int
     scan_duration_s: float
     z_range_um: float
-    objective_position: int | None
+    objective_position: int
     sharpness_curve: list[dict]
+    timing: FocusCaptureTiming
 
 
 @dataclass
@@ -266,7 +274,7 @@ class AutofocusResult:
         }
 
 
-def _get_safe_range(nosepiece: Nosepiece, z_range_um: float | None) -> tuple[float, int | None]:
+def _get_safe_range(nosepiece: Nosepiece, z_range_um: float | None) -> tuple[float, int]:
     """Calculate safe Z range from current objective.
 
     Args:
@@ -452,6 +460,8 @@ def focus_and_capture(
     Returns:
         FocusCaptureResult with the sharpest frame's image and metadata.
     """
+    t_start = time.perf_counter()
+
     z_axis = scope.z
     original_speed = z_axis.velocity_um_s
 
@@ -465,6 +475,8 @@ def focus_and_capture(
 
     # Position at z_start at full speed, then set scan speed
     z_axis.move_to_corrected(z_start)
+    t_positioned = time.perf_counter()
+
     if z_speed_um_s is not None:
         z_axis.set_velocity_um_s(z_speed_um_s)
 
@@ -480,6 +492,8 @@ def focus_and_capture(
 
     z_axis.set_velocity_um_s(original_speed)
 
+    t_end = time.perf_counter()
+
     if not frames:
         raise ValueError("No frames captured during focus scan")
 
@@ -494,6 +508,11 @@ def focus_and_capture(
         z_range_um=safe_range,
         objective_position=objective_position,
         sharpness_curve=sharpness_curve,
+        timing=FocusCaptureTiming(
+            position_s=t_positioned - t_start,
+            scan_s=scan_duration,
+            total_s=t_end - t_start,
+        ),
     )
 
 

@@ -271,6 +271,8 @@ def run(
                 "timing_s": {
                     "move": round(move_s, 3),
                     "autofocus": round(af_s, 3),
+                    "af_position": round(fc.timing.position_s, 3),
+                    "af_scan": round(fc.timing.scan_s, 3),
                     "save": round(save_s, 3),
                     "total": round(total_s, 3),
                 },
