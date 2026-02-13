@@ -61,19 +61,24 @@ def _analyze_component(
         perim = cv2.arcLength(cnt, True)
         hull = cv2.convexHull(cnt)
         hull_area = cv2.contourArea(hull)
+        hull_perim = cv2.arcLength(hull, True)
         solidity = area / max(hull_area, 1)
         circularity = (4 * np.pi * area) / max(perim**2, 1)
+        perim_ratio = perim / max(hull_perim, 1.0)
         hull_pts = hull.reshape(-1, 2).tolist()
         contour_pts = cnt.reshape(-1, 2).tolist()
     else:
         solidity = 0.0
         circularity = 0.0
+        perim_ratio = 0.0
         hull_pts = []
         contour_pts = []
 
-    # Color uniformity: std of per-pixel normalized R contrast within blob
+    # Color uniformity: std of per-pixel normalized contrast within blob
     r_norm = (image[:, :, 2].astype(np.float32) - bg_modes[2]) / max(float(bg_modes[2]), 1.0)
     r_std = float(r_norm[component].std())
+    g_norm = (image[:, :, 1].astype(np.float32) - bg_modes[1]) / max(float(bg_modes[1]), 1.0)
+    g_std = float(g_norm[component].std())
 
     return {
         "bbox": [x_min, y_min, x_max - x_min, y_max - y_min],
@@ -87,7 +92,9 @@ def _analyze_component(
         ],
         "solidity": round(solidity, 4),
         "circularity": round(circularity, 4),
+        "perim_ratio": round(perim_ratio, 4),
         "r_std": round(r_std, 4),
+        "g_std": round(g_std, 4),
         "hull": hull_pts,
         "contour": contour_pts,
     }
@@ -177,6 +184,7 @@ def segment_frame(
     contrast_offset: float = 15.0,
     min_size_px: int = 1000,
     edge_margin_px: int = 50,
+    perim_ratio_thresh: float = 0.0,
 ) -> list[dict]:
     """Segment flakes by thresholding above background mode + offset.
 
@@ -229,18 +237,25 @@ def segment_frame(
             detections.append(det)
 
     detections.sort(key=lambda d: d["size_px"], reverse=True)
-    classify_detections(detections)
+    classify_detections(detections, perim_ratio_thresh=perim_ratio_thresh)
     return detections
 
 
-def classify_detections(detections: list[dict]) -> None:
-    """Classify detections in place (tape, thickness, etc.).
+def classify_detections(
+    detections: list[dict],
+    perim_ratio_thresh: float = 0.0,
+) -> None:
+    """Classify detections in place. Adds a 'classification' key.
 
-    Adds a 'classification' key to each detection dict.
-    Currently a stub — classification logic TBD.
+    Tape classification: detections with perim_ratio >= perim_ratio_thresh
+    are marked as "tape" (jagged/fractal contour boundary).
+    Set perim_ratio_thresh=0 to disable.
     """
     for det in detections:
-        det["classification"] = None
+        if perim_ratio_thresh > 0 and det.get("perim_ratio", 0) >= perim_ratio_thresh:
+            det["classification"] = "tape"
+        else:
+            det["classification"] = None
 
 
 def draw_scale_bar(image: np.ndarray, um_per_px: float) -> None:
@@ -280,8 +295,13 @@ def draw_detections(
     for i, d in enumerate(detections):
         s = d["size_px"]
         c = d.get("mean_contrast", 0)
-        color = (0, 255, 0) if s > 1000 else (0, 255, 255) if s > 500 else (0, 0, 255)
-        thickness = 2 if s > 1000 else 1
+        is_tape = d.get("classification") == "tape"
+        if is_tape:
+            color = (128, 128, 128)
+            thickness = 1
+        else:
+            color = (0, 255, 0) if s > 1000 else (0, 255, 255) if s > 500 else (0, 0, 255)
+            thickness = 2 if s > 1000 else 1
 
         bx, by, bw, bh = d["bbox"]
         if draw_bbox:
@@ -347,6 +367,12 @@ def main():
         default=0.05,
         help="Skip frame if dark pixel fraction exceeds this (edge/off-chip filter)",
     )
+    parser.add_argument(
+        "--perim-ratio",
+        type=float,
+        default=0.0,
+        help="Classify detections with perim_ratio >= this as tape (0 to disable)",
+    )
     parser.add_argument("--output", "-o", type=Path, default=None, help="Output image path")
     parser.add_argument("--save-plot", action="store_true", help="Also save matplotlib analysis plot")
     parser.add_argument(
@@ -377,7 +403,7 @@ def main():
         dets = []
         print(f"{args.input.name}: SKIPPED (dark_frac={dark_frac:.3f} > {args.dark_frac_cutoff})")
     else:
-        dets = segment_frame(corrected, args.contrast_offset, args.min_size, args.edge_margin)
+        dets = segment_frame(corrected, args.contrast_offset, args.min_size, args.edge_margin, args.perim_ratio)
         print(f"{args.input.name}: {len(dets)} detections (dark_frac={dark_frac:.3f})")
         for i, d in enumerate(dets):
             print(f"  #{i}: size={d['size_px']}px, center={d['center']}, contrast={d['mean_contrast']}")
@@ -402,6 +428,7 @@ def main():
             "min_size_px": args.min_size,
             "edge_margin_px": args.edge_margin,
             "dark_frac_cutoff": args.dark_frac_cutoff,
+            "perim_ratio_thresh": args.perim_ratio,
         },
         "dark_frac": round(dark_frac, 4),
         "skipped": skipped,
