@@ -15,9 +15,15 @@ def main():
         x = stage.x
         y = stage.y
 
+        # Move to stage center for safe ± moves
+        x_center = (x.min_um + x.max_um) / 2
+        y_center = (y.min_um + y.max_um) / 2
+        print(f"Moving to stage center: X={x_center:.0f}, Y={y_center:.0f} µm...")
+        x.move_to(x_center)
+        y.move_to(y_center)
+
         x_pos = x.position_um
         y_pos = y.position_um
-
         print(f"Position: X={x_pos:.0f}, Y={y_pos:.0f} µm")
         print(f"X velocity: {x.velocity_um_s:.0f} µm/s (current), max={x.max_velocity_um_s:.0f}")
         print(f"Y velocity: {y.velocity_um_s:.0f} µm/s (current), max={y.max_velocity_um_s:.0f}")
