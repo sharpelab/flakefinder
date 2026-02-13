@@ -179,9 +179,32 @@ class AutofocusFrame:
     image: np.ndarray | None = None  # Only populated if store_frames=True
 
 
+class ZScanTiming(NamedTuple):
+    """Timing breakdown from _run_z_scan."""
+
+    pre_scan_s: float  # Move to z_start + settle (0 if pre_positioned)
+    scan_s: float  # Async Z motion + frame capture
+    sharpness_s: float  # Post-scan sharpness computation
+    total_s: float  # Wall-clock for entire _run_z_scan call
+
+
+class ZScanResult(NamedTuple):
+    """Result from _run_z_scan."""
+
+    sharpness_curve: list[dict]
+    frames: list[AutofocusFrame] | None
+    timing: ZScanTiming
+    frame_count: int
+    z_sample_count: int
+
+
 class FocusCaptureTiming(NamedTuple):
-    position_s: float  # Move to z_start
-    scan_s: float  # Z scan
+    position_s: float  # Move to z_start at full speed
+    set_speed_s: float  # Set scan velocity
+    pre_scan_s: float  # _run_z_scan: move + settle (0 when pre_positioned)
+    scan_s: float  # Actual Z motion + frame capture
+    sharpness_s: float  # Sharpness computation for all frames
+    restore_speed_s: float  # Restore original velocity
     total_s: float  # End-to-end
 
 
@@ -335,7 +358,8 @@ def _run_z_scan(
     store_frames: bool,
     sharpness_method: str = "tenengrad",
     compute_all_metrics: bool = False,
-) -> tuple[list[dict], list[AutofocusFrame] | None, float, int, int]:
+    pre_positioned: bool = False,
+) -> ZScanResult:
     """Execute Z scan and capture frames.
 
     Args:
@@ -347,10 +371,12 @@ def _run_z_scan(
         store_frames: Whether to store images in result.
         sharpness_method: "tenengrad" or "laplacian".
         compute_all_metrics: If True, compute all 5 sharpness metrics per frame.
+        pre_positioned: If True, skip move to z_start and settle (caller already there).
 
     Returns:
-        (sharpness_curve, frames, duration, frame_count, z_sample_count) tuple.
+        ZScanResult with sharpness curve, frames, timing, and counts.
     """
+    t_func_start = time.perf_counter()
     # Data collection
     z_samples: list[tuple[float, float, float]] = []  # (t_before, t_after, z_um)
     frame_data: list[tuple[float, np.ndarray]] = []  # (t_capture, image)
@@ -379,9 +405,11 @@ def _run_z_scan(
             z_um = z_converter.GetMetricsValue(z_native)
             z_samples.append((t_before, t_after, z_um))
 
-    # Move to scan start position
-    z_axis.move_to_corrected(z_start)
-    time.sleep(0.1)  # Brief settle
+    # Move to scan start position (skip if caller already positioned us)
+    if not pre_positioned:
+        z_axis.move_to_corrected(z_start)
+        time.sleep(0.1)  # Brief settle
+    t_pre_scan_done = time.perf_counter()
 
     # Start Z polling
     z_thread = threading.Thread(target=z_poll_thread, daemon=True)
@@ -414,6 +442,7 @@ def _run_z_scan(
     scan_duration = scan_end_time - scan_start_time
 
     # Compute sharpness for each frame
+    t_sharpness_start = time.perf_counter()
     sharpness_curve = []
     frames = [] if store_frames else None
 
@@ -434,7 +463,20 @@ def _run_z_scan(
             assert frames is not None
             frames.append(AutofocusFrame(z_um=z_interp, sharpness=s, image=img))
 
-    return sharpness_curve, frames, scan_duration, len(frame_data), len(z_samples)
+    t_func_end = time.perf_counter()
+
+    return ZScanResult(
+        sharpness_curve=sharpness_curve,
+        frames=frames,
+        timing=ZScanTiming(
+            pre_scan_s=t_pre_scan_done - t_func_start,
+            scan_s=scan_duration,
+            sharpness_s=t_func_end - t_sharpness_start,
+            total_s=t_func_end - t_func_start,
+        ),
+        frame_count=len(frame_data),
+        z_sample_count=len(z_samples),
+    )
 
 
 def focus_and_capture(
@@ -479,8 +521,9 @@ def focus_and_capture(
 
     if z_speed_um_s is not None:
         z_axis.set_velocity_um_s(z_speed_um_s)
+    t_speed_set = time.perf_counter()
 
-    sharpness_curve, frames, scan_duration, frame_count, _ = _run_z_scan(
+    zsr = _run_z_scan(
         z_axis=z_axis,
         z_start=z_start,
         z_end=z_end,
@@ -488,29 +531,34 @@ def focus_and_capture(
         context=scope.context,
         store_frames=True,
         sharpness_method=sharpness_method,
+        pre_positioned=True,
     )
 
+    t_restore_start = time.perf_counter()
     z_axis.set_velocity_um_s(original_speed)
-
     t_end = time.perf_counter()
 
-    if not frames:
+    if not zsr.frames:
         raise ValueError("No frames captured during focus scan")
 
-    best = max(frames, key=lambda f: f.sharpness)
+    best = max(zsr.frames, key=lambda f: f.sharpness)
 
     return FocusCaptureResult(
         image=best.image,
         z_um=best.z_um,
         sharpness=best.sharpness,
-        frame_count=frame_count,
-        scan_duration_s=scan_duration,
+        frame_count=zsr.frame_count,
+        scan_duration_s=zsr.timing.scan_s,
         z_range_um=safe_range,
         objective_position=objective_position,
-        sharpness_curve=sharpness_curve,
+        sharpness_curve=zsr.sharpness_curve,
         timing=FocusCaptureTiming(
             position_s=t_positioned - t_start,
-            scan_s=scan_duration,
+            set_speed_s=t_speed_set - t_positioned,
+            pre_scan_s=zsr.timing.pre_scan_s,
+            scan_s=zsr.timing.scan_s,
+            sharpness_s=zsr.timing.sharpness_s,
+            restore_speed_s=t_end - t_restore_start,
             total_s=t_end - t_start,
         ),
     )
@@ -624,7 +672,7 @@ def continuous_autofocus(
     stored_initial_image = initial_image if store_frames else None
 
     # Run main scan
-    sharpness_curve, frames, scan_duration, frame_count, z_sample_count = _run_z_scan(
+    zsr = _run_z_scan(
         z_axis=z_axis,
         z_start=z_start,
         z_end=z_end,
@@ -634,6 +682,11 @@ def continuous_autofocus(
         sharpness_method=sharpness_method,
         compute_all_metrics=compute_all_metrics,
     )
+    sharpness_curve = zsr.sharpness_curve
+    frames = zsr.frames
+    scan_duration = zsr.timing.scan_s
+    frame_count = zsr.frame_count
+    z_sample_count = zsr.z_sample_count
 
     if not sharpness_curve:
         raise ValueError("No frames captured during autofocus scan")
@@ -680,7 +733,7 @@ def continuous_autofocus(
             coarse_speed = z_speed_um_s if z_speed_um_s is not None else original_speed
             z_axis.set_velocity_um_s(coarse_speed * fine_speed_factor)
 
-        fine_curve, fine_frames, fine_duration, fine_frame_count, fine_z_count = _run_z_scan(
+        fine_zsr = _run_z_scan(
             z_axis=z_axis,
             z_start=fine_z_start,
             z_end=fine_z_end,
@@ -690,6 +743,11 @@ def continuous_autofocus(
             sharpness_method=sharpness_method,
             compute_all_metrics=compute_all_metrics,
         )
+        fine_curve = fine_zsr.sharpness_curve
+        fine_frames = fine_zsr.frames
+        fine_duration = fine_zsr.timing.scan_s
+        fine_frame_count = fine_zsr.frame_count
+        fine_z_count = fine_zsr.z_sample_count
 
         # Restore speed after fine pass (before final move)
         z_axis.set_velocity_um_s(z_speed_um_s if z_speed_um_s is not None else original_speed)
@@ -725,7 +783,7 @@ def continuous_autofocus(
         z_axis.move_to_corrected(sf_z_start)
         z_axis.set_velocity_um_s(super_fine_speed_um_s)
 
-        sf_curve, sf_frames, sf_duration, sf_frame_count, sf_z_count = _run_z_scan(
+        sf_zsr = _run_z_scan(
             z_axis=z_axis,
             z_start=sf_z_start,
             z_end=sf_z_end,
@@ -735,6 +793,11 @@ def continuous_autofocus(
             sharpness_method=sharpness_method,
             compute_all_metrics=compute_all_metrics,
         )
+        sf_curve = sf_zsr.sharpness_curve
+        sf_frames = sf_zsr.frames
+        sf_duration = sf_zsr.timing.scan_s
+        sf_frame_count = sf_zsr.frame_count
+        sf_z_count = sf_zsr.z_sample_count
 
         # Restore speed after super fine pass
         z_axis.set_velocity_um_s(z_speed_um_s if z_speed_um_s is not None else original_speed)
