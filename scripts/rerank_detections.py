@@ -49,6 +49,7 @@ def main() -> int:
         help="Directory with raw frame_NNNN.jpg files (default: <seg_dir>/../scan_20x)",
     )
     parser.add_argument("--no-mosaic", action="store_true", help="Skip crop and mosaic generation")
+    parser.add_argument("--name", type=str, default=None, help="Name for mosaic/crops (e.g. v4_entropy)")
     parser.add_argument("--no-dedup", action="store_true", help="Skip spatial deduplication")
     parser.add_argument(
         "--dedup-radius",
@@ -206,8 +207,11 @@ def main() -> int:
             print(f"Warning: scan dir not found: {scan_dir} (use --scan-dir or --no-mosaic)")
         else:
             top_dets = ranked[: args.top]
-            crops_dir = args.seg_dir / "crops"
-            crops_dir.mkdir(exist_ok=True)
+            if args.name:
+                crops_dir = args.seg_dir / "crops" / args.name
+            else:
+                crops_dir = args.seg_dir / "crops"
+            crops_dir.mkdir(parents=True, exist_ok=True)
 
             crop_paths = []
             crop_labels = []
@@ -253,7 +257,8 @@ def main() -> int:
                 crop_labels.append(f"#{i + 1} {frame_name} R={r:+.2f} G={g:+.2f}")
 
             if crop_paths:
-                mosaic_path = args.seg_dir / f"top{args.top}.jpg"
+                mosaic_name = args.name or f"top{args.top}"
+                mosaic_path = args.seg_dir / f"{mosaic_name}.jpg"
                 import math
 
                 n_cols = 5
