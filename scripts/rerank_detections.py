@@ -147,7 +147,10 @@ def main() -> int:
 
             # Compute stage coords for each detection
             for d in all_flat:
-                frame_n = int(re.search(r"\d+", d["frame"]).group())
+                m = re.search(r"\d+", d["frame"])
+                if m is None:
+                    continue
+                frame_n = int(m.group())
                 if frame_n not in frame_positions:
                     continue
                 fx, fy = frame_positions[frame_n]
