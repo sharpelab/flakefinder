@@ -254,10 +254,14 @@ def main() -> int:
 
             if crop_paths:
                 mosaic_path = args.seg_dir / f"top{args.top}.jpg"
+                import math
+
+                n_cols = 5
+                n_rows = math.ceil(len(crop_paths) / n_cols)
                 mosaic = make_mosaic(
                     crop_paths,
-                    rows=2,
-                    cols=None,
+                    rows=n_rows,
+                    cols=n_cols,
                     max_dim=5000,
                     margin=4,
                     bg_color=(30, 30, 30),
