@@ -49,6 +49,13 @@ def main() -> int:
         help="Directory with raw frame_NNNN.jpg files (default: <seg_dir>/../scan_20x)",
     )
     parser.add_argument("--no-mosaic", action="store_true", help="Skip crop and mosaic generation")
+    parser.add_argument("--no-dedup", action="store_true", help="Skip spatial deduplication")
+    parser.add_argument(
+        "--dedup-radius",
+        type=float,
+        default=50.0,
+        help="Merge radius for dedup in µm",
+    )
     args = parser.parse_args()
 
     summary_path = args.seg_dir / "summary.json"
@@ -118,8 +125,61 @@ def main() -> int:
     print(f"Re-scored {len(frame_jsons)} frames, {total_detections} detections")
     print(f"  Tier 1: {tier_counts[1]}  Tier 2: {tier_counts[2]}  Tier 3: {tier_counts[3]}")
 
-    # Print top N
     all_flat = [d for dets in all_detections.values() for d in dets]
+
+    # Spatial deduplication via greedy NMS on stage coordinates
+    if not args.no_dedup and all_flat:
+        scan_dir = args.scan_dir or (args.seg_dir / ".." / "scan_20x").resolve()
+        scan_meta_path = scan_dir / "scan_meta.json"
+        if not scan_meta_path.exists():
+            print(f"Warning: {scan_meta_path} not found, skipping dedup")
+        else:
+            with open(scan_meta_path) as f:
+                scan_meta = json.load(f)
+
+            # Build frame index → stage position lookup
+            um_per_px = scan_meta["optics"]["sample_pixel_x_um"]
+            frame_w_px = scan_meta["camera"]["frame_width_px"]
+            frame_h_px = scan_meta["camera"]["frame_height_px"]
+            frame_positions: dict[int, tuple[float, float]] = {}
+            for fr in scan_meta["frames"]:
+                frame_positions[fr["n"]] = ((fr["x_start"] + fr["x_end"]) / 2, fr["y_um"])
+
+            # Compute stage coords for each detection
+            for d in all_flat:
+                frame_n = int(re.search(r"\d+", d["frame"]).group())
+                if frame_n not in frame_positions:
+                    continue
+                fx, fy = frame_positions[frame_n]
+                px_x, px_y = d["center"]
+                d["stage_x"] = fx + (px_x - frame_w_px / 2) * um_per_px
+                d["stage_y"] = fy - (px_y - frame_h_px / 2) * um_per_px
+
+            # Greedy NMS: sorted by (tier, -score), keep if no kept detection within radius
+            sorted_all = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
+            radius_sq = args.dedup_radius**2
+            kept = []
+            kept_coords = []
+            for d in sorted_all:
+                sx = d.get("stage_x")
+                sy = d.get("stage_y")
+                if sx is None:
+                    kept.append(d)
+                    continue
+                is_dup = False
+                for kx, ky in kept_coords:
+                    if (sx - kx) ** 2 + (sy - ky) ** 2 < radius_sq:
+                        is_dup = True
+                        break
+                if not is_dup:
+                    kept.append(d)
+                    kept_coords.append((sx, sy))
+
+            n_before = len(all_flat)
+            all_flat = kept
+            print(f"Dedup: {n_before} → {len(all_flat)} unique (radius={args.dedup_radius:.0f} µm)")
+
+    # Print top N
     if all_flat:
         ranked = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
         print(f"\n--- Top {args.top} ---")
