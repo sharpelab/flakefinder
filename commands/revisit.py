@@ -233,7 +233,7 @@ def run(
             fine_pass=fine,
             super_fine_pass=super_fine,
             store_frames=True,
-            settle_time_s=0,
+            move_to_best_z=False,
         )
         t_af_end = time.perf_counter()
 

@@ -433,6 +433,7 @@ def continuous_autofocus(
     compute_all_metrics: bool = False,
     settle_time_s: float = 0.2,
     min_dynamic_range: float = 0.20,
+    move_to_best_z: bool = True,
 ) -> AutofocusResult:
     """Perform continuous Z-scan autofocus.
 
@@ -665,18 +666,22 @@ def continuous_autofocus(
         best_z = initial_z
         best_sharpness = initial_sharpness
 
-    # Move to best Z position (or back to initial if stayed_at_initial)
-    z_axis.move_to_corrected(best_z)
-    time.sleep(settle_time_s)
-
     # Restore original Z speed
     z_axis.set_velocity_um_s(original_speed)
 
-    # Capture final sharpness (flush stale sensor buffer first)
-    camera.capture()
-    final_image = camera.capture()
-    final_sharpness = sharpness(final_image, method=sharpness_method)
-    stored_final_image = final_image if store_frames else None
+    if move_to_best_z:
+        # Move to best Z position (or back to initial if stayed_at_initial)
+        z_axis.move_to_corrected(best_z)
+        time.sleep(settle_time_s)
+
+        # Capture final sharpness (flush stale sensor buffer first)
+        camera.capture()
+        final_image = camera.capture()
+        final_sharpness = sharpness(final_image, method=sharpness_method)
+        stored_final_image = final_image if store_frames else None
+    else:
+        final_sharpness = best_sharpness
+        stored_final_image = None
 
     return AutofocusResult(
         selected_z_um=best_z,
