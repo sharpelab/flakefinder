@@ -21,13 +21,16 @@ import argparse
 import json
 import math
 import os
+import queue
 import shutil
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
+import numpy as np
 from PIL import Image as PILImage
 
 from flakefinder.leica.autofocus import focus_and_capture
@@ -204,6 +207,22 @@ def run(
     # Create output directory
     os.makedirs(output)
 
+    # Background save worker — overlaps PNG encode with next point's move.
+    # Potential optimization: cv2.imwrite with low compression level would be
+    # faster than PIL, but needs BGR conversion since images are stored as RGB.
+    save_q: queue.Queue[tuple[str, np.ndarray] | None] = queue.Queue()
+
+    def save_worker():
+        while True:
+            item = save_q.get()
+            if item is None:
+                break
+            path, img = item
+            PILImage.fromarray(img).save(path)
+
+    saver = threading.Thread(target=save_worker, daemon=True)
+    saver.start()
+
     # Execution loop
     results: list[dict] = []
     t_total_start = time.perf_counter()
@@ -231,30 +250,25 @@ def run(
         )
         t_af_end = time.perf_counter()
 
-        # Phase 3: Save best frame
-        t_save_start = time.perf_counter()
+        # Phase 3: Enqueue save (runs in background, overlaps with next move)
         filename = _output_filename(i, p.label, mag_str)
         filepath = os.path.join(output, filename)
-        PILImage.fromarray(fc.image).save(filepath)
-        t_save_end = time.perf_counter()
+        save_q.put((filepath, fc.image))
 
         t_point_end = time.perf_counter()
 
         # Phase durations
         move_s = t_move_end - t_move_start
         af_s = t_af_end - t_af_start
-        save_s = t_save_end - t_save_start
         total_s = t_point_end - t_move_start
         z_adj = fc.z_um - p.z
 
         # Verbose per-point output
         vprint(
-            f"  Move: {move_s * 1000:.0f}ms | AF: {af_s * 1000:.0f}ms "
-            f"({fc.frame_count} frames) | Save: {save_s * 1000:.0f}ms | "
-            f"Total: {total_s:.1f}s"
+            f"  Move: {move_s * 1000:.0f}ms | AF: {af_s * 1000:.0f}ms ({fc.frame_count} frames) | Total: {total_s:.1f}s"
         )
         vprint(f"  Z: {p.z:.1f} -> {fc.z_um:.1f} ({z_adj:+.1f}), sharpness={fc.sharpness:.1f}")
-        vprint(f"  Saved: {filename}")
+        vprint(f"  Saving: {filename}")
 
         results.append(
             {
@@ -277,12 +291,17 @@ def run(
                     "af_scan": round(fc.timing.scan_s, 3),
                     "af_sharpness_tail": round(fc.timing.sharpness_tail_s, 3),
                     "af_restore_speed": round(fc.timing.restore_speed_s, 3),
-                    "save": round(save_s, 3),
                     "total": round(total_s, 3),
                 },
                 "image": filename,
             }
         )
+
+    # Drain save worker before writing metadata
+    t_save_drain_start = time.perf_counter()
+    save_q.put(None)
+    saver.join()
+    save_tail_s = time.perf_counter() - t_save_drain_start
 
     t_total_end = time.perf_counter()
     total_elapsed = t_total_end - t_total_start
@@ -290,7 +309,6 @@ def run(
     # Aggregate timing
     move_total = sum(r["timing_s"]["move"] for r in results)
     af_total = sum(r["timing_s"]["autofocus"] for r in results)
-    save_total = sum(r["timing_s"]["save"] for r in results)
 
     # Save metadata
     meta = {
@@ -303,7 +321,7 @@ def run(
         "aggregate_timing_s": {
             "move": round(move_total, 2),
             "autofocus": round(af_total, 2),
-            "save": round(save_total, 2),
+            "save_tail": round(save_tail_s, 2),
             "total": round(total_elapsed, 2),
         },
         **micro_meta,
@@ -324,9 +342,7 @@ def run(
         print("REVISIT SUMMARY")
         print(f"  Points: {n}")
         print(f"  Total time: {total_elapsed:.1f}s")
-        print(
-            f"  Breakdown: move={move_total:.1f}s, AF={af_total:.1f}s (avg {af_total / n:.1f}s), save={save_total:.1f}s"
-        )
+        print(f"  Breakdown: move={move_total:.1f}s, AF={af_total:.1f}s (avg {af_total / n:.1f}s)")
         print(f"  Output: {output}/")
         print()
 
