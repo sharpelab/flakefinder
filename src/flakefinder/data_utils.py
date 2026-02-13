@@ -104,7 +104,7 @@ def compute_frame_size_um(
     return Point2F(bl.frame_width_px * sample_pixel_x, bl.frame_height_px * sample_pixel_y)
 
 
-def load_chip_geometry(chips_path: str, chip_index: int) -> ChipGeometry:
+def load_chip_geometry(chips_path: Path, chip_index: int) -> ChipGeometry:
     """Load chip geometry from find_chips.py output.
 
     Args:

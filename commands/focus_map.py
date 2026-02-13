@@ -334,11 +334,11 @@ def run_focus_map(
                         save_debug_frames(af, dbg / lbl)
                     if after is not None:
                         if img_path:
-                            PILImage.fromarray(after).save(str(img_path), quality=95)
+                            PILImage.fromarray(after).save(img_path, quality=95)
                         if dbg:
                             point_dir = dbg / lbl
                             point_dir.mkdir(parents=True, exist_ok=True)
-                            PILImage.fromarray(after).save(str(point_dir / "after.png"))
+                            PILImage.fromarray(after).save(point_dir / "after.png")
 
                 save_futures.append(save_executor.submit(_save))
 
@@ -395,7 +395,7 @@ def _plan(
         ValueError: On invalid inputs (missing file, bad chip index).
         FileNotFoundError: If chips_meta file doesn't exist.
     """
-    chip_geo = load_chip_geometry(str(chips_meta), chip)
+    chip_geo = load_chip_geometry(chips_meta, chip)
     convex_hull = chip_geo.polygon
 
     # Compute contour sample count from perimeter and target spacing

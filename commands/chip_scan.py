@@ -585,7 +585,7 @@ def _plan(
     if not chips_meta.exists():
         raise ValueError(f"Chips file not found: {chips_meta}")
 
-    chip_geo = load_chip_geometry(str(chips_meta), chip)
+    chip_geo = load_chip_geometry(chips_meta, chip)
     bbox = chip_geo.bbox
     polygon = chip_geo.polygon
 
