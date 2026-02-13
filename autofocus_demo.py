@@ -60,7 +60,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--super-fine",
         action="store_true",
-        help="Third pass: 10um range at 20um/s for maximum precision",
+        help="Three-pass (implies --fine): coarse + fine + 10um at 20um/s",
     )
     parser.add_argument(
         "--sharpness-method",

@@ -156,6 +156,7 @@ def run(
     points: list[RevisitPoint],
     objective_mag: str,
     z_speed: float = 1250,
+    z_range: float | None = None,
     settle_time: float = 0.2,
     exposure_ms: float = 1.0,
     gain: float | None = None,
@@ -228,6 +229,7 @@ def run(
         af_result = continuous_autofocus(
             scope,
             z_start_um=p.z,
+            z_range_um=z_range,
             z_speed_um_s=z_speed,
             fine_pass=fine,
             super_fine_pass=super_fine,
@@ -309,6 +311,7 @@ def run(
         "total_elapsed_s": round(total_elapsed, 2),
         "point_count": len(route),
         "objective_mag": mag,
+        "z_range": z_range,
         "fine": fine,
         "super_fine": super_fine,
         "aggregate_timing_s": {
@@ -398,10 +401,15 @@ Examples:
     af_group = parser.add_argument_group("Autofocus")
     af_group.add_argument("--z-speed", type=float, default=1250, help="Z speed in um/s (default: 1250)")
     af_group.add_argument(
+        "--z-range", type=float, default=None, help="AF search range in um (default: auto from objective)"
+    )
+    af_group.add_argument(
         "--settle-time", type=float, default=0.2, help="Settle time after AF in seconds (default: 0.2)"
     )
     af_group.add_argument("--fine", action="store_true", help="Two-pass AF: coarse then fine 50um scan")
-    af_group.add_argument("--super-fine", action="store_true", help="Three-pass AF: coarse + fine + 10um super-fine")
+    af_group.add_argument(
+        "--super-fine", action="store_true", help="Three-pass AF (implies --fine): coarse + fine + 10um super-fine"
+    )
 
     # Camera
     cam_group = parser.add_argument_group("Camera")
@@ -464,6 +472,7 @@ def main() -> int:
                 points=points,
                 objective_mag=args.objective_mag,
                 z_speed=args.z_speed,
+                z_range=args.z_range,
                 settle_time=args.settle_time,
                 exposure_ms=args.exposure_ms,
                 gain=args.gain,

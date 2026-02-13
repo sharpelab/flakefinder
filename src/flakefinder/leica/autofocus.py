@@ -459,7 +459,7 @@ def continuous_autofocus(
         fine_speed_factor: Speed multiplier for fine pass (default 0.25 = 1/4 speed).
             Slower fine pass improves precision in the critical region.
         super_fine_pass: If True, do a third pass with super_fine_range_um around
-            best Z at super_fine_speed_um_s. Requires fine_pass or runs after coarse.
+            best Z at super_fine_speed_um_s. Implies fine_pass=True (three-pass).
         super_fine_range_um: Range for super fine pass (default 10µm).
         super_fine_speed_um_s: Absolute Z speed for super fine pass (default 20µm/s).
         sharpness_method: "tenengrad" (default) or "laplacian". Laplacian is more
@@ -483,6 +483,10 @@ def continuous_autofocus(
     Raises:
         ValueError: If Z range/position exceeds safety limits.
     """
+    # Super-fine implies fine (three-pass: coarse → fine → super-fine)
+    if super_fine_pass:
+        fine_pass = True
+
     # Extract subsystems from facade
     z_axis = scope.z
     camera = scope.camera
