@@ -18,7 +18,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from mosaic_util import make_mosaic
-from segment_flakes import classify_detections, score_detections
+from segment_flakes import classify_detections, draw_scale_bar, score_detections
 
 
 def _natural_sort_key(path: Path) -> int:
@@ -148,7 +148,8 @@ def main() -> int:
 
             crop_paths = []
             crop_labels = []
-            pad = 150
+            pad = 250
+            um_per_px = summary.get("params", {}).get("pixel_size_um", 0.36)
 
             for i, d in enumerate(top_dets):
                 frame_name = d["frame"]
@@ -179,6 +180,7 @@ def main() -> int:
                 x1 = min(w, bx + bw + pad)
                 y1 = min(h, by + bh + pad)
                 crop = img[y0:y1, x0:x1]
+                draw_scale_bar(crop, um_per_px)
 
                 crop_path = crops_dir / f"rank{i + 1:02d}_{frame_name}_d{det_idx}.jpg"
                 cv2.imwrite(str(crop_path), crop)
