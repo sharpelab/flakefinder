@@ -19,6 +19,16 @@ from scipy.stats import kurtosis as scipy_kurtosis
 
 from flakefinder.scan_utils import apply_flatfield
 
+# R-G calibration curve: R = 0.193*G^2 - 0.217*G - 0.604
+_CAL_POLY = np.array([0.193, -0.217, -0.604])
+_G_CURVE = np.linspace(-0.5, 6.0, 500)
+_R_CURVE = np.polyval(_CAL_POLY, _G_CURVE)
+
+
+def cal_distance(r: float, g: float) -> float:
+    """Perpendicular distance from (g, r) to hBN calibration curve."""
+    return float(np.sqrt((_G_CURVE - g) ** 2 + (_R_CURVE - r) ** 2).min())
+
 
 def histogram_mode(image: np.ndarray, channel: int | None = None) -> float:
     """Find the histogram peak (mode) of an image or single channel."""
@@ -86,16 +96,31 @@ def _analyze_component(
     b_std = float(b_norm[component].std())
     b_kurt = float(scipy_kurtosis(b_norm[component], fisher=True))
 
+    # Internal gradient energy (Sobel on G channel, masked to blob)
+    gray_g = image[:, :, 1].astype(np.float32)
+    sx = cv2.Sobel(gray_g, cv2.CV_32F, 1, 0, ksize=3)
+    sy = cv2.Sobel(gray_g, cv2.CV_32F, 0, 1, ksize=3)
+    grad_mag = np.sqrt(sx * sx + sy * sy)
+    grad_energy = float(grad_mag[component].mean())
+
+    # Histogram entropy of G normalized contrast within blob
+    g_vals = g_norm[component]
+    hist, _ = np.histogram(g_vals, bins=50)
+    hist = hist[hist > 0]
+    probs = hist / hist.sum()
+    g_entropy = float(-np.sum(probs * np.log2(probs)))
+
+    r_contrast = round(float(norm_contrast_bgr[2]), 4)
+    g_contrast = round(float(norm_contrast_bgr[1]), 4)
+    b_contrast = round(float(norm_contrast_bgr[0]), 4)
+
     return {
         "bbox": [x_min, y_min, x_max - x_min, y_max - y_min],
         "center": [round((x_min + x_max) / 2, 1), round((y_min + y_max) / 2, 1)],
         "size_px": int(component.sum()),
         "mean_contrast": round(mean_contrast, 1),
-        "contrast_rgb": [
-            round(float(norm_contrast_bgr[2]), 4),
-            round(float(norm_contrast_bgr[1]), 4),
-            round(float(norm_contrast_bgr[0]), 4),
-        ],
+        "contrast_rgb": [r_contrast, g_contrast, b_contrast],
+        "cal_dist": round(cal_distance(r_contrast, g_contrast), 4),
         "solidity": round(solidity, 4),
         "circularity": round(circularity, 4),
         "perim_ratio": round(perim_ratio, 4),
@@ -105,6 +130,8 @@ def _analyze_component(
         "g_kurt": round(g_kurt, 4),
         "b_std": round(b_std, 4),
         "b_kurt": round(b_kurt, 4),
+        "grad_energy": round(grad_energy, 2),
+        "g_entropy": round(g_entropy, 4),
         "hull": hull_pts,
         "contour": contour_pts,
     }
@@ -251,21 +278,46 @@ def segment_frame(
     return detections
 
 
+def score_detections(detections: list[dict]) -> None:
+    """Compute tier and score for detections in place.
+
+    Reads existing keys (perim_ratio, cal_dist, g_kurt, size_px).
+    Adds keys: tier, score.
+    """
+    for det in detections:
+        pr = det["perim_ratio"]
+        cd = det["cal_dist"]
+        if pr < 1.20 and cd < 1.0:
+            det["tier"] = 1
+        elif pr < 1.35 or cd < 1.0:
+            det["tier"] = 2
+        else:
+            det["tier"] = 3
+        det["score"] = round(
+            max(det.get("g_kurt", 0), 0) * (1.0 / (1.0 + cd)) * np.log(max(det["size_px"], 1)),
+            4,
+        )
+
+
 def classify_detections(
     detections: list[dict],
     perim_ratio_thresh: float = 0.0,
 ) -> None:
-    """Classify detections in place. Adds a 'classification' key.
+    """Classify detections and compute ranking scores in place.
 
-    Tape classification: detections with perim_ratio >= perim_ratio_thresh
-    are marked as "tape" (jagged/fractal contour boundary).
-    Set perim_ratio_thresh=0 to disable.
+    Adds keys: classification, tier, score.
     """
+    if not detections:
+        return
+
+    # Tape classification
     for det in detections:
         if perim_ratio_thresh > 0 and det.get("perim_ratio", 0) >= perim_ratio_thresh:
             det["classification"] = "tape"
         else:
             det["classification"] = None
+
+    score_detections(detections)
 
 
 def draw_scale_bar(image: np.ndarray, um_per_px: float) -> None:
@@ -416,7 +468,12 @@ def main():
         dets = segment_frame(corrected, args.contrast_offset, args.min_size, args.edge_margin, args.perim_ratio)
         print(f"{args.input.name}: {len(dets)} detections (dark_frac={dark_frac:.3f})")
         for i, d in enumerate(dets):
-            print(f"  #{i}: size={d['size_px']}px, center={d['center']}, contrast={d['mean_contrast']}")
+            R, G = d["contrast_rgb"][0], d["contrast_rgb"][1]
+            print(
+                f"  #{i}: {d['size_px']}px  R={R:+.2f} G={G:+.2f}  "
+                f"grad={d['grad_energy']:.1f}  entropy={d['g_entropy']:.2f}  "
+                f"pr={d['perim_ratio']:.2f}  r_std={d['r_std']:.3f}"
+            )
 
     # Output image — draw on raw to preserve true colors
     out = args.output or args.input.with_suffix(".seg.jpg")

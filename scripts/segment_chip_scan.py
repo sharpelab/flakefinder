@@ -214,26 +214,15 @@ def main() -> int:
     print(f"  Tier 2:           {tier_counts[2]}")
     print(f"  Tier 3:           {tier_counts[3]}")
 
-    # Top 10 by score_a and score_b
+    # Top 10 by score
     all_flat = [d for dets in all_detections.values() for d in dets]
     if all_flat:
-        print("\n--- Top 10 by score_a ---")
-        by_a = sorted(all_flat, key=lambda d: d.get("score_a", 0), reverse=True)[:10]
-        for i, d in enumerate(by_a):
+        print("\n--- Top 10 by score ---")
+        by_score = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))[:10]
+        for i, d in enumerate(by_score):
             print(
                 f"  {i + 1}. {d['frame']} "
-                f"score_a={d.get('score_a', 0):.3f} "
-                f"tier={d.get('tier', '?')} "
-                f"size={d['size_px']}px "
-                f"cal_dist={d.get('cal_dist', 0):.3f}"
-            )
-
-        print("\n--- Top 10 by score_b ---")
-        by_b = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score_b", 0)))[:10]
-        for i, d in enumerate(by_b):
-            print(
-                f"  {i + 1}. {d['frame']} "
-                f"score_b={d.get('score_b', 0):.3f} "
+                f"score={d.get('score', 0):.3f} "
                 f"tier={d.get('tier', '?')} "
                 f"size={d['size_px']}px "
                 f"cal_dist={d.get('cal_dist', 0):.3f}"
