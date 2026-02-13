@@ -149,8 +149,9 @@ def main() -> int:
         if not r.detections:
             continue
 
-        # Per-frame JSON (full detections with hull/contour)
-        frame_json = {"frame": name, "dark_frac": round(r.dark_frac, 4), "detections": r.detections}
+        # Per-frame JSON (geometry only — tier/score live in summary.json)
+        geom_dets = [{k: v for k, v in d.items() if k not in ("tier", "score", "classification")} for d in r.detections]
+        frame_json = {"frame": name, "dark_frac": round(r.dark_frac, 4), "detections": geom_dets}
         with open(args.output / f"{name}.json", "w") as f:
             json.dump(frame_json, f, indent=2)
 

@@ -23,15 +23,6 @@ from mosaic_util import make_mosaic
 from segment_flakes import classify_detections, draw_scale_bar, score_detections
 
 
-def _natural_sort_key(path: Path) -> int:
-    m = re.search(r"\d+", path.stem)
-    return int(m.group()) if m else 0
-
-
-def _strip_geometry(det: dict) -> dict:
-    return {k: v for k, v in det.items() if k not in ("hull", "contour")}
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Re-rank detections in a segmentation output directory",
@@ -77,46 +68,26 @@ def main() -> int:
     with open(summary_path) as f:
         summary = json.load(f)
 
-    # Discover per-frame JSONs
-    frame_jsons = sorted(args.seg_dir.glob("frame_*.json"), key=_natural_sort_key)
-    if not frame_jsons:
-        print(f"No frame_*.json files in {args.seg_dir}")
+    all_detections: dict[str, list[dict]] = summary.get("detections_by_frame", {})
+    if not all_detections:
+        print(f"No detections_by_frame in {summary_path}")
         return 1
 
     rescore_fn = classify_detections if args.reclassify else score_detections
 
-    # Re-score each frame and overwrite
+    # Re-score from summary (no per-frame JSON I/O)
     tier_counts = {1: 0, 2: 0, 3: 0}
     total_detections = 0
     frames_with_dets = 0
-    all_detections: dict[str, list[dict]] = {}
-    full_detections: dict[str, list[dict]] = {}  # with hull/contour for mosaic
 
-    for fj in frame_jsons:
-        with open(fj) as f:
-            frame_data = json.load(f)
-
-        dets = frame_data["detections"]
+    for _frame_name, dets in all_detections.items():
         if not dets:
             continue
-
         rescore_fn(dets)
-
-        # Overwrite per-frame JSON
-        with open(fj, "w") as f:
-            json.dump(frame_data, f, indent=2)
-
-        frame_name = frame_data["frame"]
         total_detections += len(dets)
         frames_with_dets += 1
-        full_detections[frame_name] = dets
-
-        stripped = [_strip_geometry(d) for d in dets]
-        for idx, d in enumerate(stripped):
-            d["frame"] = frame_name
+        for idx, d in enumerate(dets):
             d["det_idx"] = idx
-        all_detections[frame_name] = stripped
-
         for d in dets:
             tier = d.get("tier", 3)
             tier_counts[tier] = tier_counts.get(tier, 0) + 1
@@ -135,7 +106,8 @@ def main() -> int:
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)
 
-    print(f"Re-scored {len(frame_jsons)} frames, {total_detections} detections")
+    n_frames = summary["stats"].get("total_frames", len(all_detections))
+    print(f"Re-scored {n_frames} frames, {total_detections} detections")
     print(f"  Tier 1: {tier_counts[1]}  Tier 2: {tier_counts[2]}  Tier 3: {tier_counts[3]}")
 
     all_flat = [d for dets in all_detections.values() for d in dets]
@@ -238,8 +210,14 @@ def main() -> int:
                     print(f"  Warning: {frame_path} not found, skipping crop")
                     continue
 
-                # Get full detection with contour
-                full_det = full_detections[frame_name][det_idx]
+                # Load per-frame JSON for contour geometry
+                frame_json_path = args.seg_dir / f"{frame_name}.json"
+                if not frame_json_path.exists():
+                    print(f"  Warning: {frame_json_path} not found, skipping crop")
+                    continue
+                with open(frame_json_path) as f:
+                    full_det = json.load(f)["detections"][det_idx]
+
                 img = cv2.imread(frame_path)
                 if img is None:
                     print(f"  Warning: failed to read {frame_path}, skipping crop")
