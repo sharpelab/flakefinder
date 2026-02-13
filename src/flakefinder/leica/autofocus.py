@@ -179,6 +179,20 @@ class AutofocusFrame:
 
 
 @dataclass
+class FocusCaptureResult:
+    """Result from focus_and_capture: best-focus image from a single Z scan."""
+
+    image: np.ndarray
+    z_um: float
+    sharpness: float
+    frame_count: int
+    scan_duration_s: float
+    z_range_um: float
+    objective_position: int | None
+    sharpness_curve: list[dict]
+
+
+@dataclass
 class AutofocusResult:
     """Result from autofocus operation."""
 
@@ -413,6 +427,74 @@ def _run_z_scan(
             frames.append(AutofocusFrame(z_um=z_interp, sharpness=s, image=img))
 
     return sharpness_curve, frames, scan_duration, len(frame_data), len(z_samples)
+
+
+def focus_and_capture(
+    scope: "Microscope",
+    *,
+    z_center_um: float | None = None,
+    z_range_um: float | None = None,
+    z_speed_um_s: float | None = None,
+    sharpness_method: str = "tenengrad",
+) -> FocusCaptureResult:
+    """Scan Z range and return the sharpest frame.
+
+    Single-pass scan optimized for speed: no initial capture, no return move,
+    positions at z_start at full speed before setting scan speed.
+
+    Args:
+        scope: Microscope facade instance.
+        z_center_um: Center of Z scan range in µm. None = current position.
+        z_range_um: Z scan range in µm. None = auto from objective.
+        z_speed_um_s: Z scan speed in µm/s. None = use current speed.
+        sharpness_method: Sharpness metric to use.
+
+    Returns:
+        FocusCaptureResult with the sharpest frame's image and metadata.
+    """
+    z_axis = scope.z
+    original_speed = z_axis.velocity_um_s
+
+    safe_range, objective_position = _get_safe_range(scope.nosepiece, z_range_um)
+
+    center_z = z_center_um if z_center_um is not None else z_axis.position_um
+    z_start = center_z + safe_range / 2
+    z_end = center_z - safe_range / 2
+
+    _validate_z_limits(z_axis, z_start, z_end, None)
+
+    # Position at z_start at full speed, then set scan speed
+    z_axis.move_to_corrected(z_start)
+    if z_speed_um_s is not None:
+        z_axis.set_velocity_um_s(z_speed_um_s)
+
+    sharpness_curve, frames, scan_duration, frame_count, _ = _run_z_scan(
+        z_axis=z_axis,
+        z_start=z_start,
+        z_end=z_end,
+        acquisition=scope.acquisition,
+        context=scope.context,
+        store_frames=True,
+        sharpness_method=sharpness_method,
+    )
+
+    z_axis.set_velocity_um_s(original_speed)
+
+    if not frames:
+        raise ValueError("No frames captured during focus scan")
+
+    best = max(frames, key=lambda f: f.sharpness)
+
+    return FocusCaptureResult(
+        image=best.image,
+        z_um=best.z_um,
+        sharpness=best.sharpness,
+        frame_count=frame_count,
+        scan_duration_s=scan_duration,
+        z_range_um=safe_range,
+        objective_position=objective_position,
+        sharpness_curve=sharpness_curve,
+    )
 
 
 def continuous_autofocus(

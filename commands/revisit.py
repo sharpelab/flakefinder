@@ -30,7 +30,7 @@ from typing import NamedTuple
 
 from PIL import Image as PILImage
 
-from flakefinder.leica.autofocus import continuous_autofocus
+from flakefinder.leica.autofocus import focus_and_capture
 from flakefinder.leica.microscope import Microscope
 from flakefinder.scan_utils import DEFAULT_WB, build_microscope_meta, parse_white_balance
 from flakefinder.types import GainRGB
@@ -160,11 +160,9 @@ def run(
     exposure_ms: float = 1.0,
     gain: float | None = None,
     white_balance: GainRGB = DEFAULT_WB,
-    fine: bool = False,
-    super_fine: bool = False,
     quiet: bool = False,
 ) -> None:
-    """Run revisit loop: move, autofocus, capture at each point."""
+    """Run revisit loop: move, focus-scan, save best frame at each point."""
     from flakefinder.leica import wait_all
 
     def vprint(*a, **kw):
@@ -223,41 +221,21 @@ def run(
         wait_all([hx, hy])
         t_move_end = time.perf_counter()
 
-        # Phase 2: Autofocus (store frames to use peak frame as result)
+        # Phase 2: Focus scan + capture best frame
         t_af_start = time.perf_counter()
-        af_result = continuous_autofocus(
+        fc = focus_and_capture(
             scope,
-            z_start_um=p.z,
+            z_center_um=p.z,
             z_range_um=z_range,
             z_speed_um_s=z_speed,
-            fine_pass=fine,
-            super_fine_pass=super_fine,
-            store_frames=True,
-            move_to_best_z=False,
         )
         t_af_end = time.perf_counter()
 
-        # Phase 3: Use best AF frame as result image
+        # Phase 3: Save best frame
         t_save_start = time.perf_counter()
-        if af_result.stayed_at_initial:
-            after_img = af_result.initial_image
-            after_sharpness = af_result.initial_sharpness
-        else:
-            all_frames = [
-                f
-                for frame_list in [af_result.frames, af_result.fine_frames, af_result.super_fine_frames]
-                if frame_list
-                for f in frame_list
-                if f.image is not None
-            ]
-            best = max(all_frames, key=lambda f: f.sharpness)
-            after_img = best.image
-            after_sharpness = best.sharpness
-
         filename = _output_filename(i, p.label, mag_str)
         filepath = os.path.join(output, filename)
-        if after_img is not None:
-            PILImage.fromarray(after_img).save(filepath)
+        PILImage.fromarray(fc.image).save(filepath)
         t_save_end = time.perf_counter()
 
         t_point_end = time.perf_counter()
@@ -267,22 +245,16 @@ def run(
         af_s = t_af_end - t_af_start
         save_s = t_save_end - t_save_start
         total_s = t_point_end - t_move_start
-        z_adj = af_result.selected_z_um - p.z
+        z_adj = fc.z_um - p.z
 
         # Verbose per-point output
         vprint(
             f"  Move: {move_s * 1000:.0f}ms | AF: {af_s * 1000:.0f}ms "
-            f"({af_result.frame_count} frames) | Save: {save_s * 1000:.0f}ms | "
+            f"({fc.frame_count} frames) | Save: {save_s * 1000:.0f}ms | "
             f"Total: {total_s:.1f}s"
         )
-        if af_result.stayed_at_initial:
-            vprint(f"  AF stayed at initial Z (DR={af_result.dynamic_range:.3f})")
-        else:
-            vprint(f"  Z: {p.z:.1f} -> {af_result.selected_z_um:.1f} ({z_adj:+.1f}), sharpness={after_sharpness:.1f}")
-        if after_img is not None:
-            vprint(f"  Saved: {filename}")
-        else:
-            vprint("  Warning: capture failed")
+        vprint(f"  Z: {p.z:.1f} -> {fc.z_um:.1f} ({z_adj:+.1f}), sharpness={fc.sharpness:.1f}")
+        vprint(f"  Saved: {filename}")
 
         results.append(
             {
@@ -292,12 +264,10 @@ def run(
                 "x_um": p.x,
                 "y_um": p.y,
                 "z_initial_um": p.z,
-                "z_final_um": af_result.selected_z_um,
+                "z_focused_um": fc.z_um,
                 "z_adjustment_um": round(z_adj, 2),
-                "af_sharpness": af_result.selected_sharpness,
-                "after_sharpness": after_sharpness,
-                "stayed_at_initial": af_result.stayed_at_initial,
-                "af_frames": af_result.frame_count,
+                "sharpness": fc.sharpness,
+                "frame_count": fc.frame_count,
                 "timing_s": {
                     "move": round(move_s, 3),
                     "autofocus": round(af_s, 3),
@@ -324,8 +294,6 @@ def run(
         "point_count": len(route),
         "objective_mag": mag,
         "z_range": z_range,
-        "fine": fine,
-        "super_fine": super_fine,
         "aggregate_timing_s": {
             "move": round(move_total, 2),
             "autofocus": round(af_total, 2),
@@ -342,10 +310,8 @@ def run(
 
     # Summary (always printed)
     n = len(route)
-    stayed = sum(1 for r in results if r["stayed_at_initial"])
     if quiet:
-        stayed_str = f", {stayed} stayed" if stayed else ""
-        print(f"Revisited {n} points in {total_elapsed:.1f}s -> {output}/{stayed_str}")
+        print(f"Revisited {n} points in {total_elapsed:.1f}s -> {output}/")
     else:
         print()
         print("=" * 50)
@@ -355,8 +321,6 @@ def run(
         print(
             f"  Breakdown: move={move_total:.1f}s, AF={af_total:.1f}s (avg {af_total / n:.1f}s), save={save_total:.1f}s"
         )
-        if stayed:
-            print(f"  AF stayed at initial: {stayed}/{n}")
         print(f"  Output: {output}/")
         print()
 
@@ -413,10 +377,6 @@ Examples:
     af_group.add_argument("--z-speed", type=float, default=1250, help="Z speed in um/s (default: 1250)")
     af_group.add_argument(
         "--z-range", type=float, default=None, help="AF search range in um (default: auto from objective)"
-    )
-    af_group.add_argument("--fine", action="store_true", help="Two-pass AF: coarse then fine 50um scan")
-    af_group.add_argument(
-        "--super-fine", action="store_true", help="Three-pass AF (implies --fine): coarse + fine + 10um super-fine"
     )
 
     # Camera
@@ -484,8 +444,6 @@ def main() -> int:
                 exposure_ms=args.exposure_ms,
                 gain=args.gain,
                 white_balance=args.white_balance,
-                fine=args.fine,
-                super_fine=args.super_fine,
                 quiet=args.quiet,
             )
     except (ValueError, FileNotFoundError) as e:
