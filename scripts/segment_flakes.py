@@ -15,6 +15,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from scipy import ndimage
+from scipy.stats import kurtosis as scipy_kurtosis
 
 from flakefinder.scan_utils import apply_flatfield
 
@@ -77,8 +78,13 @@ def _analyze_component(
     # Color uniformity: std of per-pixel normalized contrast within blob
     r_norm = (image[:, :, 2].astype(np.float32) - bg_modes[2]) / max(float(bg_modes[2]), 1.0)
     r_std = float(r_norm[component].std())
+    r_kurt = float(scipy_kurtosis(r_norm[component], fisher=True))
     g_norm = (image[:, :, 1].astype(np.float32) - bg_modes[1]) / max(float(bg_modes[1]), 1.0)
     g_std = float(g_norm[component].std())
+    g_kurt = float(scipy_kurtosis(g_norm[component], fisher=True))
+    b_norm = (image[:, :, 0].astype(np.float32) - bg_modes[0]) / max(float(bg_modes[0]), 1.0)
+    b_std = float(b_norm[component].std())
+    b_kurt = float(scipy_kurtosis(b_norm[component], fisher=True))
 
     return {
         "bbox": [x_min, y_min, x_max - x_min, y_max - y_min],
@@ -94,7 +100,11 @@ def _analyze_component(
         "circularity": round(circularity, 4),
         "perim_ratio": round(perim_ratio, 4),
         "r_std": round(r_std, 4),
+        "r_kurt": round(r_kurt, 4),
         "g_std": round(g_std, 4),
+        "g_kurt": round(g_kurt, 4),
+        "b_std": round(b_std, 4),
+        "b_kurt": round(b_kurt, 4),
         "hull": hull_pts,
         "contour": contour_pts,
     }
