@@ -275,7 +275,7 @@ def run(
                     "af_set_speed": round(fc.timing.set_speed_s, 3),
                     "af_pre_scan": round(fc.timing.pre_scan_s, 3),
                     "af_scan": round(fc.timing.scan_s, 3),
-                    "af_sharpness": round(fc.timing.sharpness_s, 3),
+                    "af_sharpness_tail": round(fc.timing.sharpness_tail_s, 3),
                     "af_restore_speed": round(fc.timing.restore_speed_s, 3),
                     "save": round(save_s, 3),
                     "total": round(total_s, 3),

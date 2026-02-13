@@ -9,6 +9,7 @@ working distance if not specified.
 """
 
 import bisect
+import queue
 import threading
 import time
 from dataclasses import dataclass, field
@@ -51,6 +52,22 @@ def sharpness_tenengrad(image: RGBImage) -> float:
     sobel_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=5)
     sobel_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=5)
     return cv2.mean(cv2.magnitude(sobel_x, sobel_y))[0]
+
+
+def _sharpness_tenengrad_into(
+    image: RGBImage,
+    *,
+    gray: np.ndarray,
+    sobel_x: np.ndarray,
+    sobel_y: np.ndarray,
+    mag: np.ndarray,
+) -> float:
+    """Tenengrad sharpness with pre-allocated buffers (CV_32F, zero alloc per call)."""
+    cv2.cvtColor(image, cv2.COLOR_RGB2GRAY, dst=gray)
+    cv2.Sobel(gray, cv2.CV_32F, 1, 0, dst=sobel_x, ksize=5)
+    cv2.Sobel(gray, cv2.CV_32F, 0, 1, dst=sobel_y, ksize=5)
+    cv2.magnitude(sobel_x, sobel_y, mag)
+    return cv2.mean(mag)[0]
 
 
 def sharpness_laplacian(image: RGBImage) -> float:
@@ -184,7 +201,7 @@ class ZScanTiming(NamedTuple):
 
     pre_scan_s: float  # Move to z_start + settle (0 if pre_positioned)
     scan_s: float  # Async Z motion + frame capture
-    sharpness_s: float  # Post-scan sharpness computation
+    sharpness_tail_s: float  # Sharpness worker drain after scan ends
     total_s: float  # Wall-clock for entire _run_z_scan call
 
 
@@ -203,7 +220,7 @@ class FocusCaptureTiming(NamedTuple):
     set_speed_s: float  # Set scan velocity
     pre_scan_s: float  # _run_z_scan: move + settle (0 when pre_positioned)
     scan_s: float  # Actual Z motion + frame capture
-    sharpness_s: float  # Sharpness computation for all frames
+    sharpness_tail_s: float  # Sharpness worker drain after scan ends
     restore_speed_s: float  # Restore original velocity
     total_s: float  # End-to-end
 
@@ -405,6 +422,40 @@ def _run_z_scan(
             z_um = z_converter.GetMetricsValue(z_native)
             z_samples.append((t_before, t_after, z_um))
 
+    # Sharpness worker: compute sharpness in background as frames arrive.
+    # OpenCV releases the GIL, so this runs in true parallel with SDK Acquire.
+    sharpness_q: queue.Queue[np.ndarray | None] = queue.Queue()
+    # (sharpness_value, metrics_dict_or_None) per frame, in capture order
+    sharpness_out: list[tuple[float, dict | None]] = []
+    use_fast_tenengrad = sharpness_method == "tenengrad"
+
+    def sharpness_worker():
+        bufs: dict[str, np.ndarray] | None = None
+        while True:
+            img = sharpness_q.get()
+            if img is None:
+                break
+            # Fast path: tenengrad with pre-allocated CV_32F buffers
+            if use_fast_tenengrad:
+                if bufs is None:
+                    h, w = img.shape[:2]
+                    bufs = {
+                        "gray": np.empty((h, w), dtype=np.uint8),
+                        "sobel_x": np.empty((h, w), dtype=np.float32),
+                        "sobel_y": np.empty((h, w), dtype=np.float32),
+                        "mag": np.empty((h, w), dtype=np.float32),
+                    }
+                s = _sharpness_tenengrad_into(img, **bufs)
+            else:
+                s = sharpness(img, method=sharpness_method)
+            metrics = (
+                {name: float(fn(img)) for name, fn in ALL_SHARPNESS_METRICS.items()} if compute_all_metrics else None
+            )
+            sharpness_out.append((s, metrics))
+
+    worker = threading.Thread(target=sharpness_worker, daemon=True)
+    worker.start()
+
     # Move to scan start position (skip if caller already positioned us)
     if not pre_positioned:
         z_axis.move_to_corrected(z_start)
@@ -420,7 +471,7 @@ def _run_z_scan(
     # Start async Z move (downward)
     z_handle = z_axis.move_to_async(z_end)
 
-    # Capture frames during move
+    # Capture frames during move, enqueue for background sharpness
     while not z_handle.is_complete:
         t_capture = time.perf_counter()
         current_image[0] = None
@@ -431,6 +482,7 @@ def _run_z_scan(
             img_arr = sdk_image_to_numpy(current_image[0])
             current_image[0].Dispose()
             frame_data.append((t_capture, img_arr))
+            sharpness_q.put(img_arr)
 
     scan_end_time = time.perf_counter()
     z_handle.dispose()
@@ -441,8 +493,12 @@ def _run_z_scan(
 
     scan_duration = scan_end_time - scan_start_time
 
-    # Compute sharpness for each frame
-    t_sharpness_start = time.perf_counter()
+    # Wait for sharpness worker to drain remaining frames
+    sharpness_q.put(None)
+    worker.join()
+    t_sharpness_done = time.perf_counter()
+
+    # Assemble results (Z interpolation is cheap, sharpness already computed)
     sharpness_curve = []
     frames = [] if store_frames else None
 
@@ -450,14 +506,14 @@ def _run_z_scan(
         z_interp = interpolate_position(t_capture, z_samples)
         if z_interp is None:
             raise RuntimeError(f"Frame {i}: Z interpolation failed at t={t_capture:.6f}s")
-        s = sharpness(img, method=sharpness_method)
-        entry = {
+        s, metrics = sharpness_out[i]
+        entry: dict = {
             "frame": i,
             "z_um": z_interp,
             "sharpness": s,
         }
-        if compute_all_metrics:
-            entry["metrics"] = {name: float(fn(img)) for name, fn in ALL_SHARPNESS_METRICS.items()}
+        if metrics is not None:
+            entry["metrics"] = metrics
         sharpness_curve.append(entry)
         if store_frames:
             assert frames is not None
@@ -471,7 +527,7 @@ def _run_z_scan(
         timing=ZScanTiming(
             pre_scan_s=t_pre_scan_done - t_func_start,
             scan_s=scan_duration,
-            sharpness_s=t_func_end - t_sharpness_start,
+            sharpness_tail_s=t_sharpness_done - scan_end_time,
             total_s=t_func_end - t_func_start,
         ),
         frame_count=len(frame_data),
@@ -557,7 +613,7 @@ def focus_and_capture(
             set_speed_s=t_speed_set - t_positioned,
             pre_scan_s=zsr.timing.pre_scan_s,
             scan_s=zsr.timing.scan_s,
-            sharpness_s=zsr.timing.sharpness_s,
+            sharpness_tail_s=zsr.timing.sharpness_tail_s,
             restore_speed_s=t_end - t_restore_start,
             total_s=t_end - t_start,
         ),
