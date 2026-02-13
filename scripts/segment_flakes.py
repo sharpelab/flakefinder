@@ -143,11 +143,20 @@ def _otsu_split(
     min_size_px: int,
 ) -> list[np.ndarray] | None:
     """Try one Otsu split on the highest-variance channel. Returns sub-components or None."""
+    # Crop to component bounding box — all ops run on the small ROI
+    rows = np.any(component, axis=1)
+    cols = np.any(component, axis=0)
+    y_idx = np.where(rows)[0]
+    x_idx = np.where(cols)[0]
+    sl = (slice(y_idx[0], y_idx[-1] + 1), slice(x_idx[0], x_idx[-1] + 1))
+    roi_comp = component[sl]
+    roi_cc = contrast_channels[sl]
+
     # Pick the channel with highest within-blob variance
-    stds = [contrast_channels[:, :, c][component].std() for c in range(3)]
+    stds = [roi_cc[:, :, c][roi_comp].std() for c in range(3)]
     best_ch = int(np.argmax(stds))
-    ch_map = contrast_channels[:, :, best_ch]
-    blob_vals = ch_map[component]
+    roi_ch = roi_cc[:, :, best_ch]
+    blob_vals = roi_ch[roi_comp]
 
     if blob_vals.std() < 0.8:
         return None
@@ -162,19 +171,25 @@ def _otsu_split(
 
     sub_components = []
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    comp_size = int(roi_comp.sum())
     for is_high in [False, True]:
-        sub_mask = component & ((ch_map >= thresh) if is_high else (ch_map < thresh))
-        sub_clean = cv2.morphologyEx(sub_mask.astype(np.uint8), cv2.MORPH_OPEN, kernel)
-        sub_labels, n_sub = ndimage.label(sub_clean)
+        roi_sub = roi_comp & ((roi_ch >= thresh) if is_high else (roi_ch < thresh))
+        roi_clean = cv2.morphologyEx(
+            roi_sub.astype(np.uint8), cv2.MORPH_OPEN, kernel, borderType=cv2.BORDER_CONSTANT, borderValue=0
+        )
+        roi_labels, n_sub = ndimage.label(roi_clean)
 
         for j in range(1, n_sub + 1):
-            sub_comp = sub_labels == j
-            if int(sub_comp.sum()) >= min_size_px // 2:
-                sub_components.append(sub_comp)
+            roi_piece = roi_labels == j
+            if int(roi_piece.sum()) >= min_size_px // 2:
+                # Expand back to full frame
+                full = np.zeros(component.shape, dtype=bool)
+                full[sl] = roi_piece
+                sub_components.append(full)
 
     if len(sub_components) >= 2:
         return sub_components
-    if len(sub_components) == 1 and int(sub_components[0].sum()) < int(component.sum()) * 0.95:
+    if len(sub_components) == 1 and int(sub_components[0].sum()) < comp_size * 0.95:
         return sub_components
     return None
 
