@@ -241,7 +241,7 @@ def compute_metrics_from_frames(
         if info is None:
             continue
         z_values.append(info["z_um"])
-        img = cv2.imread(str(p))
+        img = cv2.imread(p)
         assert img is not None, f"Failed to read image: {p}"
         for name, fn in METRICS:
             results[name].append(fn(img))

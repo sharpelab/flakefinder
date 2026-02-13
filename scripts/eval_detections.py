@@ -83,7 +83,7 @@ def classify_detection(r: float, g: float) -> tuple[str, tuple[int, int, int]]:
 
 def mask_centroid(mask_path: Path) -> tuple[float, float] | None:
     """Compute centroid of nonzero pixels in a grayscale mask. Returns (cx, cy) or None."""
-    mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
     if mask is None:
         return None
     ys, xs = np.where(mask > 0)
@@ -294,7 +294,7 @@ def main():
     target_cls_counts: dict[str, int] = {}
 
     for frame_info in frames:
-        raw = cv2.imread(str(frame_info["raw_path"]))
+        raw = cv2.imread(frame_info["raw_path"])
         if raw is None:
             print(f"  Failed to read {frame_info['raw_path']}")
             continue
@@ -347,7 +347,7 @@ def main():
 
         # Save annotated frame to temp file
         ann_path = args.output / f"{frame_info['label'].replace('/', '_')}.jpg"
-        cv2.imwrite(str(ann_path), vis)
+        cv2.imwrite(ann_path, vis)
         annotated_paths.append(str(ann_path))
         annotated_labels.append(frame_info["label"])
 

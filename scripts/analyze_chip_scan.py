@@ -299,7 +299,7 @@ def compute_sharpness_values(scan_dir: Path, meta: dict, sample_every: int = 1) 
         if not img_path.exists():
             continue
 
-        img = cv2.imread(str(img_path))
+        img = cv2.imread(img_path)
         if img is None:
             continue
 

@@ -476,7 +476,7 @@ def create_mosaic(
             print(f"Image not found: {first_img_path}")
         return
 
-    first_img = cv2.imread(str(first_img_path))
+    first_img = cv2.imread(first_img_path)
     assert first_img is not None, f"Failed to read image: {first_img_path}"
     img_h, img_w = first_img.shape[:2]
     img_aspect = img_w / img_h  # e.g., 1.5 for landscape
@@ -653,7 +653,7 @@ def create_mosaic(
         if not img_path.exists():
             continue
 
-        img_full = cv2.imread(str(img_path))
+        img_full = cv2.imread(img_path)
         if img_full is None:
             continue
 
@@ -690,7 +690,7 @@ def create_mosaic(
         if not img_path.exists():
             continue
 
-        img_full = cv2.imread(str(img_path))
+        img_full = cv2.imread(img_path)
         if img_full is None:
             continue
 
@@ -859,7 +859,7 @@ def create_mosaic(
                 cv2.LINE_AA,
             )
 
-    cv2.imwrite(str(output_path), canvas, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    cv2.imwrite(output_path, canvas, [cv2.IMWRITE_JPEG_QUALITY, 95])
     if not quiet:
         print(f"Mosaic saved to {output_path}")
 

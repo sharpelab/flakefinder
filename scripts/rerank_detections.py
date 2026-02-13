@@ -161,7 +161,7 @@ def main() -> int:
 
                 # Get full detection with contour
                 full_det = full_detections[frame_name][det_idx]
-                img = cv2.imread(str(frame_path))
+                img = cv2.imread(frame_path)
                 if img is None:
                     print(f"  Warning: failed to read {frame_path}, skipping crop")
                     continue
@@ -183,7 +183,7 @@ def main() -> int:
                 draw_scale_bar(crop, um_per_px)
 
                 crop_path = crops_dir / f"rank{i + 1:02d}_{frame_name}_d{det_idx}.jpg"
-                cv2.imwrite(str(crop_path), crop)
+                cv2.imwrite(crop_path, crop)
                 crop_paths.append(str(crop_path))
 
                 r, g, _ = d["contrast_rgb"]

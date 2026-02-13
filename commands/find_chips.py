@@ -157,7 +157,7 @@ def find_chips(
     start_time = time.perf_counter()
     # Load image and metadata
     meta = load_stitch_meta(image_path)
-    img = cv2.imread(str(image_path))
+    img = cv2.imread(image_path)
     if img is None:
         raise ValueError(f"Could not load image: {image_path}")
 
@@ -356,7 +356,7 @@ def find_chips(
         debug_img = cv2.resize(debug_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
     detected_path = image_path.with_name(image_path.stem + "_chips_detected.png")
-    cv2.imwrite(str(detected_path), debug_img)
+    cv2.imwrite(detected_path, debug_img)
     print(f"Detection image saved to {detected_path} ({debug_img.shape[1]}x{debug_img.shape[0]})")
 
     return results

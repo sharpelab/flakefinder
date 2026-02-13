@@ -149,10 +149,10 @@ def main() -> int:
 
         # Annotated image
         if args.viz:
-            raw = cv2.imread(str(fp))
+            raw = cv2.imread(fp)
             if raw is not None:
                 vis = draw_detections(raw, r.detections, um_per_px=args.pixel_size)
-                cv2.imwrite(str(args.output / f"{name}.jpg"), vis)
+                cv2.imwrite(args.output / f"{name}.jpg", vis)
 
     # Build summary
     tier_counts = {1: 0, 2: 0, 3: 0}

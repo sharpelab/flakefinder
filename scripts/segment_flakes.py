@@ -287,14 +287,16 @@ def score_detections(detections: list[dict]) -> None:
     for det in detections:
         pr = det["perim_ratio"]
         cd = det["cal_dist"]
-        if pr < 1.20 and cd < 1.0:
+        g = det["contrast_rgb"][1]
+        if pr < 1.20 and cd < 0.3 and g < 1.0:
             det["tier"] = 1
-        elif pr < 1.35 or cd < 1.0:
+        elif pr < 1.35 or cd < 0.3:
             det["tier"] = 2
         else:
             det["tier"] = 3
+        ge = det.get("grad_energy", 0)
         det["score"] = round(
-            max(det.get("g_kurt", 0), 0) * (1.0 / (1.0 + cd)) * np.log(max(det["size_px"], 1)),
+            np.sqrt(max(det.get("g_kurt", 0), 0)) * (1.0 / (1.0 + cd)) * (1.0 / (1.0 + ge)),
             4,
         )
 
@@ -445,7 +447,7 @@ def main():
     )
     args = parser.parse_args()
 
-    raw = cv2.imread(str(args.input))
+    raw = cv2.imread(args.input)
     if raw is None:
         print(f"Failed to read {args.input}")
         return 1
@@ -478,7 +480,7 @@ def main():
     # Output image — draw on raw to preserve true colors
     out = args.output or args.input.with_suffix(".seg.jpg")
     vis = draw_detections(raw, dets, um_per_px=args.pixel_size)
-    cv2.imwrite(str(out), vis)
+    cv2.imwrite(out, vis)
     print(f"Saved: {out}")
 
     # Output metadata

@@ -101,7 +101,7 @@ def main():
         print(f"--order must be a permutation of 'bcs', got '{args.order}'")
         return 1
 
-    image = cv2.imread(str(args.input))
+    image = cv2.imread(args.input)
     if image is None:
         print(f"Failed to read {args.input}")
         return 1
@@ -136,7 +136,7 @@ def main():
 
     image = np.clip(img_f, 0, 255).astype(np.uint8)
 
-    cv2.imwrite(str(args.output), image)
+    cv2.imwrite(args.output, image)
     print(f"Saved: {args.output}")
     return 0
 
