@@ -413,15 +413,19 @@ def scan_row(
 
     t_capture_end = time.perf_counter()
     handle.dispose()
+    t_handle_disposed = time.perf_counter()
 
     # ---- 7. Cleanup ----
     z_drive.halt()
+    t_z_halted = time.perf_counter()
     stop_polling.set()
     x_thread.join(timeout=1.0)
     z_thread.join(timeout=1.0)
+    t_threads_joined = time.perf_counter()
 
     # Restore move speed for positioning to next row
     stage.x.set_velocity_um_s(cfg.move_speed_um_s)
+    t_cleanup_end = time.perf_counter()
 
     # ---- Collect results ----
     row_duration = t_capture_end - t_x_started
@@ -439,6 +443,10 @@ def scan_row(
         "z_started": (t_z_started - scan_t0) if t_z_started is not None else None,
         "z_start_x_um": z_start_x_um,
         "capture_end": t_capture_end - scan_t0,
+        "handle_disposed": t_handle_disposed - scan_t0,
+        "z_halted": t_z_halted - scan_t0,
+        "threads_joined": t_threads_joined - scan_t0,
+        "cleanup_end": t_cleanup_end - scan_t0,
     }
 
     # Console summary
