@@ -51,11 +51,16 @@ def _analyze_component(
     image: np.ndarray,
     component: np.ndarray,
     bg_modes: np.ndarray,
+    norm_contrast: np.ndarray,
+    grad_mag: np.ndarray,
 ) -> dict:
     """Analyze a binary component mask and return detection metrics."""
-    ys, xs = np.where(component)
-    x_min, x_max = int(xs.min()), int(xs.max())
-    y_min, y_max = int(ys.min()), int(ys.max())
+    rows = np.any(component, axis=1)
+    cols = np.any(component, axis=0)
+    y_indices = np.where(rows)[0]
+    x_indices = np.where(cols)[0]
+    y_min, y_max = int(y_indices[0]), int(y_indices[-1])
+    x_min, x_max = int(x_indices[0]), int(x_indices[-1])
 
     region_pixels = image[component].astype(np.float32)
     mean_contrast = float(np.mean(region_pixels - bg_modes))
@@ -85,26 +90,21 @@ def _analyze_component(
         hull_pts = []
         contour_pts = []
 
-    # Color uniformity: std of per-pixel normalized contrast within blob
-    r_norm = (image[:, :, 2].astype(np.float32) - bg_modes[2]) / max(float(bg_modes[2]), 1.0)
-    r_std = float(r_norm[component].std())
-    r_kurt = float(scipy_kurtosis(r_norm[component], fisher=True))
-    g_norm = (image[:, :, 1].astype(np.float32) - bg_modes[1]) / max(float(bg_modes[1]), 1.0)
-    g_std = float(g_norm[component].std())
-    g_kurt = float(scipy_kurtosis(g_norm[component], fisher=True))
-    b_norm = (image[:, :, 0].astype(np.float32) - bg_modes[0]) / max(float(bg_modes[0]), 1.0)
-    b_std = float(b_norm[component].std())
-    b_kurt = float(scipy_kurtosis(b_norm[component], fisher=True))
+    # Color uniformity: std of per-pixel normalized contrast within blob (BGR channel order)
+    b_vals = norm_contrast[:, :, 0][component]
+    b_std = float(b_vals.std())
+    b_kurt = float(scipy_kurtosis(b_vals, fisher=True))
+    g_vals = norm_contrast[:, :, 1][component]
+    g_std = float(g_vals.std())
+    g_kurt = float(scipy_kurtosis(g_vals, fisher=True))
+    r_vals = norm_contrast[:, :, 2][component]
+    r_std = float(r_vals.std())
+    r_kurt = float(scipy_kurtosis(r_vals, fisher=True))
 
     # Internal gradient energy (Sobel on G channel, masked to blob)
-    gray_g = image[:, :, 1].astype(np.float32)
-    sx = cv2.Sobel(gray_g, cv2.CV_32F, 1, 0, ksize=3)
-    sy = cv2.Sobel(gray_g, cv2.CV_32F, 0, 1, ksize=3)
-    grad_mag = np.sqrt(sx * sx + sy * sy)
     grad_energy = float(grad_mag[component].mean())
 
     # Histogram entropy of G normalized contrast within blob
-    g_vals = g_norm[component]
     hist, _ = np.histogram(g_vals, bins=50)
     hist = hist[hist > 0]
     probs = hist / hist.sum()
@@ -184,6 +184,7 @@ def _subsegment_by_contrast(
     component: np.ndarray,
     bg_modes: np.ndarray,
     min_size_px: int,
+    norm_contrast: np.ndarray,
     max_depth: int = 3,
 ) -> list[np.ndarray]:
     """Iteratively split a blob using Otsu on the highest-variance color channel.
@@ -192,10 +193,6 @@ def _subsegment_by_contrast(
     splitting, up to *max_depth* levels. This handles cases where extreme
     outlier pixels pull the first Otsu threshold away from subtler gradients.
     """
-    contrast_channels = (image.astype(np.float32) - bg_modes[np.newaxis, np.newaxis, :]) / np.maximum(
-        bg_modes[np.newaxis, np.newaxis, :], 1.0
-    )
-
     # Iterative: keep a work queue of components to try splitting
     final = []
     queue = [(component, 0)]
@@ -206,7 +203,7 @@ def _subsegment_by_contrast(
             final.append(comp)
             continue
 
-        pieces = _otsu_split(contrast_channels, comp, min_size_px)
+        pieces = _otsu_split(norm_contrast, comp, min_size_px)
         if pieces is None:
             final.append(comp)
         else:
@@ -234,37 +231,47 @@ def segment_frame(
 
     above = image.astype(np.float32) - bg_modes[np.newaxis, np.newaxis, :]
     mask = np.any(above > contrast_offset, axis=2)
+    # Reuse above buffer for normalized contrast (used by subsegment + analyze)
+    norm_contrast = above
+    norm_contrast /= np.maximum(bg_modes[np.newaxis, np.newaxis, :], 1.0)
+
+    # Precompute gradient magnitude on G channel (used by analyze)
+    gray_g = image[:, :, 1].astype(np.float32)
+    sx = cv2.Sobel(gray_g, cv2.CV_32F, 1, 0, ksize=3)
+    sy = cv2.Sobel(gray_g, cv2.CV_32F, 0, 1, ksize=3)
+    grad_mag = np.sqrt(sx * sx + sy * sy)
 
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     mask_clean = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
     mask_clean = cv2.morphologyEx(mask_clean, cv2.MORPH_OPEN, kernel)
 
     labels, n_labels = ndimage.label(mask_clean)
+    component_sizes = ndimage.sum(mask_clean, labels, range(1, n_labels + 1))
+    component_slices = ndimage.find_objects(labels)
 
     h, w = image.shape[:2]
     detections = []
 
-    for i in range(1, n_labels + 1):
-        component = labels == i
-        size = int(component.sum())
-
-        if size < min_size_px:
+    for i in range(n_labels):
+        if component_slices[i] is None or component_sizes[i] < min_size_px:
             continue
 
-        ys, xs = np.where(component)
-        cx = (int(xs.min()) + int(xs.max())) / 2
-        cy = (int(ys.min()) + int(ys.max())) / 2
+        sl = component_slices[i]
+        cx = (sl[1].start + sl[1].stop) / 2
+        cy = (sl[0].start + sl[0].stop) / 2
 
         if cx < edge_margin_px or cx > w - edge_margin_px:
             continue
         if cy < edge_margin_px or cy > h - edge_margin_px:
             continue
 
+        component = labels == (i + 1)
+
         # Try contrast-based sub-segmentation for large blobs
-        sub_components = _subsegment_by_contrast(image, component, bg_modes, min_size_px)
+        sub_components = _subsegment_by_contrast(image, component, bg_modes, min_size_px, norm_contrast)
 
         for sub_comp in sub_components:
-            det = _analyze_component(image, sub_comp, bg_modes)
+            det = _analyze_component(image, sub_comp, bg_modes, norm_contrast, grad_mag)
             # Re-check edge margin for sub-components
             scx, scy = det["center"]
             if scx < edge_margin_px or scx > w - edge_margin_px:
@@ -288,7 +295,7 @@ def score_detections(detections: list[dict]) -> None:
         pr = det["perim_ratio"]
         cd = det["cal_dist"]
         g = det["contrast_rgb"][1]
-        if pr < 1.20 and cd < 0.3 and g < 1.0:
+        if pr < 1.20 and cd < 0.3 and g < 4.0:
             det["tier"] = 1
         elif pr < 1.35 or cd < 0.3:
             det["tier"] = 2
@@ -296,7 +303,7 @@ def score_detections(detections: list[dict]) -> None:
             det["tier"] = 3
         ge = det.get("grad_energy", 0)
         det["score"] = round(
-            np.sqrt(max(det.get("g_kurt", 0), 0)) * (1.0 / (1.0 + cd)) * (1.0 / (1.0 + ge)),
+            np.sqrt(det["size_px"]) * (1.0 / (1.0 + cd)) * (1.0 / (1.0 + ge)) ** 2,
             4,
         )
 
