@@ -293,7 +293,7 @@ def scan_row(
     hy = stage.y.move_to_async(row_y)
     hx = stage.x.move_to_async(x_start_pos)
     # Blocking corrected Z runs while X/Y move async
-    z_drive.move_to_corrected(z_leadin_target)
+    z_drive.move_to_corrected(z_chip_edge)
     wait_all([hx, hy])
 
     t_preposition_end = time.perf_counter()
@@ -571,7 +571,7 @@ def _plan(
     y_overlap_percent: float = 12,
     row_limit: int | None = None,
     speed_mm: float = 5.0,
-    lead_in_um: float = 2000,
+    lead_in_um: float = 1000,
     z_lead_ms: float = 30,
     z_max: float = 26000.0,
 ) -> _Preflight:
@@ -676,7 +676,7 @@ def run(
     x_overlap_percent: float = 30,
     row_limit: int | None = None,
     row_settle: float = 0.1,
-    lead_in_um: float = 2000,
+    lead_in_um: float = 1000,
     z_lead_ms: float = 30,
     objective_mag: str | None = None,
     speed_mm: float = 5.0,
@@ -1274,8 +1274,8 @@ Examples:
     scan_group.add_argument(
         "--lead-in-um",
         type=float,
-        default=2000,
-        help="Lead-in distance before chip edge in um (default: 2000). "
+        default=1000,
+        help="Lead-in distance before chip edge in um (default: 1000). "
         "X starts this far before the hull boundary so it reaches scan "
         "speed before Z tracking begins.",
     )
