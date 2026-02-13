@@ -40,6 +40,7 @@ from datetime import datetime
 from pathlib import Path
 
 from commands import analyze_focus_map, chip_scan, find_chips, focus_map, scan, stage, stitch
+from flakefinder.cli_utils import park_microscope
 from flakefinder.leica import Microscope
 from flakefinder.scan_utils import parse_area_rect, parse_white_balance, validate_area_rect
 from flakefinder.types import AreaRect, GainRGB
@@ -731,6 +732,18 @@ def run(scope: Microscope, p: _Preflight) -> int:
         "limit": args.limit,
     }
     save_checkpoint(run_dir, checkpoint)
+
+    # ----------------------------------------------------------------
+    # Step 6: Park microscope
+    # ----------------------------------------------------------------
+    if not step_done(checkpoint, "park"):
+        duration, _ = run_in_process(
+            "Park Microscope",
+            lambda: park_microscope(scope),
+            pause=args.pause,
+            quiet=quiet,
+        )
+        mark_step(run_dir, checkpoint, "park", duration)
 
     return 0
 
