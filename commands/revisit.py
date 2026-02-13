@@ -30,7 +30,7 @@ from typing import NamedTuple
 
 from PIL import Image as PILImage
 
-from flakefinder.leica.autofocus import continuous_autofocus, sharpness
+from flakefinder.leica.autofocus import continuous_autofocus
 from flakefinder.leica.microscope import Microscope
 from flakefinder.scan_utils import DEFAULT_WB, build_microscope_meta, parse_white_balance
 from flakefinder.types import GainRGB
@@ -157,7 +157,6 @@ def run(
     objective_mag: str,
     z_speed: float = 1250,
     z_range: float | None = None,
-    settle_time: float = 0.2,
     exposure_ms: float = 1.0,
     gain: float | None = None,
     white_balance: GainRGB = DEFAULT_WB,
@@ -224,7 +223,7 @@ def run(
         wait_all([hx, hy])
         t_move_end = time.perf_counter()
 
-        # Phase 2: Autofocus
+        # Phase 2: Autofocus (store frames to use peak frame as result)
         t_af_start = time.perf_counter()
         af_result = continuous_autofocus(
             scope,
@@ -233,34 +232,47 @@ def run(
             z_speed_um_s=z_speed,
             fine_pass=fine,
             super_fine_pass=super_fine,
-            settle_time_s=settle_time,
+            store_frames=True,
+            settle_time_s=0,
         )
         t_af_end = time.perf_counter()
 
-        # Phase 3: Capture
-        t_capture_start = time.perf_counter()
-        after_img = camera.capture()
-        after_sharpness = sharpness(after_img) if after_img is not None else 0.0
+        # Phase 3: Use best AF frame as result image
+        t_save_start = time.perf_counter()
+        if af_result.stayed_at_initial:
+            after_img = af_result.initial_image
+            after_sharpness = af_result.initial_sharpness
+        else:
+            all_frames = [
+                f
+                for frame_list in [af_result.frames, af_result.fine_frames, af_result.super_fine_frames]
+                if frame_list
+                for f in frame_list
+                if f.image is not None
+            ]
+            best = max(all_frames, key=lambda f: f.sharpness)
+            after_img = best.image
+            after_sharpness = best.sharpness
 
         filename = _output_filename(i, p.label, mag_str)
         filepath = os.path.join(output, filename)
         if after_img is not None:
             PILImage.fromarray(after_img).save(filepath)
-        t_capture_end = time.perf_counter()
+        t_save_end = time.perf_counter()
 
         t_point_end = time.perf_counter()
 
         # Phase durations
         move_s = t_move_end - t_move_start
         af_s = t_af_end - t_af_start
-        capture_s = t_capture_end - t_capture_start
+        save_s = t_save_end - t_save_start
         total_s = t_point_end - t_move_start
         z_adj = af_result.selected_z_um - p.z
 
         # Verbose per-point output
         vprint(
             f"  Move: {move_s * 1000:.0f}ms | AF: {af_s * 1000:.0f}ms "
-            f"({af_result.frame_count} frames) | Capture: {capture_s * 1000:.0f}ms | "
+            f"({af_result.frame_count} frames) | Save: {save_s * 1000:.0f}ms | "
             f"Total: {total_s:.1f}s"
         )
         if af_result.stayed_at_initial:
@@ -289,7 +301,7 @@ def run(
                 "timing_s": {
                     "move": round(move_s, 3),
                     "autofocus": round(af_s, 3),
-                    "capture": round(capture_s, 3),
+                    "save": round(save_s, 3),
                     "total": round(total_s, 3),
                 },
                 "image": filename,
@@ -302,7 +314,7 @@ def run(
     # Aggregate timing
     move_total = sum(r["timing_s"]["move"] for r in results)
     af_total = sum(r["timing_s"]["autofocus"] for r in results)
-    capture_total = sum(r["timing_s"]["capture"] for r in results)
+    save_total = sum(r["timing_s"]["save"] for r in results)
 
     # Save metadata
     meta = {
@@ -317,7 +329,7 @@ def run(
         "aggregate_timing_s": {
             "move": round(move_total, 2),
             "autofocus": round(af_total, 2),
-            "capture": round(capture_total, 2),
+            "save": round(save_total, 2),
             "total": round(total_elapsed, 2),
         },
         **micro_meta,
@@ -341,8 +353,7 @@ def run(
         print(f"  Points: {n}")
         print(f"  Total time: {total_elapsed:.1f}s")
         print(
-            f"  Breakdown: move={move_total:.1f}s, AF={af_total:.1f}s "
-            f"(avg {af_total / n:.1f}s), capture={capture_total:.1f}s"
+            f"  Breakdown: move={move_total:.1f}s, AF={af_total:.1f}s (avg {af_total / n:.1f}s), save={save_total:.1f}s"
         )
         if stayed:
             print(f"  AF stayed at initial: {stayed}/{n}")
@@ -402,9 +413,6 @@ Examples:
     af_group.add_argument("--z-speed", type=float, default=1250, help="Z speed in um/s (default: 1250)")
     af_group.add_argument(
         "--z-range", type=float, default=None, help="AF search range in um (default: auto from objective)"
-    )
-    af_group.add_argument(
-        "--settle-time", type=float, default=0.2, help="Settle time after AF in seconds (default: 0.2)"
     )
     af_group.add_argument("--fine", action="store_true", help="Two-pass AF: coarse then fine 50um scan")
     af_group.add_argument(
@@ -473,7 +481,6 @@ def main() -> int:
                 objective_mag=args.objective_mag,
                 z_speed=args.z_speed,
                 z_range=args.z_range,
-                settle_time=args.settle_time,
                 exposure_ms=args.exposure_ms,
                 gain=args.gain,
                 white_balance=args.white_balance,
