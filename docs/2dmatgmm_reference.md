@@ -34,10 +34,11 @@ Reference for the original flake detection system at `~/code/2DMatGMM-System/`. 
 │   └── structures.py              # Flake dataclass
 ├── GUI/
 │   └── parameter_picker_V3.py      # Tkinter parameter input
-├── Parameters/                     # Runtime config (not in git)
-│   ├── Setup_Configs/              # Camera/microscope settings per mag
-│   ├── GMM_Parameters/             # Detection thresholds per material
-│   └── Flatfields/                 # Vignette reference images
+├── Parameters/                     # Runtime config (not in git, on microscope PC)
+│   └── Materials/                  # Per-material camera/microscope/GMM configs + flatfields
+│       ├── Graphene_90nm_10x/      # camera_parameters.json, microscope_parameters.json, etc.
+│       ├── hBN_Goldilocks_90nm_10x/
+│       └── ...                     # 7 profiles total
 └── other scripts (live_viewer.py, stitch.py, raster_area.py, etc.)
 ```
 
@@ -111,6 +112,50 @@ Note: values are in mm/px, not µm/px (multiply by 1000 for µm).
 ```
 5x → index 1, 10x → index 2, 20x → index 3, 50x → index 4
 ```
+
+## Camera & White Balance Settings
+
+**Source:** `Parameters/Materials/` on microscope PC (`GGG-Leica-DM6M`), copied to `~/code/2DMatGMM-System/downloads/2DMatGMM-Parameters/Materials/`.
+
+**Config loading:** `Utils/etc_functions.py` — `load_all_detection_parameters()` reads `camera_parameters.json` and `microscope_parameters.json` per material profile.
+
+### White Balance Tuple Order: BGR
+
+Despite docstrings claiming "rgb", the driver (`Drivers/Camera_Driver/camera_class.py:43-46`) maps:
+```python
+camera.gain_blue  = white_balance[0]  # index 0 = Blue
+camera.gain_green = white_balance[1]  # index 1 = Green
+camera.gain_red   = white_balance[2]  # index 2 = Red
+```
+
+### Two WB Profiles (all 90nm SiO2)
+
+**Graphene / WSe2 profile** — `(B=1.7, G=1.0, R=1.4)`:
+- Used by: `Graphene_90nm_10x`, `GrapheneThick_90nm_10x`, `WSe2_90nm_10x`
+- Same WB at all magnifications
+- Exposure varies: 0.01s (5x/10x), 0.02s (20x), 0.03s (50x), 0.01s (100x)
+
+**hBN profile** — `(B=2.51, G=1.02, R=1.41)` (5x uses G=1.05):
+- Used by: `hBN_Goldilocks_90nm_10x`, `hBN_ThickOnly_90nm_10x`, `hBN_Thick_90nm_10x`, `hBN_Thin_scuffed_90nm_10x`
+- Exposure varies: 0.005s (5x/10x), 0.01s (20x/50x/100x)
+- Derived from `calibrate_whitebalance.ipynb` calibration
+
+### Common Settings (all profiles)
+- **Gain:** 1 (unity), **Gamma:** 1 (unity)
+- **Light voltage:** 200, **Aperture:** 11
+
+### FlakeFinder Comparison
+
+FlakeFinder uses the hBN WB values `(R=1.41, G=1.02, B=2.51)` stored in RGB order in `calibration/flatfield_*_bin3.json`. This produces a brown/warm substrate appearance on 90nm SiO2. The graphene/WSe2 profile's lower blue gain `(B=1.7)` would produce a more neutral/blue-shifted substrate tone.
+
+### Material Profiles on Microscope PC
+
+Seven profiles exist, all 90nm SiO2, all 10x detection mag:
+- `Graphene_90nm_10x`, `GrapheneThick_90nm_10x`
+- `hBN_Goldilocks_90nm_10x`, `hBN_Thick_90nm_10x`, `hBN_ThickOnly_90nm_10x`, `hBN_Thin_scuffed_90nm_10x`
+- `WSe2_90nm_10x`
+
+Each contains: `camera_parameters.json`, `microscope_parameters.json`, `GMM_parameters.json`, `flatfield.png`
 
 ## Detection Pipeline
 
