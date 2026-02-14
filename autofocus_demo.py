@@ -95,6 +95,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--gamma", type=float, default=None, help="Gamma correction (default: unchanged)")
     parser.add_argument(
+        "--min-dynamic-range",
+        type=float,
+        default=0.20,
+        help="Minimum sharpness dynamic range to trust AF result (default: 0.20)",
+    )
+    parser.add_argument(
         "--quiet",
         "-q",
         action="store_true",
@@ -254,6 +260,7 @@ def main():
                 store_frames=bool(args.debug_dir),
                 compute_all_metrics=args.all_metrics,
                 settle_time_s=args.settle_time,
+                min_dynamic_range=args.min_dynamic_range,
             )
         except ValueError as e:
             print(f"Error: {e}")
