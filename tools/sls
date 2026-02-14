@@ -9,12 +9,12 @@ REMOTE="sharpelab-microscope"
 BASH='"C:\Program Files\Git\bin\bash.exe"'
 
 case "$1" in
-    git) shift; CMD="git $(printf '%q ' "$@")" ;;
-    --)  shift; CMD="$(printf '%q ' "$@")" ;;
-    *)   CMD="uv run python $(printf '%q ' "$@")" ;;
+    git) shift; CMD="git $(printf '%q ' "$@")"; DIR=flakefinder ;;
+    --)  shift; CMD="$(printf '%q ' "$@")"; DIR=. ;;
+    *)   CMD="uv run python $(printf '%q ' "$@")"; DIR=flakefinder ;;
 esac
 
 ssh "$REMOTE" "$BASH" <<EOF
-cd flakefinder
+cd $DIR
 $CMD
 EOF
