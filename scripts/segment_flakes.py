@@ -225,6 +225,7 @@ def _subsegment_by_contrast(
 def segment_frame(
     image: np.ndarray,
     config: DetectorConfig,
+    um_per_px: float,
     perim_ratio_thresh: float = 0.0,
 ) -> list[dict]:
     """Segment flakes by thresholding relative to background mode.
@@ -233,6 +234,8 @@ def segment_frame(
     For 'below' contrast mode (graphene), finds pixels darker than background.
     Returns list of detected regions with bbox, size, center, mean_contrast.
     """
+    min_size_px = int(config.min_size_um2 / (um_per_px**2))
+
     bg_modes = np.array([histogram_mode(image, c) for c in range(3)])
 
     above = image.astype(np.float32) - bg_modes[np.newaxis, np.newaxis, :]
@@ -263,7 +266,7 @@ def segment_frame(
     detections = []
 
     for i in range(n_labels):
-        if component_slices[i] is None or component_sizes[i] < config.min_size_px:
+        if component_slices[i] is None or component_sizes[i] < min_size_px:
             continue
 
         sl = component_slices[i]
@@ -278,7 +281,7 @@ def segment_frame(
         component = labels == (i + 1)
 
         # Try contrast-based sub-segmentation for large blobs
-        sub_components = _subsegment_by_contrast(image, component, bg_modes, config.min_size_px, norm_contrast)
+        sub_components = _subsegment_by_contrast(image, component, bg_modes, min_size_px, norm_contrast)
 
         for sub_comp in sub_components:
             det = _analyze_component(image, sub_comp, bg_modes, norm_contrast, grad_mag, config)
@@ -440,7 +443,7 @@ def main():
     parser.add_argument("--flatfield", type=Path, default=None, help="Flatfield .npy file")
     parser.add_argument("--material", default="hbn", choices=["hbn", "graphene"], help="Material preset")
     parser.add_argument("--contrast-offset", type=float, default=None, help="Override contrast offset from preset")
-    parser.add_argument("--min-size", type=int, default=None, help="Override min detection size (px)")
+    parser.add_argument("--min-size-um", type=float, default=None, help="Override min detection area (µm²)")
     parser.add_argument("--edge-margin", type=int, default=None, help="Override edge margin (px)")
     parser.add_argument(
         "--dark-frac-cutoff",
@@ -453,6 +456,12 @@ def main():
         type=float,
         default=0.0,
         help="Classify detections with perim_ratio >= this as tape (0 to disable)",
+    )
+    parser.add_argument(
+        "--perim-ratio-kill",
+        type=float,
+        default=0.0,
+        help="Remove detections with perim_ratio >= this entirely (0 to disable)",
     )
     parser.add_argument("--output", "-o", type=Path, default=None, help="Output image path")
     parser.add_argument("--save-plot", action="store_true", help="Also save matplotlib analysis plot")
@@ -468,8 +477,8 @@ def main():
     overrides = {}
     if args.contrast_offset is not None:
         overrides["contrast_offset"] = args.contrast_offset
-    if args.min_size is not None:
-        overrides["min_size_px"] = args.min_size
+    if args.min_size_um is not None:
+        overrides["min_size_um2"] = args.min_size_um
     if args.edge_margin is not None:
         overrides["edge_margin_px"] = args.edge_margin
     if overrides:
@@ -495,8 +504,14 @@ def main():
         dets = []
         print(f"{args.input.name}: SKIPPED (dark_frac={dark_frac:.3f} > {args.dark_frac_cutoff})")
     else:
-        dets = segment_frame(corrected, config, args.perim_ratio)
-        print(f"{args.input.name}: {len(dets)} detections (dark_frac={dark_frac:.3f})")
+        dets = segment_frame(corrected, config, args.pixel_size, args.perim_ratio)
+        if args.perim_ratio_kill > 0:
+            before = len(dets)
+            dets = [d for d in dets if d["perim_ratio"] < args.perim_ratio_kill]
+            killed = before - len(dets)
+        else:
+            killed = 0
+        print(f"{args.input.name}: {len(dets)} detections (dark_frac={dark_frac:.3f}, killed={killed})")
         for i, d in enumerate(dets):
             R, G = d["contrast_rgb"][0], d["contrast_rgb"][1]
             print(
@@ -523,7 +538,8 @@ def main():
         "params": {
             "material": args.material,
             "contrast_offset": config.contrast_offset,
-            "min_size_px": config.min_size_px,
+            "min_size_um2": config.min_size_um2,
+            "min_size_px": int(config.min_size_um2 / (args.pixel_size**2)),
             "edge_margin_px": config.edge_margin_px,
             "dark_frac_cutoff": args.dark_frac_cutoff,
             "perim_ratio_thresh": args.perim_ratio,

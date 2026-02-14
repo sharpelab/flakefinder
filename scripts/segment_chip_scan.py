@@ -37,6 +37,7 @@ def _process_frame(
     frame_path: str,
     flatfield_path: str | None,
     config: DetectorConfig,
+    um_per_px: float,
     dark_frac_cutoff: float,
 ) -> FrameResult:
     """Worker: load image, apply flatfield, segment. Imports inside worker for pickling."""
@@ -61,7 +62,7 @@ def _process_frame(
     if dark_frac > dark_frac_cutoff:
         return FrameResult(frame_name, [], dark_frac, True)
 
-    detections = segment_frame(corrected, config)
+    detections = segment_frame(corrected, config, um_per_px)
     return FrameResult(frame_name, detections, dark_frac, False)
 
 
@@ -85,7 +86,7 @@ def main() -> int:
     parser.add_argument("--flatfield", type=Path, default=None, help="Flatfield .npy file")
     parser.add_argument("--material", default="hbn", choices=["hbn", "graphene"], help="Material preset")
     parser.add_argument("--contrast-offset", type=float, default=None, help="Override contrast offset from preset")
-    parser.add_argument("--min-size", type=int, default=None, help="Override min detection size (px)")
+    parser.add_argument("--min-size-um", type=float, default=None, help="Override min detection area (µm²)")
     parser.add_argument("--edge-margin", type=int, default=None, help="Override edge margin (px)")
     parser.add_argument(
         "--dark-frac-cutoff", type=float, default=0.05, help="Skip frame if dark pixel fraction exceeds this"
@@ -112,8 +113,8 @@ def main() -> int:
     overrides = {}
     if args.contrast_offset is not None:
         overrides["contrast_offset"] = args.contrast_offset
-    if args.min_size is not None:
-        overrides["min_size_px"] = args.min_size
+    if args.min_size_um is not None:
+        overrides["min_size_um2"] = args.min_size_um
     if args.edge_margin is not None:
         overrides["edge_margin_px"] = args.edge_margin
     if overrides:
@@ -132,6 +133,7 @@ def main() -> int:
                 str(fp),
                 flatfield_str,
                 config,
+                args.pixel_size,
                 args.dark_frac_cutoff,
             )
             future_to_name[fut] = fp.stem
@@ -199,7 +201,8 @@ def main() -> int:
             "material": args.material,
             "flatfield": flatfield_str,
             "contrast_offset": config.contrast_offset,
-            "min_size_px": config.min_size_px,
+            "min_size_um2": config.min_size_um2,
+            "min_size_px": int(config.min_size_um2 / (args.pixel_size**2)),
             "edge_margin_px": config.edge_margin_px,
             "dark_frac_cutoff": args.dark_frac_cutoff,
             "pixel_size_um": args.pixel_size,

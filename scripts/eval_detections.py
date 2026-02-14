@@ -254,7 +254,7 @@ def main():
     parser.add_argument("--material", default="hbn", choices=["hbn", "graphene"], help="Material preset")
     parser.add_argument("--pixel-size", type=float, default=0.36, help="µm per pixel (20x bin3)")
     parser.add_argument("--contrast-offset", type=float, default=None, help="Override contrast offset from preset")
-    parser.add_argument("--min-size", type=int, default=None, help="Override min detection size (px)")
+    parser.add_argument("--min-size-um", type=float, default=None, help="Override min detection area (µm²)")
     parser.add_argument("--match-radius", type=int, default=100, help="Target matching radius (px)")
     parser.add_argument("-o", "--output", type=Path, required=True, help="Output directory")
     parser.add_argument("--show", action="store_true", help="Open results after generation")
@@ -266,8 +266,8 @@ def main():
     _overrides = {}
     if args.contrast_offset is not None:
         _overrides["contrast_offset"] = args.contrast_offset
-    if args.min_size is not None:
-        _overrides["min_size_px"] = args.min_size
+    if args.min_size_um is not None:
+        _overrides["min_size_um2"] = args.min_size_um
     if _overrides:
         config = _replace(config, **_overrides)
 
@@ -310,7 +310,7 @@ def main():
             corrected = raw
 
         # Run detector
-        detections = segment_frame(corrected, config)
+        detections = segment_frame(corrected, config, args.pixel_size)
 
         # Compute target centroid
         target_center = mask_centroid(frame_info["mask_path"])

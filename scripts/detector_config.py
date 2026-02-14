@@ -22,7 +22,7 @@ class DetectorConfig:
     # -- Segmentation --
     contrast_mode: ContrastMode
     contrast_offset: float
-    min_size_px: int
+    min_size_um2: float
     edge_margin_px: int
     morph_kernel_size: int
 
@@ -95,7 +95,7 @@ class DetectorConfig:
         return cls(
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=15.0,
-            min_size_px=1000,
+            min_size_um2=130.0,
             edge_margin_px=50,
             morph_kernel_size=5,
             cal_poly=(0.193, -0.217, -0.604),
@@ -117,8 +117,8 @@ class DetectorConfig:
         """Graphene detection preset (stub -- no calibration curve yet)."""
         return cls(
             contrast_mode=ContrastMode.BELOW,
-            contrast_offset=8.0,
-            min_size_px=1000,
+            contrast_offset=10.0,
+            min_size_um2=130.0,
             edge_margin_px=50,
             morph_kernel_size=5,
             cal_poly=(0.0, 0.0, 0.0),
