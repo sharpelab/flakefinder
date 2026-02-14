@@ -137,7 +137,6 @@ uv run python scripts/process_chip_scan.py scans/[run_dir]/chip_[N]/scan_20x --s
 uv run python scripts/mosaic_util.py --glob 'pattern' -o output.png --labels
 uv run python scripts/mosaic_util.py --glob 'pattern' -o output.png --label-text "a,b,c" --label-size 24 --label-bg 0,0,0,180
 ```
-- `--glob` supports brace expansion: `'afs/af_{2.5x,5x,10x}_foo/after.jpg'`
 - `--rows N` for multi-row layouts (default 1)
 - `--max-dim 5000` controls canvas size
 
