@@ -24,8 +24,8 @@ Usage:
     # Only process chips 0 and 2
     uv run python find_flakes.py --chips 0,2
 
-    # Resume a previous run
-    uv run python find_flakes.py -o scans/run_20260208_1430
+    # Resume a previous run (config loaded from checkpoint)
+    uv run python find_flakes.py --resume scans/run_20260208_1430
 
     # Process chips after chip 3, limit to 2 chips
     uv run python find_flakes.py --after 3 --limit 2
@@ -84,6 +84,20 @@ class TeeWriter:
 # Defaults
 DEFAULT_AREA_RECT = "8000,95000,0,78000"
 DEFAULT_INITIAL_Z = 24690
+
+# Config flags that --resume forbids (must come from checkpoint instead)
+_RESUME_FORBIDDEN_FLAGS = frozenset(
+    {
+        "--overview-mag",
+        "--chip-scan-mag",
+        "--scan-speed",
+        "--scan-z-speed",
+        "--area-rect",
+        "--initial-z",
+        "--white-balance",
+        "--notes",
+    }
+)
 
 
 def load_checkpoint(run_dir):
@@ -307,8 +321,8 @@ Examples:
   # Preview all commands
   uv run python find_flakes.py --dry-run
 
-  # Resume a previous run
-  uv run python find_flakes.py -o scans/run_20260208_1430
+  # Resume a previous run (config from checkpoint)
+  uv run python find_flakes.py --resume scans/run_20260208_1430
 
   # Process chips after chip 3, limit to 2
   uv run python find_flakes.py --after 3 --limit 2
@@ -320,12 +334,20 @@ Examples:
   uv run python find_flakes.py --overview-mag 2.5x --chip-scan-mag 10x
 """,
     )
-    parser.add_argument(
+    run_group = parser.add_mutually_exclusive_group()
+    run_group.add_argument(
         "-o",
         "--output",
         type=str,
         default=None,
-        help="Run directory (default: scans/run_YYYYMMDD_HHMM/)",
+        help="Run directory for new run (default: scans/run_YYYYMMDD_HHMM/)",
+    )
+    run_group.add_argument(
+        "--resume",
+        type=str,
+        metavar="DIR",
+        default=None,
+        help="Resume a previous run (loads all config from checkpoint)",
     )
     parser.add_argument(
         "--area-rect",
@@ -774,6 +796,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
         "chip_scan_mag": p.chip_scan_mag,
         "scan_speed": p.scan_speed,
         "scan_z_speed": p.scan_z_speed,
+        "white_balance": args.white_balance,
         "chips": args.chips,
         "after": args.after,
         "limit": args.limit,
@@ -795,8 +818,45 @@ def run(scope: Microscope, p: _Preflight) -> int:
     return 0
 
 
+def _apply_resume(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Load pipeline config from checkpoint for --resume mode.
+
+    Mutates args in place: sets output and all config fields from the
+    saved checkpoint. Calls parser.error() on invalid state.
+    """
+    used = [f for f in sorted(_RESUME_FORBIDDEN_FLAGS) if f in sys.argv]
+    if used:
+        parser.error(f"--resume cannot be combined with: {', '.join(used)}")
+
+    resume_dir = Path(args.resume)
+    cp_path = resume_dir / "checkpoint.json"
+    if not cp_path.exists():
+        parser.error(f"No checkpoint.json in {resume_dir}")
+
+    with open(cp_path) as f:
+        cp = json.load(f)
+    saved = cp.get("args")
+    if not saved:
+        parser.error(f"checkpoint.json in {resume_dir} has no saved args (old format?)")
+
+    args.output = str(resume_dir)
+    args.area_rect = saved["area_rect"]
+    args.initial_z = saved["initial_z"]
+    args.overview_mag = saved["overview_mag"]
+    args.chip_scan_mag = saved["chip_scan_mag"]
+    args.scan_speed = saved["scan_speed"]
+    args.scan_z_speed = saved["scan_z_speed"]
+    if "white_balance" in saved:
+        args.white_balance = saved["white_balance"]
+
+
 def main() -> int:
-    args = _build_parser().parse_args()
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    if args.resume:
+        _apply_resume(args, parser)
+
     p = _plan(args)
 
     if args.dry_run:
