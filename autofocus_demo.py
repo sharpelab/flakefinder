@@ -257,7 +257,7 @@ def main():
                 fine_speed_factor=args.fine_speed_factor,
                 super_fine_pass=args.super_fine,
                 sharpness_method=args.sharpness_method,
-                store_frames=bool(args.debug_dir),
+                store_frames=bool(args.debug_dir or args.output),
                 compute_all_metrics=args.all_metrics,
                 settle_time_s=args.settle_time,
                 min_dynamic_range=args.min_dynamic_range,
@@ -315,7 +315,7 @@ def main():
 
         # Save best frame from scan (if we have frames stored and output specified)
         if args.output and best_frame is not None and best_frame.image is not None:
-            best_scan_path = os.path.join(args.output, "best_scan_frame.jpg")
+            best_scan_path = os.path.join(args.output, "best.jpg")
             PILImage.fromarray(best_frame.image).save(best_scan_path, quality=95)
             vprint(f"  Saved best scan frame: {best_scan_path}")
 
@@ -378,6 +378,11 @@ def main():
                 "max": max_sharpness,
                 "mean": mean_sharpness,
             }
+            if best_frame is not None:
+                summary["best_frame"] = {
+                    "z_um": best_frame.z_um,
+                    "sharpness": best_frame.sharpness,
+                }
 
             summary_path = os.path.join(args.output, "summary.json")
             with open(summary_path, "w") as f:
