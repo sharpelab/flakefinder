@@ -1,7 +1,11 @@
 """End-to-end flake finding pipeline.
 
-Orchestrates: initial Z → 5x overview → stitch → chip detection →
-per-chip focus mapping → plane analysis → 20x scanning.
+Orchestrates: overview scan → stitch → chip detection →
+per-chip focus mapping → plane analysis → chip scanning.
+
+Overview and chip scan magnifications are configurable (default: 5x
+overview, 20x chip scan). Scan speeds scale automatically with
+magnification.
 
 Calls command modules in-process with a shared Microscope connection.
 If any step fails, prints what completed and exits. Output goes under
@@ -11,8 +15,11 @@ Supports checkpointing: re-running with the same -o directory resumes
 from where the previous run left off.
 
 Usage:
-    # Full pipeline
+    # Full pipeline (5x overview + 20x chip scan)
     uv run python find_flakes.py
+
+    # Fast screening: 2.5x overview + 10x chip scan
+    uv run python find_flakes.py --overview-mag 2.5x --chip-scan-mag 10x
 
     # Only process chips 0 and 2
     uv run python find_flakes.py --chips 0,2
@@ -77,8 +84,6 @@ class TeeWriter:
 # Defaults
 DEFAULT_AREA_RECT = "8000,95000,0,78000"
 DEFAULT_INITIAL_Z = 24690
-DEFAULT_SCAN_SPEED = 5
-DEFAULT_SCAN_Z_SPEED = 1250
 
 
 def load_checkpoint(run_dir):
@@ -220,6 +225,10 @@ class _Preflight:
     chip_filter: list[int] | None
     wb: GainRGB
     area: AreaRect
+    overview_mag: str
+    chip_scan_mag: str
+    scan_speed: float
+    scan_z_speed: float
     args: argparse.Namespace  # raw CLI args for forwarding
 
 
@@ -236,19 +245,33 @@ def _plan(args: argparse.Namespace) -> _Preflight:
     wb = parse_white_balance(args.white_balance)
     area = parse_area_rect(args.area_rect)
 
+    # Normalize magnification: "5" → "5x", "2.5X" → "2.5x"
+    def _fmt_mag(s: str) -> str:
+        n = float(s.lower().strip().rstrip("x"))
+        return f"{int(n)}x" if n == int(n) else f"{n}x"
+
+    overview_mag = _fmt_mag(args.overview_mag)
+    chip_scan_mag = _fmt_mag(args.chip_scan_mag)
+
     if args.output:
         run_dir = Path(args.output)
     else:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
         run_dir = Path("scans") / f"run_{timestamp}"
 
-    overview_dir = run_dir / "overview_5x"
-    stitch_path = run_dir / "overview_5x_stitch.jpg"
-    chips_json_path = run_dir / "overview_5x_stitch_chips.json"
+    overview_dir = run_dir / f"overview_{overview_mag}"
+    stitch_path = run_dir / f"overview_{overview_mag}_stitch.jpg"
+    chips_json_path = run_dir / f"overview_{overview_mag}_stitch_chips.json"
 
     chip_filter = None
     if args.chips is not None:
         chip_filter = [int(c.strip()) for c in args.chips.split(",")]
+
+    # Compute speed defaults scaled by chip scan magnification (baseline: 20x)
+    chip_mag_num = float(chip_scan_mag.rstrip("x"))
+    mag_scale = 20.0 / chip_mag_num
+    scan_speed = args.scan_speed if args.scan_speed is not None else min(5.0 * mag_scale, 40.0)
+    scan_z_speed = args.scan_z_speed if args.scan_z_speed is not None else min(1250.0 * mag_scale, 5000.0)
 
     return _Preflight(
         run_dir=run_dir,
@@ -258,6 +281,10 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         chip_filter=chip_filter,
         wb=wb,
         area=area,
+        overview_mag=overview_mag,
+        chip_scan_mag=chip_scan_mag,
+        scan_speed=scan_speed,
+        scan_z_speed=scan_z_speed,
         args=args,
     )
 
@@ -288,6 +315,9 @@ Examples:
 
   # Step through with confirmation between each stage
   uv run python find_flakes.py --pause
+
+  # Fast screening: 2.5x overview + 10x chip scan
+  uv run python find_flakes.py --overview-mag 2.5x --chip-scan-mag 10x
 """,
     )
     parser.add_argument(
@@ -308,6 +338,18 @@ Examples:
         type=float,
         default=DEFAULT_INITIAL_Z,
         help=f"Z position before overview in µm (default: {DEFAULT_INITIAL_Z})",
+    )
+    parser.add_argument(
+        "--overview-mag",
+        type=str,
+        default="5x",
+        help="Objective magnification for overview scan (default: 5x)",
+    )
+    parser.add_argument(
+        "--chip-scan-mag",
+        type=str,
+        default="20x",
+        help="Objective magnification for chip scanning (default: 20x)",
     )
     parser.add_argument(
         "--chips",
@@ -332,14 +374,14 @@ Examples:
     parser.add_argument(
         "--scan-speed",
         type=float,
-        default=DEFAULT_SCAN_SPEED,
-        help=f"20x scan speed in mm/s (default: {DEFAULT_SCAN_SPEED})",
+        default=None,
+        help="Chip scan speed in mm/s (default: scales with magnification, 5 at 20x)",
     )
     parser.add_argument(
         "--scan-z-speed",
         type=float,
-        default=DEFAULT_SCAN_Z_SPEED,
-        help=f"Focus map AF Z speed in µm/s (default: {DEFAULT_SCAN_Z_SPEED})",
+        default=None,
+        help="Focus map AF Z speed in µm/s (default: scales with magnification, 1250 at 20x)",
     )
     parser.add_argument(
         "--white-balance",
@@ -377,10 +419,12 @@ def _print_header(p: _Preflight) -> None:
     print("FlakeFinder Pipeline")
     print("=" * 70)
     print(f"Run directory: {p.run_dir}")
+    print(f"Overview:      {p.overview_mag}")
+    print(f"Chip scan:     {p.chip_scan_mag}")
     print(f"Area rect:     {args.area_rect}")
     print(f"Initial Z:     {args.initial_z} µm")
-    print(f"Scan speed:    {args.scan_speed} mm/s")
-    print(f"AF Z speed:    {args.scan_z_speed} µm/s")
+    print(f"Scan speed:    {p.scan_speed} mm/s")
+    print(f"AF Z speed:    {p.scan_z_speed} µm/s")
     print(f"White balance: {args.white_balance} (B,G,R)")
     if p.chip_filter:
         print(f"Chips:         {p.chip_filter}")
@@ -499,17 +543,17 @@ def run(scope: Microscope, p: _Preflight) -> int:
     pipeline_start = time.perf_counter()
 
     # ----------------------------------------------------------------
-    # Step 1: 5x overview scan
+    # Step 1: Overview scan
     # ----------------------------------------------------------------
     if step_done(checkpoint, "overview_scan"):
-        print("\n  [checkpoint] Skipping 5x Overview Scan (already complete)")
+        print(f"\n  [checkpoint] Skipping {p.overview_mag} Overview Scan (already complete)")
     else:
         duration, _ = run_in_process(
-            "5x Overview Scan",
+            f"{p.overview_mag} Overview Scan",
             lambda: scan.run(
                 scope=scope,
                 output=str(p.overview_dir),
-                objective_mag="5x",
+                objective_mag=p.overview_mag,
                 initial_z=args.initial_z,
                 area_rect=p.area,
                 downsample=4,
@@ -577,18 +621,19 @@ def run(scope: Microscope, p: _Preflight) -> int:
         print(f"[detect] {len(chips_data.get('chips', []))} chips")
 
     # ----------------------------------------------------------------
-    # Step 4: Switch to 20x
+    # Step 4: Switch to chip scan objective
     # ----------------------------------------------------------------
-    if step_done(checkpoint, "switch_20x"):
-        print("\n  [checkpoint] Skipping Switch to 20x (already complete)")
+    switch_key = f"switch_{p.chip_scan_mag}"
+    if step_done(checkpoint, switch_key):
+        print(f"\n  [checkpoint] Skipping Switch to {p.chip_scan_mag} (already complete)")
     else:
         duration, _ = run_in_process(
-            "Switch to 20x",
-            lambda: stage.run(scope=scope, objective_mag="20x"),
+            f"Switch to {p.chip_scan_mag}",
+            lambda: stage.run(scope=scope, objective_mag=p.chip_scan_mag),
             pause=args.pause,
             quiet=quiet,
         )
-        mark_step(run_dir, checkpoint, "switch_20x", duration)
+        mark_step(run_dir, checkpoint, switch_key, duration)
 
     # ----------------------------------------------------------------
     # Load chip data and apply filters
@@ -602,7 +647,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
         chip_dir = run_dir / f"chip_{chip_idx}"
         focus_map_path = chip_dir / f"focus_map_chip{chip_idx}.json"
         plane_path = chip_dir / f"focus_map_chip{chip_idx}_plane.json"
-        scan_20x_dir = chip_dir / "scan_20x"
+        chip_scan_dir = chip_dir / f"scan_{p.chip_scan_mag}"
 
         fm_key = f"chip_{chip_idx}_focus_map"
         an_key = f"chip_{chip_idx}_analyze"
@@ -610,7 +655,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
 
         if step_done(checkpoint, fm_key) and step_done(checkpoint, an_key) and step_done(checkpoint, sc_key):
             print(f"\n  [checkpoint] Skipping chip {chip_idx} (all steps complete)")
-            _print_chip_summary(chip_idx, plane_path, scan_20x_dir)
+            _print_chip_summary(chip_idx, plane_path, chip_scan_dir)
             continue
 
         print(f"\n{'#' * 70}")
@@ -628,7 +673,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
                     chips_meta=p.chips_json_path,
                     chip=ci,
                     save_images=True,
-                    z_speed=args.scan_z_speed,
+                    z_speed=p.scan_z_speed,
                     af_settle=0.2,
                     white_balance=p.wb,
                     output_dir=cd,
@@ -659,20 +704,20 @@ def run(scope: Microscope, p: _Preflight) -> int:
         # Summary: focus_map (after analyze exports plane)
         _print_focus_map_summary(chip_idx, plane_path)
 
-        # Step 5c: 20x scan
+        # Step 5c: Chip scan
         if step_done(checkpoint, sc_key):
-            print(f"\n  [checkpoint] Skipping Chip {chip_idx} - 20x Scan (already complete)")
+            print(f"\n  [checkpoint] Skipping Chip {chip_idx} - {p.chip_scan_mag} Scan (already complete)")
         else:
             duration, _ = run_in_process(
-                f"Chip {chip_idx} - 20x Scan",
-                lambda ci=chip_idx, sd=scan_20x_dir, pp=plane_path: chip_scan.run(
+                f"Chip {chip_idx} - {p.chip_scan_mag} Scan",
+                lambda ci=chip_idx, sd=chip_scan_dir, pp=plane_path: chip_scan.run(
                     scope=scope,
                     output=str(sd),
                     chips_meta=p.chips_json_path,
                     chip=ci,
                     plane_path=pp,
-                    objective_mag="20x",
-                    speed_mm=args.scan_speed,
+                    objective_mag=p.chip_scan_mag,
+                    speed_mm=p.scan_speed,
                     white_balance=p.wb,
                     clean=True,
                     quiet=True,
@@ -683,7 +728,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
             mark_step(run_dir, checkpoint, sc_key, duration)
 
         # Summary: chip scan
-        _print_chip_scan_summary(chip_idx, scan_20x_dir)
+        _print_chip_scan_summary(chip_idx, chip_scan_dir)
 
     # ----------------------------------------------------------------
     # Summary
@@ -704,7 +749,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
         print(f"{'Overview scan':<30} {format_duration(t.get('overview_scan', 0)):>12}")
         print(f"{'Stitch':<30} {format_duration(t.get('stitch', 0)):>12}")
         print(f"{'Detect chips':<30} {format_duration(t.get('detect_chips', 0)):>12}")
-        print(f"{'Switch to 20x':<30} {format_duration(t.get('switch_20x', 0)):>12}")
+        print(f"{'Switch to ' + p.chip_scan_mag:<30} {format_duration(t.get(switch_key, 0)):>12}")
 
         for chip_idx in chip_indices:
             fm = t.get(f"chip_{chip_idx}_focus_map", 0)
@@ -712,7 +757,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
             sc = t.get(f"chip_{chip_idx}_scan", 0)
             print(f"{'  Chip ' + str(chip_idx) + ' focus map':<30} {format_duration(fm):>12}")
             print(f"{'  Chip ' + str(chip_idx) + ' analyze':<30} {format_duration(an):>12}")
-            print(f"{'  Chip ' + str(chip_idx) + ' 20x scan':<30} {format_duration(sc):>12}")
+            print(f"{'  Chip ' + str(chip_idx) + ' ' + p.chip_scan_mag + ' scan':<30} {format_duration(sc):>12}")
 
         total_recorded = sum(t.values())
         print("-" * 42)
@@ -725,8 +770,10 @@ def run(scope: Microscope, p: _Preflight) -> int:
     checkpoint["args"] = {
         "area_rect": args.area_rect,
         "initial_z": args.initial_z,
-        "scan_speed": args.scan_speed,
-        "scan_z_speed": args.scan_z_speed,
+        "overview_mag": p.overview_mag,
+        "chip_scan_mag": p.chip_scan_mag,
+        "scan_speed": p.scan_speed,
+        "scan_z_speed": p.scan_z_speed,
         "chips": args.chips,
         "after": args.after,
         "limit": args.limit,
@@ -754,18 +801,18 @@ def main() -> int:
 
     if args.dry_run:
         _print_header(p)
-        run_in_process("5x Overview Scan", lambda: None, dry_run=True)
+        run_in_process(f"{p.overview_mag} Overview Scan", lambda: None, dry_run=True)
         run_in_process("Stitch Overview", lambda: None, dry_run=True)
         run_in_process("Detect Chips", lambda: None, dry_run=True)
-        run_in_process("Switch to 20x", lambda: None, dry_run=True)
+        run_in_process(f"Switch to {p.chip_scan_mag}", lambda: None, dry_run=True)
         if p.chips_json_path.exists():
             chip_indices = _resolve_chip_indices(p)
             for ci in chip_indices:
                 run_in_process(f"Chip {ci} - Focus Map", lambda: None, dry_run=True)
                 run_in_process(f"Chip {ci} - Analyze Focus Map", lambda: None, dry_run=True)
-                run_in_process(f"Chip {ci} - 20x Scan", lambda: None, dry_run=True)
+                run_in_process(f"Chip {ci} - {p.chip_scan_mag} Scan", lambda: None, dry_run=True)
         else:
-            print("\n  Per-chip steps: Focus Map -> Analyze -> 20x Scan (chips not yet detected)")
+            print(f"\n  Per-chip steps: Focus Map -> Analyze -> {p.chip_scan_mag} Scan (chips not yet detected)")
         return 0
 
     # Create run directory and set up log tee
