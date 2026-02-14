@@ -15,6 +15,34 @@ Empirical measurements and reference data for the Sharpe Lab Leica DM6M.
 
 Autofocus auto range = min(working_distance / 3, 500).
 
+### Autofocus Parameters by Objective
+
+Measured 2026-02-14 on silicon substrate (Elijah's Chip Rejects).
+
+| Mag | Offset from 5x | Range | Z Speed | Exposure |
+|-----|----------------|-------|---------|----------|
+| 2.5x | -87 µm | auto (500) | 2500 µm/s | 1 ms |
+| 5x | — | auto (500) | 2500 µm/s | 1 ms |
+| 10x | -3 µm | auto (500) | 1250 µm/s | 1 ms |
+| 20x | +11 µm | auto (500) | 1250 µm/s | 2 ms |
+| 50x | +13 µm | 100 µm | 500 µm/s | 2 ms |
+
+Parfocal offsets are sample-dependent. 2.5x is a notable outlier (~87 µm below 5x).
+
+**SDK parfocal correction is unreliable.** The Leica SDK adjusts Z on objective swap, but the delta is not a fixed offset — it varies with starting Z. Tested 2.5x→5x: -225 µm from Z=24483, -10.3 from Z=24670. Always supply explicit `--z`.
+
+### Focus-and-Capture Parameters by Objective
+
+Single-pass Z scan, best frame saved. Validated 2026-02-14 at chip 2 rank 18.
+
+| Mag | Range | Speed | Exposure | Frames | Time |
+|-----|-------|-------|----------|--------|------|
+| 2.5x | 200 µm | 1000 µm/s | 1 ms | 6 | 0.33s |
+| 5x | 100 µm | 500 µm/s | 1 ms | 6 | 0.33s |
+| 10x | 50 µm | 250 µm/s | 1 ms | 6 | 0.34s |
+| 20x | 30 µm | 50 µm/s | 2 ms | 22 | 1.11s |
+| 50x | 20 µm | 25 µm/s | 2 ms | 17 | 0.90s |
+
 ## Reference Z Positions
 
 Objectives are parfocal — Z focus is similar across magnifications.

@@ -38,6 +38,10 @@ You run with full permission bypass (`--dangerously-skip-permissions`). Every to
     - `--attach src.png` — copies to Obsidian attachments/, validates entry text references it as `![[src.png]]`
     - `--attach src.png:dest.png` — copies with rename
     - Entry text via heredoc, positional arg, or stdin pipe
+- **Session-ending entries**: Two types depending on context:
+  - **Handoff** (`### Session handoff`): The next operator picks up immediately. Focus on actionable state: what's in progress, what command to run next, what values to use. Include "where we are" (current objective, sample, Z) and "next step" as a concrete action.
+  - **Session end** (`### Session end`): There will be a gap before the next session. Focus on what was accomplished, key results with values, and a prioritized list of next steps. Include enough context that someone reading it cold can pick up the thread. Record open items carried forward.
+  - When resuming: if the last log entry is a handoff or session end, read it carefully before asking the user what to work on — it may already answer the question.
 - **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `sls pull` / `sls push` for transfers (handles mkdir automatically). Fall back to `rsync -a --quiet` for bulk transfers or non-repo paths. File routing:
   - `scans/` — pipeline scan data (overview, chip scans, focus maps from `find_flakes.py`)
   - `afs/` — one-off autofocus runs
