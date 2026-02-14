@@ -9,6 +9,7 @@ Usage:
     python capture_util.py output.jpg --exposure-ms 50    # 50ms exposure
     python capture_util.py output.jpg --white-balance 2.51,1.02,1.41  # White balance (B,G,R)
     python capture_util.py output.jpg --x 5000 --y 14441 # Move then capture
+    python capture_util.py output.jpg --objective-mag 20x  # Switch to 20x then capture
     python capture_util.py output.jpg --focus             # Autofocus then capture sharpest frame
     python capture_util.py output.jpg --focus --z-range 100 --z-speed 800  # Custom focus params
 """
@@ -54,6 +55,7 @@ def main() -> int:
     parser.add_argument("--x", type=float, default=None, help="Move to X position in µm before capture")
     parser.add_argument("--y", type=float, default=None, help="Move to Y position in µm before capture")
     parser.add_argument("--z", type=float, help="Move to Z position in µm before capture")
+    parser.add_argument("--objective-mag", type=str, help="Switch objective magnification (e.g. '20x', '5', '2.5x')")
     parser.add_argument("--focus", action="store_true", help="Autofocus: scan Z range and capture sharpest frame")
     parser.add_argument(
         "--z-range", type=float, default=None, help="Focus Z search range in µm (default: auto from objective)"
@@ -62,6 +64,15 @@ def main() -> int:
     args = parser.parse_args()
 
     with Microscope() as scope:
+        # Switch objective if specified (before any moves)
+        if args.objective_mag is not None:
+            switched = scope.switch_objective_mag(args.objective_mag)
+            mag = scope.nosepiece.magnification
+            if switched:
+                print(f"Switched to {mag}x objective")
+            else:
+                print(f"Already at {mag}x objective")
+
         # Set lamp and open shutter
         scope.light_on(args.lamp)
 
@@ -104,6 +115,9 @@ def main() -> int:
         # Report capture settings
         if not args.quiet:
             x, y = scope.stage.position_um
+            mag = scope.nosepiece.magnification
+            obj_str = f"{mag}x" if mag else f"position {scope.nosepiece.position}"
+            print(f"Objective: {obj_str}")
             print(f"Position: X={x:.1f} Y={y:.1f} Z={scope.z.position_um:.1f} µm")
             print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
             print(f"Shutter: {'open' if scope.shutter.is_open else 'closed'}")
@@ -138,7 +152,7 @@ def main() -> int:
             if not args.quiet:
                 print(f"Best Z: {result.z_um:.1f} µm (sharpness: {result.sharpness:.1f})")
                 print(f"Frames: {result.frame_count}, scan: {result.scan_duration_s:.2f}s")
-                print(f"Z range: {result.z_range_um:.0f} µm, objective pos: {result.objective_position}")
+                print(f"Z range: {result.z_range_um:.0f} µm")
         else:
             if not args.quiet:
                 print("Capturing...")
