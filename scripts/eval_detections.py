@@ -18,6 +18,7 @@ from pathlib import Path
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+from detector_config import DetectorConfig
 from mosaic_util import make_mosaic
 from segment_flakes import draw_scale_bar, segment_frame
 
@@ -52,33 +53,22 @@ COLOR_POSSIBLE = (255, 255, 0)  # cyan
 COLOR_NON_HBN = (128, 128, 128)  # gray
 COLOR_TARGET = (255, 255, 255)  # white outline for target matches
 
-
-_G_CURVE = np.linspace(-0.5, 6.0, 500)
-_R_CURVE = np.polyval(CAL_POLY, _G_CURVE)
-
-
-def cal_distance(r: float, g: float) -> float:
-    """Perpendicular distance from (g, r) to calibration curve."""
-    return float(np.sqrt((_G_CURVE - g) ** 2 + (_R_CURVE - r) ** 2).min())
+_LABEL_COLORS: dict[str, tuple[int, int, int]] = {
+    "thin": COLOR_THIN,
+    "medium": COLOR_MEDIUM,
+    "thick": COLOR_THICK,
+    "possible": COLOR_POSSIBLE,
+}
 
 
-def classify_detection(r: float, g: float) -> tuple[str, tuple[int, int, int]]:
+def classify_detection(r: float, g: float, config: DetectorConfig) -> tuple[str, tuple[int, int, int]]:
     """Classify a detection by R-G calibration distance and G contrast.
 
     Returns (label, bgr_color).
     """
-    d = cal_distance(r, g)
-    if d < 0.5:
-        if g < 1.0:
-            return "thin", COLOR_THIN
-        elif g <= 2.5:
-            return "medium", COLOR_MEDIUM
-        else:
-            return "thick", COLOR_THICK
-    elif d < 1.0:
-        return "possible", COLOR_POSSIBLE
-    else:
-        return "non-hBN", COLOR_NON_HBN
+    label = config.classify(r, g)
+    color = _LABEL_COLORS.get(label, COLOR_NON_HBN)
+    return label, color
 
 
 def mask_centroid(mask_path: Path) -> tuple[float, float] | None:
@@ -116,6 +106,7 @@ def draw_eval_frame(
     classifications: list[tuple[str, tuple[int, int, int]]],
     target_idx: int | None,
     um_per_px: float,
+    config: DetectorConfig,
 ) -> np.ndarray:
     """Draw color-coded detection boxes with classification labels on raw image."""
     vis = raw_image.copy()
@@ -123,7 +114,7 @@ def draw_eval_frame(
     for i, (det, (cls_label, color)) in enumerate(zip(detections, classifications, strict=True)):
         bx, by, bw, bh = det["bbox"]
         r_contrast, g_contrast, _ = det["contrast_rgb"]
-        d = cal_distance(r_contrast, g_contrast)
+        d = config.cal_distance(r_contrast, g_contrast)
 
         # Draw filled bbox
         thickness = 2
@@ -177,6 +168,7 @@ def discover_frames(ref_dir: Path) -> list[dict]:
 def generate_rg_scatter(
     all_detections: list[tuple[float, float, str, bool]],
     output_path: Path,
+    config: DetectorConfig,
 ) -> None:
     """Generate R vs G scatter plot with calibration curve.
 
@@ -186,7 +178,7 @@ def generate_rg_scatter(
 
     # Plot calibration curve
     g_range = np.linspace(-0.2, 5.0, 200)
-    r_curve = np.polyval(CAL_POLY, g_range)
+    r_curve = np.polyval(config.cal_poly, g_range)
     ax.plot(g_range, r_curve, "k-", linewidth=2, label="Calibration curve", zorder=1)
 
     # Plot calibration data points as diamonds
@@ -210,7 +202,7 @@ def generate_rg_scatter(
         "medium": "#ffa500",
         "thick": "#ff6400",
         "possible": "#00ffff",
-        "non-hBN": "#808080",
+        config.non_match_label: "#808080",
     }
 
     # Plot detection points
@@ -259,13 +251,25 @@ def main():
     )
     parser.add_argument("ref_dir", type=Path, help="Reference directory with Chip_N/Flake_M structure")
     parser.add_argument("--flatfield", type=Path, default=None, help="Flatfield .npy file")
+    parser.add_argument("--material", default="hbn", choices=["hbn", "graphene"], help="Material preset")
     parser.add_argument("--pixel-size", type=float, default=0.36, help="µm per pixel (20x bin3)")
-    parser.add_argument("--contrast-offset", type=float, default=15.0, help="Threshold above bg mode")
-    parser.add_argument("--min-size", type=int, default=1000, help="Min detection size (px)")
+    parser.add_argument("--contrast-offset", type=float, default=None, help="Override contrast offset from preset")
+    parser.add_argument("--min-size", type=int, default=None, help="Override min detection size (px)")
     parser.add_argument("--match-radius", type=int, default=100, help="Target matching radius (px)")
     parser.add_argument("-o", "--output", type=Path, required=True, help="Output directory")
     parser.add_argument("--show", action="store_true", help="Open results after generation")
     args = parser.parse_args()
+
+    from dataclasses import replace as _replace
+
+    config = DetectorConfig.from_material(args.material)
+    _overrides = {}
+    if args.contrast_offset is not None:
+        _overrides["contrast_offset"] = args.contrast_offset
+    if args.min_size is not None:
+        _overrides["min_size_px"] = args.min_size
+    if _overrides:
+        config = _replace(config, **_overrides)
 
     # Discover frames
     frames = discover_frames(args.ref_dir)
@@ -306,11 +310,7 @@ def main():
             corrected = raw
 
         # Run detector
-        detections = segment_frame(
-            corrected,
-            contrast_offset=args.contrast_offset,
-            min_size_px=args.min_size,
-        )
+        detections = segment_frame(corrected, config)
 
         # Compute target centroid
         target_center = mask_centroid(frame_info["mask_path"])
@@ -328,7 +328,7 @@ def main():
         classifications = []
         for det in detections:
             r, g, _ = det["contrast_rgb"]
-            cls_label, color = classify_detection(r, g)
+            cls_label, color = classify_detection(r, g, config)
             classifications.append((cls_label, color))
             cls_counts[cls_label] = cls_counts.get(cls_label, 0) + 1
 
@@ -343,7 +343,7 @@ def main():
             all_scatter_points.append((r, g, cls_label, i == target_idx))
 
         # Draw annotated frame
-        vis = draw_eval_frame(raw, detections, classifications, target_idx, args.pixel_size)
+        vis = draw_eval_frame(raw, detections, classifications, target_idx, args.pixel_size, config)
 
         # Save annotated frame to temp file
         ann_path = args.output / f"{frame_info['label'].replace('/', '_')}.jpg"
@@ -388,7 +388,7 @@ def main():
     if all_scatter_points:
         print("Generating R-G scatter plot...")
         scatter_path = args.output / "rg_scatter.png"
-        generate_rg_scatter(all_scatter_points, scatter_path)
+        generate_rg_scatter(all_scatter_points, scatter_path, config)
         print(f"Saved scatter: {scatter_path}")
 
     # Generate summary
@@ -411,19 +411,19 @@ def main():
         )
 
         f.write("--- Classification breakdown (all detections) ---\n")
-        for cls_name in ["thin", "medium", "thick", "possible", "non-hBN"]:
+        for cls_name in ["thin", "medium", "thick", "possible", config.non_match_label]:
             count = cls_counts.get(cls_name, 0)
             f.write(f"  {cls_name}: {count}\n")
 
         f.write("\n--- Target match classifications ---\n")
-        for cls_name in ["thin", "medium", "thick", "possible", "non-hBN"]:
+        for cls_name in ["thin", "medium", "thick", "possible", config.non_match_label]:
             count = target_cls_counts.get(cls_name, 0)
             f.write(f"  {cls_name}: {count}\n")
 
         # Recall at various classification thresholds
         f.write("\n--- Recall by classification threshold ---\n")
         cum = 0
-        for cls_name in ["thin", "medium", "thick", "possible", "non-hBN"]:
+        for cls_name in ["thin", "medium", "thick", "possible", config.non_match_label]:
             cum += target_cls_counts.get(cls_name, 0)
             f.write(f"  Including {cls_name}: {cum}/{total_targets} ({cum / max(total_targets, 1):.1%})\n")
 

@@ -2,6 +2,7 @@
 
 Usage:
     python segment_flakes.py frame.jpg --flatfield flatfield.npy
+    python segment_flakes.py frame.jpg --flatfield flatfield.npy --material graphene
     python segment_flakes.py frame.jpg --flatfield flatfield.npy --save-plot
     python segment_flakes.py frame.jpg --flatfield flatfield.npy -o output.jpg
 """
@@ -9,25 +10,17 @@ Usage:
 import argparse
 import json
 import sys
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
 import cv2
 import numpy as np
+from detector_config import ContrastMode, DetectorConfig
 from scipy import ndimage
 from scipy.stats import kurtosis as scipy_kurtosis
 
 from flakefinder.scan_utils import apply_flatfield
-
-# R-G calibration curve: R = 0.193*G^2 - 0.217*G - 0.604
-_CAL_POLY = np.array([0.193, -0.217, -0.604])
-_G_CURVE = np.linspace(-0.5, 6.0, 500)
-_R_CURVE = np.polyval(_CAL_POLY, _G_CURVE)
-
-
-def cal_distance(r: float, g: float) -> float:
-    """Perpendicular distance from (g, r) to hBN calibration curve."""
-    return float(np.sqrt((_G_CURVE - g) ** 2 + (_R_CURVE - r) ** 2).min())
 
 
 def histogram_mode(image: np.ndarray, channel: int | None = None) -> float:
@@ -53,6 +46,7 @@ def _analyze_component(
     bg_modes: np.ndarray,
     norm_contrast: np.ndarray,
     grad_mag: np.ndarray,
+    config: DetectorConfig,
 ) -> dict:
     """Analyze a binary component mask and return detection metrics."""
     rows = np.any(component, axis=1)
@@ -120,7 +114,7 @@ def _analyze_component(
         "size_px": int(component.sum()),
         "mean_contrast": round(mean_contrast, 1),
         "contrast_rgb": [r_contrast, g_contrast, b_contrast],
-        "cal_dist": round(cal_distance(r_contrast, g_contrast), 4),
+        "cal_dist": round(config.cal_distance(r_contrast, g_contrast), 4),
         "solidity": round(solidity, 4),
         "circularity": round(circularity, 4),
         "perim_ratio": round(perim_ratio, 4),
@@ -230,22 +224,22 @@ def _subsegment_by_contrast(
 
 def segment_frame(
     image: np.ndarray,
-    contrast_offset: float = 15.0,
-    min_size_px: int = 1000,
-    edge_margin_px: int = 50,
+    config: DetectorConfig,
     perim_ratio_thresh: float = 0.0,
 ) -> list[dict]:
-    """Segment flakes by thresholding above background mode + offset.
+    """Segment flakes by thresholding relative to background mode.
 
+    For 'above' contrast mode (hBN), finds pixels brighter than background.
+    For 'below' contrast mode (graphene), finds pixels darker than background.
     Returns list of detected regions with bbox, size, center, mean_contrast.
-    Large blobs with bimodal R contrast are sub-segmented by thickness.
-    Each detection includes shape metrics (solidity, circularity, r_std)
-    for downstream classification.
     """
     bg_modes = np.array([histogram_mode(image, c) for c in range(3)])
 
     above = image.astype(np.float32) - bg_modes[np.newaxis, np.newaxis, :]
-    mask = np.any(above > contrast_offset, axis=2)
+    if config.contrast_mode == ContrastMode.ABOVE:
+        mask = np.any(above > config.contrast_offset, axis=2)
+    else:
+        mask = np.any(above < -config.contrast_offset, axis=2)
     # Reuse above buffer for normalized contrast (used by subsegment + analyze)
     norm_contrast = above
     norm_contrast /= np.maximum(bg_modes[np.newaxis, np.newaxis, :], 1.0)
@@ -256,7 +250,8 @@ def segment_frame(
     sy = cv2.Sobel(gray_g, cv2.CV_32F, 0, 1, ksize=3)
     grad_mag = np.sqrt(sx * sx + sy * sy)
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    ks = config.morph_kernel_size
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks, ks))
     mask_clean = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
     mask_clean = cv2.morphologyEx(mask_clean, cv2.MORPH_OPEN, kernel)
 
@@ -268,63 +263,51 @@ def segment_frame(
     detections = []
 
     for i in range(n_labels):
-        if component_slices[i] is None or component_sizes[i] < min_size_px:
+        if component_slices[i] is None or component_sizes[i] < config.min_size_px:
             continue
 
         sl = component_slices[i]
         cx = (sl[1].start + sl[1].stop) / 2
         cy = (sl[0].start + sl[0].stop) / 2
 
-        if cx < edge_margin_px or cx > w - edge_margin_px:
+        if cx < config.edge_margin_px or cx > w - config.edge_margin_px:
             continue
-        if cy < edge_margin_px or cy > h - edge_margin_px:
+        if cy < config.edge_margin_px or cy > h - config.edge_margin_px:
             continue
 
         component = labels == (i + 1)
 
         # Try contrast-based sub-segmentation for large blobs
-        sub_components = _subsegment_by_contrast(image, component, bg_modes, min_size_px, norm_contrast)
+        sub_components = _subsegment_by_contrast(image, component, bg_modes, config.min_size_px, norm_contrast)
 
         for sub_comp in sub_components:
-            det = _analyze_component(image, sub_comp, bg_modes, norm_contrast, grad_mag)
+            det = _analyze_component(image, sub_comp, bg_modes, norm_contrast, grad_mag, config)
             # Re-check edge margin for sub-components
             scx, scy = det["center"]
-            if scx < edge_margin_px or scx > w - edge_margin_px:
+            if scx < config.edge_margin_px or scx > w - config.edge_margin_px:
                 continue
-            if scy < edge_margin_px or scy > h - edge_margin_px:
+            if scy < config.edge_margin_px or scy > h - config.edge_margin_px:
                 continue
             detections.append(det)
 
     detections.sort(key=lambda d: d["size_px"], reverse=True)
-    classify_detections(detections, perim_ratio_thresh=perim_ratio_thresh)
+    classify_detections(detections, config, perim_ratio_thresh=perim_ratio_thresh)
     return detections
 
 
-def score_detections(detections: list[dict]) -> None:
+def score_detections(detections: list[dict], config: DetectorConfig) -> None:
     """Compute tier and score for detections in place.
 
-    Reads existing keys (perim_ratio, cal_dist, g_kurt, size_px).
+    Reads existing keys (perim_ratio, cal_dist, contrast_rgb, size_px).
     Adds keys: tier, score.
     """
     for det in detections:
-        pr = det["perim_ratio"]
-        cd = det["cal_dist"]
-        g = det["contrast_rgb"][1]
-        if pr < 1.20 and cd < 0.3 and g < 4.0:
-            det["tier"] = 1
-        elif pr < 1.35 or cd < 0.3:
-            det["tier"] = 2
-        else:
-            det["tier"] = 3
-        ge = det.get("grad_energy", 0)
-        det["score"] = round(
-            np.sqrt(det["size_px"]) * (1.0 / (1.0 + cd)) * (1.0 / (1.0 + ge)) ** 2,
-            4,
-        )
+        det["tier"], det["score"] = config.score_detection(det)
 
 
 def classify_detections(
     detections: list[dict],
+    config: DetectorConfig,
     perim_ratio_thresh: float = 0.0,
 ) -> None:
     """Classify detections and compute ranking scores in place.
@@ -341,7 +324,7 @@ def classify_detections(
         else:
             det["classification"] = None
 
-    score_detections(detections)
+    score_detections(detections, config)
 
 
 def draw_scale_bar(image: np.ndarray, um_per_px: float) -> None:
@@ -411,7 +394,13 @@ def draw_detections(
     return vis
 
 
-def save_plot(image: np.ndarray, detections: list[dict], title: str, output_path: Path):
+def save_plot(
+    image: np.ndarray,
+    detections: list[dict],
+    title: str,
+    output_path: Path,
+    config: DetectorConfig,
+):
     """Save matplotlib figure with image + threshold mask side by side."""
     import matplotlib.pyplot as plt
     from matplotlib.patches import Rectangle
@@ -430,9 +419,14 @@ def save_plot(image: np.ndarray, detections: list[dict], title: str, output_path
 
     bg_modes = np.array([histogram_mode(image, c) for c in range(3)])
     above = image.astype(np.float32) - bg_modes[np.newaxis, np.newaxis, :]
-    mask = np.any(above > 15, axis=2)
+    if config.contrast_mode == ContrastMode.ABOVE:
+        mask = np.any(above > config.contrast_offset, axis=2)
+        mode_label = f"bg_mode + {config.contrast_offset}"
+    else:
+        mask = np.any(above < -config.contrast_offset, axis=2)
+        mode_label = f"bg_mode - {config.contrast_offset}"
     ax2.imshow(mask, cmap="gray")
-    ax2.set_title(f"Threshold mask (bg_mode + 15)\nbg_modes BGR: {bg_modes.astype(int)}")
+    ax2.set_title(f"Threshold mask ({mode_label})\nbg_modes BGR: {bg_modes.astype(int)}")
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
@@ -444,9 +438,10 @@ def main():
     parser = argparse.ArgumentParser(description="Segment flakes via flatfield + contrast threshold")
     parser.add_argument("input", type=Path, help="Frame image")
     parser.add_argument("--flatfield", type=Path, default=None, help="Flatfield .npy file")
-    parser.add_argument("--contrast-offset", type=float, default=15.0, help="Threshold above bg mode")
-    parser.add_argument("--min-size", type=int, default=1000, help="Min detection size (px)")
-    parser.add_argument("--edge-margin", type=int, default=50, help="Ignore detections near frame edge (px)")
+    parser.add_argument("--material", default="hbn", choices=["hbn", "graphene"], help="Material preset")
+    parser.add_argument("--contrast-offset", type=float, default=None, help="Override contrast offset from preset")
+    parser.add_argument("--min-size", type=int, default=None, help="Override min detection size (px)")
+    parser.add_argument("--edge-margin", type=int, default=None, help="Override edge margin (px)")
     parser.add_argument(
         "--dark-frac-cutoff",
         type=float,
@@ -469,6 +464,17 @@ def main():
     )
     args = parser.parse_args()
 
+    config = DetectorConfig.from_material(args.material)
+    overrides = {}
+    if args.contrast_offset is not None:
+        overrides["contrast_offset"] = args.contrast_offset
+    if args.min_size is not None:
+        overrides["min_size_px"] = args.min_size
+    if args.edge_margin is not None:
+        overrides["edge_margin_px"] = args.edge_margin
+    if overrides:
+        config = replace(config, **overrides)
+
     raw = cv2.imread(args.input)
     if raw is None:
         print(f"Failed to read {args.input}")
@@ -489,7 +495,7 @@ def main():
         dets = []
         print(f"{args.input.name}: SKIPPED (dark_frac={dark_frac:.3f} > {args.dark_frac_cutoff})")
     else:
-        dets = segment_frame(corrected, args.contrast_offset, args.min_size, args.edge_margin, args.perim_ratio)
+        dets = segment_frame(corrected, config, args.perim_ratio)
         print(f"{args.input.name}: {len(dets)} detections (dark_frac={dark_frac:.3f})")
         for i, d in enumerate(dets):
             R, G = d["contrast_rgb"][0], d["contrast_rgb"][1]
@@ -515,9 +521,10 @@ def main():
         "frame_shape": list(raw.shape),
         "flatfield": str(args.flatfield) if args.flatfield else None,
         "params": {
-            "contrast_offset": args.contrast_offset,
-            "min_size_px": args.min_size,
-            "edge_margin_px": args.edge_margin,
+            "material": args.material,
+            "contrast_offset": config.contrast_offset,
+            "min_size_px": config.min_size_px,
+            "edge_margin_px": config.edge_margin_px,
             "dark_frac_cutoff": args.dark_frac_cutoff,
             "perim_ratio_thresh": args.perim_ratio,
         },
@@ -535,7 +542,7 @@ def main():
 
     if args.save_plot:
         plot_path = args.input.with_suffix(".seg.plot.png")
-        save_plot(corrected, dets, args.input.name, plot_path)
+        save_plot(corrected, dets, args.input.name, plot_path, config)
 
     return 0
 

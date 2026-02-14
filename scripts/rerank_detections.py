@@ -19,6 +19,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from detector_config import DetectorConfig
 from mosaic_util import make_mosaic
 from segment_flakes import classify_detections, draw_scale_bar, score_detections
 
@@ -29,6 +30,7 @@ def main() -> int:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("seg_dir", type=Path, help="Segmentation output directory")
+    parser.add_argument("--material", default="hbn", choices=["hbn", "graphene"], help="Material preset")
     parser.add_argument("--top", type=int, default=10, help="Number of top results to print")
     parser.add_argument(
         "--reclassify",
@@ -73,7 +75,7 @@ def main() -> int:
         print(f"No detections_by_frame in {summary_path}")
         return 1
 
-    rescore_fn = classify_detections if args.reclassify else score_detections
+    config = DetectorConfig.from_material(args.material)
 
     # Re-score from summary (no per-frame JSON I/O)
     tier_counts = {1: 0, 2: 0, 3: 0}
@@ -83,7 +85,10 @@ def main() -> int:
     for _frame_name, dets in all_detections.items():
         if not dets:
             continue
-        rescore_fn(dets)
+        if args.reclassify:
+            classify_detections(dets, config)
+        else:
+            score_detections(dets, config)
         total_detections += len(dets)
         frames_with_dets += 1
         for idx, d in enumerate(dets):

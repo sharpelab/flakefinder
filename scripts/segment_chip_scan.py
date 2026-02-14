@@ -18,6 +18,7 @@ from typing import NamedTuple
 
 import cv2
 import numpy as np
+from detector_config import DetectorConfig
 
 from flakefinder.scan_utils import apply_flatfield
 
@@ -35,9 +36,7 @@ class FrameResult(NamedTuple):
 def _process_frame(
     frame_path: str,
     flatfield_path: str | None,
-    contrast_offset: float,
-    min_size: int,
-    edge_margin: int,
+    config: DetectorConfig,
     dark_frac_cutoff: float,
 ) -> FrameResult:
     """Worker: load image, apply flatfield, segment. Imports inside worker for pickling."""
@@ -62,12 +61,7 @@ def _process_frame(
     if dark_frac > dark_frac_cutoff:
         return FrameResult(frame_name, [], dark_frac, True)
 
-    detections = segment_frame(
-        corrected,
-        contrast_offset=contrast_offset,
-        min_size_px=min_size,
-        edge_margin_px=edge_margin,
-    )
+    detections = segment_frame(corrected, config)
     return FrameResult(frame_name, detections, dark_frac, False)
 
 
@@ -89,9 +83,10 @@ def main() -> int:
     )
     parser.add_argument("scan_dir", type=Path, help="Scan directory containing frame_NNNN.jpg files")
     parser.add_argument("--flatfield", type=Path, default=None, help="Flatfield .npy file")
-    parser.add_argument("--contrast-offset", type=float, default=15.0, help="Threshold above bg mode")
-    parser.add_argument("--min-size", type=int, default=1000, help="Min detection size (px)")
-    parser.add_argument("--edge-margin", type=int, default=50, help="Ignore detections near frame edge (px)")
+    parser.add_argument("--material", default="hbn", choices=["hbn", "graphene"], help="Material preset")
+    parser.add_argument("--contrast-offset", type=float, default=None, help="Override contrast offset from preset")
+    parser.add_argument("--min-size", type=int, default=None, help="Override min detection size (px)")
+    parser.add_argument("--edge-margin", type=int, default=None, help="Override edge margin (px)")
     parser.add_argument(
         "--dark-frac-cutoff", type=float, default=0.05, help="Skip frame if dark pixel fraction exceeds this"
     )
@@ -111,6 +106,19 @@ def main() -> int:
     args.output.mkdir(parents=True, exist_ok=True)
     flatfield_str = str(args.flatfield) if args.flatfield else None
 
+    from dataclasses import replace
+
+    config = DetectorConfig.from_material(args.material)
+    overrides = {}
+    if args.contrast_offset is not None:
+        overrides["contrast_offset"] = args.contrast_offset
+    if args.min_size is not None:
+        overrides["min_size_px"] = args.min_size
+    if args.edge_margin is not None:
+        overrides["edge_margin_px"] = args.edge_margin
+    if overrides:
+        config = replace(config, **overrides)
+
     # Submit all frames to worker pool
     t0 = time.monotonic()
     results: dict[str, FrameResult] = {}
@@ -123,9 +131,7 @@ def main() -> int:
                 _process_frame,
                 str(fp),
                 flatfield_str,
-                args.contrast_offset,
-                args.min_size,
-                args.edge_margin,
+                config,
                 args.dark_frac_cutoff,
             )
             future_to_name[fut] = fp.stem
@@ -190,10 +196,11 @@ def main() -> int:
         "duration_s": round(elapsed, 2),
         "scan_dir": str(args.scan_dir),
         "params": {
+            "material": args.material,
             "flatfield": flatfield_str,
-            "contrast_offset": args.contrast_offset,
-            "min_size_px": args.min_size,
-            "edge_margin_px": args.edge_margin,
+            "contrast_offset": config.contrast_offset,
+            "min_size_px": config.min_size_px,
+            "edge_margin_px": config.edge_margin_px,
             "dark_frac_cutoff": args.dark_frac_cutoff,
             "pixel_size_um": args.pixel_size,
         },
