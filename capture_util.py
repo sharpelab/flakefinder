@@ -9,6 +9,8 @@ Usage:
     python capture_util.py output.jpg --exposure-ms 50    # 50ms exposure
     python capture_util.py output.jpg --white-balance 2.51,1.02,1.41  # White balance (B,G,R)
     python capture_util.py output.jpg --x 5000 --y 14441 # Move then capture
+    python capture_util.py output.jpg --focus             # Autofocus then capture sharpest frame
+    python capture_util.py output.jpg --focus --z-range 100 --z-speed 800  # Custom focus params
 """
 
 import argparse
@@ -52,6 +54,11 @@ def main() -> int:
     parser.add_argument("--x", type=float, default=None, help="Move to X position in µm before capture")
     parser.add_argument("--y", type=float, default=None, help="Move to Y position in µm before capture")
     parser.add_argument("--z", type=float, help="Move to Z position in µm before capture")
+    parser.add_argument("--focus", action="store_true", help="Autofocus: scan Z range and capture sharpest frame")
+    parser.add_argument(
+        "--z-range", type=float, default=None, help="Focus Z search range in µm (default: auto from objective)"
+    )
+    parser.add_argument("--z-speed", type=float, default=1250, help="Focus Z speed in µm/s (default: 1250)")
     args = parser.parse_args()
 
     with Microscope() as scope:
@@ -68,8 +75,8 @@ def main() -> int:
             x, y = scope.stage.position_um
             print(f"Arrived at X={x:.1f}, Y={y:.1f} µm")
 
-        # Move Z if specified
-        if args.z is not None:
+        # Move Z if specified (skip when --focus, since focus_and_capture handles z_center)
+        if args.z is not None and not args.focus:
             print(f"Moving Z to {args.z:.1f} µm...")
             scope.z.move_to(args.z)
             print(f"Z at {scope.z.position_um:.1f} µm")
@@ -115,9 +122,27 @@ def main() -> int:
             print()
 
         # Capture
-        if not args.quiet:
-            print("Capturing...")
-        image = camera.capture()
+        if args.focus:
+            from flakefinder.leica.autofocus import focus_and_capture
+
+            if not args.quiet:
+                print("Focus-and-capture...")
+            z_center = args.z if args.z is not None else None
+            result = focus_and_capture(
+                scope,
+                z_center_um=z_center,
+                z_range_um=args.z_range,
+                z_speed_um_s=args.z_speed,
+            )
+            image = result.image
+            if not args.quiet:
+                print(f"Best Z: {result.z_um:.1f} µm (sharpness: {result.sharpness:.1f})")
+                print(f"Frames: {result.frame_count}, scan: {result.scan_duration_s:.2f}s")
+                print(f"Z range: {result.z_range_um:.0f} µm, objective pos: {result.objective_position}")
+        else:
+            if not args.quiet:
+                print("Capturing...")
+            image = camera.capture()
 
         # Convert to PIL
         img = PILImage.fromarray(image)
