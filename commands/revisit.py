@@ -93,14 +93,104 @@ def _parse_point_args(point_args: list[str]) -> list[RevisitPoint]:
     return points
 
 
+def _two_opt(
+    points: list[RevisitPoint],
+    order: list[int],
+    start_x: float,
+    start_y: float,
+) -> list[int]:
+    """2-opt improvement on point visit order. First point is fixed."""
+    n = len(order)
+    if n <= 2:
+        return order
+
+    def px(i: int) -> float:
+        return points[order[i]].x
+
+    def py(i: int) -> float:
+        return points[order[i]].y
+
+    def dist(ax: float, ay: float, bx: float, by: float) -> float:
+        return math.hypot(ax - bx, ay - by)
+
+    improved = True
+    while improved:
+        improved = False
+        for i in range(1, n - 1):  # skip 0 to keep first point fixed
+            for j in range(i + 1, n):
+                # Cost of edges adjacent to the segment [i..j]
+                prev_x = px(i - 1)
+                prev_y = py(i - 1)
+                old_cost = dist(prev_x, prev_y, px(i), py(i))
+                new_cost = dist(prev_x, prev_y, px(j), py(j))
+
+                if j < n - 1:
+                    old_cost += dist(px(j), py(j), px(j + 1), py(j + 1))
+                    new_cost += dist(px(i), py(i), px(j + 1), py(j + 1))
+
+                if new_cost < old_cost - 1e-10:
+                    order[i : j + 1] = order[i : j + 1][::-1]
+                    improved = True
+
+    return order
+
+
+def _or_opt(
+    points: list[RevisitPoint],
+    order: list[int],
+    start_x: float,
+    start_y: float,
+) -> list[int]:
+    """Or-opt: relocate 1/2/3-node segments to better positions. First point fixed."""
+    n = len(order)
+    if n <= 2:
+        return order
+
+    def total_distance(seq: list[int]) -> float:
+        d = 0.0
+        cx, cy = start_x, start_y
+        for idx in seq:
+            px, py = points[idx].x, points[idx].y
+            d += math.hypot(px - cx, py - cy)
+            cx, cy = px, py
+        return d
+
+    for seg_len in (1, 2, 3):
+        improved = True
+        while improved:
+            improved = False
+            best_dist = total_distance(order)
+            best_order = None
+
+            for i in range(1, n - seg_len + 1):  # skip 0 to keep first fixed
+                seg = order[i : i + seg_len]
+                rest = order[:i] + order[i + seg_len :]
+
+                for j in range(1, len(rest) + 1):  # skip 0 to keep first fixed
+                    candidate = rest[:j] + seg + rest[j:]
+                    d = total_distance(candidate)
+                    if d < best_dist - 1e-10:
+                        best_dist = d
+                        best_order = candidate
+
+            if best_order is not None:
+                order = best_order
+                improved = True
+
+    return order
+
+
 def _plan_route(
     points: list[RevisitPoint],
     start_x: float,
     start_y: float,
+    *,
+    or_opt: bool = False,
 ) -> list[RouteStep]:
-    """Greedy nearest-neighbor route from start position."""
+    """Nearest-neighbor route with 2-opt improvement. Optionally add or-opt."""
+    # Phase 1: Nearest-neighbor ordering
     remaining = list(range(len(points)))
-    route: list[RouteStep] = []
+    order: list[int] = []
     cur_x, cur_y = start_x, start_y
 
     while remaining:
@@ -108,15 +198,27 @@ def _plan_route(
         best_dist = float("inf")
         for idx in remaining:
             p = points[idx]
-            dist = math.hypot(p.x - cur_x, p.y - cur_y) / 1000.0  # mm
+            dist = math.hypot(p.x - cur_x, p.y - cur_y)
             if dist < best_dist:
                 best_dist = dist
                 best_idx = idx
-
         remaining.remove(best_idx)
-        p = points[best_idx]
-        travel_s = best_dist / XY_MAX_SPEED_MM_S if best_dist > 0 else 0.0
-        route.append(RouteStep(point=p, original_index=best_idx, distance_mm=best_dist, travel_time_s=travel_s))
+        order.append(best_idx)
+        cur_x, cur_y = points[best_idx].x, points[best_idx].y
+
+    # Phase 2: Route improvement (first point fixed)
+    order = _two_opt(points, order, start_x, start_y)
+    if or_opt:
+        order = _or_opt(points, order, start_x, start_y)
+
+    # Phase 3: Build route steps with distances
+    route: list[RouteStep] = []
+    cur_x, cur_y = start_x, start_y
+    for idx in order:
+        p = points[idx]
+        dist_mm = math.hypot(p.x - cur_x, p.y - cur_y) / 1000.0
+        travel_s = dist_mm / XY_MAX_SPEED_MM_S if dist_mm > 0 else 0.0
+        route.append(RouteStep(point=p, original_index=idx, distance_mm=dist_mm, travel_time_s=travel_s))
         cur_x, cur_y = p.x, p.y
 
     return route
@@ -164,6 +266,7 @@ def run(
     gain: float | None = None,
     white_balance: GainRGB = DEFAULT_WB,
     quiet: bool = False,
+    or_opt: bool = False,
 ) -> None:
     """Run revisit loop: move, focus-scan, save best frame at each point."""
     from flakefinder.leica import wait_all
@@ -199,7 +302,7 @@ def run(
 
     # Plan route
     mag_str = f"{mag:g}"
-    route = _plan_route(points, cur_x, cur_y)
+    route = _plan_route(points, cur_x, cur_y, or_opt=or_opt)
     vprint()
     _print_route_table(route, mag_str)
     vprint()
@@ -415,6 +518,12 @@ Examples:
     out_group.add_argument("--clean", action="store_true", help="Remove output directory before starting")
     out_group.add_argument("-q", "--quiet", action="store_true", help="Reduced output")
 
+    # Route optimization
+    route_group = parser.add_argument_group("Route optimization")
+    route_group.add_argument(
+        "--or-opt", action="store_true", help="Additional or-opt node/segment relocation after 2-opt"
+    )
+
     return parser
 
 
@@ -436,7 +545,7 @@ def main() -> int:
     # Dry run
     if args.dry_run:
         mag_str = args.objective_mag.lower().rstrip("x")
-        route = _plan_route(points, 0.0, 0.0)
+        route = _plan_route(points, 0.0, 0.0, or_opt=args.or_opt)
         print()
         print("Route plan (from origin):")
         _print_route_table(route, mag_str)
@@ -467,6 +576,7 @@ def main() -> int:
                 gain=args.gain,
                 white_balance=args.white_balance,
                 quiet=args.quiet,
+                or_opt=args.or_opt,
             )
     except (ValueError, FileNotFoundError) as e:
         print(f"Error: {e}")
