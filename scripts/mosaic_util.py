@@ -14,12 +14,26 @@ import argparse
 import glob
 import math
 import os
+import re
 import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
 from flakefinder.scan_utils import parse_area_rect_i
 from flakefinder.types import AreaRectI
+
+
+def _expand_braces(pattern):
+    """Expand {a,b,c} brace patterns into multiple strings."""
+    match = re.search(r"\{([^{}]+)\}", pattern)
+    if not match:
+        return [pattern]
+    prefix = pattern[: match.start()]
+    suffix = pattern[match.end() :]
+    results = []
+    for alt in match.group(1).split(","):
+        results.extend(_expand_braces(prefix + alt + suffix))
+    return results
 
 
 def _parse_color(s):
@@ -199,7 +213,8 @@ def main():
     # Collect image paths
     paths = list(args.images)
     if args.glob:
-        paths.extend(sorted(glob.glob(args.glob)))
+        for expanded in _expand_braces(args.glob):
+            paths.extend(sorted(glob.glob(expanded)))
     if not paths:
         parser.error("No input images. Provide files as arguments or use --glob.")
 
