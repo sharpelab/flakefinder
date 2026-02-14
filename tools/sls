@@ -18,7 +18,9 @@ case "$1" in
         shift
         for path in "$@"; do
             parent="$REPO/$(dirname "$path")"
-            ssh "$REMOTE" "$BASH" -c "$(printf '%q' "mkdir -p $parent")"
+            ssh "$REMOTE" "$BASH" <<MKDIR
+mkdir -p "$parent"
+MKDIR
             rsync -a --quiet "$path" "$REMOTE:$REPO/$path"
         done
         exit 0

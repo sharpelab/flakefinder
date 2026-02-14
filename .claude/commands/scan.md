@@ -38,7 +38,7 @@ You run with full permission bypass (`--dangerously-skip-permissions`). Every to
     - `--attach src.png` — copies to Obsidian attachments/, validates entry text references it as `![[src.png]]`
     - `--attach src.png:dest.png` — copies with rename
     - Entry text via heredoc, positional arg, or stdin pipe
-- **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `rsync -a --quiet` for all transfers (single files and bulk). File routing:
+- **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `sls pull` / `sls push` for transfers (handles mkdir automatically). Fall back to `rsync -a --quiet` for bulk transfers or non-repo paths. File routing:
   - `scans/` — pipeline scan data (overview, chip scans, focus maps from `find_flakes.py`)
   - `afs/` — one-off autofocus runs
   - `captures/` — one-off captures (`capture_util.py`)
@@ -54,7 +54,11 @@ You run with full permission bypass (`--dangerously-skip-permissions`). Every to
 All remote commands use `sls` (Sharpe Lab Scope) — runs commands on the microscope via Git Bash. Default mode runs `uv run python <script>`.
 - `sls <script.py> [args]` — run python script
 - `sls git <cmd>` — git operations
+- `sls push <path>...` — rsync local→remote (creates parent dirs automatically)
+- `sls pull <path>...` — rsync remote→local
 - `sls -- <cmd>` — raw commands (ls, du, etc.)
+
+Paths for push/pull are relative to the flakefinder repo root.
 
 **Autofocus at a point:**
 ```
@@ -133,6 +137,7 @@ uv run python scripts/process_chip_scan.py scans/[run_dir]/chip_[N]/scan_20x --s
 uv run python scripts/mosaic_util.py --glob 'pattern' -o output.png --labels
 uv run python scripts/mosaic_util.py --glob 'pattern' -o output.png --label-text "a,b,c" --label-size 24 --label-bg 0,0,0,180
 ```
+- `--glob` supports brace expansion: `'afs/af_{2.5x,5x,10x}_foo/after.jpg'`
 - `--rows N` for multi-row layouts (default 1)
 - `--max-dim 5000` controls canvas size
 
