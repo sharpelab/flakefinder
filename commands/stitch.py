@@ -301,7 +301,7 @@ def stitch_row_to_global(
     moving = np.abs(deltas) > stationary_thresh
     if np.any(moving):
         first_moving = int(np.argmax(moving))
-        last_moving = int(len(moving) - 1 - np.argmax(moving[::-1])) + 1
+        last_moving = int(len(moving) - 1 - np.argmax(moving[::-1])) + 2
     else:
         first_moving = 0
         last_moving = len(all_row_frames)
