@@ -80,7 +80,7 @@ def poll_position(
     """
     if startup_hz is not None:
         period = 1.0 / startup_hz
-        initial_pos = samples[0].x_um if samples else None
+        initial_pos = samples[0].axis_um if samples else None
         ramped = False
     else:
         period = 1.0 / target_hz

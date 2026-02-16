@@ -71,11 +71,11 @@ class ScanRow(NamedTuple):
 
 
 class PositionSample(NamedTuple):
-    """A single polled position sample: (t_before, t_after, x_um)."""
+    """A single polled position sample: (t_before, t_after, axis_um)."""
 
     t_before: float
     t_after: float
-    x_um: float
+    axis_um: float
 
 
 # ============================================================================

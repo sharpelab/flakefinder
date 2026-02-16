@@ -41,7 +41,8 @@ from flakefinder.data_utils import (
     load_chip_geometry,
     require_microscope_description,
 )
-from flakefinder.leica import Microscope, wait_all
+from flakefinder.leica import Microscope, start_polling, wait_all
+from flakefinder.leica.polling import start_motion_polling
 from flakefinder.scan_utils import (
     DEFAULT_WB,
     build_microscope_meta,
@@ -59,21 +60,21 @@ from flakefinder.types import (
 )
 
 
-def interpolate_z_position(t: float, z_samples: list[tuple[float, float]]) -> float | None:
-    """Interpolate Z position at time t from (t, z_um) samples."""
+def interpolate_z_position(t: float, z_samples: list[PositionSample]) -> float | None:
+    """Interpolate Z position at time t from PositionSample list."""
     if not z_samples:
         return None
 
-    times = [s[0] for s in z_samples]
+    times = [s.t_before for s in z_samples]
     idx = bisect.bisect_left(times, t)
 
     if idx == 0:
-        return z_samples[0][1]
+        return z_samples[0].axis_um
     if idx >= len(z_samples):
-        return z_samples[-1][1]
+        return z_samples[-1].axis_um
 
-    t0, z0 = times[idx - 1], z_samples[idx - 1][1]
-    t1, z1 = times[idx], z_samples[idx][1]
+    t0, z0 = times[idx - 1], z_samples[idx - 1].axis_um
+    t1, z1 = times[idx], z_samples[idx].axis_um
 
     if t1 == t0:
         return z0
@@ -116,7 +117,7 @@ def measure_x_cruise_speed(
         dt = window[i].t_before - window[i - 1].t_before
         if dt <= 0:
             continue
-        speed = abs(window[i].x_um - window[i - 1].x_um) / dt
+        speed = abs(window[i].axis_um - window[i - 1].axis_um) / dt
         if speed_lo <= speed <= speed_hi:
             cruise_mask[i - 1] = True
             cruise_mask[i] = True
@@ -128,7 +129,7 @@ def measure_x_cruise_speed(
         return None, {}
 
     times = np.array([s.t_before for s in cruise_samples])
-    positions = np.array([s.x_um for s in cruise_samples])
+    positions = np.array([s.axis_um for s in cruise_samples])
 
     t_rel = times - times[0]
     coeffs = np.polyfit(t_rel, positions, 1)
@@ -304,34 +305,8 @@ def scan_row(
     t_settle_end = time.perf_counter()
 
     # ---- 3. Start per-row polling threads ----
-    x_samples: list[PositionSample] = []
-    z_samples: list[tuple[float, float]] = []
-    stop_polling = threading.Event()
-
-    x_bcv = hw.x_bcv
-    x_converter = hw.x_converter
-    z_converter = hw.z_converter
-    z_bcv_hysteresis = hw.z_bcv_hysteresis
-
-    def x_poll_fn() -> None:
-        while not stop_polling.is_set():
-            t_before = time.perf_counter()
-            x_native = x_bcv.GetControlValue()
-            t_after = time.perf_counter()
-            x_um = x_converter.GetMetricsValue(x_native)
-            x_samples.append(PositionSample(t_before, t_after, x_um))
-
-    def z_poll_fn() -> None:
-        while not stop_polling.is_set():
-            t = time.perf_counter()
-            z_native = z_bcv_hysteresis.GetControlValue()
-            z_um = z_converter.GetMetricsValue(z_native)
-            z_samples.append((t, z_um))
-
-    x_thread = threading.Thread(target=x_poll_fn, daemon=True)
-    z_thread = threading.Thread(target=z_poll_fn, daemon=True)
-    x_thread.start()
-    z_thread.start()
+    x_polling = start_motion_polling(hw.x_bcv, hw.x_converter)
+    z_polling = start_polling(hw.z_bcv_hysteresis, hw.z_converter)
 
     # ---- 4. Warmup camera ----
     for _ in range(cfg.warmup_frames):
@@ -354,14 +329,19 @@ def scan_row(
     t_z_started = None
     z_start_x_um = None
 
-    while not handle.is_complete:
+    # TODO: derive stop margin from frame size or commanded speed
+    _STOP_MARGIN_UM = 50.0
+    row_distance_um = abs(x_end_pos - x_start_pos)
+    row_timeout_s = max(30.0, (row_distance_um / cfg.x_speed_um_s) * 5)
+
+    while True:
         t_start = time.perf_counter()
         hw.current_image[0] = None
         hw.acquisition.Acquire(hw.acq_context, None)
         t_end = time.perf_counter()
 
         if hw.current_image[0] is not None:
-            x_now = x_samples[-1].x_um if x_samples else None
+            x_now = x_polling.samples[-1].axis_um if x_polling.samples else None
 
             # Start Z tracking when X approaches chip edge
             if not z_started and x_now is not None:
@@ -369,7 +349,7 @@ def scan_row(
                 if signed_dist / cfg.x_speed_um_s <= cfg.z_lead_s:
                     # Measure actual X cruise speed from lead-in samples
                     measured_speed, speed_meas = measure_x_cruise_speed(
-                        x_samples, t_x_started, time.perf_counter(), cfg.x_speed_um_s
+                        x_polling.samples, t_x_started, time.perf_counter(), cfg.x_speed_um_s
                     )
                     if measured_speed is not None:
                         speed_meas["commanded_x_speed_um_s"] = cfg.x_speed_um_s
@@ -399,8 +379,8 @@ def scan_row(
                         t_end,
                         hw.current_image[0],
                         row_y,
-                        list(x_samples),
-                        list(z_samples),
+                        list(x_polling.samples),
+                        list(z_polling.samples),
                         scan_t0,
                         chip_edge_x,
                         direction,
@@ -411,14 +391,31 @@ def scan_row(
                 global_frame_idx += 1
                 row_frame_count += 1
 
+            # Stop when stage reaches target
+            if x_now is not None and (
+                (direction == 1 and x_now >= x_end_pos - _STOP_MARGIN_UM)
+                or (direction == -1 and x_now <= x_end_pos + _STOP_MARGIN_UM)
+            ):
+                break
+
+        # Safety timeout
+        if time.perf_counter() - t_x_started > row_timeout_s:
+            if not cfg.quiet:
+                print(f"  WARNING: row {row_idx} timeout ({row_timeout_s:.0f}s)")
+            break
+
     t_capture_end = time.perf_counter()
-    handle.dispose()
 
     # ---- 7. Cleanup ----
     z_drive.halt()
-    stop_polling.set()
-    x_thread.join(timeout=1.0)
-    z_thread.join(timeout=1.0)
+    # Stop both before joining both
+    x_polling.stop.set()
+    z_polling.stop.set()
+    x_polling.join()
+    z_polling.join()
+    if not handle.is_complete:
+        handle.wait(timeout=2.0)
+    handle.dispose()
 
     # Restore move speed for positioning to next row
     stage.x.set_velocity_um_s(cfg.move_speed_um_s)
@@ -427,7 +424,7 @@ def scan_row(
     row_duration = t_capture_end - t_x_started
 
     # Filter position samples to capture period
-    row_x_samples = [(tb, ta, x) for tb, ta, x in x_samples if t_x_started <= tb <= t_capture_end]
+    row_x_samples = [s for s in x_polling.samples if t_x_started <= s.t_before <= t_capture_end]
 
     # Build timing dict (all relative to scan_t0)
     timing_s: dict[str, float | None] = {
@@ -467,12 +464,12 @@ def scan_row(
     # Build position samples for global list
     position_samples = [
         {
-            "t_before": tb - scan_t0,
-            "t_after": ta - scan_t0,
-            "x_um": x_um,
+            "t_before": s.t_before - scan_t0,
+            "t_after": s.t_after - scan_t0,
+            "x_um": s.axis_um,
             "row": row_idx,
         }
-        for tb, ta, x_um in row_x_samples
+        for s in row_x_samples
     ]
 
     return RowResult(

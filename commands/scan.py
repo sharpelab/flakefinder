@@ -518,7 +518,7 @@ def run(
 
             if current_image[0] is not None:
                 row_capture_count += 1
-                x_now = x_polling.samples[-1].x_um if x_polling.samples else None
+                x_now = x_polling.samples[-1].axis_um if x_polling.samples else None
 
                 # Position-based frame save/skip
                 if last_saved_x is not None and x_now is not None and abs(x_now - last_saved_x) < target_advance_um:
@@ -582,7 +582,7 @@ def run(
                 {
                     "t_before": s.t_before - total_scan_start,
                     "t_after": s.t_after - total_scan_start,
-                    "x_um": s.x_um,
+                    "x_um": s.axis_um,
                     "row": row_idx,
                 }
             )
