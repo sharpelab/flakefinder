@@ -16,6 +16,13 @@ Experiments:
   8. Coordinated 2-thread polling — threads coordinate via shared
      timestamps so each waits target_gap after peer's last completion.
      Continuous drift correction to maintain interleaving.
+  9. Multi-axis throughput — 1 thread per axis polling concurrently.
+     Tests 2-axis (X+Y) and 3-axis (X+Y+Z) to measure per-axis Hz
+     when sharing the USB bus.
+ 10. Continuous velocity + halt under polling load — does halt() get
+     through when polling saturates the bus?
+ 11. Sync move in thread + halt under polling load — same question
+     but with blocking SetControlValue in a separate thread.
 
 Usage:
     uv run python scripts/sdk_threading_test.py
@@ -124,6 +131,30 @@ class StaggerResult:
 
 
 @dataclass
+class MultiAxisResult:
+    axes: list[str]
+    duration_s: float
+    per_axis_calls: dict[str, int]
+    per_axis_hz: dict[str, float]
+    aggregate_hz: float
+    per_axis_mean_call_us: dict[str, float]
+    sleep_ms: float = 0
+
+
+@dataclass
+class HaltUnderLoadResult:
+    mode: str  # "continuous_velocity" or "sync_move_thread"
+    poll_hz: float
+    halt_latency_s: float
+    stage_stopped: bool
+    move_duration_s: float
+    distance_traveled_um: float
+    poll_axis: str = "x"
+    move_axis: str = "x"
+    notes: str = ""
+
+
+@dataclass
 class CoordinatedResult:
     target_gap_ms: float
     thread_count: int
@@ -177,6 +208,22 @@ def _poll_loop(
         if sleep_s > 0:
             time.sleep(sleep_s)
     count_out[idx] = local_count
+
+
+def _poll_loop_ts_pos(
+    bcv,
+    stop: threading.Event,
+    ts_out: list[float],
+    pos_out: list[int],
+    sleep_s: float = 0,
+):
+    """Polling loop that records timestamps and position values."""
+    while not stop.is_set():
+        val = bcv.GetControlValue()
+        ts_out.append(time.perf_counter())
+        pos_out.append(val)
+        if sleep_s > 0:
+            time.sleep(sleep_s)
 
 
 def _poll_loop_timestamped(
@@ -1059,6 +1106,391 @@ def experiment_coordinated_stagger(
 
 
 # ---------------------------------------------------------------------------
+# Experiment 9: Multi-axis throughput (1 thread per axis)
+# ---------------------------------------------------------------------------
+
+
+def experiment_multi_axis_throughput(
+    scope: Microscope,
+    duration_s: float = 3.0,
+    sleep_ms: float = 0,
+) -> list[MultiAxisResult]:
+    """Poll multiple axes concurrently, 1 thread per axis."""
+    sleep_s = sleep_ms / 1000
+    results = []
+
+    configs: list[tuple[str, list[str]]] = [
+        ("X+Y", ["x", "y"]),
+        ("X+Y+Z", ["x", "y", "z"]),
+    ]
+
+    for label, axis_names in configs:
+        axes = {name: _get_axis(scope, name) for name in axis_names}
+        counts = {name: [0] for name in axis_names}
+        latencies: dict[str, list[float]] = {name: [] for name in axis_names}
+        stop = threading.Event()
+        threads = []
+
+        for name in axis_names:
+            t = threading.Thread(
+                target=_poll_loop,
+                args=(axes[name].bcv, stop, counts[name], 0, latencies[name], sleep_s),
+                daemon=True,
+            )
+            threads.append(t)
+
+        start = time.perf_counter()
+        for t in threads:
+            t.start()
+        time.sleep(duration_s)
+        stop.set()
+        for t in threads:
+            t.join(timeout=2.0)
+
+        elapsed = time.perf_counter() - start
+
+        per_axis_calls = {name: counts[name][0] for name in axis_names}
+        per_axis_hz = {name: counts[name][0] / elapsed for name in axis_names}
+        per_axis_us = {}
+        for name in axis_names:
+            lats = latencies[name]
+            per_axis_us[name] = sum(lats) / len(lats) * 1e6 if lats else 0
+        total = sum(per_axis_calls.values())
+
+        result = MultiAxisResult(
+            axes=axis_names,
+            duration_s=elapsed,
+            per_axis_calls=per_axis_calls,
+            per_axis_hz=per_axis_hz,
+            aggregate_hz=total / elapsed,
+            per_axis_mean_call_us=per_axis_us,
+            sleep_ms=sleep_ms,
+        )
+        results.append(result)
+
+        hz_parts = ", ".join(f"{n.upper()}={per_axis_hz[n]:.0f}" for n in axis_names)
+        us_parts = ", ".join(f"{n.upper()}={per_axis_us[n]:.0f}" for n in axis_names)
+        print(f"  {label}: {hz_parts} Hz (total={total / elapsed:.0f}), call={us_parts} µs")
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Experiment 10: Continuous velocity + halt under polling load
+# ---------------------------------------------------------------------------
+
+
+def experiment_velocity_halt(
+    scope: Microscope,
+    move_duration_s: float = 1.0,
+    velocity_um_s: float = 5000,
+    axis_name: str = "x",
+    sleep_ms: float = 0,
+) -> HaltUnderLoadResult:
+    """Start continuous velocity move, poll at given rate, then halt."""
+    axis = _get_axis(scope, axis_name)
+    bcv = axis.bcv
+    sleep_s = sleep_ms / 1000
+
+    pos_before = axis.position_um
+    counts = [0]
+    stop = threading.Event()
+
+    poll_t = threading.Thread(
+        target=_poll_loop,
+        args=(bcv, stop, counts, 0, None, sleep_s),
+        daemon=True,
+    )
+
+    # Start continuous velocity move
+    axis.start_towards_max(velocity_um_s)
+    t_start = time.perf_counter()
+    poll_t.start()
+
+    # Let it run
+    time.sleep(move_duration_s)
+
+    # Halt and measure latency
+    t_halt_start = time.perf_counter()
+    axis.halt()
+    t_halt_end = time.perf_counter()
+
+    # Check if stage actually stopped
+    time.sleep(0.05)
+    pos_after_halt = axis.position_um
+    time.sleep(0.1)
+    pos_check = axis.position_um
+    stage_stopped = abs(pos_check - pos_after_halt) < 1.0  # <1 µm drift = stopped
+
+    stop.set()
+    poll_t.join(timeout=2.0)
+
+    elapsed = t_halt_end - t_start
+    poll_hz = counts[0] / elapsed if elapsed > 0 else 0
+    halt_latency = t_halt_end - t_halt_start
+    distance = abs(pos_after_halt - pos_before)
+
+    # Move back
+    axis.move_to(pos_before)
+
+    result = HaltUnderLoadResult(
+        mode="continuous_velocity",
+        poll_hz=poll_hz,
+        halt_latency_s=halt_latency,
+        stage_stopped=stage_stopped,
+        move_duration_s=elapsed,
+        distance_traveled_um=distance,
+        poll_axis=axis_name,
+        move_axis=axis_name,
+    )
+
+    print(
+        f"  Continuous velocity: poll={poll_hz:.0f} Hz, "
+        f"halt={halt_latency * 1000:.1f} ms, "
+        f"stopped={'YES' if stage_stopped else 'NO'}, "
+        f"traveled={distance:.0f} µm"
+    )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Experiment 11: Sync move in thread under polling load
+# ---------------------------------------------------------------------------
+
+
+def experiment_sync_move_under_load(
+    scope: Microscope,
+    move_distance_um: float = 2000,
+    timeout_s: float = 10.0,
+    axis_name: str = "x",
+) -> MoveTestResult:
+    """Blocking move_rel in a thread while polling same axis at max rate."""
+    axis = _get_axis(scope, axis_name)
+    bcv = axis.bcv
+
+    counts = [0]
+    stop = threading.Event()
+    move_done = threading.Event()
+    move_exception: list[Exception | None] = [None]
+
+    def sync_move():
+        try:
+            axis.move_rel(move_distance_um)
+        except Exception as e:
+            move_exception[0] = e
+        finally:
+            move_done.set()
+
+    # Start polling thread (no sleep, max rate)
+    poll_t = threading.Thread(
+        target=_poll_loop,
+        args=(bcv, stop, counts, 0),
+        daemon=True,
+    )
+
+    # Start sync move in thread + polling
+    t_start = time.perf_counter()
+    move_t = threading.Thread(target=sync_move, daemon=True)
+    move_t.start()
+    poll_t.start()
+
+    # Wait for move to complete or timeout
+    completed = move_done.wait(timeout=timeout_s)
+    move_time = time.perf_counter() - t_start if completed else None
+
+    stop.set()
+    poll_t.join(timeout=2.0)
+    move_t.join(timeout=2.0)
+
+    poll_elapsed = time.perf_counter() - t_start
+    poll_hz = counts[0] / poll_elapsed if poll_elapsed > 0 else 0
+
+    notes = ""
+    if move_exception[0]:
+        notes = f"exception: {move_exception[0]}"
+
+    # Move back if completed
+    if completed:
+        axis.move_rel(-move_distance_um)
+    else:
+        axis.halt()
+        time.sleep(0.5)
+        with contextlib.suppress(Exception):
+            axis.move_rel(-move_distance_um)
+
+    result = MoveTestResult(
+        thread_count=1,
+        completed=completed,
+        move_time_s=move_time,
+        timeout_s=timeout_s,
+        poll_hz_during=poll_hz,
+        poll_axis=axis_name,
+        move_axis=axis_name,
+        move_distance_um=move_distance_um,
+        notes=f"sync_move {notes}".strip(),
+    )
+
+    status = f"{move_time:.3f}s" if completed else f"HUNG (timeout {timeout_s}s)"
+    print(f"  Sync move: {status}, poll={poll_hz:.0f} Hz" + (f", {notes}" if notes else ""))
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Experiment 12: Jitter + position smoothness during velocity move
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class JitterResult:
+    sleep_ms: float
+    poll_hz: float
+    total_samples: int
+    duration_s: float
+    gap_mean_ms: float
+    gap_std_ms: float
+    gap_min_ms: float
+    gap_max_ms: float
+    gap_p10_ms: float
+    gap_p50_ms: float
+    gap_p90_ms: float
+    velocity_um_s: float  # linear fit
+    pos_residual_std_um: float  # position smoothness (residual from linear fit)
+    pos_residual_max_um: float
+    delta_mean_um: float  # inter-sample position deltas
+    delta_std_um: float
+    delta_min_um: float
+    delta_max_um: float
+    delta_zero_count: int  # duplicate readings (delta=0)
+    delta_zero_pct: float
+    axis: str = "x"
+
+
+def experiment_jitter(
+    scope: Microscope,
+    duration_s: float = 3.0,
+    velocity_um_s: float = 5000,
+    sleep_ms: float = 6.0,
+    axis_name: str = "x",
+) -> JitterResult:
+    """Continuous velocity move with timestamped position polling. Reports timing jitter and position smoothness."""
+    axis = _get_axis(scope, axis_name)
+    bcv = axis.bcv
+    sleep_s = sleep_ms / 1000
+
+    pos_before = axis.position_um
+
+    ts_list: list[float] = []
+    pos_list: list[int] = []
+    stop = threading.Event()
+
+    poll_t = threading.Thread(
+        target=_poll_loop_ts_pos,
+        args=(bcv, stop, ts_list, pos_list, sleep_s),
+        daemon=True,
+    )
+
+    axis.start_towards_max(velocity_um_s)
+    poll_t.start()
+    time.sleep(duration_s)
+    stop.set()
+    poll_t.join(timeout=2.0)
+    axis.halt()
+    time.sleep(0.1)
+
+    # Move back
+    axis.move_to(pos_before)
+
+    n = len(ts_list)
+    if n < 2:
+        raise RuntimeError("No samples collected")
+
+    # Convert positions to µm
+    conv = axis.converter
+    positions_um = [conv.GetMetricsValue(p) for p in pos_list]
+
+    # Timing gaps
+    gaps_ms = [(ts_list[i + 1] - ts_list[i]) * 1000 for i in range(n - 1)]
+    n_gaps = len(gaps_ms)
+    mean_gap = sum(gaps_ms) / n_gaps
+    std_gap = (sum((g - mean_gap) ** 2 for g in gaps_ms) / n_gaps) ** 0.5
+    gaps_sorted = sorted(gaps_ms)
+
+    elapsed = ts_list[-1] - ts_list[0]
+    hz = n / elapsed
+
+    # Linear fit for velocity and residuals
+    t0 = ts_list[0]
+    times = [t - t0 for t in ts_list]
+    t_mean = sum(times) / n
+    p_mean = sum(positions_um) / n
+    num = sum((t - t_mean) * (p - p_mean) for t, p in zip(times, positions_um, strict=True))
+    den = sum((t - t_mean) ** 2 for t in times)
+    slope = num / den if den > 0 else 0  # velocity in µm/s
+    intercept = p_mean - slope * t_mean
+
+    residuals = [p - (slope * t + intercept) for t, p in zip(times, positions_um, strict=True)]
+    res_std = (sum(r**2 for r in residuals) / n) ** 0.5
+    res_max = max(abs(r) for r in residuals)
+
+    # Position deltas
+    deltas_um = [positions_um[i + 1] - positions_um[i] for i in range(n - 1)]
+    n_deltas = len(deltas_um)
+    abs_deltas = [abs(d) for d in deltas_um]
+    d_mean = sum(abs_deltas) / n_deltas
+    d_std = (sum((d - d_mean) ** 2 for d in abs_deltas) / n_deltas) ** 0.5
+    d_min = min(abs_deltas)
+    d_max = max(abs_deltas)
+    d_zeros = sum(1 for d in abs_deltas if d < 0.1)  # <0.1 µm = duplicate
+
+    result = JitterResult(
+        sleep_ms=sleep_ms,
+        poll_hz=hz,
+        total_samples=n,
+        duration_s=elapsed,
+        gap_mean_ms=mean_gap,
+        gap_std_ms=std_gap,
+        gap_min_ms=gaps_sorted[0],
+        gap_max_ms=gaps_sorted[-1],
+        gap_p10_ms=gaps_sorted[int(n_gaps * 0.1)],
+        gap_p50_ms=gaps_sorted[n_gaps // 2],
+        gap_p90_ms=gaps_sorted[int(n_gaps * 0.9)],
+        velocity_um_s=slope,
+        pos_residual_std_um=res_std,
+        pos_residual_max_um=res_max,
+        delta_mean_um=d_mean,
+        delta_std_um=d_std,
+        delta_min_um=d_min,
+        delta_max_um=d_max,
+        delta_zero_count=d_zeros,
+        delta_zero_pct=d_zeros / n_deltas * 100,
+        axis=axis_name,
+    )
+
+    abs_deltas_sorted = sorted(abs_deltas)
+    print(
+        f"  {hz:.0f} Hz, gap={mean_gap:.1f}±{std_gap:.1f}ms "
+        f"[{gaps_sorted[0]:.1f}, {gaps_sorted[int(n_gaps * 0.1)]:.1f}, "
+        f"{gaps_sorted[n_gaps // 2]:.1f}, {gaps_sorted[int(n_gaps * 0.9)]:.1f}, "
+        f"{gaps_sorted[-1]:.1f}]"
+    )
+    print(
+        f"  velocity={slope:.0f} µm/s (target {velocity_um_s:.0f}), "
+        f"pos residual std={res_std:.2f} µm, max={res_max:.2f} µm"
+    )
+    print(
+        f"  pos delta={d_mean:.1f}±{d_std:.1f} µm "
+        f"[{abs_deltas_sorted[0]:.1f}, {abs_deltas_sorted[int(n_deltas * 0.1)]:.1f}, "
+        f"{abs_deltas_sorted[n_deltas // 2]:.1f}, {abs_deltas_sorted[int(n_deltas * 0.9)]:.1f}, "
+        f"{abs_deltas_sorted[-1]:.1f}], "
+        f"zeros={d_zeros}/{n_deltas} ({d_zeros / n_deltas * 100:.0f}%)"
+    )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Summary printer
 # ---------------------------------------------------------------------------
 
@@ -1073,6 +1505,8 @@ def print_summary(
     workload_results: list[FullWorkloadResult] | None = None,
     stagger_results: list[StaggerResult] | None = None,
     coordinated_results: list[CoordinatedResult] | None = None,
+    multi_axis_results: list[MultiAxisResult] | None = None,
+    halt_results: list[HaltUnderLoadResult] | None = None,
 ):
     print()
     print("=" * 70)
@@ -1207,6 +1641,28 @@ def print_summary(
                 f"  {r.target_gap_ms:>8.0f} {r.aggregate_hz:>5.0f} {gap_str:>20} "
                 f"{r.gap_p10_ms:>6.1f} {r.gap_p50_ms:>6.1f} {r.gap_p90_ms:>6.1f} "
                 f"{clust_str:>10} {ok:>5} {t:>8}"
+            )
+
+    if multi_axis_results:
+        print()
+        print("Experiment 9: Multi-axis throughput (1 thread/axis)")
+        for r in multi_axis_results:
+            label = "+".join(n.upper() for n in r.axes)
+            hz_parts = "  ".join(f"{n.upper()}={r.per_axis_hz[n]:.0f}" for n in r.axes)
+            us_parts = "  ".join(f"{n.upper()}={r.per_axis_mean_call_us[n]:.0f}" for n in r.axes)
+            sleep_str = f" (sleep {r.sleep_ms:.0f}ms)" if r.sleep_ms > 0 else ""
+            print(f"  {label}{sleep_str}: {hz_parts} Hz, total={r.aggregate_hz:.0f} Hz, call={us_parts} µs")
+
+    if halt_results:
+        print()
+        print("Experiments 10/11: Halt under polling load")
+        print(f"  {'Mode':<22} {'Poll Hz':>8} {'Halt ms':>8} {'Stopped':>8} {'Distance':>10}")
+        print(f"  {'----------------------':<22} {'--------':>8} {'--------':>8} {'--------':>8} {'----------':>10}")
+        for r in halt_results:
+            print(
+                f"  {r.mode:<22} {r.poll_hz:>8.0f} {r.halt_latency_s * 1000:>8.1f} "
+                f"{'YES' if r.stage_stopped else 'NO':>8} {r.distance_traveled_um:>10.0f}"
+                + (f"  {r.notes}" if r.notes else "")
             )
 
     # Diagnosis
@@ -1350,6 +1806,8 @@ def main() -> int:
         workload_results: list[FullWorkloadResult] = []
         stagger_results: list[StaggerResult] = []
         coordinated_results: list[CoordinatedResult] = []
+        multi_axis_results: list[MultiAxisResult] = []
+        halt_results: list[HaltUnderLoadResult] = []
 
         if 1 in experiments:
             print("--- Experiment 1: Polling throughput ---")
@@ -1435,6 +1893,37 @@ def main() -> int:
             )
             print()
 
+        if 9 in experiments:
+            sleep_9 = float(args.camera_sleep) if args.camera_sleep else 0
+            print(f"--- Experiment 9: Multi-axis throughput (sleep={sleep_9}ms) ---")
+            multi_axis_results = experiment_multi_axis_throughput(
+                scope,
+                duration_s=args.poll_duration,
+                sleep_ms=sleep_9,
+            )
+            print()
+
+        if 10 in experiments:
+            sleep_val = float(args.camera_sleep) if args.camera_sleep else 0
+            print(f"--- Experiment 10: Continuous velocity + halt under polling (sleep={sleep_val}ms) ---")
+            halt_results.append(experiment_velocity_halt(scope, sleep_ms=sleep_val))
+            print()
+
+        if 11 in experiments:
+            print("--- Experiment 11: Sync move in thread under polling ---")
+            experiment_sync_move_under_load(scope)
+            print()
+
+        if 12 in experiments:
+            sleep_12 = float(args.camera_sleep) if args.camera_sleep else 6.0
+            print(f"--- Experiment 12: Jitter + smoothness during velocity move (sleep={sleep_12}ms) ---")
+            experiment_jitter(
+                scope,
+                duration_s=args.poll_duration,
+                sleep_ms=sleep_12,
+            )
+            print()
+
         print_summary(
             poll_results,
             move_results,
@@ -1444,6 +1933,8 @@ def main() -> int:
             workload_results=workload_results,
             stagger_results=stagger_results,
             coordinated_results=coordinated_results,
+            multi_axis_results=multi_axis_results,
+            halt_results=halt_results,
         )
 
         # Save results to JSON
@@ -1477,6 +1968,8 @@ def main() -> int:
             "experiment_6_full_workload": [asdict(r) for r in workload_results],
             "experiment_7_stagger_analysis": [asdict(r) for r in stagger_results],
             "experiment_8_coordinated": [asdict(r) for r in coordinated_results],
+            "experiment_9_multi_axis": [asdict(r) for r in multi_axis_results],
+            "experiment_10_11_halt": [asdict(r) for r in halt_results],
         }
 
         with open(output_path, "w") as f:

@@ -43,6 +43,18 @@ Modules:
     utils: Conversion utilities and helpers
 """
 
+import contextlib
+
+# Windows: boost process-wide timer resolution from ~15ms to ~1ms.
+# Without this, time.sleep() rounds up to the next 15ms tick, which
+# makes rate-limited polling loops (~5ms target sleep) inaccurate.
+# No-op on Linux (ctypes.windll doesn't exist). No cleanup needed —
+# Windows ref-counts per-process and cleans up on exit.
+with contextlib.suppress(Exception):
+    import ctypes
+
+    ctypes.windll.winmm.timeBeginPeriod(1)  # type: ignore[attr-defined]
+
 from .autofocus import (
     WORKING_DISTANCES_UM,
     AutofocusFrame,
