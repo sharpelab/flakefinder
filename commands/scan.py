@@ -223,13 +223,13 @@ def run(
         y_min = stage.y.min_um + margin
         y_max = stage.y.max_um - margin
 
-    # Calculate row Y positions (top to bottom, -Y direction)
+    # Calculate row Y positions (low Y to high Y, +Y direction)
     y_step = frame_height_um * (1 - y_overlap_percent / 100)
     row_y_positions = []
-    y = y_max
-    while y >= y_min:
+    y = y_min
+    while y <= y_max:
         row_y_positions.append(y)
-        y -= y_step
+        y += y_step
 
     num_rows = len(row_y_positions)
 
