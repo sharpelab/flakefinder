@@ -696,6 +696,8 @@ def run(scope: Microscope, p: _Preflight) -> int:
                 lambda ci=chip_idx, cd=chip_dir: focus_map.run(
                     scope=scope,
                     chips_meta=p.chips_json_path,
+                    gain=1.0,
+                    exposure_ms=1.0,
                     chip=ci,
                     save_images=True,
                     z_speed=p.scan_z_speed,

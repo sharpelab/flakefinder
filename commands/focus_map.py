@@ -4,10 +4,11 @@ Samples points along the chip's convex hull edge and on an interior grid,
 runs autofocus at each point, and outputs a focus map with best Z positions.
 
 Usage:
-    uv run python commands/focus_map.py --chips-meta scans/chips.json --chip 0
-    uv run python commands/focus_map.py --chips-meta scans/chips.json --chip 0 --dry-run
     uv run python commands/focus_map.py --chips-meta scans/chips.json --chip 0 \\
-        --save-images --suffix v6 --z 24700
+        --gain 1 --exposure-ms 1
+    uv run python commands/focus_map.py --chips-meta scans/chips.json --chip 0 \\
+        --gain 1 --exposure-ms 2 --save-images --suffix v6 --z 24700
+    uv run python commands/focus_map.py --chips-meta scans/chips.json --chip 0 --dry-run
 """
 
 from __future__ import annotations
@@ -456,6 +457,8 @@ def run(
     scope: Microscope,
     *,
     chips_meta: Path,
+    gain: float,
+    exposure_ms: float,
     chip: int = 0,
     contour_spacing_mm: float = 15.0,
     grid_spacing_um: float = 10000,
@@ -527,8 +530,10 @@ def run(
     camera = scope.camera
     camera.trigger_mode = 0  # CONTINUOUS
     camera.binning = 2  # 3x3 binning for speed
-    camera.exposure_time = 0.001  # 1ms
+    camera.exposure_time = exposure_ms / 1000.0
+    camera.gain = gain
     camera.gain_rgb = white_balance
+    camera.gamma = 1.0
 
     if not quiet:
         print(f"Camera: {camera.name}")
@@ -658,6 +663,18 @@ def _build_parser():
         type=Path,
         required=True,
         help="Path to *_chips.json file",
+    )
+    parser.add_argument(
+        "--gain",
+        type=float,
+        required=True,
+        help="Camera gain (e.g. 1 for AF, 4 for chip scan)",
+    )
+    parser.add_argument(
+        "--exposure-ms",
+        type=float,
+        required=True,
+        help="Exposure time in ms (e.g. 1 for 10x, 2 for 20x/50x)",
     )
     parser.add_argument(
         "--chip",
@@ -814,6 +831,8 @@ def main() -> int:
             run(
                 scope,
                 chips_meta=args.chips_meta,
+                gain=args.gain,
+                exposure_ms=args.exposure_ms,
                 chip=args.chip,
                 contour_spacing_mm=args.contour_spacing_mm,
                 grid_spacing_um=args.grid_spacing_um,
