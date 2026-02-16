@@ -61,7 +61,7 @@ def poll_position(
         samples.append(PositionSample(t_before, t_after, um))
         elapsed = t_after - t_before
         if elapsed < period:
-            time.sleep(period - elapsed)
+            stop.wait(timeout=period - elapsed)
 
 
 def start_polling(
