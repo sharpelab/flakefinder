@@ -88,7 +88,7 @@ from .enums import (
 )
 from .events import AxisEvents, EventQueue, PositionMonitor, Subscription
 from .microscope import Microscope
-from .polling import PollingHandle, start_polling
+from .polling import PollingHandle, start_motion_polling, start_polling
 from .units import Aperture, Axis, Lamp, MoveHandle, Nosepiece, Shutter, Stage, ZDrive, wait_all
 from .utils import (
     UnitConverter,
@@ -145,6 +145,7 @@ __all__ = [
     # Polling
     "PollingHandle",
     "start_polling",
+    "start_motion_polling",
     # Autofocus
     "sharpness",
     "interpolate_position",

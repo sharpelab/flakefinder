@@ -142,3 +142,19 @@ def start_polling(
     if not paused:
         handle.start()
     return handle
+
+
+def start_motion_polling(
+    bcv,
+    converter,
+    *,
+    target_hz: float = DEFAULT_POLL_HZ,
+    startup_hz: float = STARTUP_POLL_HZ,
+) -> PollingHandle:
+    """Start polling for use during a move: 10 Hz ramp to 100 Hz on motion.
+
+    Convenience wrapper around start_polling with adaptive Hz defaults.
+    No paused mode — 10 Hz startup is gentle enough to coexist with
+    move_to_async on the bus.
+    """
+    return start_polling(bcv, converter, target_hz=target_hz, startup_hz=startup_hz)

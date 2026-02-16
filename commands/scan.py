@@ -25,8 +25,8 @@ from PIL import Image as PILImage
 
 from flakefinder.data_utils import compute_frame_size_um, require_microscope_description
 from flakefinder.image_utils import sdk_image_to_numpy
-from flakefinder.leica import Microscope, continuous_autofocus, start_polling, wait_all
-from flakefinder.leica.polling import STARTUP_POLL_HZ
+from flakefinder.leica import Microscope, continuous_autofocus, wait_all
+from flakefinder.leica.polling import start_motion_polling
 from flakefinder.scan_utils import (
     DEFAULT_WB,
     build_microscope_meta,
@@ -481,11 +481,9 @@ def run(
             print(f"Row {row_idx}/{num_rows - 1}: Y={row_y:.0f}µm, {dir_str}")
 
         # Move to row start if not already there
-        _t_gap = time.perf_counter()
         if row_idx > 0:
             hx, hy = stage.move_to_async(x_start_pos, row_y)
             wait_all([hx, hy])
-        _t_move = time.perf_counter()
 
         row_start = time.perf_counter()
         row_frame_start = global_frame_idx
@@ -500,13 +498,10 @@ def run(
             acquisition.Acquire(context, None)
             if current_image[0] is not None:
                 current_image[0].Dispose()
-        _t_warmup = time.perf_counter()
 
         # Start polling at low Hz, issue move, polling ramps to full speed on motion
-        x_polling = start_polling(x_bcv, x_converter, startup_hz=STARTUP_POLL_HZ)
-        _t_init = time.perf_counter()
+        x_polling = start_motion_polling(x_bcv, x_converter)
         handle = stage.x.move_to_async(x_end_pos)
-        _t_async = time.perf_counter()
         # TODO: derive stop margin from frame size or commanded speed
         _STOP_MARGIN_UM = 50.0
         row_distance_um = abs(x_end_pos - x_start_pos)
@@ -565,10 +560,8 @@ def run(
 
         # Stop polling to free bus, then wait for SDK move completion
         x_polling.join()
-        _t_join = time.perf_counter()
         if not handle.is_complete:
             handle.wait(timeout=2.0)
-        _t_wait = time.perf_counter()
         handle.dispose()
 
         row_duration = row_end - row_start
@@ -581,15 +574,6 @@ def run(
             print(
                 f"  {row_frame_count} frames ({row_capture_count} captured{skip_str}),"
                 f" {len(row_x_samples)} pos samples, {row_duration:.2f}s"
-            )
-            print(
-                f"  Gap: move={(_t_move - _t_gap) * 1000:.0f}ms"
-                f" warmup={(_t_warmup - _t_move) * 1000:.0f}ms"
-                f" init={(_t_init - _t_warmup) * 1000:.0f}ms"
-                f" async={(_t_async - _t_init) * 1000:.0f}ms"
-                f" join={(_t_join - row_end) * 1000:.0f}ms"
-                f" wait={(_t_wait - _t_join) * 1000:.0f}ms"
-                f" total={(_t_wait - _t_gap) * 1000:.0f}ms"
             )
 
         # Add position samples to global list (with adjusted timestamps)
