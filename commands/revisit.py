@@ -5,14 +5,14 @@ each, autofocuses using z as initial guess, and captures the result image.
 
 Usage:
     uv run python commands/revisit.py -o scans/revisit_01 \\
-        --points points.json --objective-mag 20x
+        --points revisit_top20_50x.json
 
     uv run python commands/revisit.py -o scans/revisit_01 \\
         --point 50000,40000,24700,flake_A --point 51000,41000,24750 \\
         --objective-mag 20x
 
     uv run python commands/revisit.py -o scans/revisit_01 \\
-        --points points.json --objective-mag 50x --dry-run
+        --points revisit_top20_50x.json --dry-run
 """
 
 from __future__ import annotations
@@ -55,14 +55,25 @@ class RouteStep(NamedTuple):
     travel_time_s: float
 
 
-def _parse_points_file(points_file: Path) -> list[RevisitPoint]:
-    """Parse points from a JSON file."""
+class RevisitFile(NamedTuple):
+    points: list[RevisitPoint]
+    objective_mag: str
+
+
+def _parse_points_file(points_file: Path) -> RevisitFile:
+    """Parse points from a JSON file.
+
+    Expected format: {"objective_mag": ..., "points": [{x, y, z, label?}, ...], ...}
+    """
     with open(points_file) as f:
         data = json.load(f)
-    if not isinstance(data, list):
-        raise ValueError(f"Expected JSON array in {points_file}, got {type(data).__name__}")
+    if not isinstance(data, dict) or "points" not in data:
+        raise ValueError(f"Expected JSON object with 'points' key in {points_file}")
+    obj_mag = data.get("objective_mag")
+    if obj_mag is None:
+        raise ValueError(f"Missing 'objective_mag' in {points_file}")
     points: list[RevisitPoint] = []
-    for obj in data:
+    for obj in data["points"]:
         points.append(
             RevisitPoint(
                 x=float(obj["x"]),
@@ -71,7 +82,7 @@ def _parse_points_file(points_file: Path) -> list[RevisitPoint]:
                 label=obj.get("label"),
             )
         )
-    return points
+    return RevisitFile(points=points, objective_mag=f"{obj_mag:g}x")
 
 
 def _parse_point_args(point_args: list[str]) -> list[RevisitPoint]:
@@ -260,9 +271,9 @@ def run(
     output: str,
     points: list[RevisitPoint],
     objective_mag: str,
-    z_speed: float = 1250,
+    z_speed: float | None = None,
     z_range: float | None = None,
-    exposure_ms: float = 1.0,
+    exposure_ms: float | None = None,
     gain: float | None = None,
     white_balance: GainRGB = DEFAULT_WB,
     quiet: bool = False,
@@ -288,7 +299,6 @@ def run(
     camera = scope.camera
     camera.trigger_mode = 0  # CONTINUOUS
     camera.binning = 2  # 3x3 binning
-    camera.exposure_time = exposure_ms / 1000.0
     if gain is not None:
         camera.gain = gain
     camera.gain_rgb = white_balance
@@ -350,6 +360,7 @@ def run(
             z_center_um=p.z,
             z_range_um=z_range,
             z_speed_um_s=z_speed,
+            exposure_ms=exposure_ms,
         )
         t_af_end = time.perf_counter()
 
@@ -477,7 +488,7 @@ Examples:
     pts_group.add_argument(
         "--points",
         type=Path,
-        help="JSON file with [{x, y, z, label?}, ...]",
+        help="Revisit JSON file with {objective_mag, points: [{x, y, z, label?}, ...]}",
     )
     pts_group.add_argument(
         "--point",
@@ -492,21 +503,23 @@ Examples:
     optics_group.add_argument(
         "--objective-mag",
         type=str,
-        required=True,
+        default=None,
         metavar="MAG",
-        help="Objective magnification (e.g. 20x, 50x)",
+        help="Objective magnification (e.g. 20x, 50x). Read from --points file if not specified.",
     )
 
     # Autofocus
     af_group = parser.add_argument_group("Autofocus")
-    af_group.add_argument("--z-speed", type=float, default=1250, help="Z speed in um/s (default: 1250)")
+    af_group.add_argument("--z-speed", type=float, default=None, help="Z speed in um/s (default: from objective)")
     af_group.add_argument(
         "--z-range", type=float, default=None, help="AF search range in um (default: auto from objective)"
     )
 
     # Camera
     cam_group = parser.add_argument_group("Camera")
-    cam_group.add_argument("--exposure-ms", type=float, default=1.0, help="Exposure time in ms (default: 1.0)")
+    cam_group.add_argument(
+        "--exposure-ms", type=float, default=None, help="Exposure time in ms (default: from objective)"
+    )
     cam_group.add_argument("--gain", type=float, default=None, help="Camera gain (default: unchanged)")
     cam_group.add_argument(
         "--white-balance", type=parse_white_balance, default="2.51,1.02,1.41", help="White balance as B,G,R gains"
@@ -530,21 +543,30 @@ Examples:
 def main() -> int:
     args = _build_parser().parse_args()
 
-    # Parse points
+    # Parse points and resolve objective mag
     try:
         if args.points is not None:
-            points = _parse_points_file(args.points)
+            if args.objective_mag is not None:
+                print("Error: --objective-mag cannot be used with --points (mag comes from the file)")
+                return 1
+            revisit_file = _parse_points_file(args.points)
+            points = revisit_file.points
+            objective_mag = revisit_file.objective_mag
         else:
             points = _parse_point_args(args.point_args)
+            if args.objective_mag is None:
+                print("Error: --objective-mag is required when using --point")
+                return 1
+            objective_mag = args.objective_mag
     except (ValueError, FileNotFoundError, json.JSONDecodeError) as e:
         print(f"Error: {e}")
         return 1
 
-    print(f"Loaded {len(points)} points")
+    print(f"Loaded {len(points)} points (objective: {objective_mag})")
 
     # Dry run
     if args.dry_run:
-        mag_str = args.objective_mag.lower().rstrip("x")
+        mag_str = objective_mag.lower().rstrip("x")
         route = _plan_route(points, 0.0, 0.0, or_opt=args.or_opt)
         print()
         print("Route plan (from origin):")
@@ -569,7 +591,7 @@ def main() -> int:
                 scope,
                 output=args.output,
                 points=points,
-                objective_mag=args.objective_mag,
+                objective_mag=objective_mag,
                 z_speed=args.z_speed,
                 z_range=args.z_range,
                 exposure_ms=args.exposure_ms,
