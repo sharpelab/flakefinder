@@ -81,7 +81,11 @@ def create_blend_alpha(
     return Image.fromarray((alpha * 255).astype("uint8"), mode="L")
 
 
-def deskew_image(img: Image.Image, shear_px: float) -> Image.Image:
+def deskew_image(
+    img: Image.Image,
+    shear_px: float,
+    resample: Image.Resampling = Image.Resampling.BILINEAR,
+) -> Image.Image:
     """Apply horizontal shear to correct rolling shutter skew.
 
     Positive shear_px: bottom of image shifts RIGHT
@@ -115,7 +119,7 @@ def deskew_image(img: Image.Image, shear_px: float) -> Image.Image:
         (pw, ph),
         Image.Transform.AFFINE,
         (a, b, c, d, e, f),
-        resample=Image.Resampling.BICUBIC,
+        resample=resample,
         fillcolor=(0,) * len(img.getbands()),
     )
 
@@ -269,6 +273,7 @@ def stitch_row_to_global(
     savgol_window: int = 15,
     flatfield: np.ndarray | None = None,
     num_threads: int = 1,
+    deskew_resample: Image.Resampling = Image.Resampling.BILINEAR,
 ) -> RowStitchResult:
     """
     Stitch a single row directly into global X coordinate space.
@@ -416,17 +421,17 @@ def stitch_row_to_global(
         img.load()
         if img.size[0] != frame_w or img.size[1] != frame_h:
             img = img.resize((frame_w, frame_h), Image.Resampling.LANCZOS)
-        img = img.convert("RGBA")
 
         if flatfield is not None:
             img_arr = np.array(img)
-            img_rgb = apply_flatfield(img_arr[:, :, :3], flatfield)
-            img_arr[:, :, :3] = img_rgb
-            img = Image.fromarray(img_arr, mode="RGBA")
+            img_arr = apply_flatfield(img_arr[:, :, :3], flatfield)
+            img = Image.fromarray(img_arr, mode="RGB")
 
-        # Apply per-frame deskew (rolling shutter correction).
+        # Deskew on RGB (3 channels) before converting to RGBA — faster.
         if frame_deskew != 0:
-            img = deskew_image(img, frame_deskew)
+            img = deskew_image(img, frame_deskew, resample=deskew_resample)
+
+        img = img.convert("RGBA")
 
         if blend:
             is_first = seq_i == 0
@@ -496,7 +501,7 @@ def run(
     crop: AreaRect | None = None,
     flatfield_path: Path | None = None,
     no_flatfield: bool = False,
-    threads: int = 4,
+    threads: int = 8,
     bg: str = "black",
     grid_spacing_um: float = 0,
     grid_line_color: str = "#FFFFFF50",
@@ -504,6 +509,7 @@ def run(
     row_labels: bool = False,
     show_frame_outlines: bool = False,
     savgol_window: int = 15,
+    bicubic_deskew: bool = False,
     quiet: bool = False,
     output: str | None = None,
 ) -> StitchResult:
@@ -669,6 +675,7 @@ def run(
             savgol_window=savgol_window,
             flatfield=flatfield,
             num_threads=threads,
+            deskew_resample=Image.Resampling.BICUBIC if bicubic_deskew else Image.Resampling.BILINEAR,
         )
         row_img = row_stitch.image
 
@@ -854,7 +861,7 @@ def _build_parser():
     )
     parser.add_argument("--flatfield", type=Path, default=None, help="Path to flatfield .npy file")
     parser.add_argument("--no-flatfield", action="store_true", help="Disable flatfield correction")
-    parser.add_argument("--threads", type=int, default=4, help="Threads for parallel frame loading")
+    parser.add_argument("--threads", type=int, default=8, help="Threads for parallel frame loading")
     parser.add_argument("--bg", type=str, default="black", help="Background color")
     parser.add_argument("--grid-spacing-um", type=float, default=0, help="Grid line spacing in µm")
     parser.add_argument("--grid-line-color", type=str, default="#FFFFFF50", help="Grid line color")
@@ -867,6 +874,7 @@ def _build_parser():
         help="Draw frame outlines",
     )
     parser.add_argument("--savgol-window", type=int, default=15, help="Savgol smoothing window")
+    parser.add_argument("--bicubic", action="store_true", help="Use bicubic deskew (slower, slightly sharper)")
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress progress output")
     parser.add_argument("-o", "--output", type=str, default=None, help="Output filename")
     return parser
@@ -894,6 +902,7 @@ def main() -> int:
             row_labels=args.row_labels,
             show_frame_outlines=args.show_frame_outlines,
             savgol_window=args.savgol_window,
+            bicubic_deskew=args.bicubic,
             quiet=args.quiet,
             output=args.output,
         )
