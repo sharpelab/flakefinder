@@ -382,6 +382,33 @@ class _Preflight:
         print(f"  Grid: {self.grid_count} points")
 
 
+def _nearest_neighbor_order(
+    points: list[SamplePoint],
+    start: Point2F,
+) -> list[SamplePoint]:
+    """Reorder points by nearest-neighbor traversal from start position."""
+    if len(points) <= 1:
+        return list(points)
+
+    remaining = list(points)
+    ordered: list[SamplePoint] = []
+    cx, cy = start
+
+    while remaining:
+        best_idx = 0
+        best_dist_sq = float("inf")
+        for i, pt in enumerate(remaining):
+            d = (pt.x_um - cx) ** 2 + (pt.y_um - cy) ** 2
+            if d < best_dist_sq:
+                best_dist_sq = d
+                best_idx = i
+        nearest = remaining.pop(best_idx)
+        ordered.append(nearest)
+        cx, cy = nearest.x_um, nearest.y_um
+
+    return ordered
+
+
 def _plan(
     *,
     chips_meta: Path,
@@ -412,6 +439,9 @@ def _plan(
         all_points.append(SamplePoint(x, y, "contour", i))
     for i, (x, y) in enumerate(grid_points):
         all_points.append(SamplePoint(x, y, "grid", i))
+
+    # Reorder for efficient traversal (nearest-neighbor from centroid)
+    all_points = _nearest_neighbor_order(all_points, chip_geo.centroid)
 
     return _Preflight(
         points=all_points,
