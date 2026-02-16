@@ -246,6 +246,46 @@ def intersect_polygon_with_y(
     return Point2F(min(intersections), max(intersections))
 
 
+def intersect_polygon_with_y_band(
+    polygon: Sequence[Point2F],
+    y_center: float,
+    frame_height: float,
+) -> Point2F | None:
+    """Find widest X extent where a horizontal band intersects a polygon.
+
+    The band covers [y_center - frame_height/2, y_center + frame_height/2].
+    For a convex polygon with straight edges, the X extent is piecewise-linear
+    in Y, so the extremes occur at band edges or polygon vertex Y values.
+
+    Returns:
+        (x_min, x_max) envelope or None if no Y in the band intersects.
+    """
+    y_top = y_center - frame_height / 2
+    y_bot = y_center + frame_height / 2
+
+    # Candidate Y values: band edges + polygon vertices within the band
+    candidates = [y_top, y_bot]
+    for _, vy in polygon:
+        if y_top <= vy <= y_bot:
+            candidates.append(vy)
+
+    x_min_all = float("inf")
+    x_max_all = float("-inf")
+    any_hit = False
+
+    for y in candidates:
+        extent = intersect_polygon_with_y(polygon, y)
+        if extent is not None:
+            x_min_all = min(x_min_all, extent[0])
+            x_max_all = max(x_max_all, extent[1])
+            any_hit = True
+
+    if not any_hit:
+        return None
+
+    return Point2F(x_min_all, x_max_all)
+
+
 def compute_plane_z(a: float, b: float, c: float, x_um: float, y_um: float) -> float:
     """Compute Z from plane coefficients. Z_um = a * X_um + b * Y_um + c."""
     return a * x_um + b * y_um + c
@@ -282,7 +322,7 @@ def compute_planar_scan_plan(
     rows: list[ScanRow] = []
     y = bbox["y_min"]
     while y <= bbox["y_max"]:
-        extent = intersect_polygon_with_y(polygon, y)
+        extent = intersect_polygon_with_y_band(polygon, y, frame_height_um)
         if extent is not None:
             x_min, x_max = extent
             # Skip rows narrower than one frame (polygon tips)
