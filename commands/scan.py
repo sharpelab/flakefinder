@@ -26,6 +26,7 @@ from PIL import Image as PILImage
 from flakefinder.data_utils import compute_frame_size_um, require_microscope_description
 from flakefinder.image_utils import sdk_image_to_numpy
 from flakefinder.leica import Microscope, continuous_autofocus, start_polling, wait_all
+from flakefinder.leica.polling import STARTUP_POLL_HZ
 from flakefinder.scan_utils import (
     DEFAULT_WB,
     build_microscope_meta,
@@ -502,11 +503,9 @@ def run(
         _t_warmup = time.perf_counter()
 
         # Capture initial position, start move on clean bus, then begin polling
-        x_polling = start_polling(x_bcv, x_converter, paused=True)
+        x_polling = start_polling(x_bcv, x_converter, startup_hz=STARTUP_POLL_HZ, paused=True)
         _t_init = time.perf_counter()
         handle = stage.x.move_to_async(x_end_pos)
-        # TODO: replace with adaptive Hz (start 10 Hz, bump to 100 Hz on motion)
-        time.sleep(0.02)  # let move initialize before polling hits the bus
         _t_async = time.perf_counter()
         x_polling.start()
         # TODO: derive stop margin from frame size or commanded speed

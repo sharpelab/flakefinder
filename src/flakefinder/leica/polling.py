@@ -19,6 +19,8 @@ from typing import Any
 from ..types import PositionSample
 
 DEFAULT_POLL_HZ: float = 100.0
+STARTUP_POLL_HZ: float = 10.0
+_MOTION_THRESHOLD_UM: float = 1.0
 
 
 @dataclass
@@ -33,6 +35,7 @@ class PollingHandle:
     _bcv: Any = field(default=None, repr=False)
     _converter: Any = field(default=None, repr=False)
     _target_hz: float = field(default=DEFAULT_POLL_HZ, repr=False)
+    _startup_hz: float | None = field(default=None, repr=False)
 
     def start(self) -> None:
         """Start the polling thread (for use after paused=True)."""
@@ -41,7 +44,7 @@ class PollingHandle:
         self.thread = threading.Thread(
             target=poll_position,
             args=(self._bcv, self._converter, self.samples, self.stop),
-            kwargs={"target_hz": self._target_hz},
+            kwargs={"target_hz": self._target_hz, "startup_hz": self._startup_hz},
             daemon=True,
         )
         self.thread.start()
@@ -60,8 +63,12 @@ def poll_position(
     stop: threading.Event,
     *,
     target_hz: float = DEFAULT_POLL_HZ,
+    startup_hz: float | None = None,
 ) -> None:
     """Thread-target: poll position, convert, append PositionSample, sleep to target rate.
+
+    When startup_hz is provided, starts at that rate and ramps to target_hz
+    once motion is detected (>1 µm from initial position).
 
     Args:
         bcv: BasicControlValue interface (or hysteresis-corrected variant).
@@ -69,14 +76,28 @@ def poll_position(
         samples: Shared list to append PositionSample results.
         stop: Event to signal thread shutdown.
         target_hz: Target polling rate in Hz.
+        startup_hz: If set, initial polling rate before motion detected.
     """
-    period = 1.0 / target_hz
+    if startup_hz is not None:
+        period = 1.0 / startup_hz
+        initial_pos = samples[0].x_um if samples else None
+        ramped = False
+    else:
+        period = 1.0 / target_hz
+        initial_pos = None
+        ramped = True
+
     while not stop.is_set():
         t_before = time.perf_counter()
         native = bcv.GetControlValue()
         t_after = time.perf_counter()
         um = converter.GetMetricsValue(native)
         samples.append(PositionSample(t_before, t_after, um))
+
+        if not ramped and abs(um - initial_pos) > _MOTION_THRESHOLD_UM:
+            period = 1.0 / target_hz
+            ramped = True
+
         elapsed = t_after - t_before
         if elapsed < period:
             time.sleep(period - elapsed)
@@ -87,6 +108,7 @@ def start_polling(
     converter,
     *,
     target_hz: float = DEFAULT_POLL_HZ,
+    startup_hz: float | None = None,
     paused: bool = False,
 ) -> PollingHandle:
     """Start a position polling thread.
@@ -96,16 +118,20 @@ def start_polling(
     after issuing any bus commands (e.g. move_to_async) that would
     compete with polling on the same axis.
 
+    When startup_hz is provided, the polling thread starts at that rate
+    and ramps to target_hz once motion is detected (>1 µm from initial sample).
+
     Args:
         bcv: BasicControlValue interface (or hysteresis-corrected variant).
         converter: MetricsConverter for native -> microns.
         target_hz: Target polling rate in Hz.
+        startup_hz: If set, initial polling rate before motion detected.
         paused: If True, capture initial sample but don't start thread.
 
     Returns:
         PollingHandle with .samples, .stop, .thread, .start(), and .join().
     """
-    handle = PollingHandle(_bcv=bcv, _converter=converter, _target_hz=target_hz)
+    handle = PollingHandle(_bcv=bcv, _converter=converter, _target_hz=target_hz, _startup_hz=startup_hz)
 
     # Capture initial position before thread starts
     t_before = time.perf_counter()
