@@ -505,6 +505,8 @@ def run(
         x_polling = start_polling(x_bcv, x_converter, paused=True)
         _t_init = time.perf_counter()
         handle = stage.x.move_to_async(x_end_pos)
+        # TODO: replace with adaptive Hz (start 10 Hz, bump to 100 Hz on motion)
+        time.sleep(0.02)  # let move initialize before polling hits the bus
         _t_async = time.perf_counter()
         x_polling.start()
         # TODO: derive stop margin from frame size or commanded speed
