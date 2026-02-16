@@ -15,11 +15,11 @@ Supports checkpointing: re-running with the same -o directory resumes
 from where the previous run left off.
 
 Usage:
-    # Full pipeline (5x overview + 20x chip scan)
+    # Full pipeline with default preset (5x overview + 20x chip scan)
     uv run python find_flakes.py
 
-    # Fast screening: 2.5x overview + 10x chip scan
-    uv run python find_flakes.py --overview-mag 2.5x --chip-scan-mag 10x
+    # Fast screening preset (2.5x overview + 10x chip scan)
+    uv run python find_flakes.py --preset 2.5_10
 
     # Only process chips 0 and 2
     uv run python find_flakes.py --chips 0,2
@@ -45,6 +45,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import TypedDict
 
 from commands import analyze_focus_map, chip_scan, find_chips, focus_map, scan, stage, stitch
 from flakefinder.cli_utils import park_microscope
@@ -85,9 +86,44 @@ class TeeWriter:
 DEFAULT_AREA_RECT = "8000,95000,0,78000"
 DEFAULT_INITIAL_Z = 24690
 
+
+class ScanPreset(TypedDict):
+    overview_mag: str
+    chip_scan_mag: str
+    chip_scan_speed_mm: float
+    focus_map_gain: float
+    focus_map_exposure_ms: float
+    chip_scan_gain: float
+    chip_scan_exposure_ms: float
+
+
+PRESETS: dict[str, ScanPreset] = {
+    "5_20": {
+        "overview_mag": "5x",
+        "chip_scan_mag": "20x",
+        "chip_scan_speed_mm": 5.0,
+        "focus_map_gain": 1.0,
+        "focus_map_exposure_ms": 1.0,
+        "chip_scan_gain": 4.0,
+        "chip_scan_exposure_ms": 0.25,
+    },
+    "2.5_10": {
+        "overview_mag": "2.5x",
+        "chip_scan_mag": "10x",
+        "chip_scan_speed_mm": 10.0,
+        "focus_map_gain": 1.0,
+        "focus_map_exposure_ms": 1.0,
+        "chip_scan_gain": 4.0,
+        "chip_scan_exposure_ms": 0.25,
+    },
+}
+
+DEFAULT_PRESET = "5_20"
+
 # Config flags that --resume forbids (must come from checkpoint instead)
 _RESUME_FORBIDDEN_FLAGS = frozenset(
     {
+        "--preset",
         "--overview-mag",
         "--chip-scan-mag",
         "--scan-speed",
@@ -239,10 +275,15 @@ class _Preflight:
     chip_filter: list[int] | None
     wb: GainRGB
     area: AreaRect
+    preset_name: str
     overview_mag: str
     chip_scan_mag: str
     scan_speed: float
     scan_z_speed: float
+    focus_map_gain: float
+    focus_map_exposure_ms: float
+    chip_scan_gain: float
+    chip_scan_exposure_ms: float
     args: argparse.Namespace  # raw CLI args for forwarding
 
 
@@ -259,13 +300,18 @@ def _plan(args: argparse.Namespace) -> _Preflight:
     wb = parse_white_balance(args.white_balance)
     area = parse_area_rect(args.area_rect)
 
+    # Resolve preset
+    preset_name: str = args.preset
+    preset = PRESETS[preset_name]
+
     # Normalize magnification: "5" → "5x", "2.5X" → "2.5x"
     def _fmt_mag(s: str) -> str:
         n = float(s.lower().strip().rstrip("x"))
         return f"{int(n)}x" if n == int(n) else f"{n}x"
 
-    overview_mag = _fmt_mag(args.overview_mag)
-    chip_scan_mag = _fmt_mag(args.chip_scan_mag)
+    # CLI flags override preset values when provided
+    overview_mag = _fmt_mag(args.overview_mag) if args.overview_mag is not None else preset["overview_mag"]
+    chip_scan_mag = _fmt_mag(args.chip_scan_mag) if args.chip_scan_mag is not None else preset["chip_scan_mag"]
 
     if args.output:
         run_dir = Path(args.output)
@@ -281,10 +327,10 @@ def _plan(args: argparse.Namespace) -> _Preflight:
     if args.chips is not None:
         chip_filter = [int(c.strip()) for c in args.chips.split(",")]
 
-    # Compute speed defaults scaled by chip scan magnification (baseline: 20x)
+    # Scan speed from preset; CLI overrides. AF Z speed still auto-derived from mag.
+    scan_speed = args.scan_speed if args.scan_speed is not None else preset["chip_scan_speed_mm"]
     chip_mag_num = float(chip_scan_mag.rstrip("x"))
     mag_scale = 20.0 / chip_mag_num
-    scan_speed = args.scan_speed if args.scan_speed is not None else min(5.0 * mag_scale, 40.0)
     scan_z_speed = args.scan_z_speed if args.scan_z_speed is not None else min(1250.0 * mag_scale, 5000.0)
 
     return _Preflight(
@@ -295,10 +341,15 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         chip_filter=chip_filter,
         wb=wb,
         area=area,
+        preset_name=preset_name,
         overview_mag=overview_mag,
         chip_scan_mag=chip_scan_mag,
         scan_speed=scan_speed,
         scan_z_speed=scan_z_speed,
+        focus_map_gain=preset["focus_map_gain"],
+        focus_map_exposure_ms=preset["focus_map_exposure_ms"],
+        chip_scan_gain=preset["chip_scan_gain"],
+        chip_scan_exposure_ms=preset["chip_scan_exposure_ms"],
         args=args,
     )
 
@@ -307,16 +358,18 @@ def _build_parser():
     parser = argparse.ArgumentParser(
         description="End-to-end flake finding pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=f"""
+Presets: {", ".join(PRESETS)}
+
 Examples:
-  # Full pipeline with defaults
+  # Full pipeline with default preset ({DEFAULT_PRESET})
   uv run python find_flakes.py
+
+  # Fast screening preset
+  uv run python find_flakes.py --preset 2.5_10
 
   # Only scan chips 0 and 2
   uv run python find_flakes.py --chips 0,2
-
-  # Custom scan area
-  uv run python find_flakes.py --area-rect 10000,80000,5000,70000
 
   # Preview all commands
   uv run python find_flakes.py --dry-run
@@ -326,12 +379,6 @@ Examples:
 
   # Process chips after chip 3, limit to 2
   uv run python find_flakes.py --after 3 --limit 2
-
-  # Step through with confirmation between each stage
-  uv run python find_flakes.py --pause
-
-  # Fast screening: 2.5x overview + 10x chip scan
-  uv run python find_flakes.py --overview-mag 2.5x --chip-scan-mag 10x
 """,
     )
     run_group = parser.add_mutually_exclusive_group()
@@ -350,6 +397,13 @@ Examples:
         help="Resume a previous run (loads all config from checkpoint)",
     )
     parser.add_argument(
+        "--preset",
+        type=str,
+        default=DEFAULT_PRESET,
+        choices=list(PRESETS),
+        help=f"Scan preset (default: {DEFAULT_PRESET})",
+    )
+    parser.add_argument(
         "--area-rect",
         type=str,
         default=DEFAULT_AREA_RECT,
@@ -364,14 +418,14 @@ Examples:
     parser.add_argument(
         "--overview-mag",
         type=str,
-        default="5x",
-        help="Objective magnification for overview scan (default: 5x)",
+        default=None,
+        help="Override preset overview magnification",
     )
     parser.add_argument(
         "--chip-scan-mag",
         type=str,
-        default="20x",
-        help="Objective magnification for chip scanning (default: 20x)",
+        default=None,
+        help="Override preset chip scan magnification",
     )
     parser.add_argument(
         "--chips",
@@ -441,12 +495,15 @@ def _print_header(p: _Preflight) -> None:
     print("FlakeFinder Pipeline")
     print("=" * 70)
     print(f"Run directory: {p.run_dir}")
+    print(f"Preset:        {p.preset_name}")
     print(f"Overview:      {p.overview_mag}")
     print(f"Chip scan:     {p.chip_scan_mag}")
     print(f"Area rect:     {args.area_rect}")
     print(f"Initial Z:     {args.initial_z} µm")
     print(f"Scan speed:    {p.scan_speed} mm/s")
     print(f"AF Z speed:    {p.scan_z_speed} µm/s")
+    print(f"Focus map:     gain={p.focus_map_gain}, exposure={p.focus_map_exposure_ms}ms")
+    print(f"Chip scan:     gain={p.chip_scan_gain}, exposure={p.chip_scan_exposure_ms}ms")
     print(f"White balance: {args.white_balance} (B,G,R)")
     if p.chip_filter:
         print(f"Chips:         {p.chip_filter}")
@@ -696,8 +753,8 @@ def run(scope: Microscope, p: _Preflight) -> int:
                 lambda ci=chip_idx, cd=chip_dir: focus_map.run(
                     scope=scope,
                     chips_meta=p.chips_json_path,
-                    gain=1.0,
-                    exposure_ms=1.0,
+                    gain=p.focus_map_gain,
+                    exposure_ms=p.focus_map_exposure_ms,
                     chip=ci,
                     save_images=True,
                     z_speed=p.scan_z_speed,
@@ -745,6 +802,8 @@ def run(scope: Microscope, p: _Preflight) -> int:
                     plane_path=pp,
                     objective_mag=p.chip_scan_mag,
                     speed_mm=p.scan_speed,
+                    gain=p.chip_scan_gain,
+                    exposure_ms=p.chip_scan_exposure_ms,
                     white_balance=p.wb,
                     clean=True,
                     quiet=True,
@@ -808,12 +867,17 @@ def run(scope: Microscope, p: _Preflight) -> int:
 
     # Save args to checkpoint for reference
     checkpoint["args"] = {
+        "preset": p.preset_name,
         "area_rect": args.area_rect,
         "initial_z": args.initial_z,
         "overview_mag": p.overview_mag,
         "chip_scan_mag": p.chip_scan_mag,
         "scan_speed": p.scan_speed,
         "scan_z_speed": p.scan_z_speed,
+        "focus_map_gain": p.focus_map_gain,
+        "focus_map_exposure_ms": p.focus_map_exposure_ms,
+        "chip_scan_gain": p.chip_scan_gain,
+        "chip_scan_exposure_ms": p.chip_scan_exposure_ms,
         "white_balance": args.white_balance,
         "chips": args.chips,
         "after": args.after,
@@ -858,6 +922,7 @@ def _apply_resume(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
         parser.error(f"checkpoint.json in {resume_dir} has no saved args (old format?)")
 
     args.output = str(resume_dir)
+    args.preset = saved.get("preset", DEFAULT_PRESET)
     args.area_rect = saved["area_rect"]
     args.initial_z = saved["initial_z"]
     args.overview_mag = saved["overview_mag"]
