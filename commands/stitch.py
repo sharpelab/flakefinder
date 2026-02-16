@@ -813,6 +813,7 @@ def run(
     duration_s = time.perf_counter() - start_time
     stitch_meta = {
         "timestamp": datetime.now().isoformat(),
+        "command": sys.argv,
         "duration_s": round(duration_s, 2),
         "image_file": out_path.name,
         "image_size_px": [background.width, background.height],

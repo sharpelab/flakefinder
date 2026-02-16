@@ -342,10 +342,7 @@ def run(
         }
         if af_result
         else None,
-        # Microscope metadata (camera, optics, lighting)
-        "camera": cam_meta,
-        "optics": optics_meta,
-        "lighting": micro_meta["lighting"],
+        **micro_meta,
         "rows": [],
     }
 

@@ -7,6 +7,7 @@ Usage:
 
 import argparse
 import json
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -238,6 +239,7 @@ def find_chips(
     duration_s = time.perf_counter() - start_time
     results = {
         "timestamp": datetime.now().isoformat(),
+        "command": sys.argv,
         "duration_s": round(duration_s, 2),
         "source_stitch": image_path.name,
         "source_meta": image_path.stem + "_meta.json",
