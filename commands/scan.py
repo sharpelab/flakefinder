@@ -502,12 +502,11 @@ def run(
                 current_image[0].Dispose()
         _t_warmup = time.perf_counter()
 
-        # Capture initial position, start move on clean bus, then begin polling
-        x_polling = start_polling(x_bcv, x_converter, startup_hz=STARTUP_POLL_HZ, paused=True)
+        # Start polling at low Hz, issue move, polling ramps to full speed on motion
+        x_polling = start_polling(x_bcv, x_converter, startup_hz=STARTUP_POLL_HZ)
         _t_init = time.perf_counter()
         handle = stage.x.move_to_async(x_end_pos)
         _t_async = time.perf_counter()
-        x_polling.start()
         # TODO: derive stop margin from frame size or commanded speed
         _STOP_MARGIN_UM = 50.0
         row_distance_um = abs(x_end_pos - x_start_pos)
