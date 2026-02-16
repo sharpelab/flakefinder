@@ -263,3 +263,163 @@ move performance. This exceeds the 100 Hz target.
 - Moves on any axis complete normally (cross-axis is safe; same-axis
   with 8 ms sleep is safe)
 - Camera `Acquire()` still untested in combination (experiment 5 TBD)
+
+### 2026-02-15: Camera + full workload (experiments 5-7)
+
+Data: `results/sdk_threading_20260215_2132.json`
+
+**Experiment 5 — Camera + polling combined:**
+
+Camera `Acquire()` is completely independent of position polling.
+65-66 fps regardless of poll thread count (0 through 6). Polling rate
+unaffected by camera. With concurrent move, all complete up to 3 poll
+threads; 6 threads slows move to 1.8s but still completes.
+
+| Poll threads | Cam fps | Poll Hz | Move | Move time |
+|-------------|---------|---------|------|-----------|
+| 0           | 65.7    | —       | YES  | 0.470s    |
+| 1           | 65.8    | 61      | YES  | 0.486s    |
+| 2           | 66.0    | 93      | YES  | 0.597s    |
+| 3           | 65.9    | 125     | YES  | 0.595s    |
+| 6           | 66.2    | 212     | YES  | 1.776s    |
+
+**Experiment 6 — Full combined workload (3-axis poll + camera + move):**
+
+| Config | Cam fps | X Hz | Y Hz | Z Hz | Total Hz | Move time |
+|--------|---------|------|------|------|----------|-----------|
+| 1/axis no sleep   | 63.6 | 74 | 74 | 73 | 221 | 0.795s |
+| 2/axis 8ms sleep  | 63.2 | 82 | 85 | 91 | 257 | 0.625s |
+
+Both configurations work. Camera holds 63+ fps in both cases.
+
+**Experiment 7 — Poll stagger analysis (2 threads, same axis):**
+
+| Config | Hz | Gap mean±std | Clustered |
+|--------|-----|-------------|-----------|
+| 2T no stagger  | 94 | 10.7±7.5 ms | 33% |
+| 2T stagger 12ms | 94 | 10.6±7.5 ms | 33% |
+| 1T reference   | 62 | 16.2±1.7 ms | 0%  |
+
+Staggering had no effect — 33% of samples clustered (gap < 1ms)
+regardless of phase offset. The SDK likely serializes access
+internally, so both threads end up waiting on the same lock and
+firing back-to-back. 1 thread: perfectly even 16ms gaps, zero waste.
+
+### 2026-02-15: Coordinated 2-thread polling (experiment 8)
+
+Data: `results/sdk_threading_20260215_2158.json`
+
+Attempted drift correction: each thread checks when its peer last
+completed and waits until `target_gap` has elapsed before polling.
+
+| Gap (ms) | Hz | Gap mean±std | Clustered | Move | Move time |
+|----------|-----|-------------|-----------|------|-----------|
+| 6        | 122 | 8.2±7.9 ms | **49%**   | YES  | 4.759s    |
+| 8        | 123 | 8.2±7.9 ms | **49%**   | YES  | 2.412s    |
+| 10       | 124 | 8.1±7.9 ms | **49%**   | NO   | —         |
+
+Coordination made clustering worse (49% vs 33% naive, vs 0%
+single-thread). P10=0.0 ms, P50=15.8 ms — bimodal distribution
+unchanged. The SDK's internal per-axis lock defeats any client-side
+timing strategy: both threads queue behind the lock and fire
+back-to-back regardless of coordination.
+
+Move performance also degraded: 6 ms gap = 4.8s (10× baseline),
+10 ms gap hung entirely.
+
+**Conclusion:** 2 threads per axis is not viable for improving
+temporal resolution. The SDK serializes access per-axis, and no
+client-side strategy can prevent clustering or avoid move
+starvation at useful poll rates. **1 thread per axis (63 Hz, 0%
+clustering) is the ceiling for this SDK.**
+
+### 2026-02-16: USB driver investigation
+
+The 63 Hz ceiling from experiments 1-8 was caused by the SDK's
+communication driver, not SDK-level serialization. The DM6M connects
+via an FTDI USB-to-serial bridge (COM4). The SDK supports two
+transport drivers for this link:
+
+- **`cmserial2.dll`** — opens COM4 via Windows serial API (VCP).
+  Subject to the FTDI Virtual COM Port driver's latency timer.
+- **`cmusb.dll`** — talks to the FTDI chip via D2XX direct USB,
+  bypassing the VCP layer entirely.
+
+The default `ahmconfig.xml` (from the 2DMatGMM project) used
+`cmserial2.dll`. The FTDI VCP driver's default 16 ms latency timer
+was the bottleneck — it buffers received data for up to 16 ms
+before delivering to the host application.
+
+**Driver comparison:**
+
+| Transport driver | FTDI path | Per-call | Per-axis Hz |
+|------------------|-----------|----------|-------------|
+| `cmserial2.dll` + 16 ms latency (default) | VCP | ~16 ms | 63 Hz |
+| `cmserial2.dll` + 1 ms latency | VCP | ~5.8 ms | 171 Hz |
+| **`cmusb.dll`** | **D2XX** | **~4.8 ms** | **~206 Hz** |
+
+With `cmusb.dll`, the FTDI latency timer setting is irrelevant —
+D2XX bypasses the VCP stack. Confirmed by resetting the latency
+timer to 16 ms with no change in polling rate.
+
+**Baud rate investigation (COM port path only):**
+
+- `mode COM4` while connected via `cmserial2.dll` shows 19200 baud
+- Baud rate is set by the SDK driver internally, not configurable
+  via `ahmconfig.xml` `baudrate` parameter or Device Manager
+- At 19200 baud, ~11-byte round-trip takes ~5.7 ms (matches 171 Hz)
+- `baudrate="115200"` in ahmconfig → connection fails (firmware
+  doesn't support it)
+- With `cmusb.dll`, `mode COM4` shows 1200/7-bit — stale defaults,
+  confirming D2XX doesn't touch the VCP at all
+
+**ahmconfig.xml setup (for `cmusb.dll`):**
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<configurations>
+  <unit name="microscope" id="MICROSCOPE" detect="*" driver="valentine.dll">
+    <parameters>
+      <unit name="microscope-comm" id="CM-SERIAL-COMMUNICATION-II"
+            detect="*" driver="cmusb.dll">
+        <parameters>
+          <usb-config usbport="usb:Leica DM|usb*" lgm-stand="DM6" />
+        </parameters>
+      </unit>
+    </parameters>
+    <unit name="camera" detect="*" driver="ucBgapi.dll" />
+  </unit>
+</configurations>
+```
+
+Config lives in `src/flakefinder/dlls/ahmconfig.xml` and is loaded
+via `TheHardwareModelInDirectory()`. No `<driver-config>` needed —
+removing it gave slightly better results (~213 Hz peak).
+
+**SDK internals (from SDK source investigation):**
+
+- `EventSource` (IID 0x106) available on all DM6B axis units
+  — push-based position events, but observed at only ~10 Hz
+- `BasicControlValueSets` (batch read, IID 0x118) exists in SDK
+  headers but is NOT exposed on DM6B hardware
+- No threading documentation or configuration knobs in SDK
+- Events fire on SDK-managed threads (need CriticalSection)
+
+**DLL provenance:**
+
+Working DLLs are from **AHM SDK V2023.3.0.12509** and
+**UCAPI SDK V2023.3.0.12509** (build date May 12, 2025), found
+on the microscope at `SDK_Tests/ARCHIVE/`. The older V2020.3.3
+SDK and the LAS X installation have different (incompatible)
+builds. Backup of working DLL set at
+`SDK_Tests/ARCHIVE/flakefinder_working_dlls_backup/`.
+
+**Conclusions:**
+
+- **~206 Hz per axis, 1 thread per axis** — 3.3× the original
+- `cmusb.dll` (D2XX) is strictly better than `cmserial2.dll` (VCP)
+- No Device Manager changes needed
+- Multi-thread approaches remain non-viable (same-axis starvation)
+- Events too slow (10 Hz) to replace polling
+- Per-axis independence confirmed: 3 axes × 206 Hz = 618 Hz aggregate
+- Remaining ~4.8 ms/call is USB round-trip overhead

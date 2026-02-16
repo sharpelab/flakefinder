@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configurations>
+  <unit name="microscope" id="MICROSCOPE" detect="*" driver="valentine.dll">
+    <parameters>
+      <unit
+        name="microscope-comm"
+        id="CM-SERIAL-COMMUNICATION-II"
+        detect="*"
+        driver="cmusb.dll"
+      >
+        <parameters>
+          <usb-config usbport="usb:Leica DM|usb*" lgm-stand="DM6" />
+        </parameters>
+      </unit>
+    </parameters>
+    <unit name="camera" detect="*" driver="ucBgapi.dll" />
+  </unit>
+</configurations>

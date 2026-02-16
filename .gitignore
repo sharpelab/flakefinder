@@ -47,6 +47,7 @@ htmlcov/
 src/flakefinder/dlls/*.dll
 src/flakefinder/dlls/*.cti
 src/flakefinder/dlls/*.xml
+!src/flakefinder/dlls/ahmconfig.xml
 leica_sdk/
 
 # OS
@@ -64,3 +65,5 @@ afs/*
 !afs/.gitkeep
 captures/*
 !captures/.gitkeep
+results/*
+!results/.gitkeep
