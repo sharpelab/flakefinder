@@ -25,7 +25,7 @@ from PIL import Image as PILImage
 
 from flakefinder.data_utils import compute_frame_size_um, require_microscope_description
 from flakefinder.image_utils import sdk_image_to_numpy
-from flakefinder.leica import Microscope, continuous_autofocus, wait_all
+from flakefinder.leica import Microscope, continuous_autofocus, start_polling, wait_all
 from flakefinder.scan_utils import (
     DEFAULT_WB,
     build_microscope_meta,
@@ -484,21 +484,8 @@ def run(
             hx, hy = stage.move_to_async(x_start_pos, row_y)
             wait_all([hx, hy])
 
-        # Set up position polling for this row
-        x_samples = []
-        stop_polling = threading.Event()
-
-        def x_poll_thread():
-            while not stop_polling.is_set():
-                t_before = time.perf_counter()
-                x_native = x_bcv.GetControlValue()
-                t_after = time.perf_counter()
-                x_um = x_converter.GetMetricsValue(x_native)
-                x_samples.append((t_before, t_after, x_um))
-
-        # Start position polling
-        x_thread = threading.Thread(target=x_poll_thread, daemon=True)
-        x_thread.start()
+        # Start position polling for this row
+        x_polling = start_polling(x_bcv, x_converter)
 
         row_start = time.perf_counter()
         row_frame_start = global_frame_idx
@@ -526,7 +513,7 @@ def run(
 
             if current_image[0] is not None:
                 row_capture_count += 1
-                x_now = x_samples[-1][2] if x_samples else None
+                x_now = x_polling.samples[-1].x_um if x_polling.samples else None
 
                 # Position-based frame save/skip
                 if last_saved_x is not None and x_now is not None and abs(x_now - last_saved_x) < target_advance_um:
@@ -542,7 +529,7 @@ def run(
                             t_end,
                             current_image[0],
                             row_y,
-                            x_samples,
+                            x_polling.samples,
                             total_scan_start,
                         )
                     )
@@ -555,15 +542,12 @@ def run(
         handle.dispose()
 
         # Stop position polling
-        stop_polling.set()
-        x_thread.join(timeout=1.0)
+        x_polling.join()
 
         row_duration = row_end - row_start
 
         # Filter position samples to row scan period
-        row_x_samples = [
-            (t_before, t_after, x) for t_before, t_after, x in x_samples if row_start <= t_before <= row_end
-        ]
+        row_x_samples = [s for s in x_polling.samples if row_start <= s.t_before <= row_end]
 
         if not quiet:
             skip_str = f", {row_skip_count} skipped" if row_skip_count > 0 else ""
@@ -573,12 +557,12 @@ def run(
             )
 
         # Add position samples to global list (with adjusted timestamps)
-        for t_before, t_after, x_um in row_x_samples:
+        for s in row_x_samples:
             all_position_samples.append(
                 {
-                    "t_before": t_before - total_scan_start,
-                    "t_after": t_after - total_scan_start,
-                    "x_um": x_um,
+                    "t_before": s.t_before - total_scan_start,
+                    "t_after": s.t_after - total_scan_start,
+                    "x_um": s.x_um,
                     "row": row_idx,
                 }
             )
