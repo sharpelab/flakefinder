@@ -897,14 +897,6 @@ def run(
         t.start()
         savers.append(t)
 
-    # ---- Save initial position ----
-    initial_x = stage.x.position_um
-    initial_y = stage.y.position_um
-    initial_z = z_drive.position_um
-
-    if not quiet:
-        print(f"Initial position: X={initial_x:.0f}, Y={initial_y:.0f}, Z={initial_z:.0f} um")
-
     # Set move speed for positioning
     stage.x.set_velocity_um_s(move_speed_mm * 1000)
     stage.y.set_velocity_um_s(move_speed_mm * 1000)
@@ -979,13 +971,9 @@ def run(
     total_scan_end = time.perf_counter()
     total_duration = total_scan_end - total_scan_start
 
-    # Return to initial position
-    if not quiet:
-        print("\nReturning to initial position...")
+    # Restore move speed (scan_row leaves X at move speed, but be explicit)
     stage.x.set_velocity_um_s(move_speed_mm * 1000)
     stage.y.set_velocity_um_s(move_speed_mm * 1000)
-    hx = stage.x.move_to_async(initial_x)
-    hy = stage.y.move_to_async(initial_y)
 
     # Wait for savers
     if not quiet:
@@ -1209,9 +1197,6 @@ def run(
     print(f"  Output: {output}/")
     print()
     print("Done.")
-
-    wait_all([hx, hy])
-    z_drive.move_to_corrected(initial_z)
 
 
 def _build_parser():

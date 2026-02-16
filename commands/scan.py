@@ -223,9 +223,6 @@ def run(
         y_min = stage.y.min_um + margin
         y_max = stage.y.max_um - margin
 
-    x_center = (x_min + x_max) / 2
-    y_center = (y_min + y_max) / 2
-
     # Calculate row Y positions (top to bottom, -Y direction)
     y_step = frame_height_um * (1 - y_overlap_percent / 100)
     row_y_positions = []
@@ -488,12 +485,8 @@ def run(
     total_scan_end = time.perf_counter()
     total_duration = total_scan_end - total_scan_start
 
-    # Return to center while saver finishes
-    print()
-    print("Returning to center...")
-    set_stage_speed(move_speed_mm)  # Switch back to move speed
-    return_handle_x = stage.x.move_to_async(x_center)
-    return_handle_y = stage.y.move_to_async(y_center)
+    # Restore move speed (scan leaves it at scan speed)
+    set_stage_speed(move_speed_mm)
 
     # Wait for savers to finish
     print(f"Waiting for savers ({save_queue.qsize()} frames queued, {len(savers)} threads)...")
@@ -551,9 +544,6 @@ def run(
             f"min={min(row_frame_counts)}, max={max(row_frame_counts)}"
         )
         print(f"  Row duration: avg={sum(row_durations) / len(row_durations):.2f}s")
-
-    # Wait for return
-    wait_all([return_handle_x, return_handle_y])
 
     print()
     print("Done.")
