@@ -14,6 +14,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 from ..types import PositionSample
 
@@ -27,6 +28,23 @@ class PollingHandle:
     samples: list[PositionSample] = field(default_factory=list)
     stop: threading.Event = field(default_factory=threading.Event)
     thread: threading.Thread | None = None
+
+    # Private — stored for deferred thread creation (paused=True)
+    _bcv: Any = field(default=None, repr=False)
+    _converter: Any = field(default=None, repr=False)
+    _target_hz: float = field(default=DEFAULT_POLL_HZ, repr=False)
+
+    def start(self) -> None:
+        """Start the polling thread (for use after paused=True)."""
+        if self.thread is not None and self.thread.is_alive():
+            return
+        self.thread = threading.Thread(
+            target=poll_position,
+            args=(self._bcv, self._converter, self.samples, self.stop),
+            kwargs={"target_hz": self._target_hz},
+            daemon=True,
+        )
+        self.thread.start()
 
     def join(self, timeout: float = 1.0) -> None:
         """Signal stop and join the polling thread."""
@@ -61,7 +79,7 @@ def poll_position(
         samples.append(PositionSample(t_before, t_after, um))
         elapsed = t_after - t_before
         if elapsed < period:
-            stop.wait(timeout=period - elapsed)
+            time.sleep(period - elapsed)
 
 
 def start_polling(
@@ -69,23 +87,32 @@ def start_polling(
     converter,
     *,
     target_hz: float = DEFAULT_POLL_HZ,
+    paused: bool = False,
 ) -> PollingHandle:
     """Start a position polling thread.
+
+    Always captures one initial position sample before returning.
+    With paused=True, the thread is not started — call handle.start()
+    after issuing any bus commands (e.g. move_to_async) that would
+    compete with polling on the same axis.
 
     Args:
         bcv: BasicControlValue interface (or hysteresis-corrected variant).
         converter: MetricsConverter for native -> microns.
         target_hz: Target polling rate in Hz.
+        paused: If True, capture initial sample but don't start thread.
 
     Returns:
-        PollingHandle with .samples, .stop, .thread, and .join().
+        PollingHandle with .samples, .stop, .thread, .start(), and .join().
     """
-    handle = PollingHandle()
-    handle.thread = threading.Thread(
-        target=poll_position,
-        args=(bcv, converter, handle.samples, handle.stop),
-        kwargs={"target_hz": target_hz},
-        daemon=True,
-    )
-    handle.thread.start()
+    handle = PollingHandle(_bcv=bcv, _converter=converter, _target_hz=target_hz)
+
+    # Capture initial position before thread starts
+    t_before = time.perf_counter()
+    native = bcv.GetControlValue()
+    t_after = time.perf_counter()
+    handle.samples.append(PositionSample(t_before, t_after, converter.GetMetricsValue(native)))
+
+    if not paused:
+        handle.start()
     return handle
