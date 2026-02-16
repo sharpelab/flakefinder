@@ -13,6 +13,9 @@ Experiments:
      (the actual chip_scan scenario).
   7. Poll stagger analysis — do 2-thread polls cluster or interleave?
      Tests with and without explicit stagger offset.
+  8. Coordinated 2-thread polling — threads coordinate via shared
+     timestamps so each waits target_gap after peer's last completion.
+     Continuous drift correction to maintain interleaving.
 
 Usage:
     uv run python scripts/sdk_threading_test.py
@@ -120,6 +123,26 @@ class StaggerResult:
     clustered_pct: float
 
 
+@dataclass
+class CoordinatedResult:
+    target_gap_ms: float
+    thread_count: int
+    duration_s: float
+    total_samples: int
+    aggregate_hz: float
+    gap_mean_ms: float
+    gap_std_ms: float
+    gap_min_ms: float
+    gap_max_ms: float
+    gap_p10_ms: float
+    gap_p50_ms: float
+    gap_p90_ms: float
+    clustered_count: int  # gaps < 2ms
+    clustered_pct: float
+    move_completed: bool | None = None  # None = no move tested
+    move_time_s: float | None = None
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -173,6 +196,50 @@ def _poll_loop_timestamped(
         local_ts.append(time.perf_counter())
         if sleep_s > 0:
             time.sleep(sleep_s)
+    ts_out[idx] = local_ts
+
+
+def _poll_loop_coordinated(
+    bcv,
+    stop: threading.Event,
+    ts_out: list,
+    idx: int,
+    completions: list[float],
+    lock: threading.Lock,
+    target_gap_s: float,
+    initial_delay_s: float = 0,
+):
+    """Coordinated polling: wait target_gap after peer's last completion.
+
+    Two threads alternate, each waiting until target_gap has elapsed since
+    the other thread's most recent sample. This prevents both threads from
+    polling simultaneously (clustering) by continuously correcting drift.
+    """
+    if initial_delay_s > 0:
+        time.sleep(initial_delay_s)
+
+    peer_idx = 1 - idx
+    local_ts: list[float] = []
+
+    while not stop.is_set():
+        # Wait until target_gap after peer's last completion
+        with lock:
+            peer_last = completions[peer_idx]
+
+        if peer_last > 0:
+            wait_until = peer_last + target_gap_s
+            now = time.perf_counter()
+            if now < wait_until:
+                time.sleep(wait_until - now)
+
+        # Poll
+        bcv.GetControlValue()
+        now = time.perf_counter()
+        local_ts.append(now)
+
+        with lock:
+            completions[idx] = now
+
     ts_out[idx] = local_ts
 
 
@@ -855,6 +922,143 @@ def experiment_stagger(
 
 
 # ---------------------------------------------------------------------------
+# Experiment 8: Coordinated 2-thread polling
+# ---------------------------------------------------------------------------
+
+
+def experiment_coordinated_stagger(
+    scope: Microscope,
+    duration_s: float = 3.0,
+    target_gaps_ms: list[float] | None = None,
+    axis_name: str = "x",
+    move_distance_um: float = 2000,
+    timeout_s: float = 10.0,
+) -> list[CoordinatedResult]:
+    """Test coordinated 2-thread polling with continuous drift correction."""
+    if target_gaps_ms is None:
+        target_gaps_ms = [6.0, 8.0, 10.0]
+
+    axis = _get_axis(scope, axis_name)
+    bcv = axis.bcv
+    results = []
+
+    for target_gap_ms in target_gaps_ms:
+        target_gap_s = target_gap_ms / 1000
+
+        # --- Phase 1: steady-state gap analysis ---
+        ts_lists: list[list[float]] = [[], []]
+        completions = [0.0, 0.0]
+        lock = threading.Lock()
+        stop = threading.Event()
+
+        threads = []
+        for i in range(2):
+            t = threading.Thread(
+                target=_poll_loop_coordinated,
+                args=(bcv, stop, ts_lists, i, completions, lock, target_gap_s),
+                kwargs={"initial_delay_s": target_gap_s * i},
+                daemon=True,
+            )
+            threads.append(t)
+
+        for t in threads:
+            t.start()
+        time.sleep(duration_s)
+        stop.set()
+        for t in threads:
+            t.join(timeout=2.0)
+
+        # Merge and sort timestamps
+        all_ts = sorted([t for ts in ts_lists for t in ts])
+        if len(all_ts) < 2:
+            continue
+
+        # Compute gap stats
+        gaps_ms = [(all_ts[i + 1] - all_ts[i]) * 1000 for i in range(len(all_ts) - 1)]
+        n_gaps = len(gaps_ms)
+        mean_gap = sum(gaps_ms) / n_gaps
+        std_gap = (sum((g - mean_gap) ** 2 for g in gaps_ms) / n_gaps) ** 0.5
+        gaps_sorted = sorted(gaps_ms)
+        clustered = sum(1 for g in gaps_ms if g < 2.0)
+
+        elapsed = all_ts[-1] - all_ts[0]
+        hz = len(all_ts) / elapsed if elapsed > 0 else 0
+
+        print(
+            f"  gap={target_gap_ms:.0f}ms: {hz:.0f} Hz, "
+            f"gap={mean_gap:.1f}\u00b1{std_gap:.1f}ms, "
+            f"clustered={clustered}/{n_gaps} ({clustered / n_gaps * 100:.0f}%)"
+        )
+
+        # --- Phase 2: move safety ---
+        ts_lists2: list[list[float]] = [[], []]
+        completions2 = [0.0, 0.0]
+        lock2 = threading.Lock()
+        stop2 = threading.Event()
+
+        threads2 = []
+        for i in range(2):
+            t = threading.Thread(
+                target=_poll_loop_coordinated,
+                args=(bcv, stop2, ts_lists2, i, completions2, lock2, target_gap_s),
+                kwargs={"initial_delay_s": target_gap_s * i},
+                daemon=True,
+            )
+            threads2.append(t)
+
+        for t in threads2:
+            t.start()
+        time.sleep(0.2)  # let coordination stabilize
+
+        move_start = time.perf_counter()
+        handle = axis.move_rel_async(move_distance_um)
+        completed = handle.wait(timeout=timeout_s)
+        move_time = time.perf_counter() - move_start if completed else None
+
+        stop2.set()
+        for t in threads2:
+            t.join(timeout=2.0)
+
+        handle.dispose()
+
+        if completed:
+            rev = axis.move_rel_async(-move_distance_um)
+            rev.wait(timeout=10.0)
+            rev.dispose()
+        else:
+            axis.halt()
+            time.sleep(0.5)
+            with contextlib.suppress(Exception):
+                axis.move_rel(-move_distance_um)
+
+        status = f"{move_time:.3f}s" if completed else "HUNG"
+        print(f"    + move: {status}")
+
+        results.append(
+            CoordinatedResult(
+                target_gap_ms=target_gap_ms,
+                thread_count=2,
+                duration_s=elapsed,
+                total_samples=len(all_ts),
+                aggregate_hz=hz,
+                gap_mean_ms=mean_gap,
+                gap_std_ms=std_gap,
+                gap_min_ms=gaps_sorted[0],
+                gap_max_ms=gaps_sorted[-1],
+                gap_p10_ms=gaps_sorted[int(n_gaps * 0.1)],
+                gap_p50_ms=gaps_sorted[n_gaps // 2],
+                gap_p90_ms=gaps_sorted[int(n_gaps * 0.9)],
+                clustered_count=clustered,
+                clustered_pct=clustered / n_gaps * 100,
+                move_completed=completed,
+                move_time_s=move_time,
+            )
+        )
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Summary printer
 # ---------------------------------------------------------------------------
 
@@ -868,6 +1072,7 @@ def print_summary(
     camera_results: list[CameraPollResult] | None = None,
     workload_results: list[FullWorkloadResult] | None = None,
     stagger_results: list[StaggerResult] | None = None,
+    coordinated_results: list[CoordinatedResult] | None = None,
 ):
     print()
     print("=" * 70)
@@ -982,6 +1187,28 @@ def print_summary(
                 f"{r.gap_p10_ms:>6.1f} {r.gap_p50_ms:>6.1f} {r.gap_p90_ms:>6.1f} {clust_str:>10}"
             )
 
+    if coordinated_results:
+        print()
+        print("Experiment 8: Coordinated 2-thread polling")
+        print(
+            f"  {'Gap(ms)':>8} {'Hz':>5} {'Gap mean\u00b1std (ms)':>20} "
+            f"{'P10':>6} {'P50':>6} {'P90':>6} {'Clustered':>10} {'Move':>5} {'Time':>8}"
+        )
+        print(
+            f"  {'--------':>8} {'-----':>5} {'--------------------':>20} "
+            f"{'------':>6} {'------':>6} {'------':>6} {'----------':>10} {'-----':>5} {'--------':>8}"
+        )
+        for r in coordinated_results:
+            gap_str = f"{r.gap_mean_ms:.1f}\u00b1{r.gap_std_ms:.1f}"
+            clust_str = f"{r.clustered_count} ({r.clustered_pct:.0f}%)"
+            ok = "YES" if r.move_completed else ("NO" if r.move_completed is not None else "---")
+            t = f"{r.move_time_s:.3f}s" if r.move_time_s is not None else "---"
+            print(
+                f"  {r.target_gap_ms:>8.0f} {r.aggregate_hz:>5.0f} {gap_str:>20} "
+                f"{r.gap_p10_ms:>6.1f} {r.gap_p50_ms:>6.1f} {r.gap_p90_ms:>6.1f} "
+                f"{clust_str:>10} {ok:>5} {t:>8}"
+            )
+
     # Diagnosis
     print()
     print("-" * 70)
@@ -1077,6 +1304,12 @@ def main() -> int:
         help="Sleep between polls in ms for camera experiments (default: 8.0)",
     )
     parser.add_argument(
+        "--coord-gaps",
+        type=str,
+        default="6,8,10",
+        help="Comma-separated target gap values in ms for experiment 8 (default: 6,8,10)",
+    )
+    parser.add_argument(
         "-o",
         "--output",
         type=str,
@@ -1089,6 +1322,7 @@ def main() -> int:
     experiments = [int(x) for x in args.experiments.split(",")]
     sleep_values = [float(x) for x in args.sleep_values.split(",")]
     camera_thread_counts = [int(x) for x in args.camera_threads.split(",")]
+    coord_gaps_ms = [float(x) for x in args.coord_gaps.split(",")]
 
     # Filter: experiments 2-4 need thread counts > 0 for the poll side,
     # but experiment 2 also tests 0 (baseline with no polling)
@@ -1115,6 +1349,7 @@ def main() -> int:
         camera_results: list[CameraPollResult] = []
         workload_results: list[FullWorkloadResult] = []
         stagger_results: list[StaggerResult] = []
+        coordinated_results: list[CoordinatedResult] = []
 
         if 1 in experiments:
             print("--- Experiment 1: Polling throughput ---")
@@ -1189,6 +1424,17 @@ def main() -> int:
             )
             print()
 
+        if 8 in experiments:
+            print("--- Experiment 8: Coordinated 2-thread polling ---")
+            coordinated_results = experiment_coordinated_stagger(
+                scope,
+                duration_s=args.poll_duration,
+                target_gaps_ms=coord_gaps_ms,
+                move_distance_um=args.move_distance,
+                timeout_s=args.move_timeout,
+            )
+            print()
+
         print_summary(
             poll_results,
             move_results,
@@ -1197,6 +1443,7 @@ def main() -> int:
             camera_results=camera_results,
             workload_results=workload_results,
             stagger_results=stagger_results,
+            coordinated_results=coordinated_results,
         )
 
         # Save results to JSON
@@ -1220,6 +1467,7 @@ def main() -> int:
                 "camera_thread_counts": camera_thread_counts,
                 "camera_duration_s": args.camera_duration,
                 "camera_sleep_ms": args.camera_sleep,
+                "coord_gaps_ms": coord_gaps_ms,
             },
             "experiment_1_poll_throughput": [asdict(r) for r in poll_results],
             "experiment_2_move_under_load": [asdict(r) for r in move_results],
@@ -1228,6 +1476,7 @@ def main() -> int:
             "experiment_5_camera_polling": [asdict(r) for r in camera_results],
             "experiment_6_full_workload": [asdict(r) for r in workload_results],
             "experiment_7_stagger_analysis": [asdict(r) for r in stagger_results],
+            "experiment_8_coordinated": [asdict(r) for r in coordinated_results],
         }
 
         with open(output_path, "w") as f:
