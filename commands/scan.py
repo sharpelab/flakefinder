@@ -503,9 +503,15 @@ def run(
 
         # Start async X move
         handle = stage.x.move_to_async(x_end_pos)
+        # TODO: derive stop margin from frame size or commanded speed
+        _STOP_MARGIN_UM = 50.0
+        row_distance_um = abs(x_end_pos - x_start_pos)
+        row_timeout_s = max(30.0, (row_distance_um / (actual_speed_mm * 1000)) * 5)
 
-        # Capture frames during move, queue to savers immediately
-        while not handle.is_complete:
+        # Capture frames during move, using position to detect arrival
+        # (avoids calling GetState on the same axis as polling — see
+        # docs/poll_throttling_plan.md for starvation background)
+        while True:
             t_start = time.perf_counter()
             current_image[0] = None
             acquisition.Acquire(context, None)
@@ -538,11 +544,26 @@ def run(
                     global_frame_idx += 1
                     row_frame_count += 1
 
-        row_end = time.perf_counter()
-        handle.dispose()
+                # Stop when stage reaches target (frees bus for SDK move completion)
+                if x_now is not None and (
+                    (direction == 1 and x_now >= x_end_pos - _STOP_MARGIN_UM)
+                    or (direction == -1 and x_now <= x_end_pos + _STOP_MARGIN_UM)
+                ):
+                    break
 
-        # Stop position polling
+            # Safety timeout
+            if time.perf_counter() - row_start > row_timeout_s:
+                if not quiet:
+                    print(f"  WARNING: row {row_idx} timeout ({row_timeout_s:.0f}s)")
+                break
+
+        row_end = time.perf_counter()
+
+        # Stop polling to free bus, then wait for SDK move completion
         x_polling.join()
+        if not handle.is_complete:
+            handle.wait(timeout=2.0)
+        handle.dispose()
 
         row_duration = row_end - row_start
 
