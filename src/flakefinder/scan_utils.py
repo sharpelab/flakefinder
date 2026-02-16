@@ -28,6 +28,16 @@ from flakefinder.types import (
 # Binning index (SDK) -> binning factor (NxN)
 _BINNING_FACTOR = {0: 1, 1: 2, 2: 3}
 
+# Parfocal reference Z positions (µm) per objective magnification.
+# Measured 2026-02-14 at chip 2 rank 18 (Elijah's Chip Rejects).
+PARFOCAL_Z_UM: dict[float, float] = {
+    2.5: 24584.9,
+    5: 24671.9,
+    10: 24669.3,
+    20: 24682.5,
+    50: 24685.1,
+}
+
 
 def parse_position(s: str) -> Point2F:
     """Parse 'X,Y' position string into Point2F.

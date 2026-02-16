@@ -1218,6 +1218,7 @@ def export_plane(data: dict, output_path: Path, cf_threshold: float = 20.0, min_
         "focus_map": data.get("source_chips_meta", "unknown"),
         "chip_id": data.get("chip_id", 0),
         "timestamp": data.get("timestamp", "unknown"),
+        "objective_mag": data.get("optics", {}).get("objective_mag"),
     }
 
     # Strip non-serializable plot data before saving

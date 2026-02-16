@@ -29,7 +29,7 @@ from PIL import Image as PILImage
 from flakefinder.data_utils import load_chip_geometry
 from flakefinder.leica.autofocus import ALL_SHARPNESS_METRICS, AutofocusResult
 from flakefinder.leica.microscope import Microscope
-from flakefinder.scan_utils import DEFAULT_WB, parse_white_balance
+from flakefinder.scan_utils import DEFAULT_WB, build_microscope_meta, parse_white_balance
 from flakefinder.types import ChipGeometry, GainRGB, Point2F
 
 
@@ -571,6 +571,7 @@ def run(
         "chip_id": chip,
         "source_chips_meta": str(chips_meta),
         "notes": notes,
+        **build_microscope_meta(scope),
         "grid_params": {
             "contour_samples": p.contour_count,
             "contour_spacing_mm": contour_spacing_mm,
