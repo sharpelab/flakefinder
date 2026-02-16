@@ -17,10 +17,13 @@ Usage:
 
 import argparse
 import contextlib
+import json
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from pathlib import Path
 
 from flakefinder.leica import Microscope
 
@@ -547,6 +550,13 @@ def main() -> int:
         default="0,0.5,1,2,5,10",
         help="Comma-separated sleep values in ms for experiment 4 (default: 0,0.5,1,2,5,10)",
     )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default=None,
+        help="Output JSON path (default: results/sdk_threading_YYYYMMDD_HHMM.json)",
+    )
     args = parser.parse_args()
 
     thread_counts = [int(x) for x in args.threads.split(",")]
@@ -617,6 +627,35 @@ def main() -> int:
             print()
 
         print_summary(poll_results, move_results, cross_results, sleep_results)
+
+        # Save results to JSON
+        output_path = args.output
+        if output_path is None:
+            results_dir = Path("results")
+            results_dir.mkdir(exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+            output_path = str(results_dir / f"sdk_threading_{timestamp}.json")
+
+        results_json = {
+            "timestamp": datetime.now().isoformat(),
+            "config": {
+                "thread_counts": thread_counts,
+                "experiments": experiments,
+                "poll_duration_s": args.poll_duration,
+                "move_timeout_s": args.move_timeout,
+                "move_distance_um": args.move_distance,
+                "sleep_threads": args.sleep_threads,
+                "sleep_values_ms": sleep_values,
+            },
+            "experiment_1_poll_throughput": [asdict(r) for r in poll_results],
+            "experiment_2_move_under_load": [asdict(r) for r in move_results],
+            "experiment_3_cross_axis": [asdict(r) for r in cross_results],
+            "experiment_4_sleep_mitigation": [asdict(r) for r in sleep_results],
+        }
+
+        with open(output_path, "w") as f:
+            json.dump(results_json, f, indent=2)
+        print(f"\nResults saved to {output_path}")
 
     return 0
 
