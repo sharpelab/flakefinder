@@ -163,25 +163,34 @@ def main() -> int:
 
     # Spatial deduplication via greedy NMS on stage coordinates
     if not args.no_dedup and all_flat:
-        # Greedy NMS: sorted by (tier, -score), keep if no kept detection within radius
+        from scipy.spatial import KDTree
+
         sorted_all = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
-        radius_sq = args.dedup_radius**2
-        kept = []
-        kept_coords = []
+
+        # Separate detections with/without stage coords
+        with_coords = []
+        without_coords = []
         for d in sorted_all:
-            sx = d.get("stage_x")
-            sy = d.get("stage_y")
-            if sx is None:
+            if d.get("stage_x") is not None:
+                with_coords.append(d)
+            else:
+                without_coords.append(d)
+
+        if with_coords:
+            coords = np.array([(d["stage_x"], d["stage_y"]) for d in with_coords])
+            tree = KDTree(coords)
+            suppressed: set[int] = set()
+            kept = list(without_coords)
+            for idx, d in enumerate(with_coords):
+                if idx in suppressed:
+                    continue
                 kept.append(d)
-                continue
-            is_dup = False
-            for kx, ky in kept_coords:
-                if (sx - kx) ** 2 + (sy - ky) ** 2 < radius_sq:
-                    is_dup = True
-                    break
-            if not is_dup:
-                kept.append(d)
-                kept_coords.append((sx, sy))
+                neighbors = tree.query_ball_point(coords[idx], args.dedup_radius)
+                for n_idx in neighbors:
+                    if n_idx > idx:
+                        suppressed.add(n_idx)
+        else:
+            kept = sorted_all
 
         n_before = len(all_flat)
         all_flat = kept
