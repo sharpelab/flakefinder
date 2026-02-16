@@ -408,6 +408,14 @@ def stitch_row_to_global(
 
     num_work = len(work_items)
 
+    # Pre-compute blend alpha masks: first, interior, last (reused across all frames in row)
+    if blend and num_work > 0:
+        alpha_first = create_blend_alpha(frame_w, frame_h, blend_width_x, 0, is_first_x=True, is_last_x=(num_work == 1))
+        alpha_last = create_blend_alpha(frame_w, frame_h, blend_width_x, 0, is_first_x=False, is_last_x=True)
+        alpha_interior = create_blend_alpha(frame_w, frame_h, blend_width_x, 0, is_first_x=False, is_last_x=False)
+    else:
+        alpha_first = alpha_last = alpha_interior = Image.new("L", (frame_w, frame_h), 128)
+
     def load_frame(item):
         """Load, resize, flatfield-correct, deskew, and alpha-blend a single frame."""
         seq_i, frame_idx, _, frame_deskew = item
@@ -431,14 +439,18 @@ def stitch_row_to_global(
         if frame_deskew != 0:
             img = deskew_image(img, frame_deskew, resample=deskew_resample)
 
+        # PERF: converting to RGBA here + alpha_composite below accounts for ~0.8s
+        # at 8x. Could switch to RGB canvas + paste(img, pos, mask=alpha) to eliminate
+        # RGBA entirely, but requires restructuring Y-blend which manipulates row alpha.
         img = img.convert("RGBA")
 
-        if blend:
-            is_first = seq_i == 0
-            is_last = seq_i == num_work - 1
-            alpha = create_blend_alpha(frame_w, frame_h, blend_width_x, 0, is_first_x=is_first, is_last_x=is_last)
+        # Select pre-computed blend alpha
+        if seq_i == 0:
+            alpha = alpha_first
+        elif seq_i == num_work - 1:
+            alpha = alpha_last
         else:
-            alpha = Image.new("L", img.size, 128)
+            alpha = alpha_interior
 
         # Mask deskew void: the shear leaves a triangle of edge-replicated
         # pixels that grows from 0 px at top to |shear| px at bottom.
