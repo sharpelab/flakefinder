@@ -7,6 +7,7 @@ Usage:
     uv run python commands/scan.py -o scan_5x --objective-mag 5
     uv run python commands/scan.py -o scan_20x --objective-mag 20x --z 24699 \\
         --area-rect 10000,60000,15000,55000
+    uv run python commands/scan.py -o scan_5x --objective-mag 5 --dry-run
 """
 
 import argparse
@@ -17,10 +18,12 @@ import shutil
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime
 
 from PIL import Image as PILImage
 
+from flakefinder.data_utils import compute_frame_size_um, require_microscope_description
 from flakefinder.image_utils import sdk_image_to_numpy
 from flakefinder.leica import Microscope, continuous_autofocus, wait_all
 from flakefinder.scan_utils import (
@@ -33,6 +36,122 @@ from flakefinder.scan_utils import (
     validate_area_rect,
 )
 from flakefinder.types import AreaRect, GainRGB, Point2F
+
+
+@dataclass
+class _Preflight:
+    """Validated inputs and computed scan plan from _plan()."""
+
+    x_min: float
+    x_max: float
+    y_min: float
+    y_max: float
+    frame_width_um: float
+    frame_height_um: float
+    y_step: float
+    row_y_positions: list[float]
+    target_advance_um: float
+
+    def print_summary(
+        self,
+        *,
+        speed_mm: float,
+        move_speed_mm: float,
+        x_overlap_percent: float,
+        y_overlap_percent: float,
+        objective_mag: str | None,
+        binning: int,
+        downsample: int,
+    ) -> None:
+        num_rows = len(self.row_y_positions)
+        x_dist_mm = (self.x_max - self.x_min) / 1000
+        total_distance_mm = x_dist_mm * num_rows
+        est_time_s = total_distance_mm / speed_mm + num_rows * 0.5
+
+        print("Area Scan v1 (Snake Pattern)")
+        print("=" * 50)
+        print(f"Scan area: X={self.x_min:.0f}-{self.x_max:.0f} µm, Y={self.y_min:.0f}-{self.y_max:.0f} µm")
+        if objective_mag:
+            print(f"Objective: {objective_mag}x, Binning: {binning}x{binning}")
+        print(f"Frame FOV: {self.frame_width_um:.1f} x {self.frame_height_um:.1f} µm")
+        if downsample > 1:
+            print(f"Downsample: {downsample}x")
+        print(f"X overlap: {x_overlap_percent:.0f}% (advance {self.target_advance_um:.0f} µm between saves)")
+        print(f"Y step: {self.y_step:.1f} µm ({y_overlap_percent:.0f}% overlap)")
+        print(f"Rows: {num_rows}")
+        print(f"Scan speed: {speed_mm:.1f} mm/s, Move speed: {move_speed_mm:.1f} mm/s")
+        print(f"Row X distance: {x_dist_mm:.1f} mm")
+        print(f"Total scan distance: {total_distance_mm:.1f} mm")
+        print(f"Estimated time: ~{est_time_s:.0f}s")
+        print()
+
+
+def _plan(
+    *,
+    area_rect: AreaRect | None = None,
+    margin: float = 1000,
+    objective_mag: str | None = None,
+    binning: int = 3,
+    x_overlap_percent: float = 100,
+    y_overlap_percent: float = 12,
+) -> _Preflight:
+    """Compute and validate scan plan (pure computation, no hardware).
+
+    Raises:
+        ValueError: On invalid inputs.
+    """
+    desc = require_microscope_description()
+
+    # Resolve scan area
+    if area_rect:
+        x_min, x_max, y_min, y_max = area_rect
+    else:
+        x_min = desc.stage.x.min_um + margin
+        x_max = desc.stage.x.max_um - margin
+        y_min = desc.stage.y.min_um + margin
+        y_max = desc.stage.y.max_um - margin
+
+    # Resolve frame size from microscope description
+    if objective_mag is None:
+        raise ValueError("--objective-mag is required for --dry-run")
+
+    mag_str = objective_mag.lower().rstrip("x")
+    obj_mag_float: float | None = None
+    for obj in desc.objectives.values():
+        if str(obj.magnification) == mag_str:
+            obj_mag_float = obj.magnification
+            break
+    if obj_mag_float is None:
+        raise ValueError(f"Unknown objective magnification '{objective_mag}'")
+
+    binning_idx = binning - 1
+    frame_size = compute_frame_size_um(desc.camera, obj_mag_float, binning_idx)
+    if frame_size is None:
+        raise ValueError("Could not compute frame size from microscope description")
+    frame_width_um, frame_height_um = frame_size
+
+    # Row Y positions
+    y_step = frame_height_um * (1 - y_overlap_percent / 100)
+    row_y_positions: list[float] = []
+    y = y_min
+    while y <= y_max:
+        row_y_positions.append(y)
+        y += y_step
+
+    # Target X advance
+    target_advance_um = frame_width_um * (1 - x_overlap_percent / 100)
+
+    return _Preflight(
+        x_min=x_min,
+        x_max=x_max,
+        y_min=y_min,
+        y_max=y_max,
+        frame_width_um=frame_width_um,
+        frame_height_um=frame_height_um,
+        y_step=y_step,
+        row_y_positions=row_y_positions,
+        target_advance_um=target_advance_um,
+    )
 
 
 def run(
@@ -576,6 +695,12 @@ Examples:
         help="Explicit scan area as x_min,x_max,y_min,y_max in µm",
     )
 
+    area_group.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print scan plan and exit (no hardware)",
+    )
+
     # Objective/optics options
     optics_group = parser.add_argument_group("Optics")
     optics_group.add_argument(
@@ -669,6 +794,31 @@ Examples:
 
 def main() -> int:
     args = _build_parser().parse_args()
+
+    if args.dry_run:
+        try:
+            p = _plan(
+                area_rect=args.area_rect,
+                margin=args.margin,
+                objective_mag=args.objective_mag,
+                binning=args.binning,
+                x_overlap_percent=args.x_overlap_percent,
+                y_overlap_percent=args.y_overlap_percent,
+            )
+        except ValueError as e:
+            print(f"Error: {e}")
+            return 1
+        p.print_summary(
+            speed_mm=args.speed_mm,
+            move_speed_mm=args.move_speed_mm,
+            x_overlap_percent=args.x_overlap_percent,
+            y_overlap_percent=args.y_overlap_percent,
+            objective_mag=args.objective_mag,
+            binning=args.binning,
+            downsample=args.downsample,
+        )
+        print("(dry run -- exiting)")
+        return 0
 
     try:
         with Microscope() as scope:
