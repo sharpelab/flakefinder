@@ -91,10 +91,10 @@ class ScanPreset(TypedDict):
     overview_mag: str
     chip_scan_mag: str
     chip_scan_speed_mm: float
-    focus_map_gain: float
-    focus_map_exposure_ms: float
     chip_scan_gain: float
     chip_scan_exposure_ms: float
+    focus_map_gain: float
+    focus_map_exposure_ms: float
 
 
 PRESETS: dict[str, ScanPreset] = {
@@ -102,19 +102,19 @@ PRESETS: dict[str, ScanPreset] = {
         "overview_mag": "5x",
         "chip_scan_mag": "20x",
         "chip_scan_speed_mm": 5.0,
-        "focus_map_gain": 1.0,
-        "focus_map_exposure_ms": 1.0,
         "chip_scan_gain": 4.0,
         "chip_scan_exposure_ms": 0.25,
+        "focus_map_gain": 1.0,
+        "focus_map_exposure_ms": 1.0,
     },
     "2.5_10": {
         "overview_mag": "2.5x",
         "chip_scan_mag": "10x",
         "chip_scan_speed_mm": 10.0,
-        "focus_map_gain": 1.0,
-        "focus_map_exposure_ms": 1.0,
         "chip_scan_gain": 4.0,
         "chip_scan_exposure_ms": 0.25,
+        "focus_map_gain": 1.0,
+        "focus_map_exposure_ms": 1.0,
     },
 }
 
@@ -280,10 +280,10 @@ class _Preflight:
     chip_scan_mag: str
     scan_speed: float
     scan_z_speed: float
-    focus_map_gain: float
-    focus_map_exposure_ms: float
     chip_scan_gain: float
     chip_scan_exposure_ms: float
+    focus_map_gain: float
+    focus_map_exposure_ms: float
     args: argparse.Namespace  # raw CLI args for forwarding
 
 
@@ -346,10 +346,10 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         chip_scan_mag=chip_scan_mag,
         scan_speed=scan_speed,
         scan_z_speed=scan_z_speed,
-        focus_map_gain=preset["focus_map_gain"],
-        focus_map_exposure_ms=preset["focus_map_exposure_ms"],
         chip_scan_gain=preset["chip_scan_gain"],
         chip_scan_exposure_ms=preset["chip_scan_exposure_ms"],
+        focus_map_gain=preset["focus_map_gain"],
+        focus_map_exposure_ms=preset["focus_map_exposure_ms"],
         args=args,
     )
 
@@ -502,8 +502,8 @@ def _print_header(p: _Preflight) -> None:
     print(f"Initial Z:     {args.initial_z} µm")
     print(f"Scan speed:    {p.scan_speed} mm/s")
     print(f"AF Z speed:    {p.scan_z_speed} µm/s")
-    print(f"Focus map:     gain={p.focus_map_gain}, exposure={p.focus_map_exposure_ms}ms")
-    print(f"Chip scan:     gain={p.chip_scan_gain}, exposure={p.chip_scan_exposure_ms}ms")
+    print(f"Chip camera:   gain={p.chip_scan_gain}, exposure={p.chip_scan_exposure_ms}ms")
+    print(f"AF camera:     gain={p.focus_map_gain}, exposure={p.focus_map_exposure_ms}ms")
     print(f"White balance: {args.white_balance} (B,G,R)")
     if p.chip_filter:
         print(f"Chips:         {p.chip_filter}")
@@ -874,10 +874,10 @@ def run(scope: Microscope, p: _Preflight) -> int:
         "chip_scan_mag": p.chip_scan_mag,
         "scan_speed": p.scan_speed,
         "scan_z_speed": p.scan_z_speed,
-        "focus_map_gain": p.focus_map_gain,
-        "focus_map_exposure_ms": p.focus_map_exposure_ms,
         "chip_scan_gain": p.chip_scan_gain,
         "chip_scan_exposure_ms": p.chip_scan_exposure_ms,
+        "focus_map_gain": p.focus_map_gain,
+        "focus_map_exposure_ms": p.focus_map_exposure_ms,
         "white_balance": args.white_balance,
         "chips": args.chips,
         "after": args.after,
