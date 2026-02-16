@@ -7,12 +7,18 @@ Experiments:
      when N threads are polling? At what N does it break?
   3. Cross-axis interference — poll axis A while moving axis B.
   4. Sleep between polls — does yielding between calls fix starvation?
+  5. Camera + polling — does continuous Acquire() degrade polling or
+     vice versa? Does a concurrent move complete?
+  6. Full combined workload — multi-axis polling + camera + async move
+     (the actual chip_scan scenario).
+  7. Poll stagger analysis — do 2-thread polls cluster or interleave?
+     Tests with and without explicit stagger offset.
 
 Usage:
     uv run python scripts/sdk_threading_test.py
-    uv run python scripts/sdk_threading_test.py --threads 1,2,4
-    uv run python scripts/sdk_threading_test.py --skip-move     # polling only
     uv run python scripts/sdk_threading_test.py --experiments 1,2  # select experiments
+    uv run python scripts/sdk_threading_test.py --experiments 5,6,7  # camera + stagger
+    uv run python scripts/sdk_threading_test.py --experiments 5 --camera-threads 0,1,3
 """
 
 import argparse
@@ -59,6 +65,61 @@ class MoveTestResult:
     notes: str = ""
 
 
+@dataclass
+class CameraPollResult:
+    poll_thread_count: int
+    poll_sleep_ms: float
+    duration_s: float
+    camera_fps: float
+    camera_frames: int
+    poll_hz: float
+    poll_total_calls: int
+    move_completed: bool | None  # None = no move tested
+    move_time_s: float | None
+    poll_axis: str = "x"
+    move_axis: str = "x"
+    move_distance_um: float = 0
+    notes: str = ""
+
+
+@dataclass
+class FullWorkloadResult:
+    config: str
+    poll_threads_per_axis: int
+    total_poll_threads: int
+    poll_sleep_ms: float
+    duration_s: float
+    camera_fps: float
+    camera_frames: int
+    poll_hz_x: float
+    poll_hz_y: float
+    poll_hz_z: float
+    poll_hz_total: float
+    move_completed: bool
+    move_time_s: float | None
+    move_axis: str = "x"
+    move_distance_um: float = 2000
+
+
+@dataclass
+class StaggerResult:
+    thread_count: int
+    sleep_ms: float
+    stagger_ms: float
+    duration_s: float
+    total_samples: int
+    aggregate_hz: float
+    gap_mean_ms: float
+    gap_std_ms: float
+    gap_min_ms: float
+    gap_max_ms: float
+    gap_p10_ms: float
+    gap_p50_ms: float
+    gap_p90_ms: float
+    clustered_count: int  # gaps < 2ms
+    clustered_pct: float
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -93,6 +154,26 @@ def _poll_loop(
         if sleep_s > 0:
             time.sleep(sleep_s)
     count_out[idx] = local_count
+
+
+def _poll_loop_timestamped(
+    bcv,
+    stop: threading.Event,
+    ts_out: list,
+    idx: int,
+    sleep_s: float = 0,
+    stagger_s: float = 0,
+):
+    """Polling loop that records per-sample timestamps."""
+    if stagger_s > 0:
+        time.sleep(stagger_s)
+    local_ts: list[float] = []
+    while not stop.is_set():
+        bcv.GetControlValue()
+        local_ts.append(time.perf_counter())
+        if sleep_s > 0:
+            time.sleep(sleep_s)
+    ts_out[idx] = local_ts
 
 
 # ---------------------------------------------------------------------------
@@ -418,6 +499,362 @@ def experiment_poll_with_sleep(
 
 
 # ---------------------------------------------------------------------------
+# Experiment 5: Camera + polling combined
+# ---------------------------------------------------------------------------
+
+
+def experiment_camera_polling(
+    scope: Microscope,
+    thread_counts: list[int],
+    duration_s: float = 5.0,
+    sleep_ms: float = 8.0,
+    axis_name: str = "x",
+    move_distance_um: float = 2000,
+    timeout_s: float = 10.0,
+) -> list[CameraPollResult]:
+    """Test camera continuous capture + position polling combined."""
+    axis = _get_axis(scope, axis_name)
+    bcv = axis.bcv
+    sleep_s = sleep_ms / 1000
+    results = []
+
+    camera = scope.camera
+    camera.trigger_mode = 0  # CONTINUOUS
+
+    for n in thread_counts:
+        # --- Phase 1: camera + polling, no move ---
+        counts = [0] * max(n, 1)
+        stop = threading.Event()
+        threads = []
+
+        if n > 0:
+            for i in range(n):
+                t = threading.Thread(
+                    target=_poll_loop,
+                    args=(bcv, stop, counts, i, None, sleep_s),
+                    daemon=True,
+                )
+                threads.append(t)
+
+        start = time.perf_counter()
+        for t in threads:
+            t.start()
+
+        with camera.stream() as stream:
+            time.sleep(duration_s)
+            cam_fps = stream.frame_rate
+            cam_frames = stream.frames_captured
+
+        stop.set()
+        for t in threads:
+            t.join(timeout=2.0)
+
+        elapsed = time.perf_counter() - start
+        total_polls = sum(counts) if n > 0 else 0
+        poll_hz = total_polls / elapsed if elapsed > 0 and n > 0 else 0
+
+        results.append(
+            CameraPollResult(
+                poll_thread_count=n,
+                poll_sleep_ms=sleep_ms if n > 0 else 0,
+                duration_s=elapsed,
+                camera_fps=cam_fps,
+                camera_frames=cam_frames,
+                poll_hz=poll_hz,
+                poll_total_calls=total_polls,
+                move_completed=None,
+                move_time_s=None,
+                poll_axis=axis_name,
+                move_axis=axis_name,
+            )
+        )
+
+        print(f"  {n} poll thread(s): cam={cam_fps:.1f} fps, poll={poll_hz:.0f} Hz")
+
+        # --- Phase 2: camera + polling + move ---
+        counts2 = [0] * max(n, 1)
+        stop2 = threading.Event()
+        threads2 = []
+
+        if n > 0:
+            for i in range(n):
+                t = threading.Thread(
+                    target=_poll_loop,
+                    args=(bcv, stop2, counts2, i, None, sleep_s),
+                    daemon=True,
+                )
+                threads2.append(t)
+
+        with camera.stream() as stream:
+            for t in threads2:
+                t.start()
+            time.sleep(0.1)  # settle
+
+            move_start = time.perf_counter()
+            handle = axis.move_rel_async(move_distance_um)
+            completed = handle.wait(timeout=timeout_s)
+            move_end = time.perf_counter()
+            move_time = move_end - move_start if completed else None
+
+            cam_fps2 = stream.frame_rate
+            cam_frames2 = stream.frames_captured
+
+        stop2.set()
+        for t in threads2:
+            t.join(timeout=2.0)
+
+        move_elapsed = move_end - move_start
+        total_polls2 = sum(counts2) if n > 0 else 0
+        poll_hz2 = total_polls2 / move_elapsed if move_elapsed > 0 and n > 0 else 0
+
+        handle.dispose()
+
+        if completed:
+            rev = axis.move_rel_async(-move_distance_um)
+            rev.wait(timeout=10.0)
+            rev.dispose()
+        else:
+            axis.halt()
+            time.sleep(0.5)
+            with contextlib.suppress(Exception):
+                axis.move_rel(-move_distance_um)
+
+        results.append(
+            CameraPollResult(
+                poll_thread_count=n,
+                poll_sleep_ms=sleep_ms if n > 0 else 0,
+                duration_s=move_elapsed,
+                camera_fps=cam_fps2,
+                camera_frames=cam_frames2,
+                poll_hz=poll_hz2,
+                poll_total_calls=total_polls2,
+                move_completed=completed,
+                move_time_s=move_time,
+                poll_axis=axis_name,
+                move_axis=axis_name,
+                move_distance_um=move_distance_um,
+                notes="with_move",
+            )
+        )
+
+        status = f"{move_time:.3f}s" if completed else "HUNG"
+        print(f"    + move: {status}, cam={cam_fps2:.1f} fps, poll={poll_hz2:.0f} Hz")
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Experiment 6: Full combined workload
+# ---------------------------------------------------------------------------
+
+
+def experiment_full_workload(
+    scope: Microscope,
+    move_distance_um: float = 2000,
+    timeout_s: float = 10.0,
+) -> list[FullWorkloadResult]:
+    """Full chip_scan workload: multi-axis polling + camera + move."""
+    camera = scope.camera
+    camera.trigger_mode = 0  # CONTINUOUS
+
+    configs = [
+        ("1/axis_no_sleep", 1, 0.0),
+        ("2/axis_8ms_sleep", 2, 8.0),
+    ]
+
+    results = []
+
+    for config_name, threads_per_axis, sleep_ms in configs:
+        sleep_s = sleep_ms / 1000
+        stop = threading.Event()
+
+        # Start per-axis poll threads
+        axis_counts: dict[str, list[int]] = {}
+        all_threads: list[threading.Thread] = []
+
+        for ax_name in ("x", "y", "z"):
+            ax = _get_axis(scope, ax_name)
+            counts = [0] * threads_per_axis
+            axis_counts[ax_name] = counts
+            for i in range(threads_per_axis):
+                t = threading.Thread(
+                    target=_poll_loop,
+                    args=(ax.bcv, stop, counts, i, None, sleep_s),
+                    daemon=True,
+                )
+                all_threads.append(t)
+
+        # Start camera + poll threads, then move
+        with camera.stream() as stream:
+            for t in all_threads:
+                t.start()
+            time.sleep(0.1)  # settle
+
+            t_start = time.perf_counter()
+            handle = scope.stage.x.move_rel_async(move_distance_um)
+            completed = handle.wait(timeout=timeout_s)
+            t_end = time.perf_counter()
+
+            cam_fps = stream.frame_rate
+            cam_frames = stream.frames_captured
+
+        stop.set()
+        for t in all_threads:
+            t.join(timeout=2.0)
+
+        elapsed = t_end - t_start
+        move_time = elapsed if completed else None
+
+        handle.dispose()
+
+        if completed:
+            rev = scope.stage.x.move_rel_async(-move_distance_um)
+            rev.wait(timeout=10.0)
+            rev.dispose()
+        else:
+            scope.stage.x.halt()
+            time.sleep(0.5)
+            with contextlib.suppress(Exception):
+                scope.stage.x.move_rel(-move_distance_um)
+
+        hz_x = sum(axis_counts["x"]) / elapsed if elapsed > 0 else 0
+        hz_y = sum(axis_counts["y"]) / elapsed if elapsed > 0 else 0
+        hz_z = sum(axis_counts["z"]) / elapsed if elapsed > 0 else 0
+        hz_total = hz_x + hz_y + hz_z
+
+        result = FullWorkloadResult(
+            config=config_name,
+            poll_threads_per_axis=threads_per_axis,
+            total_poll_threads=threads_per_axis * 3,
+            poll_sleep_ms=sleep_ms,
+            duration_s=elapsed,
+            camera_fps=cam_fps,
+            camera_frames=cam_frames,
+            poll_hz_x=hz_x,
+            poll_hz_y=hz_y,
+            poll_hz_z=hz_z,
+            poll_hz_total=hz_total,
+            move_completed=completed,
+            move_time_s=move_time,
+            move_axis="x",
+            move_distance_um=move_distance_um,
+        )
+        results.append(result)
+
+        status = f"{move_time:.3f}s" if completed else "HUNG"
+        print(
+            f"  {config_name}: cam={cam_fps:.1f} fps, "
+            f"X={hz_x:.0f} Y={hz_y:.0f} Z={hz_z:.0f} (total={hz_total:.0f} Hz), "
+            f"move={status}"
+        )
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Experiment 7: Poll stagger analysis
+# ---------------------------------------------------------------------------
+
+
+def experiment_stagger(
+    scope: Microscope,
+    duration_s: float = 3.0,
+    sleep_ms: float = 8.0,
+    axis_name: str = "x",
+) -> list[StaggerResult]:
+    """Analyze temporal distribution of 2-thread polling with/without stagger."""
+    axis = _get_axis(scope, axis_name)
+    bcv = axis.bcv
+    sleep_s = sleep_ms / 1000
+
+    # Optimal stagger: half the per-thread period (call_time + sleep)
+    estimated_call_ms = 16.0
+    optimal_stagger_ms = (estimated_call_ms + sleep_ms) / 2
+
+    configs = [
+        ("no_stagger", 2, 0.0),
+        (f"stagger_{optimal_stagger_ms:.0f}ms", 2, optimal_stagger_ms),
+        ("1_thread_ref", 1, 0.0),
+    ]
+
+    results = []
+
+    for label, n_threads, stagger_ms in configs:
+        ts_lists: list[list[float]] = [[] for _ in range(n_threads)]
+        stop = threading.Event()
+        threads = []
+
+        for i in range(n_threads):
+            t = threading.Thread(
+                target=_poll_loop_timestamped,
+                args=(
+                    bcv,
+                    stop,
+                    ts_lists,
+                    i,
+                    sleep_s,
+                    stagger_ms / 1000 if i > 0 else 0,
+                ),
+                daemon=True,
+            )
+            threads.append(t)
+
+        for t in threads:
+            t.start()
+        time.sleep(duration_s)
+        stop.set()
+        for t in threads:
+            t.join(timeout=2.0)
+
+        # Merge and sort all timestamps
+        all_ts: list[float] = []
+        for ts in ts_lists:
+            all_ts.extend(ts)
+        all_ts.sort()
+
+        if len(all_ts) < 2:
+            continue
+
+        # Compute inter-sample gaps
+        gaps_ms = [(all_ts[i + 1] - all_ts[i]) * 1000 for i in range(len(all_ts) - 1)]
+        n_gaps = len(gaps_ms)
+        mean_gap = sum(gaps_ms) / n_gaps
+        std_gap = (sum((g - mean_gap) ** 2 for g in gaps_ms) / n_gaps) ** 0.5
+
+        gaps_sorted = sorted(gaps_ms)
+        clustered = sum(1 for g in gaps_ms if g < 2.0)
+
+        elapsed = all_ts[-1] - all_ts[0]
+        hz = len(all_ts) / elapsed if elapsed > 0 else 0
+
+        result = StaggerResult(
+            thread_count=n_threads,
+            sleep_ms=sleep_ms,
+            stagger_ms=stagger_ms,
+            duration_s=elapsed,
+            total_samples=len(all_ts),
+            aggregate_hz=hz,
+            gap_mean_ms=mean_gap,
+            gap_std_ms=std_gap,
+            gap_min_ms=gaps_sorted[0],
+            gap_max_ms=gaps_sorted[-1],
+            gap_p10_ms=gaps_sorted[int(n_gaps * 0.1)],
+            gap_p50_ms=gaps_sorted[n_gaps // 2],
+            gap_p90_ms=gaps_sorted[int(n_gaps * 0.9)],
+            clustered_count=clustered,
+            clustered_pct=clustered / n_gaps * 100,
+        )
+        results.append(result)
+
+        print(
+            f"  {label}: {hz:.0f} Hz, gap={mean_gap:.1f}\u00b1{std_gap:.1f}ms, "
+            f"clustered={clustered}/{n_gaps} ({clustered / n_gaps * 100:.0f}%)"
+        )
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Summary printer
 # ---------------------------------------------------------------------------
 
@@ -427,6 +864,10 @@ def print_summary(
     move_results: list[MoveTestResult],
     cross_results: list[MoveTestResult],
     sleep_results: list[MoveTestResult],
+    *,
+    camera_results: list[CameraPollResult] | None = None,
+    workload_results: list[FullWorkloadResult] | None = None,
+    stagger_results: list[StaggerResult] | None = None,
 ):
     print()
     print("=" * 70)
@@ -473,6 +914,73 @@ def print_summary(
         for r in sleep_results:
             t = f"{r.move_time_s:.3f}s" if r.move_time_s is not None else "---"
             print(f"  {r.sleep_ms:>10.1f} {'YES' if r.completed else 'NO':>10} {t:>12} {r.poll_hz_during:>10.0f}")
+
+    if camera_results:
+        no_move = [r for r in camera_results if r.notes != "with_move"]
+        with_move = [r for r in camera_results if r.notes == "with_move"]
+
+        print()
+        sleep_val = no_move[0].poll_sleep_ms if no_move else 0
+        print(f"Experiment 5: Camera + polling combined ({sleep_val:.0f}ms sleep)")
+
+        if no_move:
+            print("  No-move test:")
+            print(f"    {'Polls':>6} {'Cam fps':>10} {'Poll Hz':>10}")
+            print(f"    {'------':>6} {'----------':>10} {'----------':>10}")
+            for r in no_move:
+                print(f"    {r.poll_thread_count:>6} {r.camera_fps:>10.1f} {r.poll_hz:>10.0f}")
+
+        if with_move:
+            dist = with_move[0].move_distance_um
+            ax = with_move[0].move_axis.upper()
+            print(f"  With move ({ax}, {dist:.0f} µm):")
+            print(f"    {'Polls':>6} {'Cam fps':>10} {'Poll Hz':>10} {'Move':>6} {'Time':>10}")
+            print(f"    {'------':>6} {'----------':>10} {'----------':>10} {'------':>6} {'----------':>10}")
+            for r in with_move:
+                ok = "YES" if r.move_completed else "NO"
+                t = f"{r.move_time_s:.3f}s" if r.move_time_s is not None else "---"
+                print(f"    {r.poll_thread_count:>6} {r.camera_fps:>10.1f} {r.poll_hz:>10.0f} {ok:>6} {t:>10}")
+
+    if workload_results:
+        print()
+        print("Experiment 6: Full combined workload")
+        print(
+            f"  {'Config':<22} {'Cam fps':>8} {'X Hz':>6} {'Y Hz':>6} {'Z Hz':>6} {'Total':>6} {'Move':>5} {'Time':>8}"
+        )
+        print(
+            f"  {'----------------------':<22} {'--------':>8} {'------':>6} {'------':>6} "
+            f"{'------':>6} {'------':>6} {'-----':>5} {'--------':>8}"
+        )
+        for r in workload_results:
+            ok = "YES" if r.move_completed else "NO"
+            t = f"{r.move_time_s:.3f}s" if r.move_time_s is not None else "---"
+            print(
+                f"  {r.config:<22} {r.camera_fps:>8.1f} {r.poll_hz_x:>6.0f} {r.poll_hz_y:>6.0f} "
+                f"{r.poll_hz_z:>6.0f} {r.poll_hz_total:>6.0f} {ok:>5} {t:>8}"
+            )
+
+    if stagger_results:
+        print()
+        print("Experiment 7: Poll stagger analysis")
+        print(
+            f"  {'Config':<18} {'Hz':>5} {'Gap mean±std (ms)':>20} {'P10':>6} {'P50':>6} {'P90':>6} {'Clustered':>10}"
+        )
+        print(
+            f"  {'------------------':<18} {'-----':>5} {'--------------------':>20} "
+            f"{'------':>6} {'------':>6} {'------':>6} {'----------':>10}"
+        )
+        for r in stagger_results:
+            label = f"{r.thread_count}T"
+            if r.stagger_ms > 0:
+                label += f" stg={r.stagger_ms:.0f}ms"
+            else:
+                label += " no stagger"
+            gap_str = f"{r.gap_mean_ms:.1f}\u00b1{r.gap_std_ms:.1f}"
+            clust_str = f"{r.clustered_count} ({r.clustered_pct:.0f}%)"
+            print(
+                f"  {label:<18} {r.aggregate_hz:>5.0f} {gap_str:>20} "
+                f"{r.gap_p10_ms:>6.1f} {r.gap_p50_ms:>6.1f} {r.gap_p90_ms:>6.1f} {clust_str:>10}"
+            )
 
     # Diagnosis
     print()
@@ -551,6 +1059,24 @@ def main() -> int:
         help="Comma-separated sleep values in ms for experiment 4 (default: 0,0.5,1,2,5,10)",
     )
     parser.add_argument(
+        "--camera-threads",
+        type=str,
+        default="0,1,2,3,6",
+        help="Comma-separated poll thread counts for camera experiments (default: 0,1,2,3,6)",
+    )
+    parser.add_argument(
+        "--camera-duration",
+        type=float,
+        default=5.0,
+        help="Duration for camera+polling steady-state test in seconds (default: 5.0)",
+    )
+    parser.add_argument(
+        "--camera-sleep",
+        type=float,
+        default=8.0,
+        help="Sleep between polls in ms for camera experiments (default: 8.0)",
+    )
+    parser.add_argument(
         "-o",
         "--output",
         type=str,
@@ -562,6 +1088,7 @@ def main() -> int:
     thread_counts = [int(x) for x in args.threads.split(",")]
     experiments = [int(x) for x in args.experiments.split(",")]
     sleep_values = [float(x) for x in args.sleep_values.split(",")]
+    camera_thread_counts = [int(x) for x in args.camera_threads.split(",")]
 
     # Filter: experiments 2-4 need thread counts > 0 for the poll side,
     # but experiment 2 also tests 0 (baseline with no polling)
@@ -574,6 +1101,10 @@ def main() -> int:
     print(f"Poll duration: {args.poll_duration}s")
     print(f"Move timeout: {args.move_timeout}s")
     print(f"Move distance: {args.move_distance} µm")
+    if any(e in experiments for e in [5, 6]):
+        print(f"Camera poll threads: {camera_thread_counts}")
+        print(f"Camera duration: {args.camera_duration}s")
+        print(f"Camera poll sleep: {args.camera_sleep}ms")
     print()
 
     with Microscope() as scope:
@@ -581,6 +1112,9 @@ def main() -> int:
         move_results: list[MoveTestResult] = []
         cross_results: list[MoveTestResult] = []
         sleep_results: list[MoveTestResult] = []
+        camera_results: list[CameraPollResult] = []
+        workload_results: list[FullWorkloadResult] = []
+        stagger_results: list[StaggerResult] = []
 
         if 1 in experiments:
             print("--- Experiment 1: Polling throughput ---")
@@ -626,7 +1160,44 @@ def main() -> int:
             )
             print()
 
-        print_summary(poll_results, move_results, cross_results, sleep_results)
+        if 5 in experiments:
+            print(f"--- Experiment 5: Camera + polling ({args.camera_sleep}ms sleep) ---")
+            camera_results = experiment_camera_polling(
+                scope,
+                camera_thread_counts,
+                duration_s=args.camera_duration,
+                sleep_ms=args.camera_sleep,
+                move_distance_um=args.move_distance,
+                timeout_s=args.move_timeout,
+            )
+            print()
+
+        if 6 in experiments:
+            print("--- Experiment 6: Full combined workload ---")
+            workload_results = experiment_full_workload(
+                scope,
+                move_distance_um=args.move_distance,
+                timeout_s=args.move_timeout,
+            )
+            print()
+
+        if 7 in experiments:
+            print("--- Experiment 7: Poll stagger analysis ---")
+            stagger_results = experiment_stagger(
+                scope,
+                duration_s=args.poll_duration,
+            )
+            print()
+
+        print_summary(
+            poll_results,
+            move_results,
+            cross_results,
+            sleep_results,
+            camera_results=camera_results,
+            workload_results=workload_results,
+            stagger_results=stagger_results,
+        )
 
         # Save results to JSON
         output_path = args.output
@@ -646,11 +1217,17 @@ def main() -> int:
                 "move_distance_um": args.move_distance,
                 "sleep_threads": args.sleep_threads,
                 "sleep_values_ms": sleep_values,
+                "camera_thread_counts": camera_thread_counts,
+                "camera_duration_s": args.camera_duration,
+                "camera_sleep_ms": args.camera_sleep,
             },
             "experiment_1_poll_throughput": [asdict(r) for r in poll_results],
             "experiment_2_move_under_load": [asdict(r) for r in move_results],
             "experiment_3_cross_axis": [asdict(r) for r in cross_results],
             "experiment_4_sleep_mitigation": [asdict(r) for r in sleep_results],
+            "experiment_5_camera_polling": [asdict(r) for r in camera_results],
+            "experiment_6_full_workload": [asdict(r) for r in workload_results],
+            "experiment_7_stagger_analysis": [asdict(r) for r in stagger_results],
         }
 
         with open(output_path, "w") as f:
