@@ -41,7 +41,7 @@ from flakefinder.data_utils import (
     load_chip_geometry,
     require_microscope_description,
 )
-from flakefinder.leica import Microscope, start_polling, wait_all
+from flakefinder.leica import Microscope, wait_all
 from flakefinder.leica.polling import start_motion_polling
 from flakefinder.scan_utils import (
     DEFAULT_WB,
@@ -306,7 +306,7 @@ def scan_row(
 
     # ---- 3. Start per-row polling threads ----
     x_polling = start_motion_polling(hw.x_bcv, hw.x_converter)
-    z_polling = start_polling(hw.z_bcv_hysteresis, hw.z_converter)
+    z_polling = start_motion_polling(hw.z_bcv_hysteresis, hw.z_converter)
 
     # ---- 4. Warmup camera ----
     for _ in range(cfg.warmup_frames):
