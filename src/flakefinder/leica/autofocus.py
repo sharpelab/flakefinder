@@ -35,6 +35,24 @@ WORKING_DISTANCES_UM: dict[int, float] = {
 }
 
 
+class FCDefaults(NamedTuple):
+    """Validated focus-and-capture defaults per objective."""
+
+    z_range_um: float
+    z_speed_um_s: float
+    exposure_ms: float
+
+
+# Validated 2026-02-14 on silicon substrate. See docs/microscope_reference.md.
+FC_DEFAULTS: dict[int, FCDefaults] = {
+    6: FCDefaults(z_range_um=200, z_speed_um_s=1000, exposure_ms=1),  # 2.5x
+    1: FCDefaults(z_range_um=100, z_speed_um_s=500, exposure_ms=1),  # 5x
+    2: FCDefaults(z_range_um=50, z_speed_um_s=250, exposure_ms=1),  # 10x
+    3: FCDefaults(z_range_um=30, z_speed_um_s=50, exposure_ms=2),  # 20x
+    4: FCDefaults(z_range_um=20, z_speed_um_s=25, exposure_ms=2),  # 50x
+}
+
+
 def sharpness_tenengrad(image: RGBImage) -> float:
     """Compute Tenengrad sharpness (Sobel gradient magnitude mean).
 
@@ -541,22 +559,59 @@ def focus_and_capture(
     z_center_um: float | None = None,
     z_range_um: float | None = None,
     z_speed_um_s: float | None = None,
+    exposure_ms: float | None = None,
     sharpness_method: str = "tenengrad",
 ) -> FocusCaptureResult:
     """Scan Z range and return the sharpest frame.
 
-    Single-pass scan optimized for speed: no initial capture, no return move,
-    positions at z_start at full speed before setting scan speed.
+    Wrapper around _focus_and_capture_impl that applies per-objective defaults
+    from FC_DEFAULTS for any parameter left as None. Also sets camera exposure
+    when resolved.
 
     Args:
         scope: Microscope facade instance.
         z_center_um: Center of Z scan range in µm. None = current position.
-        z_range_um: Z scan range in µm. None = auto from objective.
-        z_speed_um_s: Z scan speed in µm/s. None = use current speed.
+        z_range_um: Z scan range in µm. None = use objective default.
+        z_speed_um_s: Z scan speed in µm/s. None = use objective default.
+        exposure_ms: Camera exposure in ms. None = use objective default.
         sharpness_method: Sharpness metric to use.
 
     Returns:
         FocusCaptureResult with the sharpest frame's image and metadata.
+    """
+    defaults = FC_DEFAULTS.get(scope.nosepiece.position)
+    if defaults is not None:
+        if z_range_um is None:
+            z_range_um = defaults.z_range_um
+        if z_speed_um_s is None:
+            z_speed_um_s = defaults.z_speed_um_s
+        if exposure_ms is None:
+            exposure_ms = defaults.exposure_ms
+
+    if exposure_ms is not None:
+        scope.camera.exposure_time = exposure_ms / 1000.0
+
+    return _focus_and_capture_impl(
+        scope,
+        z_center_um=z_center_um,
+        z_range_um=z_range_um,
+        z_speed_um_s=z_speed_um_s,
+        sharpness_method=sharpness_method,
+    )
+
+
+def _focus_and_capture_impl(
+    scope: "Microscope",
+    *,
+    z_center_um: float | None = None,
+    z_range_um: float | None = None,
+    z_speed_um_s: float | None = None,
+    sharpness_method: str = "tenengrad",
+) -> FocusCaptureResult:
+    """Single-pass Z scan returning the sharpest frame.
+
+    Low-level implementation — no default resolution. Callers should use
+    focus_and_capture() which applies per-objective defaults.
     """
     t_start = time.perf_counter()
 

@@ -38,8 +38,8 @@ def main() -> int:
     parser.add_argument(
         "--exposure-ms",
         type=float,
-        default=1.0,
-        help="Exposure time in milliseconds (default: 1.0)",
+        default=None,
+        help="Exposure time in ms (default: from objective in --focus mode, else 1.0)",
     )
     parser.add_argument(
         "--white-balance",
@@ -60,7 +60,7 @@ def main() -> int:
     parser.add_argument(
         "--z-range", type=float, default=None, help="Focus Z search range in µm (default: auto from objective)"
     )
-    parser.add_argument("--z-speed", type=float, default=1250, help="Focus Z speed in µm/s (default: 1250)")
+    parser.add_argument("--z-speed", type=float, default=None, help="Focus Z speed in µm/s (default: from objective)")
     args = parser.parse_args()
 
     with Microscope() as scope:
@@ -98,8 +98,10 @@ def main() -> int:
         if args.binning is not None:
             camera.binning = args.binning
 
-        if args.exposure_ms is not None:
-            camera.exposure_time = args.exposure_ms / 1000.0
+        # In --focus mode, focus_and_capture handles exposure from objective defaults.
+        # In regular mode, apply explicit value or fallback to 1.0 ms.
+        if not args.focus:
+            camera.exposure_time = (args.exposure_ms if args.exposure_ms is not None else 1.0) / 1000.0
 
         if args.gain is not None:
             camera.gain = args.gain
@@ -147,6 +149,7 @@ def main() -> int:
                 z_center_um=z_center,
                 z_range_um=args.z_range,
                 z_speed_um_s=args.z_speed,
+                exposure_ms=args.exposure_ms,
             )
             image = result.image
             if not args.quiet:
