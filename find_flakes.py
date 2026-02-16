@@ -665,7 +665,10 @@ def run(scope: Microscope, p: _Preflight) -> int:
     # ----------------------------------------------------------------
     # Per-chip loop
     # ----------------------------------------------------------------
-    for chip_idx in chip_indices:
+    chip_loop_start = time.perf_counter()
+    chips_processed = 0
+
+    for loop_pos, chip_idx in enumerate(chip_indices):
         chip_dir = run_dir / f"chip_{chip_idx}"
         focus_map_path = chip_dir / f"focus_map_chip{chip_idx}.json"
         plane_path = chip_dir / f"focus_map_chip{chip_idx}_plane.json"
@@ -751,6 +754,19 @@ def run(scope: Microscope, p: _Preflight) -> int:
 
         # Summary: chip scan
         _print_chip_scan_summary(chip_idx, chip_scan_dir)
+
+        # ETA for remaining chips
+        chips_processed += 1
+        chips_remaining = len(chip_indices) - (loop_pos + 1)
+        if chips_remaining > 0 and chips_processed > 0:
+            avg_s = (time.perf_counter() - chip_loop_start) / chips_processed
+            eta_s = avg_s * chips_remaining
+            with _always_console():
+                print(
+                    f"[{loop_pos + 1}/{len(chip_indices)} chips] "
+                    f"~{_format_duration_compact(eta_s)} remaining "
+                    f"(avg {_format_duration_compact(avg_s)}/chip)"
+                )
 
     # ----------------------------------------------------------------
     # Summary
