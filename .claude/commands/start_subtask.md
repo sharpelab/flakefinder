@@ -39,14 +39,14 @@ Pick from this menu based on relevance to the task. The subtask will read these 
 | `src/flakefinder/leica/camera.py` | Camera capture, image acquisition |
 | `src/flakefinder/leica/core.py` | Connection management, LeicaConnection |
 | `src/flakefinder/leica/enums.py` | SDK constants, interface IDs |
-| `commands/autofocus.py` | Autofocus logic, Z scanning patterns |
-| `commands/scan.py` | Scanning patterns, position polling, frame capture |
-| `commands/focus_map.py` | Focus map grid autofocus |
-| `commands/stitch.py` | Image stitching |
-| `commands/find_chips.py` | Chip detection |
-| `commands/chip_scan.py` | Chip scan with Z tracking |
-| `commands/stage.py` | Stage/objective control |
-| `commands/analyze_focus_map.py` | Focus map analysis, plane fitting |
+| `src/flakefinder/commands/autofocus.py` | Autofocus logic, Z scanning patterns |
+| `src/flakefinder/commands/scan.py` | Scanning patterns, position polling, frame capture |
+| `src/flakefinder/commands/focus_map.py` | Focus map grid autofocus |
+| `src/flakefinder/commands/stitch.py` | Image stitching |
+| `src/flakefinder/commands/find_chips.py` | Chip detection |
+| `src/flakefinder/commands/chip_scan.py` | Chip scan with Z tracking |
+| `src/flakefinder/commands/stage.py` | Stage/objective control |
+| `src/flakefinder/commands/analyze_focus_map.py` | Focus map analysis, plane fitting |
 | `docs/architecture.md` | System overview, stage speeds, design |
 | `docs/continuous_autofocus_plan.md` | Focus system design |
 | `docs/scan_metadata.md` | Scan data format reference |

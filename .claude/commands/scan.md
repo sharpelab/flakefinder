@@ -55,8 +55,9 @@ You run with full permission bypass (`--dangerously-skip-permissions`). Every to
 
 ### Standard Procedures
 
-All remote commands use `sls` (Sharpe Lab Scope) — runs commands on the microscope via Git Bash. Default mode runs `uv run python <script>`.
-- `sls <script.py> [args]` — run python script
+All remote commands use `sls` (Sharpe Lab Scope) — runs commands on the microscope via Git Bash. Default mode runs `uv run <command>`.
+- `sls <command> [args]` — run a pyproject.toml entry point (e.g. `sls capture`, `sls find-flakes`)
+- `sls <script.py> [args]` — run a python script directly
 - `sls git <cmd>` — git operations
 - `sls push <path>...` — rsync local→remote (creates parent dirs automatically)
 - `sls pull <path>...` — rsync remote→local
@@ -66,7 +67,7 @@ Paths for push/pull are relative to the flakefinder repo root.
 
 **Autofocus at a point:**
 ```
-sls commands/autofocus.py --x [X] --y [Y] --z [Z_REF] --fine --z-speed 1250 --settle-time 0.2 --white-balance 2.51,1.02,1.41 --output afs/[name] --clean -q
+sls autofocus --x [X] --y [Y] --z [Z_REF] --fine --z-speed 1250 --settle-time 0.2 --white-balance 2.51,1.02,1.41 --output afs/[name] --clean -q
 ```
 - Always use `--z` with a known reference Z (from notebook or microscope_reference.md)
 - Default to 1/4 Z speed (1250 µm/s) for 20x
@@ -74,29 +75,29 @@ sls commands/autofocus.py --x [X] --y [Y] --z [Z_REF] --fine --z-speed 1250 --se
 
 **Focus map for a chip:**
 ```
-sls commands/focus_map.py --chips-meta scans/[prefix]_chips.json --chip [N] --save-images --z-speed 1250 --z [Z_REF] --af-settle 0.2 -q
+sls focus-map --chips-meta scans/[prefix]_chips.json --chip [N] --save-images --z-speed 1250 --z [Z_REF] --af-settle 0.2 -q
 ```
 - `--z` is required — use the autofocused Z at chip centroid
 - Grab results: `rsync -a --quiet sharpelab-microscope:flakefinder/scans/focus_map_chip[N]* scans/`
-- Run analysis: `uv run python commands/analyze_focus_map.py scans/focus_map_chip[N].json --export-plane scans/focus_map_chip[N]_plane.json --min-sharpness 20 --quiet`
+- Run analysis: `uv run analyze-focus-map scans/focus_map_chip[N].json --export-plane scans/focus_map_chip[N]_plane.json --min-sharpness 20 --quiet`
 - Open all three outputs (analysis, mosaic, contour)
 
 **Capture at a point:**
 ```
-sls commands/capture.py --x [X] --y [Y] --z [Z] --white-balance 2.51,1.02,1.41 -q captures/[name].png
+sls capture --x [X] --y [Y] --z [Z] --white-balance 2.51,1.02,1.41 -q captures/[name].png
 ```
 - If needed, use `scripts/image_stats.py` after grabbing locally to check brightness, clipping, and channel balance
 
 **Switch objective:**
 ```
-sls commands/stage.py --objective-mag [MAG] -q
+sls stage --objective-mag [MAG] -q
 ```
 - Magnifications: 2.5x, 5x, 10x, 20x, 50x, 150x
 - Z shifts on swap (parfocal adjustment) — note the new Z
 
 **Full pipeline (find_flakes):**
 ```
-sls find_flakes.py --initial-z [Z_REF] --notes "[description]" -q
+sls find-flakes --initial-z [Z_REF] --notes "[description]" -q
 ```
 - Runs: overview → detect chips → per-chip focus map + scan + analysis
 - Output: `scans/run_YYYYMMDD_HHMM/`

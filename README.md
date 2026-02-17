@@ -62,8 +62,8 @@ See [docs/setup.md](docs/setup.md) for detailed setup instructions.
 ├── scans/                   # Scan output data (gitignored)
 ├── experiments/             # Experiment data and plots (gitignored)
 ├── calibration/             # Flatfield calibration images
-├── find_flakes.py           # Full pipeline orchestrator
-├── commands/                # Command modules with run() + main() entry points
+├── src/flakefinder/commands/ # Command modules (pyproject.toml entry points)
+│   ├── find_flakes.py       # Full pipeline orchestrator
 │   ├── scan.py              # Multi-row snake scan with continuous motion
 │   ├── stitch.py            # Stitch scan frames into overview image
 │   ├── find_chips.py        # Detect chips in stitched image

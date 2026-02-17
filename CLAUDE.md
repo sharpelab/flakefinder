@@ -4,21 +4,29 @@
 
 FlakeFinder is a microscope automation system for the Sharpe Lab's Leica DM6M microscope. It performs continuous-motion scanning to detect 2D material flakes on silicon chips.
 
-## Key Scripts
+## Commands (`src/flakefinder/commands/`)
+
+All commands are registered as pyproject.toml entry points and invokable via `sls`:
+`sls <command> [args]` (e.g. `sls capture --wb ...`, `sls find-flakes --dry-run`).
+
+| Command | Entry point | Purpose |
+|---------|-------------|---------|
+| `find-flakes` | `find_flakes.py` | Full pipeline orchestrator (overview → chips → focus → chip scan) |
+| `autofocus` | `autofocus.py` | Z-scan autofocus CLI with debug output |
+| `capture` | `capture.py` | Single image capture utility |
+| `scan` | `scan.py` | Multi-row snake scan with continuous motion capture |
+| `stitch` | `stitch.py` | Stitch scan frames into 2D overview image |
+| `find-chips` | `find_chips.py` | Detect chips in stitched image using Otsu thresholding |
+| `focus-map` | `focus_map.py` | Autofocus grid sampling across a chip |
+| `analyze-focus-map` | `analyze_focus_map.py` | Analyze focus map, fit tilt plane |
+| `chip-scan` | `chip_scan.py` | Chip scan with continuous Z tracking |
+| `revisit` | `revisit.py` | Revisit stage points with autofocus and capture |
+| `stage` | `stage.py` | Stage/objective control utility |
+
+### Analysis Scripts (`scripts/`)
 
 | Script | Purpose |
 |--------|---------|
-| `find_flakes.py` | Full pipeline orchestrator (overview → chips → focus → chip scan) |
-| `commands/autofocus.py` | Z-scan autofocus CLI with debug output |
-| `commands/capture.py` | Single image capture utility |
-| `commands/scan.py` | Multi-row snake scan with continuous motion capture |
-| `commands/stitch.py` | Stitch scan frames into 2D overview image |
-| `commands/find_chips.py` | Detect chips in stitched image using Otsu thresholding |
-| `commands/focus_map.py` | Autofocus grid sampling across a chip |
-| `commands/analyze_focus_map.py` | Analyze focus map, fit tilt plane |
-| `commands/chip_scan.py` | Chip scan with continuous Z tracking |
-| `commands/revisit.py` | Revisit stage points with autofocus and capture |
-| `commands/stage.py` | Stage/objective control utility |
 | `scripts/process_overview.py` | Overview post-processing pipeline (rsync + stitch + detect chips) |
 | `scripts/process_chip_scan.py` | Chip scan analysis pipeline (rsync + analyze_chip_scan) |
 
@@ -72,7 +80,7 @@ git config core.hooksPath hooks/
 ```
 
 - **Ruff** config: `pyproject.toml` under `[tool.ruff]`. Rules: E, F, I, UP, B, SIM.
-- **ty** config: `pyproject.toml` under `[tool.ty]`. Excludes `driver/`; ignores all rules for `cli.py` (via override); suppresses `unresolved-reference` (forward-ref string annotations) and .NET SDK imports.
+- **ty** config: `pyproject.toml` under `[tool.ty]`. Excludes `driver/`; suppresses `unresolved-reference` (forward-ref string annotations) and .NET SDK imports.
 
 ## Microscope Operations
 
@@ -85,9 +93,9 @@ Workflow:
 4. Then execute
 
 Requires approval:
-- Running scans (`commands/scan.py`)
-- Capturing images (`commands/capture.py`)
-- Moving stage (`commands/stage.py`)
+- Running scans (`sls scan`)
+- Capturing images (`sls capture`)
+- Moving stage (`sls stage`)
 - Any script that connects to the Leica hardware
 
 Does NOT require approval:

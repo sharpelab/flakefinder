@@ -55,8 +55,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple, TypedDict
 
-from commands import analyze_focus_map, chip_scan, find_chips, focus_map, scan, stage, stitch
 from flakefinder.cli_utils import park_microscope
+from flakefinder.commands import analyze_focus_map, chip_scan, find_chips, focus_map, scan, stage, stitch
 from flakefinder.leica import Microscope
 from flakefinder.scan_utils import parse_area_rect, parse_white_balance, validate_area_rect
 from flakefinder.types import AreaRect, GainRGB
@@ -93,7 +93,7 @@ class TeeWriter:
 # Defaults
 DEFAULT_AREA_RECT = "8000,95000,0,78000"
 DEFAULT_INITIAL_Z = 24690
-REPO_DIR = Path(__file__).resolve().parent
+REPO_DIR = Path(__file__).resolve().parent.parent.parent.parent
 
 
 class ScanPreset(TypedDict):
