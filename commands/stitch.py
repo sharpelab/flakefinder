@@ -370,11 +370,10 @@ def stitch_row_to_global(
     # Use all frames (including accel zones)
     num_frames = len(row_frames)
 
-    # For snake pattern, process frames in the order that places them left-to-right
-    if direction < 0:
-        indices = list(range(num_frames - 1, -1, -1))
-    else:
-        indices = list(range(num_frames))
+    # Composite in capture order: later-captured frames go on top.
+    # This is direction-independent — stale/early frames always end up
+    # underneath regardless of +X/-X scan direction.
+    indices = list(range(num_frames))
 
     # Compute per-frame velocity using multi-scale savgol derivative.
     # Large windows give smooth estimates in the interior; at row edges the
