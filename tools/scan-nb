@@ -9,18 +9,20 @@ Auto-prepends **MM-DD HH:MM** timestamp. Appends before <!-- end-of-log --> sent
 
 Usage:
   scan-nb <slug> "entry text"
+  scan-nb <slug> --create "entry text"
   scan-nb <slug> --attach src.png "text with ![[src.png]]"
   scan-nb <slug> --attach src.png:dest.png "text with ![[dest.png]]"
   echo "text" | scan-nb <slug>
 
-Attachments:
+Flags:
+  --create              Create notebook from template if it doesn't exist (no-op if it does).
   --attach src[:dest]   Copy src to attachments/ dir (optionally renamed to dest).
                         Repeatable. Entry must reference each attachment as ![[name]]
                         or the command errors (gmail-style validation).
                         Fails if dest already exists in attachments/.
 
 Errors:
-  - Notebook not found for given slug
+  - Notebook not found for given slug (without --create)
   - <!-- end-of-log --> sentinel missing from notebook
   - Attachment source file not found
   - Attachment not referenced in entry text
@@ -36,6 +38,35 @@ NB_DIR = Path.home() / "Documents" / "Primer" / "Sharpelab"
 ATTACH_DIR = NB_DIR / "attachments"
 SENTINEL = "<!-- end-of-log -->"
 
+TEMPLATE = """\
+# Scan Notebook - [YYYY-MM-DD]
+
+[Brief description: new sample set, revisiting previous samples, specific experiment, etc.]
+
+## Current State
+
+- **Objective**: [5x / 20x]
+- **5x overview scan**: `scans/[prefix]_overview_5x/`
+- **Stitch**: `scans/[prefix]_overview_5x_stitch.jpg`
+- **Detection**: `scans/[prefix]_overview_5x_stitch_chips_detected.png`
+
+### Chips
+
+| Chip | Center (mm) | Area (mm2) | Notes |
+|------|-------------|------------|-------|
+| 0 | | | |
+
+### Z Focus
+
+- Reference Z from previous set: ~_____ um
+- Current set offset: _____ um from reference
+- Chip 0 centroid: ~_____ um (20x, 1/4 speed)
+
+## Log
+
+<!-- end-of-log -->
+"""
+
 
 def die(msg):
     print(f"Error: {msg}", file=sys.stderr)
@@ -49,17 +80,20 @@ def main():
         sys.exit(0 if args else 1)
 
     slug = args.pop(0)
+    if slug.startswith("--"):
+        die(f"expected slug as first argument, got '{slug}' (usage: scan-nb <slug> [--create] \"text\")")
     nb = NB_DIR / f"Scan Notebook - {slug}.md"
-    if not nb.exists():
-        die(f"{nb} not found")
 
-    # Parse --attach flags and entry text
+    # Parse --create, --attach flags, and entry text
+    create = False
     attachments = []  # list of (src_path, dest_name)
     text = None
 
     i = 0
     while i < len(args):
-        if args[i] == "--attach":
+        if args[i] == "--create":
+            create = True
+        elif args[i] == "--attach":
             i += 1
             if i >= len(args):
                 die("--attach requires an argument")
@@ -78,6 +112,16 @@ def main():
         else:
             text = args[i]
         i += 1
+
+    # Create notebook from template if --create and it doesn't exist
+    if not nb.exists():
+        if create:
+            nb.write_text(TEMPLATE.replace("[YYYY-MM-DD]", slug))
+            print(f"Created {nb.name}")
+        else:
+            die(f"{nb} not found")
+    elif create:
+        print(f"{nb.name} already exists")
 
     if text is None:
         if not sys.stdin.isatty():
