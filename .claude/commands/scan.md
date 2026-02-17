@@ -43,9 +43,9 @@ You run with full permission bypass (`--dangerously-skip-permissions`). Every to
   - **Session end** (`### Session end`): There will be a gap before the next session. Focus on what was accomplished, key results with values, and a prioritized list of next steps. Include enough context that someone reading it cold can pick up the thread. Record open items carried forward.
   - When resuming: if the last log entry is a handoff or session end, read it carefully before asking the user what to work on — it may already answer the question.
 - **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `sls pull` / `sls push` for transfers (handles mkdir automatically). Fall back to `rsync -a --quiet` for bulk transfers or non-repo paths. File routing:
-  - `scans/` — pipeline scan data (overview, chip scans, focus maps from `find_flakes.py`)
+  - `scans/` — pipeline scan data (overview, chip scans, focus maps from `sls find-flakes`)
   - `afs/` — one-off autofocus runs
-  - `captures/` — one-off captures (`commands/capture.py`)
+  - `captures/` — one-off captures (`sls capture`)
   - `downloads/` — reference data, downloaded flakes, analysis artifacts
 - **Images**: `present` results for the user automatically after analysis runs. "present" = open file for the user.
 - **Images in notebook**: Use `scan-nb --attach`, not manual copy + link.
