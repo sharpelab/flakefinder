@@ -872,6 +872,7 @@ def compute_robust_plane_fit(
     mad_sigma_threshold: float = 3.0,
     max_reject_frac: float = 0.3,
     min_points_after_reject: int = 4,
+    max_tilt_um_per_mm: float = 30.0,
 ) -> dict:
     """Compute robust plane fit with outlier rejection and coverage analysis.
 
@@ -889,6 +890,8 @@ def compute_robust_plane_fit(
         mad_sigma_threshold: Reject residuals beyond this many robust-sigma (MAD * 1.4826).
         max_reject_frac: Never reject more than this fraction of pre-filtered points.
         min_points_after_reject: Require at least this many points after rejection.
+        max_tilt_um_per_mm: Fall back to flat plane if tilt exceeds this (default 30;
+            normal chips are 2-6 µm/mm, degenerate fits produce 100+).
 
     Returns:
         Dict with plane parameters, quality metrics, and coverage info.
@@ -985,6 +988,16 @@ def compute_robust_plane_fit(
     coeffs, _, _, _ = np.linalg.lstsq(A, z_hc, rcond=None)
     a, b, c = coeffs
 
+    # Tilt sanity check: degenerate fits (collinear points) produce absurd tilt
+    tilt_magnitude = float(np.sqrt(a**2 + b**2) * 1000)  # µm/mm
+    tilt_clamped = tilt_magnitude > max_tilt_um_per_mm
+    if tilt_clamped:
+        print(
+            f"  Warning: tilt {tilt_magnitude:.1f} µm/mm exceeds {max_tilt_um_per_mm} µm/mm, "
+            f"falling back to flat plane at median Z"
+        )
+        a, b, c = 0.0, 0.0, float(np.median(z_hc))
+
     # Compute residuals and R²
     z_pred = a * x_hc + b * y_hc + c
     residuals = z_hc - z_pred
@@ -1061,6 +1074,7 @@ def compute_robust_plane_fit(
             "x_um_per_mm": float(a * 1000),
             "y_um_per_mm": float(b * 1000),
             "magnitude_um_per_mm": float(np.sqrt(a**2 + b**2) * 1000),
+            "clamped": tilt_clamped,
         },
         "coverage": {
             "x_range_um": [float(x_hc.min()), float(x_hc.max())],

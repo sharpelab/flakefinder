@@ -41,7 +41,7 @@ Single-pass Z scan, best frame saved. Validated 2026-02-14 at chip 2 rank 18.
 | 5x | 100 µm | 500 µm/s | 1 ms | 6 | 0.33s |
 | 10x | 50 µm | 250 µm/s | 1 ms | 6 | 0.34s |
 | 20x | 30 µm | 50 µm/s | 2 ms | 22 | 1.11s |
-| 50x | 20 µm | 25 µm/s | 2 ms | 17 | 0.90s |
+| 50x | 30 µm | 25 µm/s | 2 ms | ~25 | ~1.3s |
 
 ## Reference Z Positions
 
