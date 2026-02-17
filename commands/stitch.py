@@ -376,26 +376,27 @@ def stitch_row_to_global(
     # underneath regardless of +X/-X scan direction.
     indices = list(range(num_frames))
 
-    # Compute per-frame velocity using multi-scale savgol derivative.
-    # Large windows give smooth estimates in the interior; at row edges the
-    # one-sided polynomial overshoots (e.g. -X approach frames get cruise
-    # velocity even while still accelerating). Fix: compute savgol at several
-    # window sizes and for each frame use the largest window whose interior
-    # covers that frame.
-    vel_windows = [w for w in [31, 21, 11, 7, 5] if w <= (n if n % 2 == 1 else n - 1)]
-    if vel_windows:
-        dt = np.mean(np.diff(raw_times))
-        vel_layers = [(w, savgol_filter(raw_positions, w, min(2, w - 1), deriv=1, delta=dt)) for w in vel_windows]
-        frame_velocities = np.empty(n)
-        for i in range(n):
-            for w, v in vel_layers:
-                if i >= w // 2 and i < n - w // 2:
-                    frame_velocities[i] = v[i]
-                    break
-            else:
-                frame_velocities[i] = vel_layers[-1][1][i]
+    # Per-frame velocity for deskew.  Prefer x_vel_um_s from scan_meta
+    # (spline derivative on the full position stream — accurate even at
+    # row edges).  Fall back to savgol on frame positions for legacy scans.
+    meta_vels = [row_frames[i].get("x_vel_um_s") for i in range(n)]
+    if all(v is not None for v in meta_vels):
+        frame_velocities = np.array(meta_vels)
     else:
-        frame_velocities = np.gradient(np.array(all_positions), raw_times)
+        vel_windows = [w for w in [31, 21, 11, 7, 5] if w <= (n if n % 2 == 1 else n - 1)]
+        if vel_windows:
+            dt = np.mean(np.diff(raw_times))
+            vel_layers = [(w, savgol_filter(raw_positions, w, min(2, w - 1), deriv=1, delta=dt)) for w in vel_windows]
+            frame_velocities = np.empty(n)
+            for i in range(n):
+                for w, v in vel_layers:
+                    if i >= w // 2 and i < n - w // 2:
+                        frame_velocities[i] = v[i]
+                        break
+                else:
+                    frame_velocities[i] = vel_layers[-1][1][i]
+        else:
+            frame_velocities = np.gradient(np.array(all_positions), raw_times)
 
     if deskew:
         readout_time = meta["camera"]["readout_time_s"]
