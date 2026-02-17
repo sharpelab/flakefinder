@@ -6,14 +6,14 @@ from pathlib import Path
 
 from PIL import Image as PILImage
 
-from .leica.autofocus import ALL_SHARPNESS_METRICS, AutofocusFrame, AutofocusResult
+from .leica.autofocus import ALL_SHARPNESS_METRICS, AutofocusFrame, AutofocusResult, SharpnessSample
 
 METRIC_NAMES = list(ALL_SHARPNESS_METRICS.keys())
 
 
 def save_pass_frames(
     frames: list[AutofocusFrame],
-    curve: list[dict],
+    curve: list[SharpnessSample],
     out_dir: str | Path,
 ) -> None:
     """Save autofocus frames as PNGs and sharpness curve as CSV.

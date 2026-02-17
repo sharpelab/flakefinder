@@ -13,7 +13,7 @@ import queue
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import NamedTuple
+from typing import NamedTuple, TypedDict
 
 import cv2
 import numpy as np
@@ -215,6 +215,23 @@ class AutofocusFrame:
     image: np.ndarray | None = None  # Only populated if store_frames=True
 
 
+class _SharpnessSampleBase(TypedDict):
+    """Required fields for a sharpness measurement."""
+
+    frame: int
+    z_um: float
+    sharpness: float
+
+
+class SharpnessSample(_SharpnessSampleBase, total=False):
+    """Single sharpness measurement from a Z scan.
+
+    Optional: metrics (present when store_all_metrics=True).
+    """
+
+    metrics: dict[str, float]
+
+
 class ZScanTiming(NamedTuple):
     """Timing breakdown from _run_z_scan."""
 
@@ -227,7 +244,7 @@ class ZScanTiming(NamedTuple):
 class ZScanResult(NamedTuple):
     """Result from _run_z_scan."""
 
-    sharpness_curve: list[dict]
+    sharpness_curve: list[SharpnessSample]
     frames: list[AutofocusFrame] | None
     timing: ZScanTiming
     frame_count: int
@@ -255,7 +272,7 @@ class FocusCaptureResult:
     scan_duration_s: float
     z_range_um: float
     objective_position: int
-    sharpness_curve: list[dict]
+    sharpness_curve: list[SharpnessSample]
     timing: FocusCaptureTiming
 
 
@@ -287,11 +304,11 @@ class AutofocusResult:
     super_fine_z_start_um: float | None = None  # None if no super fine pass
     super_fine_z_end_um: float | None = None
     stayed_at_initial: bool = False  # True if scan found nothing better than initial
-    sharpness_curve: list[dict] = field(default_factory=list)  # [{z_um, sharpness}, ...] coarse only
+    sharpness_curve: list[SharpnessSample] = field(default_factory=list)  # [{z_um, sharpness}, ...] coarse only
     frames: list[AutofocusFrame] | None = None  # Coarse frames only (if store_frames=True)
-    fine_sharpness_curve: list[dict] = field(default_factory=list)  # Fine pass only
+    fine_sharpness_curve: list[SharpnessSample] = field(default_factory=list)  # Fine pass only
     fine_frames: list[AutofocusFrame] | None = None  # Fine frames only (if store_frames=True)
-    super_fine_sharpness_curve: list[dict] = field(default_factory=list)  # Super fine pass only
+    super_fine_sharpness_curve: list[SharpnessSample] = field(default_factory=list)  # Super fine pass only
     super_fine_frames: list[AutofocusFrame] | None = None  # Super fine frames only (if store_frames=True)
     initial_image: np.ndarray | None = None  # Image at initial Z (if store_frames=True)
     final_image: np.ndarray | None = None  # Image at selected Z after move (if store_frames=True)
@@ -532,11 +549,11 @@ def _run_z_scan(
         if z_interp is None:
             raise RuntimeError(f"Frame {i}: Z interpolation failed at t={t_capture:.6f}s")
         s, metrics = sharpness_out[i]
-        entry: dict = {
-            "frame": i,
-            "z_um": z_interp,
-            "sharpness": s,
-        }
+        entry = SharpnessSample(
+            frame=i,
+            z_um=z_interp,
+            sharpness=s,
+        )
         if metrics is not None:
             entry["metrics"] = metrics
         sharpness_curve.append(entry)
