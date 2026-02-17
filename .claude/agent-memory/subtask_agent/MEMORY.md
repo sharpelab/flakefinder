@@ -86,6 +86,19 @@ At high scan speeds, `deskew_image` creates a large triangular void filled with 
 
 Generate 4 variants (±deskew × ±blend) and compare. This immediately isolates which subsystem causes the artifact. The `--no-deskew` and `--no-blend` flags exist for this.
 
+## Position Smoothing (2026-02-16)
+
+**Committed fix (c504bb2):** `smooth_frame_positions()` in stitch.py applies savgol (win=15, poly=3) to the ~63 Hz raw position poll stream per row, evaluates at frame t_start. Eliminates ~49 µm direction-dependent position bias (at 10 mm/s) from per-poll interpolation timing jitter. Default savgol_window changed to 0 (frame-level savgol now redundant). `--no-pos-smooth` flag to disable.
+
+**Remaining issues:**
+- Savgol edge effect at stationary→moving boundary creates artifacts in first few frames of approach side. Trimming stationary samples before smoothing doesn't help (just moves the edge effect). The committed version smooths over the full sample stream including stationary — this is the least-bad option so far but still has minor dark-rectangle artifacts on -X rows' right edge.
+- Right chip edge deskew: +X departure frames have ~4400 µm/s velocity (decel) vs -X approach ~5050 (accel) → 1.7 px deskew difference at the chip boundary. Clamping velocity to cruise didn't visibly help. Root cause is likely the velocity estimation, not the clamp approach.
+- X-blend alpha masks (`alpha_first`/`alpha_last`) are position-independent but processing order flips for -X rows. Investigation was inconclusive — swapping them made chip edge worse, not better. Needs more study.
+
+## Frame Removal Test Script
+
+`scripts/test_frame_removal.py` — creates symlinked temp directories with frame subsets and stitches each. Strategies: sim_99pct, uniform_thin, no_zero_dx, beat_freq. Uses symlinks to avoid copying JPEGs. Key finding: artificially removing frames from 100% data does NOT reproduce 99% scan degradation — the issue was position noise, not frame selection.
+
 ## Don't Read Images — Use `show`
 
 Use `show <path>` to display images to the user. Do NOT use the Read tool on images — it wastes tokens.
