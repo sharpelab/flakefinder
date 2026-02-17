@@ -5,6 +5,9 @@ from __future__ import annotations
 import bisect
 from argparse import ArgumentTypeError
 from collections.abc import Sequence
+from functools import cache
+from importlib.resources import files
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -25,6 +28,20 @@ from flakefinder.types import (
     ScanRow,
     StageBounds,
 )
+
+
+@cache
+def _repo_root() -> Path:
+    """Walk up from the package directory to find the repo root (pyproject.toml)."""
+    p = Path(str(files("flakefinder"))).resolve()
+    while p != p.parent:
+        if (p / "pyproject.toml").exists():
+            return p
+        p = p.parent
+    raise RuntimeError("Could not find repo root (no pyproject.toml found)")
+
+
+CALIBRATION_DIR = _repo_root() / "calibration"
 
 # Binning index (SDK) -> binning factor (NxN)
 _BINNING_FACTOR = {0: 1, 1: 2, 2: 3}

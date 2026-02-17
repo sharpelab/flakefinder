@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from importlib.resources import files
 from pathlib import Path
 
 from flakefinder.types import (
@@ -19,7 +20,7 @@ from flakefinder.types import (
     StageDescription,
 )
 
-_DESCRIPTION_PATH = Path(__file__).parent / "microscope_description.json"
+_DESCRIPTION_PATH = Path(str(files("flakefinder"))) / "microscope_description.json"
 
 
 def require_microscope_description() -> MicroscopeDescription:

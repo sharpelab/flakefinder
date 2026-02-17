@@ -58,7 +58,7 @@ from typing import NamedTuple, TypedDict
 from flakefinder.cli_utils import park_microscope
 from flakefinder.commands import analyze_focus_map, chip_scan, find_chips, focus_map, scan, stage, stitch
 from flakefinder.leica import Microscope
-from flakefinder.scan_utils import parse_area_rect, parse_white_balance, validate_area_rect
+from flakefinder.scan_utils import CALIBRATION_DIR, parse_area_rect, parse_white_balance, validate_area_rect
 from flakefinder.types import AreaRect, GainRGB
 
 
@@ -93,7 +93,6 @@ class TeeWriter:
 # Defaults
 DEFAULT_AREA_RECT = "8000,95000,0,78000"
 DEFAULT_INITIAL_Z = 24690
-REPO_DIR = Path(__file__).resolve().parent.parent.parent.parent
 
 
 class ScanPreset(TypedDict):
@@ -313,7 +312,7 @@ class _Preflight:
 
 def _resolve_flatfield(chip_scan_mag: str) -> Path | None:
     """Auto-detect flatfield file for a chip scan magnification."""
-    path = REPO_DIR / "calibration" / f"flatfield_{chip_scan_mag}_bin3.npy"
+    path = CALIBRATION_DIR / f"flatfield_{chip_scan_mag}_bin3.npy"
     return path if path.exists() else None
 
 
