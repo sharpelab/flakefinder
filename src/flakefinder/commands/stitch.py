@@ -34,10 +34,14 @@ class StitchResult:
 
 @dataclass
 class RowStitchResult:
-    """Output from stitching a single row (raw accumulators, not normalized)."""
+    """Output from stitching a single row (raw accumulators, not normalized).
 
-    color_sum: np.ndarray  # float32 (H, W, 3) — weighted pixel sums
-    weight_sum: np.ndarray  # float32 (H, W) — weight sums
+    When blend=True: color_sum is float32 (H,W,3), weight_sum is float32 (H,W).
+    When blend=False: color_sum is uint16 (H,W,3), weight_sum is uint8 (H,W) frame count.
+    """
+
+    color_sum: np.ndarray
+    weight_sum: np.ndarray
     frames_placed: int
     frame_rects: list[AreaRectI]
 
@@ -265,7 +269,7 @@ def stitch_row_to_global(
     global_x_min: float,
     global_x_max: float,
     *,
-    blend: bool = True,
+    blend: bool = False,
     deskew: bool = True,
     hysteresis_um: float = 0,
     savgol_window: int = 0,
@@ -361,16 +365,16 @@ def stitch_row_to_global(
     overlap_px = max(0, frame_w - frame_spacing_px)
     blend_width_x = overlap_px // 2 if blend else 0
 
-    # Weighted-average accumulators (per-row X blending)
-    color_sum = np.zeros((canvas_h, canvas_w, 3), dtype=np.float32)
-    weight_sum = np.zeros((canvas_h, canvas_w), dtype=np.float32)
+    # Per-row accumulators — dtype depends on blend mode
+    if blend:
+        color_sum = np.zeros((canvas_h, canvas_w, 3), dtype=np.float32)
+        weight_sum = np.zeros((canvas_h, canvas_w), dtype=np.float32)
+    else:
+        color_sum = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint16)
+        weight_sum = np.zeros((canvas_h, canvas_w), dtype=np.uint8)
 
     # Use all frames (including accel zones)
     num_frames = len(row_frames)
-
-    # Composite in capture order: later-captured frames go on top.
-    # This is direction-independent — stale/early frames always end up
-    # underneath regardless of +X/-X scan direction.
     indices = list(range(num_frames))
 
     # Per-frame velocity for deskew from scan_meta (spline derivative
@@ -400,7 +404,7 @@ def stitch_row_to_global(
 
     num_work = len(work_items)
 
-    # Pre-compute blend weight masks (float32, 0-1).
+    # Pre-compute blend weight masks (float32, 0-1) — only for blend mode.
     # "first_x" = spatially leftmost (no left ramp), "last_x" = rightmost (no right ramp).
     if blend and num_work > 0:
 
@@ -416,23 +420,18 @@ def stitch_row_to_global(
         wt_first_x = _wt(first=True, last=(num_work == 1))
         wt_last_x = _wt(last=True)
         wt_interior = _wt()
-    else:
-        wt_first_x = wt_last_x = wt_interior = np.ones((frame_h, frame_w), dtype=np.float32)
 
-    # Map capture-order sequence to spatial position for weight selection.
-    # +X: capture order = spatial order; -X: reversed.
-    if direction > 0:
-        _leftmost_seq = 0
-        _rightmost_seq = num_work - 1
-    else:
-        _leftmost_seq = num_work - 1
-        _rightmost_seq = 0
+        # Map capture-order sequence to spatial position for weight selection.
+        # +X: capture order = spatial order; -X: reversed.
+        if direction > 0:
+            _leftmost_seq = 0
+            _rightmost_seq = num_work - 1
+        else:
+            _leftmost_seq = num_work - 1
+            _rightmost_seq = 0
 
     def load_frame(item):
-        """Load, resize, flatfield-correct, and deskew a single frame.
-
-        Returns (rgb, weight): float32 (H,W,3) and float32 (H,W).
-        """
+        """Load, resize, flatfield-correct, and deskew a single frame."""
         seq_i, frame_idx, _, frame_deskew = item
         path = scan_dir / f"frame_{frame_idx:04d}.jpg"
 
@@ -453,17 +452,8 @@ def stitch_row_to_global(
         if frame_deskew != 0:
             img = deskew_image(img, frame_deskew, resample=deskew_resample)
 
-        rgb = np.array(img, dtype=np.float32)
-
-        # Select blend weight by spatial position (not capture order)
-        if seq_i == _leftmost_seq:
-            weight = wt_first_x.copy()
-        elif seq_i == _rightmost_seq:
-            weight = wt_last_x.copy()
-        else:
-            weight = wt_interior.copy()
-
-        # Zero weight in deskew void region
+        # Compute deskew void mask (needed for both blend and no-blend)
+        void: np.ndarray | None = None
         if frame_deskew != 0:
             abs_shear = abs(frame_deskew)
             ys = np.arange(frame_h)
@@ -473,9 +463,26 @@ def stitch_row_to_global(
                 void = cols[np.newaxis, :] < void_widths[:, np.newaxis]
             else:  # -X motion: void at right
                 void = cols[np.newaxis, :] >= (frame_w - void_widths[:, np.newaxis])
-            weight[void] = 0.0
 
-        return rgb, weight
+        if blend:
+            rgb = np.array(img, dtype=np.float32)
+            # Select blend weight by spatial position (not capture order)
+            if seq_i == _leftmost_seq:
+                weight = wt_first_x.copy()
+            elif seq_i == _rightmost_seq:
+                weight = wt_last_x.copy()
+            else:
+                weight = wt_interior.copy()
+            if void is not None:
+                weight[void] = 0.0
+            return rgb, weight
+        else:
+            rgb = np.array(img, dtype=np.uint8)
+            # Valid mask: True where pixel should contribute
+            valid = np.ones((frame_h, frame_w), dtype=np.uint8)
+            if void is not None:
+                valid[void] = 0
+            return rgb, valid
 
     # Load frames in parallel, accumulate sequentially
     if num_threads > 1 and num_work > 1:
@@ -495,8 +502,15 @@ def stitch_row_to_global(
         if src_x1 > src_x0:
             w = src_x1 - src_x0
             wgt_s = weight[:, src_x0:src_x1]
-            color_sum[:, dst_x0 : dst_x0 + w, :] += rgb[:, src_x0:src_x1, :] * wgt_s[:, :, np.newaxis]
-            weight_sum[:, dst_x0 : dst_x0 + w] += wgt_s
+            if blend:
+                color_sum[:, dst_x0 : dst_x0 + w, :] += rgb[:, src_x0:src_x1, :] * wgt_s[:, :, np.newaxis]
+                weight_sum[:, dst_x0 : dst_x0 + w] += wgt_s
+            else:
+                # uint16 accumulation: zero out void pixels, add as uint16
+                rgb_s = rgb[:, src_x0:src_x1, :]
+                valid_s = wgt_s  # uint8 0/1
+                color_sum[:, dst_x0 : dst_x0 + w, :] += (rgb_s * valid_s[:, :, np.newaxis]).astype(np.uint16)
+                weight_sum[:, dst_x0 : dst_x0 + w] += valid_s
             frame_rects.append(AreaRectI(dst_x0, dst_x0 + w - 1, 0, canvas_h - 1))
             frames_placed += 1
 
@@ -509,7 +523,7 @@ def run(
     scan_dir: Path,
     *,
     deskew: bool = True,
-    blend: bool = True,
+    blend: bool = False,
     downsample: int = 1,
     rows_range: str | None = None,
     hysteresis: float = 0,
@@ -658,9 +672,13 @@ def run(
     y_overlap_px = int(y_overlap_um / um_per_px)
     blend_width_y = y_overlap_px // 2 if blend else 0
 
-    # Global weighted-average accumulators
-    global_color = np.zeros((canvas_h, canvas_w, 3), dtype=np.float32)
-    global_weight = np.zeros((canvas_h, canvas_w), dtype=np.float32)
+    # Global accumulators — dtype depends on blend mode
+    if blend:
+        global_color = np.zeros((canvas_h, canvas_w, 3), dtype=np.float32)
+        global_weight = np.zeros((canvas_h, canvas_w), dtype=np.float32)
+    else:
+        global_color = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint16)
+        global_weight = np.zeros((canvas_h, canvas_w), dtype=np.uint8)
 
     if not quiet:
         print("\nStitching rows...")
@@ -736,11 +754,20 @@ def run(
 
     # Single global normalization → RGB
     covered = global_weight > 0
-    np.divide(global_color[:, :, 0], global_weight, out=global_color[:, :, 0], where=covered)
-    np.divide(global_color[:, :, 1], global_weight, out=global_color[:, :, 1], where=covered)
-    np.divide(global_color[:, :, 2], global_weight, out=global_color[:, :, 2], where=covered)
-    np.clip(global_color, 0, 255, out=global_color)
-    result_rgb = global_color.astype(np.uint8)
+    if blend:
+        np.divide(global_color[:, :, 0], global_weight, out=global_color[:, :, 0], where=covered)
+        np.divide(global_color[:, :, 1], global_weight, out=global_color[:, :, 1], where=covered)
+        np.divide(global_color[:, :, 2], global_weight, out=global_color[:, :, 2], where=covered)
+        np.clip(global_color, 0, 255, out=global_color)
+        result_rgb = global_color.astype(np.uint8)
+    else:
+        # uint16 // uint8 → uint16, then truncate to uint8
+        count = global_weight.astype(np.uint16)
+        count[count == 0] = 1  # avoid division by zero
+        global_color[:, :, 0] //= count
+        global_color[:, :, 1] //= count
+        global_color[:, :, 2] //= count
+        result_rgb = global_color.astype(np.uint8)
     result_rgb[~covered] = bg_color[:3] if len(bg_color) >= 3 else 0
     background = Image.fromarray(result_rgb, mode="RGB")
 
@@ -869,7 +896,7 @@ def _build_parser():
     parser = argparse.ArgumentParser(description="Stitch multi-row snake scan into 2D image")
     parser.add_argument("scan_dir", type=Path, help="Scan directory")
     parser.add_argument("--no-deskew", action="store_true", help="Disable rolling shutter deskew")
-    parser.add_argument("--no-blend", action="store_true", help="Disable gradient blending")
+    parser.add_argument("--blend", action="store_true", help="Enable gradient blending (default: simple averaging)")
     parser.add_argument("--downsample", type=int, default=1, help="Additional downsample factor")
     parser.add_argument("--rows", type=str, default=None, help="Row range (e.g., '0-5' or '10')")
     parser.add_argument("--hysteresis", type=float, default=0, help="Hysteresis correction in µm (-X rows)")
@@ -904,7 +931,7 @@ def main() -> int:
         run(
             args.scan_dir,
             deskew=not args.no_deskew,
-            blend=not args.no_blend,
+            blend=args.blend,
             downsample=args.downsample,
             rows_range=args.rows,
             hysteresis=args.hysteresis,
