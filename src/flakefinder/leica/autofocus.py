@@ -42,15 +42,16 @@ class FCDefaults(NamedTuple):
     z_range_um: float
     z_speed_um_s: float
     exposure_ms: float
+    gain: float
 
 
 # Validated 2026-02-14 on silicon substrate. See docs/microscope_reference.md.
 FC_DEFAULTS: dict[int, FCDefaults] = {
-    6: FCDefaults(z_range_um=200, z_speed_um_s=1000, exposure_ms=1),  # 2.5x
-    1: FCDefaults(z_range_um=100, z_speed_um_s=500, exposure_ms=1),  # 5x
-    2: FCDefaults(z_range_um=50, z_speed_um_s=250, exposure_ms=1),  # 10x
-    3: FCDefaults(z_range_um=30, z_speed_um_s=50, exposure_ms=2),  # 20x
-    4: FCDefaults(z_range_um=30, z_speed_um_s=25, exposure_ms=2),  # 50x
+    6: FCDefaults(z_range_um=200, z_speed_um_s=1000, exposure_ms=1, gain=1.0),  # 2.5x
+    1: FCDefaults(z_range_um=100, z_speed_um_s=500, exposure_ms=1, gain=1.0),  # 5x
+    2: FCDefaults(z_range_um=50, z_speed_um_s=250, exposure_ms=1, gain=1.0),  # 10x
+    3: FCDefaults(z_range_um=30, z_speed_um_s=50, exposure_ms=2, gain=1.0),  # 20x
+    4: FCDefaults(z_range_um=30, z_speed_um_s=25, exposure_ms=2, gain=1.0),  # 50x
 }
 
 
@@ -591,13 +592,14 @@ def focus_and_capture(
     z_range_um: float | None = None,
     z_speed_um_s: float | None = None,
     exposure_ms: float | None = None,
+    gain: float | None = None,
     sharpness_method: str = "tenengrad",
 ) -> FocusCaptureResult:
     """Scan Z range and return the sharpest frame.
 
     Wrapper around _focus_and_capture_impl that applies per-objective defaults
     from FC_DEFAULTS for any parameter left as None. Also sets camera exposure
-    when resolved.
+    and gain when resolved.
 
     Args:
         scope: Microscope facade instance.
@@ -605,6 +607,7 @@ def focus_and_capture(
         z_range_um: Z scan range in µm. None = use objective default.
         z_speed_um_s: Z scan speed in µm/s. None = use objective default.
         exposure_ms: Camera exposure in ms. None = use objective default.
+        gain: Camera gain. None = use objective default.
         sharpness_method: Sharpness metric to use.
 
     Returns:
@@ -618,9 +621,13 @@ def focus_and_capture(
             z_speed_um_s = defaults.z_speed_um_s
         if exposure_ms is None:
             exposure_ms = defaults.exposure_ms
+        if gain is None:
+            gain = defaults.gain
 
     if exposure_ms is not None:
         scope.camera.exposure_time = exposure_ms / 1000.0
+    if gain is not None:
+        scope.camera.gain = gain
 
     return _focus_and_capture_impl(
         scope,

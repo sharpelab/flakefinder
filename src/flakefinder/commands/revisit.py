@@ -300,8 +300,6 @@ def run(
     camera = scope.camera
     camera.trigger_mode = 0  # CONTINUOUS
     camera.binning = 2  # 3x3 binning
-    if gain is not None:
-        camera.gain = gain
     camera.gain_rgb = white_balance
 
     # Build microscope metadata
@@ -366,6 +364,7 @@ def run(
             z_range_um=z_range,
             z_speed_um_s=z_speed,
             exposure_ms=exposure_ms,
+            gain=gain,
         )
         t_af_end = time.perf_counter()
 

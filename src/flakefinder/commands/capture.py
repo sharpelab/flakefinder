@@ -150,6 +150,7 @@ def main() -> int:
                 z_range_um=args.z_range,
                 z_speed_um_s=args.z_speed,
                 exposure_ms=args.exposure_ms,
+                gain=args.gain,
             )
             image = result.image
             if not args.quiet:
