@@ -32,7 +32,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import numpy as np
 
@@ -59,6 +59,7 @@ from flakefinder.types import (
     MicroscopeDescription,
     PlanarScanPlan,
     PositionSample,
+    PositionStreamSample,
     ScanMeta,
 )
 
@@ -84,76 +85,6 @@ def interpolate_z_position(t: float, z_samples: list[PositionSample]) -> float |
 
     alpha = (t - t0) / (t1 - t0)
     return z0 + alpha * (z1 - z0)
-
-
-def measure_x_cruise_speed(
-    x_samples: list[PositionSample],
-    t_x_started: float,
-    t_deadline: float,
-    commanded_speed_um_s: float,
-    vel_tolerance: float = 0.5,
-) -> tuple[float | None, dict[str, Any]]:
-    """Measure actual X cruise speed from position samples via linear regression.
-
-    Filters samples to the cruise velocity band: only consecutive pairs whose
-    inter-sample speed is within ±vel_tolerance of commanded_speed_um_s are
-    kept.  This eliminates both stationary samples (stage hasn't started moving)
-    and acceleration-zone samples without relying on a fixed time offset.
-
-    Returns:
-        (measured_speed_um_s, measurement_dict) where speed is always positive
-        and measurement_dict contains logging info.  Returns (None, {}) if
-        insufficient data after filtering.
-    """
-    # Window to samples between move start and deadline
-    window = [s for s in x_samples if t_x_started <= s.t_before < t_deadline]
-
-    if len(window) < 2:
-        return None, {}
-
-    # Velocity filter: keep samples where inter-sample speed is within
-    # ±vel_tolerance of commanded speed
-    speed_lo = commanded_speed_um_s * (1 - vel_tolerance)
-    speed_hi = commanded_speed_um_s * (1 + vel_tolerance)
-    cruise_mask = [False] * len(window)
-    for i in range(1, len(window)):
-        dt = window[i].t_before - window[i - 1].t_before
-        if dt <= 0:
-            continue
-        speed = abs(window[i].axis_um - window[i - 1].axis_um) / dt
-        if speed_lo <= speed <= speed_hi:
-            cruise_mask[i - 1] = True
-            cruise_mask[i] = True
-
-    cruise_samples = [s for s, keep in zip(window, cruise_mask, strict=True) if keep]
-    n_filtered = len(window) - len(cruise_samples)
-
-    if len(cruise_samples) < 5:
-        return None, {}
-
-    times = np.array([s.t_before for s in cruise_samples])
-    positions = np.array([s.axis_um for s in cruise_samples])
-
-    t_rel = times - times[0]
-    coeffs = np.polyfit(t_rel, positions, 1)
-    speed_um_s = abs(coeffs[0])
-
-    # R²
-    fitted = np.polyval(coeffs, t_rel)
-    ss_res = float(np.sum((positions - fitted) ** 2))
-    ss_tot = float(np.sum((positions - np.mean(positions)) ** 2))
-    r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
-
-    measurement = {
-        "measured_x_speed_um_s": round(speed_um_s, 2),
-        "n_samples": len(cruise_samples),
-        "n_total": len(window),
-        "n_filtered": n_filtered,
-        "measurement_window_ms": round((times[-1] - times[0]) * 1000, 1),
-        "r_squared": round(r_squared, 6),
-    }
-
-    return speed_um_s, measurement
 
 
 # ============================================================================
@@ -188,9 +119,8 @@ class RowResult:
     frames_skipped: int
     skipped: bool  # True if row was safety-skipped
     timing_s: dict[str, float | None]  # timestamp dict (see plan doc)
-    position_samples: list[dict[str, Any]]  # [{t_before, t_after, x_um, row}]
+    position_samples: list[PositionStreamSample]
     z_start_x_um: float | None
-    speed_measurement: dict[str, Any] | None  # X speed measurement from lead-in
     z_leadin_target_um: float | None  # Z preposition target (plane at lead-in start)
 
 
@@ -259,9 +189,7 @@ def scan_row(
     z_leadin_target = compute_plane_z(cfg.plane_a, cfg.plane_b, cfg.plane_c, x_start_pos, row_y)
 
     # Z velocity: dZ/dt = plane_a * direction * x_speed
-    # Initial estimate from commanded speed; corrected below from measured X speed
     z_vel_um_s = cfg.plane_a * direction * cfg.x_speed_um_s
-    speed_measurement: dict[str, Any] | None = None
 
     row_width_mm = (row_x_max - row_x_min) / 1000
     if not cfg.quiet:
@@ -281,7 +209,6 @@ def scan_row(
             timing_s={},
             position_samples=[],
             z_start_x_um=None,
-            speed_measurement=None,
             z_leadin_target_um=None,
         )
 
@@ -344,16 +271,6 @@ def scan_row(
             if not z_started and x_now is not None:
                 signed_dist = (chip_edge_x - x_now) * direction
                 if signed_dist / cfg.x_speed_um_s <= cfg.z_lead_s:
-                    # Measure actual X cruise speed from lead-in samples
-                    measured_speed, speed_meas = measure_x_cruise_speed(
-                        x_polling.samples, t_x_started, time.perf_counter(), cfg.x_speed_um_s
-                    )
-                    if measured_speed is not None:
-                        speed_meas["commanded_x_speed_um_s"] = cfg.x_speed_um_s
-                        speed_meas["z_vel_commanded_um_s"] = round(abs(cfg.plane_a * cfg.x_speed_um_s), 4)
-                        speed_meas["z_vel_corrected_um_s"] = round(abs(cfg.plane_a * measured_speed), 4)
-                        speed_measurement = speed_meas
-
                     if abs(z_vel_um_s) > 0.1:
                         if z_vel_um_s > 0:
                             z_drive.start_towards_max(abs(z_vel_um_s))
@@ -454,23 +371,14 @@ def scan_row(
             f"  Startup: prepos={prepos_ms:.0f}ms settle={settle_ms:.0f}ms "
             f"warmup={warmup_ms:.0f}ms Xstart={x_start_ms:.0f}ms {z_start_str}"
         )
-        if speed_measurement:
-            ms = speed_measurement
-            pct = (ms["measured_x_speed_um_s"] - cfg.x_speed_um_s) / cfg.x_speed_um_s * 100
-            print(
-                f"  X speed: {ms['measured_x_speed_um_s']:.1f} µm/s "
-                f"(cmd {cfg.x_speed_um_s:.0f}, {pct:+.2f}%), "
-                f"Z vel: {ms['z_vel_commanded_um_s']:.2f} → {ms['z_vel_corrected_um_s']:.2f} µm/s"
-            )
-
     # Build position samples for global list
-    position_samples = [
-        {
-            "t_before": s.t_before - scan_t0,
-            "t_after": s.t_after - scan_t0,
-            "x_um": s.axis_um,
-            "line": row_idx,
-        }
+    position_samples: list[PositionStreamSample] = [
+        PositionStreamSample(
+            t_before=s.t_before - scan_t0,
+            t_after=s.t_after - scan_t0,
+            x_um=s.axis_um,
+            line=row_idx,
+        )
         for s in row_x_samples
     ]
 
@@ -481,7 +389,6 @@ def scan_row(
         timing_s=timing_s,
         position_samples=position_samples,
         z_start_x_um=z_start_x_um,
-        speed_measurement=speed_measurement,
         z_leadin_target_um=z_leadin_target,
     )
 
@@ -921,10 +828,9 @@ def run(
 
     # ---- Scan loop ----
     total_scan_start = time.perf_counter()
-    all_position_samples: list[dict] = []
+    all_position_samples: list[PositionStreamSample] = []
     global_frame_idx = 0
     row_timings: list[dict[str, float | None] | None] = [None] * len(plan.rows)
-    row_speed_measurements: list[dict[str, Any] | None] = [None] * len(plan.rows)
 
     try:
         for row_idx, (row_y, row_x_min, row_x_max) in enumerate(plan.rows):
@@ -949,7 +855,6 @@ def run(
                 global_frame_idx += result.frames_saved
                 all_position_samples.extend(result.position_samples)
                 row_timings[row_idx] = result.timing_s
-                row_speed_measurements[row_idx] = result.speed_measurement
 
     finally:
         # Emergency stop on any error
@@ -1070,7 +975,6 @@ def run(
                 "duration_s": duration,
                 "position_samples": len(row_pos_samples),
                 "timing_s": timing,
-                "speed_measurement": row_speed_measurements[row_idx],
                 "z_frame1_error_um": row_frame1_errors[row_idx],
                 "z_drift_um": row_drift_values[row_idx],
             }

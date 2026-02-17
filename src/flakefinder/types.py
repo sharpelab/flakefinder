@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, NamedTuple, Protocol, TypedDict
+from dataclasses import dataclass
+from typing import NamedTuple, Protocol, TypedDict
 
 import numpy as np
 
@@ -189,6 +189,22 @@ class ChipGeometry:
 # ============================================================================
 
 
+class PlanInputs(TypedDict):
+    """Provenance record of inputs to compute_planar_scan_plan."""
+
+    bbox: BBox
+    polygon: list[Point2F]
+    x_overlap_pct: float
+    y_overlap_pct: float
+    padding: float
+    row_limit: int | None
+    speed_mm: float
+    z_max: float
+    plane_a: float
+    plane_b: float
+    plane_c: float
+
+
 @dataclass
 class PlanarScanPlan:
     """Computed scan plan from chip geometry and focus plane."""
@@ -203,7 +219,7 @@ class PlanarScanPlan:
     plane_c: float
     frame_width_um: float
     frame_height_um: float
-    inputs: dict[str, Any] = field(default_factory=dict)
+    inputs: PlanInputs | None = None
 
 
 # ============================================================================
