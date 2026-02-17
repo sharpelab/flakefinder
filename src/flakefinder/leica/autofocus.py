@@ -485,6 +485,13 @@ def _run_z_scan(
     if not pre_positioned:
         z_axis.move_to_corrected(z_start)
         time.sleep(0.1)  # Brief settle
+    # Dummy acquire to flush any stale camera buffer before scanning
+    current_image[0] = None
+    acquisition.Acquire(context, None)
+    if current_image[0] is not None:
+        current_image[0].Dispose()
+        current_image[0] = None
+
     t_pre_scan_done = time.perf_counter()
 
     # Start Z polling (adaptive Hz: 10 Hz startup, ramps to 100 Hz on motion)
