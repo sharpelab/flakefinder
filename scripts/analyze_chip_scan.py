@@ -366,15 +366,18 @@ def _plot_spatial_z_error(
     frames: list[dict],
     z_errors: list,
     lead_in_mask: list[bool],
+    lead_out_mask: list[bool],
 ) -> None:
     """Render the spatial Z error map on *ax*."""
     x_mm = np.array([f["x_start"] for f in frames]) / 1000
     y_mm = np.array([f["y_um"] for f in frames]) / 1000
     z_err_arr = np.array(z_errors)
     li_mask = np.array(lead_in_mask)
+    lo_mask = np.array(lead_out_mask)
+    excluded = li_mask | lo_mask
 
     abs_max = max(np.percentile(np.abs(z_err_arr), 99), 0.5)
-    track = ~li_mask
+    track = ~excluded
     if np.any(track):
         sc = ax.scatter(
             x_mm[track],
@@ -388,16 +391,17 @@ def _plot_spatial_z_error(
             rasterized=True,
         )
         plt.colorbar(sc, ax=ax, label="Z error (um)")
-    if np.any(li_mask):
-        ax.scatter(
-            x_mm[li_mask],
-            y_mm[li_mask],
-            c="gray",
-            marker="x",
-            s=6,
-            alpha=0.3,
-            rasterized=True,
-        )
+    for mask in (li_mask, lo_mask):
+        if np.any(mask):
+            ax.scatter(
+                x_mm[mask],
+                y_mm[mask],
+                c="gray",
+                marker="x",
+                s=6,
+                alpha=0.3,
+                rasterized=True,
+            )
     ax.set_xlabel("X (mm)")
     ax.set_ylabel("Y (mm)")
     ax.set_title("Spatial Z Error Map")
@@ -442,10 +446,13 @@ def plot_analysis(
     row_colors = {r: cmap(i / max(1, len(row_indices) - 1)) for i, r in enumerate(row_indices)}
 
     # --- Panel 1: Z error vs frame number ---
-    # Separate lead-in from tracking frames for distinct styling
+    # Separate lead-in/lead-out from tracking frames for distinct styling
     lead_in_mask = [f.get("in_lead_in", False) for f in frames]
-    tracking_idx = [i for i, li in enumerate(lead_in_mask) if not li]
+    lead_out_mask = [f.get("in_lead_out", False) for f in frames]
+    excluded = [li or lo for li, lo in zip(lead_in_mask, lead_out_mask, strict=True)]
+    tracking_idx = [i for i, ex in enumerate(excluded) if not ex]
     lead_in_idx = [i for i, li in enumerate(lead_in_mask) if li]
+    lead_out_idx = [i for i, lo in enumerate(lead_out_mask) if lo]
 
     frame_nums = [f["n"] for f in frames]
     z_errors = [f["z_error"] for f in frames]
@@ -474,6 +481,18 @@ def plot_analysis(
             rasterized=True,
             label=f"Lead-in ({len(lead_in_idx)})",
         )
+    # Lead-out frames: gray x markers
+    if lead_out_idx:
+        ax_zerr.scatter(
+            [frame_nums[i] for i in lead_out_idx],
+            [z_errors[i] for i in lead_out_idx],
+            c="gray",
+            marker="x",
+            s=6,
+            alpha=0.3,
+            rasterized=True,
+            label=f"Lead-out ({len(lead_out_idx)})",
+        )
 
     # DOF bands
     for dof, alpha, label in [(2, 0.15, "2 um DOF"), (4, 0.08, "4 um DOF")]:
@@ -483,7 +502,13 @@ def plot_analysis(
 
     ov = z_stats["overall"]
     n_lead_in = ov.get("n_lead_in", 0)
-    lead_in_note = f"  [{n_lead_in} lead-in excluded]" if n_lead_in > 0 else ""
+    n_lead_out = ov.get("n_lead_out", 0)
+    excluded_parts = []
+    if n_lead_in > 0:
+        excluded_parts.append(f"{n_lead_in} lead-in")
+    if n_lead_out > 0:
+        excluded_parts.append(f"{n_lead_out} lead-out")
+    lead_in_note = f"  [{', '.join(excluded_parts)} excluded]" if excluded_parts else ""
     ax_zerr.set_xlabel("Frame number")
     ax_zerr.set_ylabel("Z error (um)")
     ax_zerr.set_title(
@@ -520,7 +545,7 @@ def plot_analysis(
 
     # --- Spatial Z error map (only when --spatial-z) ---
     if spatial_z and not has_sharpness:
-        _plot_spatial_z_error(ax_zmap, frames, z_errors, lead_in_mask)
+        _plot_spatial_z_error(ax_zmap, frames, z_errors, lead_in_mask, lead_out_mask)
 
         plt.tight_layout()
         plt.savefig(output_path, dpi=150, bbox_inches="tight")
@@ -583,7 +608,7 @@ def plot_analysis(
 
     # --- Panel 3: Spatial Z error map (only when --spatial-z) ---
     if spatial_z:
-        _plot_spatial_z_error(ax_zmap, frames, z_errors, lead_in_mask)
+        _plot_spatial_z_error(ax_zmap, frames, z_errors, lead_in_mask, lead_out_mask)
 
     # --- Panel 4: Spatial sharpness map ---
     sx_mm = sharpness_data["x_um"] / 1000
