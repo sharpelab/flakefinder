@@ -96,7 +96,7 @@ def _plan(
     objective_mag: str | None = None,
     binning: int = 3,
     x_overlap_percent: float = 100,
-    y_overlap_percent: float = 12,
+    y_overlap_percent: float = 2,
 ) -> _Preflight:
     """Compute and validate scan plan (pure computation, no hardware).
 
@@ -169,7 +169,7 @@ def run(
     initial_z: float | None = None,
     auto_focus_pos: Point2F | None = None,
     x_overlap_percent: float = 100,
-    y_overlap_percent: float = 12,
+    y_overlap_percent: float = 2,
     downsample: int = 1,
     white_balance: GainRGB = DEFAULT_WB,
     gamma: float = 1.0,
@@ -756,8 +756,8 @@ Examples:
     frame_group.add_argument(
         "--y-overlap-percent",
         type=float,
-        default=12,
-        help="Y overlap between rows as %% of frame height (default: 12)",
+        default=2,
+        help="Y overlap between rows as %% of frame height (default: 2)",
     )
     frame_group.add_argument("--downsample", type=int, default=1, help="Downsample factor (2 = half dims)")
     frame_group.add_argument(
