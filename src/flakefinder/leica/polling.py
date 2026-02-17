@@ -20,7 +20,7 @@ from ..types import PositionSample
 
 DEFAULT_POLL_HZ: float = 100.0
 STARTUP_POLL_HZ: float = 10.0
-_MOTION_THRESHOLD_UM: float = 1.0
+_MOTION_THRESHOLD_UM: float = 0.1
 
 
 @dataclass
