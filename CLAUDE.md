@@ -9,16 +9,20 @@ FlakeFinder is a microscope automation system for the Sharpe Lab's Leica DM6M mi
 | Script | Purpose |
 |--------|---------|
 | `find_flakes.py` | Full pipeline orchestrator (overview → chips → focus → chip scan) |
+| `autofocus_demo.py` | Z-scan autofocus CLI with debug output |
+| `capture_util.py` | Single image capture utility |
 | `commands/scan.py` | Multi-row snake scan with continuous motion capture |
 | `commands/stitch.py` | Stitch scan frames into 2D overview image |
 | `commands/find_chips.py` | Detect chips in stitched image using Otsu thresholding |
 | `commands/focus_map.py` | Autofocus grid sampling across a chip |
 | `commands/analyze_focus_map.py` | Analyze focus map, fit tilt plane |
 | `commands/chip_scan.py` | Chip scan with continuous Z tracking |
+| `commands/revisit.py` | Revisit stage points with autofocus and capture |
 | `commands/stage.py` | Stage/objective control utility |
-| `capture_util.py` | Single image capture utility |
 | `scripts/process_overview.py` | Overview post-processing pipeline (rsync + stitch + detect chips) |
 | `scripts/process_chip_scan.py` | Chip scan analysis pipeline (rsync + analyze_chip_scan) |
+
+Hardware characterization experiments (SDK probes, Z-tracking tests, speed sweeps) are in `scripts/experiments/`.
 
 ## Tools
 
