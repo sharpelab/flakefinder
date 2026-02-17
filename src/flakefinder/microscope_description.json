@@ -24,7 +24,7 @@
   "stage": {
     "x": {
       "min_um": 0,
-      "max_um": 95172,
+      "max_um": 95170,
       "position_um_per_native": 0.009766,
       "max_velocity_native": 27467476,
       "max_speed_mm_s": 40.0,
@@ -32,7 +32,7 @@
     },
     "y": {
       "min_um": 0,
-      "max_um": 85103,
+      "max_um": 85102,
       "position_um_per_native": 0.009766,
       "max_velocity_native": 27467476,
       "max_speed_mm_s": 40.0,
