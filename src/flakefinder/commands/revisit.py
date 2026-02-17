@@ -273,6 +273,7 @@ def run(
     objective_mag: str,
     z_speed: float | None = None,
     z_range: float | None = None,
+    settle: float = 0,
     exposure_ms: float | None = None,
     gain: float | None = None,
     white_balance: GainRGB = DEFAULT_WB,
@@ -352,6 +353,10 @@ def run(
         scope.z.move_to_corrected(p.z)  # blocking Z while XY runs async
         wait_all([hx, hy])
         t_move_end = time.perf_counter()
+
+        # Settle after move
+        if settle > 0:
+            time.sleep(settle)
 
         # Phase 2: Focus scan + capture best frame
         t_af_start = time.perf_counter()
@@ -514,6 +519,9 @@ Examples:
     af_group.add_argument(
         "--z-range", type=float, default=None, help="AF search range in um (default: auto from objective)"
     )
+    af_group.add_argument(
+        "--settle", type=float, default=0, help="Settle time in seconds after XY move, before AF (default: 0)"
+    )
 
     # Camera
     cam_group = parser.add_argument_group("Camera")
@@ -594,6 +602,7 @@ def main() -> int:
                 objective_mag=objective_mag,
                 z_speed=args.z_speed,
                 z_range=args.z_range,
+                settle=args.settle,
                 exposure_ms=args.exposure_ms,
                 gain=args.gain,
                 white_balance=args.white_balance,
