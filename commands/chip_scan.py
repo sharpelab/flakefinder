@@ -185,6 +185,7 @@ class RowConfig:
     move_speed_um_s: float
     target_advance_um: float
     lead_in_um: float
+    lead_out_um: float
     z_lead_s: float
     row_settle_s: float
     warmup_frames: int
@@ -247,18 +248,20 @@ def scan_row(
     # ---- Row geometry ----
     if direction == 1:
         chip_edge_x = row_x_min
+        far_edge_x = row_x_max
         x_start_pos = row_x_min - cfg.lead_in_um
-        x_end_pos = row_x_max
+        x_end_pos = row_x_max + cfg.lead_out_um
         dir_str = "+X"
     else:
         chip_edge_x = row_x_max
+        far_edge_x = row_x_min
         x_start_pos = row_x_max + cfg.lead_in_um
-        x_end_pos = row_x_min
+        x_end_pos = row_x_min - cfg.lead_out_um
         dir_str = "-X"
 
     # Z at chip edge (where tracking begins) and scan end
     z_chip_edge = compute_plane_z(cfg.plane_a, cfg.plane_b, cfg.plane_c, chip_edge_x, row_y)
-    z_end = compute_plane_z(cfg.plane_a, cfg.plane_b, cfg.plane_c, x_end_pos, row_y)
+    z_end = compute_plane_z(cfg.plane_a, cfg.plane_b, cfg.plane_c, far_edge_x, row_y)
     # Z at lead-in start (focus plane extrapolated into lead-in region)
     z_leadin_target = compute_plane_z(cfg.plane_a, cfg.plane_b, cfg.plane_c, x_start_pos, row_y)
 
@@ -386,6 +389,7 @@ def scan_row(
                         list(z_polling.samples),
                         scan_t0,
                         chip_edge_x,
+                        far_edge_x,
                         direction,
                     )
                 )
@@ -512,6 +516,7 @@ class _Preflight:
         chip: int,
         speed_mm: float,
         lead_in_um: float,
+        lead_out_um: float,
         z_lead_ms: float,
         x_overlap_percent: float,
         y_overlap_percent: float,
@@ -536,7 +541,7 @@ class _Preflight:
         print(f"  Z limit: {z_max:.0f} um")
         print()
         print(f"Scan speed: {speed_mm:.1f} mm/s")
-        print(f"Lead-in: {lead_in_um:.0f} um, Z lead: {z_lead_ms:.0f} ms")
+        print(f"Lead-in: {lead_in_um:.0f} um, lead-out: {lead_out_um:.0f} um, Z lead: {z_lead_ms:.0f} ms")
         if row_limit:
             print(f"Row limit: {row_limit}")
         print()
@@ -571,6 +576,7 @@ def _plan(
     row_limit: int | None = None,
     speed_mm: float = 5.0,
     lead_in_um: float = 1000,
+    lead_out_um: float = 1000,
     z_lead_ms: float = 30,
     z_max: float = 26000.0,
 ) -> _Preflight:
@@ -676,6 +682,7 @@ def run(
     row_limit: int | None = None,
     row_settle: float = 0.1,
     lead_in_um: float = 1000,
+    lead_out_um: float = 1000,
     z_lead_ms: float = 30,
     objective_mag: str | None = None,
     speed_mm: float = 5.0,
@@ -710,6 +717,7 @@ def run(
         row_limit=row_limit,
         speed_mm=speed_mm,
         lead_in_um=lead_in_um,
+        lead_out_um=lead_out_um,
         z_lead_ms=z_lead_ms,
         z_max=z_max,
     )
@@ -719,6 +727,7 @@ def run(
             chip=chip,
             speed_mm=speed_mm,
             lead_in_um=lead_in_um,
+            lead_out_um=lead_out_um,
             z_lead_ms=z_lead_ms,
             x_overlap_percent=x_overlap_percent,
             y_overlap_percent=y_overlap_percent,
@@ -832,6 +841,7 @@ def run(
                 row_z_samples,
                 t0,
                 frame_chip_edge_x,
+                frame_far_edge_x,
                 frame_direction,
             ) = item
 
@@ -871,6 +881,15 @@ def run(
             else:
                 in_lead_in = True  # no position data → treat as lead-in
 
+            # Lead-out check: frame start has crossed far hull edge
+            if x_start_interp is not None:
+                if frame_direction == 1:
+                    in_lead_out = x_start_interp > frame_far_edge_x
+                else:
+                    in_lead_out = x_start_interp < frame_far_edge_x
+            else:
+                in_lead_out = False
+
             saved_frames_meta.append(
                 {
                     "n": frame_idx,
@@ -885,6 +904,7 @@ def run(
                     "z_ideal": z_ideal,
                     "z_error": z_error,
                     "in_lead_in": in_lead_in,
+                    "in_lead_out": in_lead_out,
                 }
             )
 
@@ -924,6 +944,7 @@ def run(
         move_speed_um_s=move_speed_mm * 1000,
         target_advance_um=plan.target_advance_um,
         lead_in_um=lead_in_um,
+        lead_out_um=lead_out_um,
         z_lead_s=z_lead_ms / 1000.0,
         row_settle_s=row_settle,
         warmup_frames=warmup_frames,
@@ -987,9 +1008,14 @@ def run(
     # Sort frames
     saved_frames_meta.sort(key=lambda f: f["n"])
 
-    # Z tracking error stats (exclude lead-in frames)
-    tracking_frames = [f for f in saved_frames_meta if f["z_error"] is not None and not f.get("in_lead_in", False)]
+    # Z tracking error stats (exclude lead-in and lead-out frames)
+    tracking_frames = [
+        f
+        for f in saved_frames_meta
+        if f["z_error"] is not None and not f.get("in_lead_in", False) and not f.get("in_lead_out", False)
+    ]
     n_lead_in = sum(1 for f in saved_frames_meta if f.get("in_lead_in", False))
+    n_lead_out = sum(1 for f in saved_frames_meta if f.get("in_lead_out", False))
     z_errors = [f["z_error"] for f in tracking_frames]
     if z_errors:
         z_error_arr = np.array(z_errors)
@@ -1007,7 +1033,10 @@ def run(
         dir_frames = [
             f
             for f in saved_frames_meta
-            if f["row"] in dir_row_idxs and f["z_error"] is not None and not f.get("in_lead_in", False)
+            if f["row"] in dir_row_idxs
+            and f["z_error"] is not None
+            and not f.get("in_lead_in", False)
+            and not f.get("in_lead_out", False)
         ]
         if not dir_frames:
             continue
@@ -1019,7 +1048,10 @@ def run(
             rf = [
                 f
                 for f in saved_frames_meta
-                if f["row"] == ri and f["z_error"] is not None and not f.get("in_lead_in", False)
+                if f["row"] == ri
+                and f["z_error"] is not None
+                and not f.get("in_lead_in", False)
+                and not f.get("in_lead_out", False)
             ]
             if len(rf) >= 2:
                 z_jumps.append(abs(rf[1]["z_error"] - rf[0]["z_error"]))
@@ -1036,7 +1068,10 @@ def run(
         chip_frames = [
             f
             for f in saved_frames_meta
-            if f["row"] == ri and not f.get("in_lead_in", False) and f["z_error"] is not None
+            if f["row"] == ri
+            and not f.get("in_lead_in", False)
+            and not f.get("in_lead_out", False)
+            and f["z_error"] is not None
         ]
         if chip_frames:
             row_frame1_errors.append(chip_frames[0]["z_error"])
@@ -1106,6 +1141,7 @@ def run(
             "scan_speed_mm_s": speed_mm,
             "move_speed_mm_s": move_speed_mm,
             "lead_in_um": lead_in_um,
+            "lead_out_um": lead_out_um,
             "z_lead_ms": z_lead_ms,
             "row_limit": row_limit,
             "row_settle_s": row_settle,
@@ -1171,7 +1207,7 @@ def run(
     print(f"  Total time: {total_duration:.1f}s")
     print(f"  Rows: {len(plan.rows)}")
     print(f"  Total frames: {global_frame_idx}")
-    print(f"  Lead-in frames: {n_lead_in} (excluded from Z tracking stats)")
+    print(f"  Lead-in frames: {n_lead_in}, lead-out: {n_lead_out} (excluded from Z tracking stats)")
     print(f"  Avg FPS: {global_frame_idx / total_duration:.1f}" if total_duration > 0 else "  Avg FPS: N/A")
     if z_error_max is not None:
         dof_20x = 1.7
@@ -1267,6 +1303,14 @@ Examples:
         "speed before Z tracking begins.",
     )
     scan_group.add_argument(
+        "--lead-out-um",
+        type=float,
+        default=1000,
+        help="Lead-out distance past chip edge in um (default: 1000). "
+        "X continues past the hull boundary so deceleration happens "
+        "outside the chip area.",
+    )
+    scan_group.add_argument(
         "--z-lead-ms",
         type=float,
         default=30,
@@ -1341,6 +1385,7 @@ def main() -> int:
                 row_limit=args.row_limit,
                 speed_mm=args.speed_mm,
                 lead_in_um=args.lead_in_um,
+                lead_out_um=args.lead_out_um,
                 z_lead_ms=args.z_lead_ms,
                 z_max=args.z_max,
             )
@@ -1351,6 +1396,7 @@ def main() -> int:
             chip=args.chip,
             speed_mm=args.speed_mm,
             lead_in_um=args.lead_in_um,
+            lead_out_um=args.lead_out_um,
             z_lead_ms=args.z_lead_ms,
             x_overlap_percent=args.x_overlap_percent,
             y_overlap_percent=args.y_overlap_percent,
@@ -1372,6 +1418,7 @@ def main() -> int:
                 row_limit=args.row_limit,
                 row_settle=args.row_settle,
                 lead_in_um=args.lead_in_um,
+                lead_out_um=args.lead_out_um,
                 z_lead_ms=args.z_lead_ms,
                 objective_mag=args.objective_mag,
                 speed_mm=args.speed_mm,
