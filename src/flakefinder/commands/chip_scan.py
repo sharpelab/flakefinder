@@ -161,21 +161,6 @@ def measure_x_cruise_speed(
 
 
 @dataclass
-class ScanHardware:
-    """Hardware interfaces needed for row scanning."""
-
-    stage: Any  # Stage
-    z_drive: Any  # ZDrive
-    acquisition: Any  # SDK acquisition
-    acq_context: Any  # SDK image acquisition context
-    current_image: list  # [None] mutable ref for image callback
-    x_bcv: Any  # fast X position reader
-    x_converter: Any  # native -> um converter
-    z_converter: Any  # native -> um converter
-    z_bcv_hysteresis: Any  # hysteresis-corrected Z reader
-
-
-@dataclass
 class RowConfig:
     """Scan configuration for a single row."""
 
@@ -216,7 +201,8 @@ def scan_row(
     direction: int,
     total_rows: int,
     *,
-    hw: ScanHardware,
+    scope: Microscope,
+    current_image: list,
     cfg: RowConfig,
     save_queue: queue.Queue,
     global_frame_idx: int,
@@ -234,7 +220,8 @@ def scan_row(
         row_x_max: Hull-clipped X max (um, unpadded).
         direction: +1 for +X, -1 for -X.
         total_rows: Total number of rows (for printing).
-        hw: Hardware interfaces.
+        scope: Microscope facade.
+        current_image: Mutable [None] ref for image callback.
         cfg: Scan configuration.
         save_queue: Queue for frame saving (producer interface).
         global_frame_idx: Starting frame index for this row.
@@ -243,8 +230,12 @@ def scan_row(
     Returns:
         RowResult with frame counts, timing, and position data.
     """
-    stage = hw.stage
-    z_drive = hw.z_drive
+    stage = scope.stage
+    z_drive = scope.z
+    x_bcv = stage.x.bcv
+    x_converter = stage.x.converter
+    z_converter = z_drive.converter
+    z_bcv_hysteresis = z_drive.bcv_hysteresis
 
     # ---- Row geometry ----
     if direction == 1:
@@ -310,17 +301,15 @@ def scan_row(
     t_settle_end = time.perf_counter()
 
     # ---- 3. Start per-row polling threads ----
-    x_polling = start_motion_polling(hw.x_bcv, hw.x_converter)
-    z_polling = start_polling(
-        hw.z_bcv_hysteresis, hw.z_converter, target_hz=50, startup_hz=25, motion_threshold_um=0.05
-    )
+    x_polling = start_motion_polling(x_bcv, x_converter)
+    z_polling = start_polling(z_bcv_hysteresis, z_converter, target_hz=50, startup_hz=25, motion_threshold_um=0.05)
 
     # ---- 4. Warmup camera ----
     for _ in range(cfg.warmup_frames):
-        hw.current_image[0] = None
-        hw.acquisition.Acquire(hw.acq_context, None)
-        if hw.current_image[0] is not None:
-            hw.current_image[0].Dispose()
+        current_image[0] = None
+        scope.acquisition.Acquire(scope.context, None)
+        if current_image[0] is not None:
+            current_image[0].Dispose()
     t_warmup_end = time.perf_counter()
 
     # ---- 5. Start X motion ----
@@ -343,11 +332,11 @@ def scan_row(
 
     while True:
         t_start = time.perf_counter()
-        hw.current_image[0] = None
-        hw.acquisition.Acquire(hw.acq_context, None)
+        current_image[0] = None
+        scope.acquisition.Acquire(scope.context, None)
         t_end = time.perf_counter()
 
-        if hw.current_image[0] is not None:
+        if current_image[0] is not None:
             x_now = x_polling.samples[-1].axis_um if x_polling.samples else None
 
             # Start Z tracking when X approaches chip edge
@@ -384,7 +373,7 @@ def scan_row(
                 last_saved_x is not None and x_now is not None and abs(x_now - last_saved_x) < cfg.target_advance_um
             )
             if not is_last and not_advanced:
-                hw.current_image[0].Dispose()
+                current_image[0].Dispose()
                 row_skip_count += 1
             else:
                 save_queue.put(
@@ -393,7 +382,7 @@ def scan_row(
                         row_idx,
                         t_start,
                         t_end,
-                        hw.current_image[0],
+                        current_image[0],
                         row_y,
                         list(x_polling.samples),
                         list(z_polling.samples),
@@ -759,12 +748,6 @@ def run(
     stage = scope.stage
     z_drive = scope.z
 
-    # Fast position readers
-    x_bcv = stage.x.bcv
-    x_converter = stage.x.converter
-    z_converter = z_drive.converter
-    z_bcv_hysteresis = z_drive.bcv_hysteresis or z_drive.bcv
-
     # Switch objective if requested
     if objective_mag is not None:
         if scope.switch_objective_mag(objective_mag):
@@ -779,7 +762,6 @@ def run(
 
     # Camera
     camera = scope.camera
-    acquisition = scope.acquisition
 
     # Configure camera
     camera.trigger_mode = 0  # CONTINUOUS
@@ -818,13 +800,12 @@ def run(
     # ---- Set up acquisition context ----
     from LeicaMicrosystems.HardwareModel import Extensions
 
-    context = scope.context
     current_image = [None]
 
     def on_image(image):
         current_image[0] = image
 
-    context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(on_image)
+    scope.context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(on_image)
 
     # ---- Set up saver threads ----
     save_queue: queue.Queue = queue.Queue()
@@ -921,19 +902,6 @@ def run(
     # Scan speed
     x_speed_um_s = speed_mm * 1000
 
-    # ---- Build scan_row config ----
-    hw = ScanHardware(
-        stage=stage,
-        z_drive=z_drive,
-        acquisition=acquisition,
-        acq_context=context,
-        current_image=current_image,
-        x_bcv=x_bcv,
-        x_converter=x_converter,
-        z_converter=z_converter,
-        z_bcv_hysteresis=z_bcv_hysteresis,
-    )
-
     cfg = RowConfig(
         plane_a=plan.plane_a,
         plane_b=plan.plane_b,
@@ -968,7 +936,8 @@ def run(
                 row_x_max,
                 direction,
                 len(plan.rows),
-                hw=hw,
+                scope=scope,
+                current_image=current_image,
                 cfg=cfg,
                 save_queue=save_queue,
                 global_frame_idx=global_frame_idx,

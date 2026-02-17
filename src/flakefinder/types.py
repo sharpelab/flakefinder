@@ -358,6 +358,17 @@ class ScanMeta(TypedDict):
     position_stream: list[PositionStreamSample]
 
 
+class ChipInfoMeta(TypedDict):
+    """Chip geometry info embedded in chip scan metadata."""
+
+    chips_meta: str
+    chip_index: int
+    bbox_stage_um: BBox
+    centroid_stage_um: Point2F
+    area_um2: float
+    hull_vertices: int
+
+
 class ChipScanMeta(TypedDict):
     """Top-level chip scan metadata — all fields required.
 
@@ -378,4 +389,4 @@ class ChipScanMeta(TypedDict):
     position_stream: list[PositionStreamSample]
     scan_params: ChipScanParamsMeta
     focus_plane: FocusPlaneMeta
-    chip_info: dict[str, Any]
+    chip_info: ChipInfoMeta

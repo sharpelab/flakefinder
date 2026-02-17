@@ -921,49 +921,37 @@ class ZDrive(Axis):
         super().__init__(unit)
 
         # Hysteresis-corrected interface for accurate position during motion
-        self._bcv_hysteresis = get_interface(unit, IID.IID_BASIC_CONTROL_VALUE_HYSTERESIS_CORRECTED)
+        bcv_hyst: BasicControlValue | None = get_interface(unit, IID.IID_BASIC_CONTROL_VALUE_HYSTERESIS_CORRECTED)
+        assert bcv_hyst is not None, "Z drive must support hysteresis-corrected BCV"
+        self._bcv_hysteresis: BasicControlValue = bcv_hyst
 
     @property
-    def position_um_hysteresis_corrected(self) -> float | None:
+    def position_um_hysteresis_corrected(self) -> float:
         """Current Z position with hysteresis correction (more accurate during motion).
 
         The Z axis has ~45 µm of mechanical backlash. During motion:
         - Regular position_um lags by ~20-25 µm
         - This corrected value compensates based on motion direction
-
-        Returns:
-            Position in microns, or None if interface not available.
         """
-        if self._bcv_hysteresis is None:
-            return None
         native = self._bcv_hysteresis.GetControlValue()
         return self._converter.GetMetricsValue(native)
 
     @property
-    def bcv_hysteresis(self):
-        """Direct hysteresis-corrected BCV interface for fast polling, or None."""
+    def bcv_hysteresis(self) -> BasicControlValue:
+        """Direct hysteresis-corrected BCV interface for fast polling."""
         return self._bcv_hysteresis
-
-    @property
-    def supports_hysteresis_correction(self) -> bool:
-        """Check if hysteresis-corrected position is available."""
-        return self._bcv_hysteresis is not None
 
     def move_to_corrected(self, position_um: float) -> None:
         """Move to position using hysteresis-corrected interface.
 
         The SDK's hysteresis-corrected interface compensates for ~45 µm
         of mechanical backlash based on motion history/direction.
-        Falls back to regular move_to if not available.
 
         Args:
             position_um: Target position in microns.
         """
-        if self._bcv_hysteresis is not None:
-            native = self._um_to_native(position_um)
-            self._bcv_hysteresis.SetControlValue(native)
-        else:
-            self.move_to(position_um)
+        native = self._um_to_native(position_um)
+        self._bcv_hysteresis.SetControlValue(native)
 
     @classmethod
     def from_connection(cls, conn: LeicaConnection) -> ZDrive:
