@@ -39,7 +39,7 @@ Pick from this menu based on relevance to the task. The subtask will read these 
 | `src/flakefinder/leica/camera.py` | Camera capture, image acquisition |
 | `src/flakefinder/leica/core.py` | Connection management, LeicaConnection |
 | `src/flakefinder/leica/enums.py` | SDK constants, interface IDs |
-| `autofocus_demo.py` | Autofocus logic, Z scanning patterns |
+| `commands/autofocus.py` | Autofocus logic, Z scanning patterns |
 | `commands/scan.py` | Scanning patterns, position polling, frame capture |
 | `commands/focus_map.py` | Focus map grid autofocus |
 | `commands/stitch.py` | Image stitching |

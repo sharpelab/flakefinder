@@ -45,7 +45,7 @@ You run with full permission bypass (`--dangerously-skip-permissions`). Every to
 - **Files**: Always grab files from microscope and run analysis locally. Never run analysis remotely. Use `sls pull` / `sls push` for transfers (handles mkdir automatically). Fall back to `rsync -a --quiet` for bulk transfers or non-repo paths. File routing:
   - `scans/` — pipeline scan data (overview, chip scans, focus maps from `find_flakes.py`)
   - `afs/` — one-off autofocus runs
-  - `captures/` — one-off captures (`capture_util.py`)
+  - `captures/` — one-off captures (`commands/capture.py`)
   - `downloads/` — reference data, downloaded flakes, analysis artifacts
 - **Images**: `present` results for the user automatically after analysis runs. "present" = open file for the user.
 - **Images in notebook**: Use `scan-nb --attach`, not manual copy + link.
@@ -66,7 +66,7 @@ Paths for push/pull are relative to the flakefinder repo root.
 
 **Autofocus at a point:**
 ```
-sls autofocus_demo.py --x [X] --y [Y] --z [Z_REF] --fine --z-speed 1250 --settle-time 0.2 --white-balance 2.51,1.02,1.41 --output afs/[name] --clean -q
+sls commands/autofocus.py --x [X] --y [Y] --z [Z_REF] --fine --z-speed 1250 --settle-time 0.2 --white-balance 2.51,1.02,1.41 --output afs/[name] --clean -q
 ```
 - Always use `--z` with a known reference Z (from notebook or microscope_reference.md)
 - Default to 1/4 Z speed (1250 µm/s) for 20x
@@ -83,7 +83,7 @@ sls commands/focus_map.py --chips-meta scans/[prefix]_chips.json --chip [N] --sa
 
 **Capture at a point:**
 ```
-sls capture_util.py --x [X] --y [Y] --z [Z] --white-balance 2.51,1.02,1.41 -q captures/[name].png
+sls commands/capture.py --x [X] --y [Y] --z [Z] --white-balance 2.51,1.02,1.41 -q captures/[name].png
 ```
 - If needed, use `scripts/image_stats.py` after grabbing locally to check brightness, clipping, and channel balance
 

@@ -70,9 +70,9 @@ See [docs/setup.md](docs/setup.md) for detailed setup instructions.
 │   ├── focus_map.py         # Autofocus grid sampling across a chip
 │   ├── analyze_focus_map.py # Analyze focus map, fit tilt plane
 │   ├── chip_scan.py         # Chip scan with continuous Z tracking
+│   ├── autofocus.py         # Single-point Z autofocus
+│   ├── capture.py           # Single image capture utility
 │   └── stage.py             # Stage/objective control utility
-├── autofocus_demo.py        # Single-point Z autofocus
-├── capture_util.py          # Single image capture utility
 └── archive/                 # Superseded scripts kept for reference
 ```
 
