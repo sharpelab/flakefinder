@@ -373,8 +373,17 @@ def scan_row(
                     t_z_started = time.perf_counter()
                     z_start_x_um = x_now
 
-            # Position-based frame save/skip
-            if last_saved_x is not None and x_now is not None and abs(x_now - last_saved_x) < cfg.target_advance_um:
+            # Check if stage has arrived (before skip logic)
+            is_last = x_now is not None and (
+                (direction == 1 and x_now >= x_end_pos - _STOP_MARGIN_UM)
+                or (direction == -1 and x_now <= x_end_pos + _STOP_MARGIN_UM)
+            )
+
+            # Position-based frame save/skip (always save the last frame)
+            not_advanced = (
+                last_saved_x is not None and x_now is not None and abs(x_now - last_saved_x) < cfg.target_advance_um
+            )
+            if not is_last and not_advanced:
                 hw.current_image[0].Dispose()
                 row_skip_count += 1
             else:
@@ -399,11 +408,7 @@ def scan_row(
                 global_frame_idx += 1
                 row_frame_count += 1
 
-            # Stop when stage reaches target
-            if x_now is not None and (
-                (direction == 1 and x_now >= x_end_pos - _STOP_MARGIN_UM)
-                or (direction == -1 and x_now <= x_end_pos + _STOP_MARGIN_UM)
-            ):
+            if is_last:
                 break
 
         # Safety timeout

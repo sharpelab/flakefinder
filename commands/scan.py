@@ -520,8 +520,17 @@ def run(
                 row_capture_count += 1
                 x_now = x_polling.samples[-1].axis_um if x_polling.samples else None
 
-                # Position-based frame save/skip
-                if last_saved_x is not None and x_now is not None and abs(x_now - last_saved_x) < target_advance_um:
+                # Check if stage has arrived (before skip logic)
+                is_last = x_now is not None and (
+                    (direction == 1 and x_now >= x_end_pos - _STOP_MARGIN_UM)
+                    or (direction == -1 and x_now <= x_end_pos + _STOP_MARGIN_UM)
+                )
+
+                # Position-based frame save/skip (always save the last frame)
+                not_advanced = (
+                    last_saved_x is not None and x_now is not None and abs(x_now - last_saved_x) < target_advance_um
+                )
+                if not is_last and not_advanced:
                     current_image[0].Dispose()
                     row_skip_count += 1
                 else:
@@ -543,11 +552,7 @@ def run(
                     global_frame_idx += 1
                     row_frame_count += 1
 
-                # Stop when stage reaches target (frees bus for SDK move completion)
-                if x_now is not None and (
-                    (direction == 1 and x_now >= x_end_pos - _STOP_MARGIN_UM)
-                    or (direction == -1 and x_now <= x_end_pos + _STOP_MARGIN_UM)
-                ):
+                if is_last:
                     break
 
             # Safety timeout
