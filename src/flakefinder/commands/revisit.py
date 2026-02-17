@@ -413,6 +413,7 @@ def run(
                     "total": round(total_s, 3),
                 },
                 "image": filename,
+                "sharpness_curve": fc.sharpness_curve,
             }
         )
 
