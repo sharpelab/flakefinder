@@ -34,6 +34,7 @@ from flakefinder.scan_utils import (
     parse_area_rect,
     parse_position,
     parse_white_balance,
+    smooth_frame_positions,
     validate_area_rect,
 )
 from flakefinder.types import AreaRect, GainRGB, Point2F
@@ -628,6 +629,9 @@ def run(
     meta["total_skipped"] = total_skipped
     meta["position_sample_count"] = len(all_position_samples)
     meta["position_stream"] = all_position_samples
+
+    # Smooth frame positions from raw position polls
+    smooth_frame_positions(meta)
 
     # Save metadata
     meta_path = os.path.join(output, "scan_meta.json")

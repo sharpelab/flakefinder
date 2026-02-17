@@ -50,6 +50,7 @@ from flakefinder.scan_utils import (
     compute_plane_z,
     interpolate_position,
     parse_white_balance,
+    smooth_frame_positions,
 )
 from flakefinder.types import (
     ChipGeometry,
@@ -1142,6 +1143,9 @@ def run(
         "position_stream": all_position_samples,
         "frames": saved_frames_meta,
     }
+
+    # Smooth frame positions from raw position polls
+    smooth_frame_positions(meta, quiet=quiet)
 
     # Save metadata
     meta_path = os.path.join(output, "scan_meta.json")

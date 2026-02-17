@@ -28,47 +28,6 @@ DEFAULT_SCAN_DIR = REPO_DIR / "test_area_2"
 CALIBRATION_DIR = REPO_DIR / "calibration"
 
 
-def smooth_frame_positions(meta: dict, *, quiet: bool = False) -> None:
-    """Smooth frame x_start values using the raw position sample stream.
-
-    Applies savgol smoothing to the ~63 Hz position polls per row, then
-    evaluates the smooth curve at each frame's t_start.  This eliminates
-    direction-dependent timing bias from the per-poll interpolation
-    (~49 µm offset at 10 mm/s reduced to <5 µm).
-
-    Modifies meta["frames"] in place.  No-op if position_stream is absent.
-    """
-    if "position_stream" not in meta:
-        return
-
-    ps = meta["position_stream"]
-    frames = meta["frames"]
-    rows = meta["rows"]
-
-    count = 0
-    for row in rows:
-        row_idx = row["row_idx"]
-        row_ps = [s for s in ps if s["row"] == row_idx]
-        if len(row_ps) < 5:
-            continue
-
-        t_ps = np.array([(s["t_before"] + s["t_after"]) / 2 for s in row_ps])
-        x_ps = np.array([s["x_um"] for s in row_ps])
-
-        win = min(15, len(x_ps) if len(x_ps) % 2 == 1 else len(x_ps) - 1)
-        if win < 5:
-            continue
-        x_smooth = savgol_filter(x_ps, win, 3)
-
-        for fi in range(row["frame_start"], row["frame_end"]):
-            f = frames[fi]
-            f["x_start"] = float(np.interp(f["t_start"], t_ps, x_smooth))
-            count += 1
-
-    if not quiet:
-        print(f"Position smoothing: updated {count} frames from {len(ps)} raw samples")
-
-
 @dataclass
 class StitchResult:
     """Output from stitch run()."""
@@ -573,7 +532,6 @@ def run(
     show_frame_outlines: bool = False,
     savgol_window: int = 0,
     bicubic_deskew: bool = False,
-    smooth_positions: bool = True,
     quiet: bool = False,
     output: str | None = None,
 ) -> StitchResult:
@@ -595,9 +553,6 @@ def run(
 
     if "rows" not in meta:
         raise ValueError("scan_meta.json has no 'rows' array — is this a valid scan directory?")
-
-    if smooth_positions:
-        smooth_frame_positions(meta, quiet=quiet)
 
     rows = meta["rows"]
     optics = meta["optics"]
@@ -941,11 +896,6 @@ def _build_parser():
         help="Draw frame outlines",
     )
     parser.add_argument("--savgol-window", type=int, default=0, help="Savgol smoothing window (0=off)")
-    parser.add_argument(
-        "--no-pos-smooth",
-        action="store_true",
-        help="Disable position sample smoothing (use raw interpolated x_start)",
-    )
     parser.add_argument("--bicubic", action="store_true", help="Use bicubic deskew (slower, slightly sharper)")
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress progress output")
     parser.add_argument("-o", "--output", type=str, default=None, help="Output filename")
@@ -975,7 +925,6 @@ def main() -> int:
             show_frame_outlines=args.show_frame_outlines,
             savgol_window=args.savgol_window,
             bicubic_deskew=args.bicubic,
-            smooth_positions=not args.no_pos_smooth,
             quiet=args.quiet,
             output=args.output,
         )

@@ -210,6 +210,54 @@ def interpolate_position(
     return x0 + alpha * (x1 - x0)
 
 
+def smooth_frame_positions(meta: dict, *, quiet: bool = False) -> None:
+    """Smooth frame x_start and x_vel using the raw position sample stream.
+
+    Applies savgol smoothing to the ~63 Hz position polls per row, then
+    evaluates the smooth curve at each frame's t_start.  Also recomputes
+    x_vel from the savgol derivative.
+
+    Modifies meta["frames"] in place.  No-op if position_stream is absent.
+    """
+    from scipy.signal import savgol_filter
+
+    if "position_stream" not in meta:
+        return
+
+    ps = meta["position_stream"]
+    frames = meta["frames"]
+    rows = meta["rows"]
+
+    count = 0
+    for row in rows:
+        row_idx = row["row_idx"]
+        row_ps = [s for s in ps if s["row"] == row_idx]
+        if len(row_ps) < 5:
+            continue
+
+        t_ps = np.array([(s["t_before"] + s["t_after"]) / 2 for s in row_ps])
+        x_ps = np.array([s["x_um"] for s in row_ps])
+
+        win = min(15, len(x_ps) if len(x_ps) % 2 == 1 else len(x_ps) - 1)
+        if win < 5:
+            continue
+        x_smooth = savgol_filter(x_ps, win, 3)
+
+        # Velocity from savgol derivative
+        dt_mean = float(np.mean(np.diff(t_ps)))
+        x_vel_smooth = savgol_filter(x_ps, win, 3, deriv=1, delta=dt_mean)
+
+        for fi in range(row["frame_start"], row["frame_end"]):
+            f = frames[fi]
+            t = f["t_start"]
+            f["x_start"] = float(np.interp(t, t_ps, x_smooth))
+            f["x_vel"] = float(np.interp(t, t_ps, x_vel_smooth))
+            count += 1
+
+    if not quiet:
+        print(f"Position smoothing: updated {count} frames from {len(ps)} raw samples")
+
+
 # ============================================================================
 # Geometry helpers
 # ============================================================================
