@@ -104,6 +104,10 @@ def main():
         if ref not in pending_names and not (ATTACH_DIR / ref).exists():
             die(f"entry references ![[{ref}]] but no such file in {ATTACH_DIR}")
 
+    # Check for manual timestamps (scan-nb adds these automatically)
+    if re.match(r"\*\*\d{2}-\d{2}\s+\d{2}:\d{2}\*\*", text):
+        die("entry starts with a timestamp — scan-nb adds these automatically, remove it")
+
     # --- All validation passed, now write ---
 
     # Copy attachments
