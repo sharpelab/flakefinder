@@ -71,9 +71,4 @@ include = ["scripts/segment_flakes.py"]
 [tool.ty.overrides.rules]
 no-matching-overload = "ignore"
 
-# focus_map.py — hardware scripts have scoping ty can't follow
-[[tool.ty.overrides]]
-include = ["focus_map.py"]
-[tool.ty.overrides.rules]
-unresolved-reference = "ignore"
 
