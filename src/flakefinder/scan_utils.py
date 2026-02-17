@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import bisect
+import subprocess
 from argparse import ArgumentTypeError
 from collections.abc import Sequence
 from functools import cache
@@ -44,6 +45,36 @@ def _repo_root() -> Path:
 
 
 CALIBRATION_DIR = _repo_root() / "calibration"
+
+
+@cache
+def get_git_version() -> str:
+    """Return short git commit hash with optional '-dirty' suffix.
+
+    Returns ``"unknown"`` if git is unavailable or the repo has no commits.
+    """
+    try:
+        root = _repo_root()
+        rev = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        if rev.returncode != 0:
+            return "unknown"
+        sha = rev.stdout.strip()
+        dirty = subprocess.run(
+            ["git", "diff", "--quiet", "HEAD"],
+            cwd=root,
+            capture_output=True,
+        )
+        if dirty.returncode != 0:
+            sha += "-dirty"
+        return sha
+    except Exception:
+        return "unknown"
+
 
 # Binning index (SDK) -> binning factor (NxN)
 _BINNING_FACTOR = {0: 1, 1: 2, 2: 3}

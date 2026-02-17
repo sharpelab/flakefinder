@@ -9,6 +9,7 @@ Loader: `flakefinder.data_utils.load_scan_meta()`.
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `git_version` | string | Git commit hash (e.g. `"b36777c"` or `"b36777c-dirty"`; `"unknown"` if git unavailable) |
 | `timestamp` | string | ISO 8601 timestamp |
 | `x_min_um` | float | Scan area X minimum (µm) |
 | `x_max_um` | float | Scan area X maximum (µm) |

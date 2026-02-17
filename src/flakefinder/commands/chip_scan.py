@@ -48,6 +48,7 @@ from flakefinder.scan_utils import (
     build_microscope_meta,
     compute_planar_scan_plan,
     compute_plane_z,
+    get_git_version,
     interpolate_position,
     parse_white_balance,
     smooth_frame_positions,
@@ -1077,6 +1078,7 @@ def run(
 
     # Build metadata (commands/scan.py compatible for stitching)
     meta = {
+        "git_version": get_git_version(),
         "timestamp": datetime.now().isoformat(),
         "command": sys.argv,
         "x_min_um": min(r.x_min_um for r in plan.rows),

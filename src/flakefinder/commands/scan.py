@@ -31,6 +31,7 @@ from flakefinder.leica.polling import start_motion_polling
 from flakefinder.scan_utils import (
     DEFAULT_WB,
     build_microscope_meta,
+    get_git_version,
     interpolate_position,
     parse_area_rect,
     parse_position,
@@ -428,6 +429,7 @@ def run(
         savers.append(t)
 
     meta = {
+        "git_version": get_git_version(),
         "timestamp": datetime.now().isoformat(),
         "command": sys.argv,
         "x_min_um": x_min,

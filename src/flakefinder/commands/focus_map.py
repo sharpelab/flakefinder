@@ -30,7 +30,7 @@ from PIL import Image as PILImage
 from flakefinder.data_utils import load_chip_geometry
 from flakefinder.leica.autofocus import ALL_SHARPNESS_METRICS, AutofocusResult
 from flakefinder.leica.microscope import Microscope
-from flakefinder.scan_utils import DEFAULT_WB, build_microscope_meta, parse_white_balance
+from flakefinder.scan_utils import DEFAULT_WB, build_microscope_meta, get_git_version, parse_white_balance
 from flakefinder.types import ChipGeometry, GainRGB, Point2F
 
 
@@ -600,6 +600,7 @@ def run(
     duration_s = time.perf_counter() - start_time
 
     output = {
+        "git_version": get_git_version(),
         "timestamp": datetime.now().isoformat(),
         "command": sys.argv,
         "duration_s": round(duration_s, 2),

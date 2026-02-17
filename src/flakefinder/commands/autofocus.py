@@ -23,7 +23,7 @@ from flakefinder.leica.autofocus import (
     continuous_autofocus,
     sharpness,
 )
-from flakefinder.scan_utils import parse_white_balance
+from flakefinder.scan_utils import get_git_version, parse_white_balance
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -354,6 +354,7 @@ def main():
         summary_path = None
         if args.output:
             summary = af_result.to_dict()
+            summary["git_version"] = get_git_version()
             summary["timestamp"] = datetime.now().isoformat()
             summary["command"] = sys.argv
             summary["params"] = {

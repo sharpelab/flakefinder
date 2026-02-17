@@ -58,7 +58,13 @@ from typing import NamedTuple, TypedDict
 from flakefinder.cli_utils import park_microscope
 from flakefinder.commands import analyze_focus_map, chip_scan, find_chips, focus_map, scan, stage, stitch
 from flakefinder.leica import Microscope
-from flakefinder.scan_utils import CALIBRATION_DIR, parse_area_rect, parse_white_balance, validate_area_rect
+from flakefinder.scan_utils import (
+    CALIBRATION_DIR,
+    get_git_version,
+    parse_area_rect,
+    parse_white_balance,
+    validate_area_rect,
+)
 from flakefinder.types import AreaRect, GainRGB
 
 
@@ -1385,6 +1391,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
 
     # Save args to checkpoint for reference
     checkpoint["args"] = {
+        "git_version": get_git_version(),
         "preset": p.preset_name,
         "area_rect": args.area_rect,
         "initial_z": args.initial_z,
