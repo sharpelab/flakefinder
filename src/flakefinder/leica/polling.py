@@ -36,6 +36,7 @@ class PollingHandle:
     _converter: Any = field(default=None, repr=False)
     _target_hz: float = field(default=DEFAULT_POLL_HZ, repr=False)
     _startup_hz: float | None = field(default=None, repr=False)
+    _motion_threshold_um: float = field(default=_MOTION_THRESHOLD_UM, repr=False)
 
     def start(self) -> None:
         """Start the polling thread (for use after paused=True)."""
@@ -44,7 +45,11 @@ class PollingHandle:
         self.thread = threading.Thread(
             target=poll_position,
             args=(self._bcv, self._converter, self.samples, self.stop),
-            kwargs={"target_hz": self._target_hz, "startup_hz": self._startup_hz},
+            kwargs={
+                "target_hz": self._target_hz,
+                "startup_hz": self._startup_hz,
+                "motion_threshold_um": self._motion_threshold_um,
+            },
             daemon=True,
         )
         self.thread.start()
@@ -64,11 +69,13 @@ def poll_position(
     *,
     target_hz: float = DEFAULT_POLL_HZ,
     startup_hz: float | None = None,
+    motion_threshold_um: float = _MOTION_THRESHOLD_UM,
 ) -> None:
     """Thread-target: poll position, convert, append PositionSample, sleep to target rate.
 
     When startup_hz is provided, starts at that rate and ramps to target_hz
-    once motion is detected (>1 µm from initial position).
+    once motion is detected (position moves more than motion_threshold_um
+    from initial position).
 
     Args:
         bcv: BasicControlValue interface (or hysteresis-corrected variant).
@@ -77,6 +84,7 @@ def poll_position(
         stop: Event to signal thread shutdown.
         target_hz: Target polling rate in Hz.
         startup_hz: If set, initial polling rate before motion detected.
+        motion_threshold_um: Distance from initial position to trigger ramp.
     """
     if startup_hz is not None:
         period = 1.0 / startup_hz
@@ -94,7 +102,7 @@ def poll_position(
         um = converter.GetMetricsValue(native)
         samples.append(PositionSample(t_before, t_after, um))
 
-        if not ramped and abs(um - initial_pos) > _MOTION_THRESHOLD_UM:
+        if not ramped and abs(um - initial_pos) > motion_threshold_um:
             period = 1.0 / target_hz
             ramped = True
 
@@ -109,6 +117,7 @@ def start_polling(
     *,
     target_hz: float = DEFAULT_POLL_HZ,
     startup_hz: float | None = None,
+    motion_threshold_um: float = _MOTION_THRESHOLD_UM,
     paused: bool = False,
 ) -> PollingHandle:
     """Start a position polling thread.
@@ -119,19 +128,26 @@ def start_polling(
     compete with polling on the same axis.
 
     When startup_hz is provided, the polling thread starts at that rate
-    and ramps to target_hz once motion is detected (>1 µm from initial sample).
+    and ramps to target_hz once motion is detected.
 
     Args:
         bcv: BasicControlValue interface (or hysteresis-corrected variant).
         converter: MetricsConverter for native -> microns.
         target_hz: Target polling rate in Hz.
         startup_hz: If set, initial polling rate before motion detected.
+        motion_threshold_um: Distance from initial position to trigger ramp.
         paused: If True, capture initial sample but don't start thread.
 
     Returns:
         PollingHandle with .samples, .stop, .thread, .start(), and .join().
     """
-    handle = PollingHandle(_bcv=bcv, _converter=converter, _target_hz=target_hz, _startup_hz=startup_hz)
+    handle = PollingHandle(
+        _bcv=bcv,
+        _converter=converter,
+        _target_hz=target_hz,
+        _startup_hz=startup_hz,
+        _motion_threshold_um=motion_threshold_um,
+    )
 
     # Capture initial position before thread starts
     t_before = time.perf_counter()
@@ -150,11 +166,18 @@ def start_motion_polling(
     *,
     target_hz: float = DEFAULT_POLL_HZ,
     startup_hz: float = STARTUP_POLL_HZ,
+    motion_threshold_um: float = _MOTION_THRESHOLD_UM,
 ) -> PollingHandle:
-    """Start polling for use during a move: 10 Hz ramp to 100 Hz on motion.
+    """Start polling for use during a move: slow ramp to target Hz on motion.
 
     Convenience wrapper around start_polling with adaptive Hz defaults.
-    No paused mode — 10 Hz startup is gentle enough to coexist with
+    No paused mode — low startup Hz is gentle enough to coexist with
     move_to_async on the bus.
     """
-    return start_polling(bcv, converter, target_hz=target_hz, startup_hz=startup_hz)
+    return start_polling(
+        bcv,
+        converter,
+        target_hz=target_hz,
+        startup_hz=startup_hz,
+        motion_threshold_um=motion_threshold_um,
+    )
