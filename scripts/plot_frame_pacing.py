@@ -27,21 +27,21 @@ def plot_pacing(scan_dirs, output=None):
         ax = axes[idx, 0]
         meta = load_scan(scan_dir)
         frames = meta["frames"]
-        rows = meta["rows"]
+        rows = meta["lines"]
         label = Path(scan_dir).name
 
         row_colors = ["C0", "C1", "C2", "C3", "C4", "C5"]
 
         for f in frames:
-            ri = f["row"]
+            ri = f["line"]
             row = rows[ri]
             is_f0 = f["n"] == row["frame_start"]
             is_f1 = f["n"] == row["frame_start"] + 1
             color = "red" if is_f0 else ("orange" if is_f1 else row_colors[ri % len(row_colors)])
             ax.barh(
                 ri,
-                f["t_end"] - f["t_start"],
-                left=f["t_start"],
+                f["capture_duration_s"],
+                left=f["t_capture"],
                 height=0.6,
                 color=color,
                 alpha=0.7,
@@ -51,13 +51,13 @@ def plot_pacing(scan_dirs, output=None):
 
         # Annotate f0→f1 gaps
         for row in rows:
-            rf = sorted([f for f in frames if f["row"] == row["row_idx"]], key=lambda f: f["t_start"])
+            rf = sorted([f for f in frames if f["line"] == row["line_idx"]], key=lambda f: f["t_capture"])
             if len(rf) >= 2:
-                dt01_ms = (rf[1]["t_start"] - rf[0]["t_start"]) * 1000
-                mid_t = (rf[0]["t_end"] + rf[1]["t_start"]) / 2
+                dt01_ms = (rf[1]["t_capture"] - rf[0]["t_capture"]) * 1000
+                mid_t = ((rf[0]["t_capture"] + rf[0]["capture_duration_s"]) + rf[1]["t_capture"]) / 2
                 ax.annotate(
                     f"{dt01_ms:.0f}ms",
-                    xy=(mid_t, row["row_idx"]),
+                    xy=(mid_t, row["line_idx"]),
                     ha="center",
                     va="center",
                     fontsize=7,

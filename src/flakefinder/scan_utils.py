@@ -211,11 +211,11 @@ def interpolate_position(
 
 
 def smooth_frame_positions(meta: dict, *, quiet: bool = False) -> None:
-    """Smooth frame x_start and x_vel using the raw position sample stream.
+    """Smooth frame x_um and x_vel_um_s using the raw position sample stream.
 
-    Applies savgol smoothing to the ~63 Hz position polls per row, then
-    evaluates the smooth curve at each frame's t_start.  Also recomputes
-    x_vel from the savgol derivative.
+    Applies savgol smoothing to the ~63 Hz position polls per line, then
+    evaluates the smooth curve at each frame's t_capture.  Also recomputes
+    x_vel_um_s from the savgol derivative.
 
     Modifies meta["frames"] in place.  No-op if position_stream is absent.
     """
@@ -226,17 +226,17 @@ def smooth_frame_positions(meta: dict, *, quiet: bool = False) -> None:
 
     ps = meta["position_stream"]
     frames = meta["frames"]
-    rows = meta["rows"]
+    lines = meta["lines"]
 
     count = 0
-    for row in rows:
-        row_idx = row["row_idx"]
-        row_ps = [s for s in ps if s["row"] == row_idx]
-        if len(row_ps) < 5:
+    for line in lines:
+        line_idx = line["line_idx"]
+        line_ps = [s for s in ps if s["line"] == line_idx]
+        if len(line_ps) < 5:
             continue
 
-        t_ps = np.array([(s["t_before"] + s["t_after"]) / 2 for s in row_ps])
-        x_ps = np.array([s["x_um"] for s in row_ps])
+        t_ps = np.array([(s["t_before"] + s["t_after"]) / 2 for s in line_ps])
+        x_ps = np.array([s["x_um"] for s in line_ps])
 
         win = min(15, len(x_ps) if len(x_ps) % 2 == 1 else len(x_ps) - 1)
         if win < 5:
@@ -247,11 +247,11 @@ def smooth_frame_positions(meta: dict, *, quiet: bool = False) -> None:
         dt_mean = float(np.mean(np.diff(t_ps)))
         x_vel_smooth = savgol_filter(x_ps, win, 3, deriv=1, delta=dt_mean)
 
-        for fi in range(row["frame_start"], row["frame_end"]):
+        for fi in range(line["frame_start"], line["frame_end"]):
             f = frames[fi]
-            t = f["t_start"]
-            f["x_start"] = float(np.interp(t, t_ps, x_smooth))
-            f["x_vel"] = float(np.interp(t, t_ps, x_vel_smooth))
+            t = f["t_capture"]
+            f["x_um"] = float(np.interp(t, t_ps, x_smooth))
+            f["x_vel_um_s"] = float(np.interp(t, t_ps, x_vel_smooth))
             count += 1
 
     if not quiet:

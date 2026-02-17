@@ -147,7 +147,7 @@ def main() -> int:
             frame_h_px = scan_meta["camera"]["frame_height_px"]
             frame_positions: dict[int, tuple[float, float]] = {}
             for fr in scan_meta["frames"]:
-                frame_positions[fr["n"]] = (fr["x_start"], fr["y_um"])
+                frame_positions[fr["n"]] = (fr["x_um"], fr["y_um"])
 
             for d in all_flat:
                 m = re.search(r"\d+", d["frame"])

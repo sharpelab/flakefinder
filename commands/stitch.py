@@ -21,7 +21,7 @@ from PIL import Image, ImageColor, ImageDraw, ImageFont
 from scipy.signal import savgol_filter
 
 from flakefinder.scan_utils import apply_flatfield, parse_area_rect
-from flakefinder.types import AreaRect, AreaRectI, Point2I, ScanRowMeta
+from flakefinder.types import AreaRect, AreaRectI, Point2I, ScanLineMeta
 
 REPO_DIR = Path(__file__).parent.parent
 DEFAULT_SCAN_DIR = REPO_DIR / "test_area_2"
@@ -190,7 +190,7 @@ def draw_grid(
 
 def draw_row_labels(
     background: Image.Image,
-    rows: list[ScanRowMeta],
+    rows: list[ScanLineMeta],
     um_per_px: float,
     stage_bounds_um: AreaRect,
 ) -> Image.Image:
@@ -209,7 +209,7 @@ def draw_row_labels(
 
     pad = 6
     for row in rows:
-        row_idx = row["row_idx"]
+        row_idx = row["line_idx"]
         direction = row["direction"]
         label = f"{row_idx}{'+' if direction > 0 else '-'}"
 
@@ -258,7 +258,7 @@ def draw_frame_outlines(
 
 def stitch_row_to_global(
     meta: dict,
-    row: ScanRowMeta,
+    row: ScanLineMeta,
     frame_w: int,
     frame_h: int,
     um_per_px: float,
@@ -293,7 +293,7 @@ def stitch_row_to_global(
     direction = row["direction"]
 
     # Trim stationary frames at row boundaries (stage parked, camera still capturing)
-    raw_x = np.array([f["x_start"] for f in all_row_frames])
+    raw_x = np.array([f["x_um"] for f in all_row_frames])
     deltas = np.diff(raw_x)
     stationary_thresh = 2.0  # µm — frames closer than this are "stationary"
 
@@ -313,8 +313,8 @@ def stitch_row_to_global(
     # have inaccurate interpolated positions because the actual exposure time
     # differs from t_start. Fix by replacing bubble positions with linear
     # interpolation from their clean neighbors.
-    raw_positions = np.array([f["x_start"] for f in row_frames])
-    raw_times = np.array([(f["t_start"] + f["t_end"]) / 2 for f in row_frames])
+    raw_positions = np.array([f["x_um"] for f in row_frames])
+    raw_times = np.array([f["t_capture"] + f["capture_duration_s"] / 2 for f in row_frames])
     n = len(raw_positions)
 
     if n >= 5:
@@ -551,10 +551,10 @@ def run(
     with open(scan_dir / "scan_meta.json") as f:
         meta = json.load(f)
 
-    if "rows" not in meta:
-        raise ValueError("scan_meta.json has no 'rows' array — is this a valid scan directory?")
+    if "lines" not in meta:
+        raise ValueError("scan_meta.json has no 'lines' array — is this a valid scan directory?")
 
-    rows = meta["rows"]
+    rows = meta["lines"]
     optics = meta["optics"]
     scan_downsample = meta["downsample"]
 
@@ -585,10 +585,10 @@ def run(
     if rows_range:
         if "-" in rows_range:
             start, end = map(int, rows_range.split("-"))
-            rows = [r for r in rows if start <= r["row_idx"] <= end]
+            rows = [r for r in rows if start <= r["line_idx"] <= end]
         else:
             row_idx = int(rows_range)
-            rows = [r for r in rows if r["row_idx"] == row_idx]
+            rows = [r for r in rows if r["line_idx"] == row_idx]
 
     # Calibration
     um_per_px = optics["sample_pixel_x_um"] * scan_downsample * downsample
@@ -635,11 +635,11 @@ def run(
     for row in rows:
         row_frames = meta["frames"][row["frame_start"] : row["frame_end"]]
 
-        all_x = [f["x_start"] for f in row_frames]
+        all_x = [f["x_um"] for f in row_frames]
         x_min = min(all_x)
         x_max = max(all_x)
 
-        row_results.append({"row": row, "x_min": x_min, "x_max": x_max})
+        row_results.append({"line": row, "x_min": x_min, "x_max": x_max})
 
         if not quiet:
             print(f"  Row {row['row_idx']:2d}: {len(row_frames)} frames, X: {x_min:.0f} - {x_max:.0f} µm")
@@ -677,8 +677,8 @@ def run(
     max_y = max(r["y_um"] for r in rows)
 
     for result in row_results:
-        row = result["row"]
-        row_idx = row["row_idx"]
+        row = result["line"]
+        row_idx = row["line_idx"]
 
         # Stitch this row in global coordinates
         row_stitch = stitch_row_to_global(
@@ -825,9 +825,9 @@ def run(
     # Compute average frame step from raw positions (median across all rows)
     all_steps = []
     for rr in row_results:
-        row = rr["row"]
+        row = rr["line"]
         row_frames = meta["frames"][row["frame_start"] : row["frame_end"]]
-        positions = [f["x_start"] for f in row_frames]
+        positions = [f["x_um"] for f in row_frames]
         if len(positions) >= 2:
             steps = [abs(positions[i + 1] - positions[i]) for i in range(len(positions) - 1)]
             all_steps.extend(steps)

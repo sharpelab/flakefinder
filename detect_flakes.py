@@ -52,7 +52,7 @@ def predict_frame(
 
 def compute_stage_coords(flake: dict, frame: dict, um_per_px: float, frame_w: int, frame_h: int):
     cx, cy = flake["center"]
-    frame_x_center = (frame["x_start"] + frame["x_end"]) / 2
+    frame_x_center = frame["x_um"]
     stage_x = frame_x_center + (cx - frame_w / 2) * um_per_px
     stage_y = frame["y_um"] + (cy - frame_h / 2) * um_per_px
     return stage_x, stage_y

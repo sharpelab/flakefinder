@@ -26,7 +26,7 @@ from flakefinder.leica.autofocus import sharpness
 
 def plot_row_map(meta: dict, output_path: Path, *, notes: str | None = None) -> None:
     """Plot chip hull outline with per-row extents and lead-in arrows."""
-    rows = meta.get("rows", [])
+    rows = meta.get("lines", [])
     if not rows:
         print("  No row data for row map")
         return
@@ -51,7 +51,7 @@ def plot_row_map(meta: dict, output_path: Path, *, notes: str | None = None) -> 
     # For large row counts, only label every Nth row
     label_every = max(1, len(rows) // 15)
     for i, r in enumerate(rows):
-        ri = r["row_idx"]
+        ri = r["line_idx"]
         d = r["direction"]
         x_min, x_max = r["x_min_um"], r["x_max_um"]
         color = palette[i % len(palette)]
@@ -110,14 +110,15 @@ def compute_z_tracking_stats(meta: dict) -> dict:
     Returns dict with overall and per-row stats, plus ``n_lead_in``.
     """
     frames = meta["frames"]
-    rows = meta["rows"]
+    rows = meta["lines"]
 
-    # Separate lead-in vs tracking frames (backwards compatible)
-    tracking_frames = [f for f in frames if not f.get("in_lead_in", False)]
-    n_lead_in = len(frames) - len(tracking_frames)
+    # Separate lead-in/lead-out vs tracking frames (backwards compatible)
+    tracking_frames = [f for f in frames if not f.get("in_lead_in", False) and not f.get("in_lead_out", False)]
+    n_lead_in = sum(1 for f in frames if f.get("in_lead_in", False))
+    n_lead_out = sum(1 for f in frames if f.get("in_lead_out", False))
 
     # Overall arrays (tracking frames only)
-    z_errors = np.array([f["z_error"] for f in tracking_frames])
+    z_errors = np.array([f["z_error_um"] for f in tracking_frames])
     abs_errors = np.abs(z_errors)
 
     overall = {
@@ -129,23 +130,24 @@ def compute_z_tracking_stats(meta: dict) -> dict:
         "pct_outside_4um": float(np.mean(abs_errors > 4.0) * 100),
         "n_frames": len(tracking_frames),
         "n_lead_in": n_lead_in,
+        "n_lead_out": n_lead_out,
     }
 
     # Per-row stats (exclude lead-in)
     per_row = []
     for row in rows:
-        row_idx = row["row_idx"]
-        row_frames = [f for f in tracking_frames if f["row"] == row_idx]
+        row_idx = row["line_idx"]
+        row_frames = [f for f in tracking_frames if f["line"] == row_idx]
         if not row_frames:
             continue
-        row_errors = np.array([f["z_error"] for f in row_frames])
+        row_errors = np.array([f["z_error_um"] for f in row_frames])
         row_abs = np.abs(row_errors)
 
         direction = row["direction"]
 
         # Z-jump: first two non-lead-in frames
         if len(row_frames) >= 2:
-            z_jump = abs(row_frames[1]["z_error"] - row_frames[0]["z_error"])
+            z_jump = abs(row_frames[1]["z_error_um"] - row_frames[0]["z_error_um"])
         else:
             z_jump = 0.0
 
@@ -172,24 +174,24 @@ def compute_slope_metrics(meta: dict) -> dict:
     summary.
     """
     frames = meta["frames"]
-    rows_meta = meta["rows"]
+    rows_meta = meta["lines"]
     plane_a = meta["focus_plane"]["a"]  # um/um  (dZ/dX)
     cmd_speed_mm = meta["scan_params"]["scan_speed_mm_s"]
 
-    tracking = [f for f in frames if not f.get("in_lead_in", False)]
+    tracking = [f for f in frames if not f.get("in_lead_in", False) and not f.get("in_lead_out", False)]
 
     per_row: list[dict] = []
     for row in rows_meta:
-        ri = row["row_idx"]
+        ri = row["line_idx"]
         direction = row["direction"]
-        rf = [f for f in tracking if f["row"] == ri]
+        rf = [f for f in tracking if f["line"] == ri]
         if len(rf) < 5:
             continue
 
-        x = np.array([f["x_start"] for f in rf])
-        z = np.array([f["z_actual"] for f in rf])
-        t = np.array([f["t_start"] for f in rf])
-        z_err = np.array([f["z_error"] for f in rf])
+        x = np.array([f["x_um"] for f in rf])
+        z = np.array([f["z_um"] for f in rf])
+        t = np.array([f["t_capture"] for f in rf])
+        z_err = np.array([f["z_error_um"] for f in rf])
         frame_ns = np.array([f["n"] for f in rf])
 
         # 1. Z slope: linear fit of z_actual vs x (dZ/dX, direction-independent)
@@ -306,7 +308,7 @@ def compute_sharpness_values(scan_dir: Path, meta: dict, sample_every: int = 1) 
         s = sharpness(img, method="tenengrad")
         indices.append(frame["n"])
         sharpness_vals.append(s)
-        x_positions.append(frame["x_start"])
+        x_positions.append(frame["x_um"])
         y_positions.append(frame["y_um"])
         row_ids.append(frame["row"])
         processed += 1
@@ -369,7 +371,7 @@ def _plot_spatial_z_error(
     lead_out_mask: list[bool],
 ) -> None:
     """Render the spatial Z error map on *ax*."""
-    x_mm = np.array([f["x_start"] for f in frames]) / 1000
+    x_mm = np.array([f["x_um"] for f in frames]) / 1000
     y_mm = np.array([f["y_um"] for f in frames]) / 1000
     z_err_arr = np.array(z_errors)
     li_mask = np.array(lead_in_mask)
@@ -421,7 +423,7 @@ def plot_analysis(
 ) -> None:
     """Generate combined analysis plot and save to output_path."""
     frames = meta["frames"]
-    n_rows = len(meta["rows"])
+    n_rows = len(meta["lines"])
     spatial_z = kwargs.get("spatial_z", False)
 
     # Determine layout
@@ -442,7 +444,7 @@ def plot_analysis(
 
     # Color map for rows
     cmap = plt.colormaps["viridis"]
-    row_indices = sorted(set(f["row"] for f in frames))
+    row_indices = sorted(set(f["line"] for f in frames))
     row_colors = {r: cmap(i / max(1, len(row_indices) - 1)) for i, r in enumerate(row_indices)}
 
     # --- Panel 1: Z error vs frame number ---
@@ -455,8 +457,8 @@ def plot_analysis(
     lead_out_idx = [i for i, lo in enumerate(lead_out_mask) if lo]
 
     frame_nums = [f["n"] for f in frames]
-    z_errors = [f["z_error"] for f in frames]
-    frame_rows = [f["row"] for f in frames]
+    z_errors = [f["z_error_um"] for f in frames]
+    frame_rows = [f["line"] for f in frames]
     colors = [row_colors[r] for r in frame_rows]
 
     # Tracking frames: colored dots
@@ -521,7 +523,7 @@ def plot_analysis(
     ax_zerr.legend(loc="upper right", fontsize=8)
 
     # Add row boundary markers
-    for row in meta["rows"]:
+    for row in meta["lines"]:
         ax_zerr.axvline(row["frame_start"], color="gray", alpha=0.15, linewidth=0.5)
 
     # Overlay per-row linear fit lines (slope drift)
@@ -603,7 +605,7 @@ def plot_analysis(
     ax_sharp.legend(loc="lower right", fontsize=8)
 
     # Row boundaries
-    for row in meta["rows"]:
+    for row in meta["lines"]:
         ax_sharp.axvline(row["frame_start"], color="gray", alpha=0.15, linewidth=0.5)
 
     # --- Panel 3: Spatial Z error map (only when --spatial-z) ---
@@ -686,7 +688,7 @@ def print_summary(
     chip_idx = chip_info.get("chip_index", "?")
     obj_mag = meta.get("optics", {}).get("objective_mag", "?")
     n_frames = meta.get("frame_count", "?")
-    n_rows = len(meta.get("rows", []))
+    n_rows = len(meta.get("lines", []))
     duration = meta.get("scan_duration_s", 0)
     ov = z_stats["overall"]
 
@@ -723,8 +725,14 @@ def print_summary(
     print(f"Chip index:   {chip_idx}")
     print(f"Objective:    {obj_mag}x")
     n_lead_in = ov.get("n_lead_in", 0)
-    lead_in_str = f" ({n_lead_in} lead-in excluded from stats)" if n_lead_in > 0 else ""
-    print(f"Frames:       {n_frames}{lead_in_str}")
+    n_lead_out = ov.get("n_lead_out", 0)
+    excl_parts = []
+    if n_lead_in > 0:
+        excl_parts.append(f"{n_lead_in} lead-in")
+    if n_lead_out > 0:
+        excl_parts.append(f"{n_lead_out} lead-out")
+    excl_str = f" ({', '.join(excl_parts)} excluded)" if excl_parts else ""
+    print(f"Frames:       {n_frames}{excl_str}")
     print(f"Rows:         {n_rows}")
     print(f"Duration:     {duration:.1f}s")
 
@@ -902,8 +910,8 @@ def print_comparison(
         print(f"{dir_name:<20}  {va:>{wa}}  {vb:>{wb}}")
 
     # Per-row comparison (paired by row index)
-    rows_a = {r["row_idx"]: r for r in z_stats_a["per_row"]}
-    rows_b = {r["row_idx"]: r for r in z_stats_b["per_row"]}
+    rows_a = {r["line_idx"]: r for r in z_stats_a["per_row"]}
+    rows_b = {r["line_idx"]: r for r in z_stats_b["per_row"]}
     common_rows = sorted(set(rows_a.keys()) & set(rows_b.keys()))
 
     if common_rows:
@@ -1001,7 +1009,7 @@ def main() -> int:
         print(f"Loading scan metadata from {scan_dir}")
     meta = load_scan_meta(scan_dir)
     n_frames = meta.get("frame_count", len(meta["frames"]))
-    n_rows = len(meta.get("rows", []))
+    n_rows = len(meta.get("lines", []))
     if not args.quiet:
         print(f"  {n_frames} frames, {n_rows} rows, {meta.get('scan_duration_s', 0):.1f}s")
 

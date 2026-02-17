@@ -22,9 +22,9 @@ def load_scan(scan_dir):
 
 def plot_row_timing(ax_x, ax_z, meta, row_idx, label_prefix=""):
     """Plot X position samples and Z error for a single row, with frame markers."""
-    frames = [f for f in meta["frames"] if f["row"] == row_idx]
+    frames = [f for f in meta["frames"] if f["line"] == row_idx]
     pos_samples = meta["position_stream"]
-    row_samples = [s for s in pos_samples if s["row"] == row_idx]
+    row_samples = [s for s in pos_samples if s["line"] == row_idx]
 
     if not frames or not row_samples:
         return
@@ -40,8 +40,8 @@ def plot_row_timing(ax_x, ax_z, meta, row_idx, label_prefix=""):
 
     # Frame captures: vertical spans + Z error markers
     for i, f in enumerate(frames):
-        ft_start = f["t_start"] - t0
-        ft_end = f["t_end"] - t0
+        ft_start = f["t_capture"] - t0
+        ft_end = f["t_capture"] + f["capture_duration_s"] - t0
         ft_mid = (ft_start + ft_end) / 2
 
         # Frame span on X plot
@@ -52,7 +52,7 @@ def plot_row_timing(ax_x, ax_z, meta, row_idx, label_prefix=""):
         # Z error markers
         ax_z.plot(
             ft_mid,
-            f["z_error"],
+            f["z_error_um"],
             "o",
             color=color,
             markersize=6 if i < 2 else 3,
@@ -63,8 +63,8 @@ def plot_row_timing(ax_x, ax_z, meta, row_idx, label_prefix=""):
 
     # Annotate frame 0→1 gap
     if len(frames) >= 2:
-        dt = (frames[1]["t_start"] - frames[0]["t_start"]) * 1000
-        mid_t = (frames[0]["t_start"] + frames[1]["t_start"]) / 2 - t0
+        dt = (frames[1]["t_capture"] - frames[0]["t_capture"]) * 1000
+        mid_t = (frames[0]["t_capture"] + frames[1]["t_capture"]) / 2 - t0
         ax_x.annotate(
             f"{dt:.0f}ms",
             xy=(mid_t, ax_x.get_ylim()[0]),
@@ -77,19 +77,19 @@ def plot_row_timing(ax_x, ax_z, meta, row_idx, label_prefix=""):
         )
 
     # Z error line
-    frame_t = [(f["t_start"] + f["t_end"]) / 2 - t0 for f in frames]
-    frame_z = [f["z_error"] for f in frames]
+    frame_t = [(f["t_capture"] + (f["t_capture"] + f["capture_duration_s"])) / 2 - t0 for f in frames]
+    frame_z = [f["z_error_um"] for f in frames]
     ax_z.plot(frame_t, frame_z, "-", color="C1", linewidth=1, alpha=0.5)
     ax_z.axhline(0, color="gray", linewidth=0.5, linestyle="--")
 
-    row_info = meta["rows"][row_idx]
+    row_info = meta["lines"][row_idx]
     direction = "→+X" if row_info["direction"] == 1 else "←-X"
     ax_x.set_title(f"{label_prefix}Row {row_idx} ({direction})", fontsize=9)
 
 
 def plot_scan(scan_dir, scan_label=None):
     meta = load_scan(scan_dir)
-    n_rows = len(meta["rows"])
+    n_rows = len(meta["lines"])
 
     if scan_label is None:
         scan_label = Path(scan_dir).name
@@ -123,11 +123,11 @@ def plot_multi_scan_comparison(scan_dirs, labels=None):
         meta = load_scan(scan_dir)
         label = labels[i] if labels else Path(scan_dir).name
 
-        for row_idx in range(len(meta["rows"])):
-            frames = [f for f in meta["frames"] if f["row"] == row_idx]
+        for row_idx in range(len(meta["lines"])):
+            frames = [f for f in meta["frames"] if f["line"] == row_idx]
             if len(frames) >= 2:
-                dt_ms = (frames[1]["t_start"] - frames[0]["t_start"]) * 1000
-                zjump = abs(frames[1]["z_error"] - frames[0]["z_error"])
+                dt_ms = (frames[1]["t_capture"] - frames[0]["t_capture"]) * 1000
+                zjump = abs(frames[1]["z_error_um"] - frames[0]["z_error_um"])
                 all_gaps.append(dt_ms)
                 all_jumps.append(zjump)
                 all_labels.append(f"{label} r{row_idx}")

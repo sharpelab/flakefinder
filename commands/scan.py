@@ -402,21 +402,19 @@ def run(
             img.save(path, quality=95)
 
             # Compute metadata
-            x_start_interp = interpolate_position(t_start, row_x_samples)
-            x_end_interp = interpolate_position(t_end, row_x_samples)
-            dt = t_end - t_start
-            x_vel = (x_end_interp - x_start_interp) / dt if dt > 0 and x_start_interp and x_end_interp else 0
+            x_interp = interpolate_position(t_start, row_x_samples)
 
             saved_frames_meta.append(
                 {
                     "n": frame_idx,
-                    "row": row_idx,
-                    "t_start": t_start - t0,
-                    "t_end": t_end - t0,
-                    "x_start": x_start_interp,
-                    "x_end": x_end_interp,
-                    "x_vel": x_vel,
+                    "line": row_idx,
+                    "t_capture": t_start - t0,
+                    "capture_duration_s": t_end - t_start,
+                    "x_um": x_interp,
+                    "x_vel_um_s": 0.0,  # overwritten by smooth_frame_positions
                     "y_um": row_y,
+                    "y_vel_um_s": 0.0,
+                    "phase": "capture",  # TODO: tag lead_in/lead_out
                 }
             )
 
@@ -464,7 +462,7 @@ def run(
         if af_result
         else None,
         **micro_meta,
-        "rows": [],
+        "lines": [],
     }
 
     # Scan each row
@@ -584,14 +582,14 @@ def run(
                     "t_before": s.t_before - total_scan_start,
                     "t_after": s.t_after - total_scan_start,
                     "x_um": s.axis_um,
-                    "row": row_idx,
+                    "line": row_idx,
                 }
             )
 
-        # Record row metadata
-        meta["rows"].append(
+        # Record line metadata
+        meta["lines"].append(
             {
-                "row_idx": row_idx,
+                "line_idx": row_idx,
                 "y_um": row_y,
                 "direction": direction,
                 "frame_start": row_frame_start,
@@ -623,8 +621,8 @@ def run(
     meta["frames"] = saved_frames_meta
     meta["scan_duration_s"] = total_duration
     meta["frame_count"] = global_frame_idx
-    total_captures = sum(r["captures"] for r in meta["rows"])
-    total_skipped = sum(r["skipped"] for r in meta["rows"])
+    total_captures = sum(r["captures"] for r in meta["lines"])
+    total_skipped = sum(r["skipped"] for r in meta["lines"])
     meta["total_captures"] = total_captures
     meta["total_skipped"] = total_skipped
     meta["position_sample_count"] = len(all_position_samples)
@@ -660,9 +658,9 @@ def run(
     print(f"  Avg FPS: {global_frame_idx / total_duration:.1f}")
 
     # Per-row stats
-    if meta["rows"]:
-        row_frame_counts = [r["frame_end"] - r["frame_start"] for r in meta["rows"]]
-        row_durations = [r["duration_s"] for r in meta["rows"]]
+    if meta["lines"]:
+        row_frame_counts = [r["frame_end"] - r["frame_start"] for r in meta["lines"]]
+        row_durations = [r["duration_s"] for r in meta["lines"]]
         print(
             f"  Frames/row: avg={sum(row_frame_counts) / len(row_frame_counts):.0f}, "
             f"min={min(row_frame_counts)}, max={max(row_frame_counts)}"

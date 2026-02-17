@@ -211,14 +211,50 @@ class PlanarScanPlan:
 # ============================================================================
 
 
-class ScanRowMeta(TypedDict):
-    """Row metadata from scan_meta.json rows array."""
+class ScanLineMeta(TypedDict):
+    """Line metadata from scan_meta.json lines array."""
 
-    row_idx: int
+    line_idx: int
     direction: int
     y_um: float
     frame_start: int
     frame_end: int
+
+
+type Phase = str  # "lead_in" | "capture" | "lead_out"
+
+
+class FrameMeta(TypedDict, total=False):
+    """Per-frame metadata from scan_meta.json frames array.
+
+    Shared fields (total=False so chip_scan-only fields are optional):
+    """
+
+    # Required fields (both scan.py and chip_scan.py)
+    n: int
+    line: int
+    t_capture: float
+    capture_duration_s: float
+    x_um: float
+    y_um: float
+    x_vel_um_s: float
+    y_vel_um_s: float
+    phase: Phase
+
+    # chip_scan only
+    z_um: float | None
+    z_vel_um_s: float
+    z_plane_um: float | None
+    z_error_um: float | None
+
+
+class PositionStreamSample(TypedDict):
+    """Raw position poll sample from scan_meta.json position_stream."""
+
+    t_before: float
+    t_after: float
+    x_um: float
+    line: int
 
 
 class CameraMeta(TypedDict):

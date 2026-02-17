@@ -473,7 +473,7 @@ def scan_row(
             "t_before": s.t_before - scan_t0,
             "t_after": s.t_after - scan_t0,
             "x_um": s.axis_um,
-            "row": row_idx,
+            "line": row_idx,
         }
         for s in row_x_samples
     ]
@@ -857,54 +857,46 @@ def run(
             img.save(path, quality=95)
 
             # Compute metadata
-            x_start_interp = interpolate_position(t_start, row_x_samples)
-            x_end_interp = interpolate_position(t_end, row_x_samples)
+            x_interp = interpolate_position(t_start, row_x_samples)
             z_interp = interpolate_z_position(t_start, row_z_samples)
 
             # Compute ideal Z and error
-            z_ideal = (
-                compute_plane_z(plan.plane_a, plan.plane_b, plan.plane_c, x_start_interp, row_y)
-                if x_start_interp
-                else None
-            )
-            z_error = (z_interp - z_ideal) if (z_interp is not None and z_ideal is not None) else None
+            z_plane = compute_plane_z(plan.plane_a, plan.plane_b, plan.plane_c, x_interp, row_y) if x_interp else None
+            z_err = (z_interp - z_plane) if (z_interp is not None and z_plane is not None) else None
 
-            dt = t_end - t_start
-            x_vel = (x_end_interp - x_start_interp) / dt if dt > 0 and x_start_interp and x_end_interp else 0
-
-            # Lead-in check: frame start hasn't crossed chip edge yet
-            if x_start_interp is not None:
-                if frame_direction == 1:
-                    in_lead_in = x_start_interp < frame_chip_edge_x
+            # Phase: lead_in → capture → lead_out
+            if x_interp is None:
+                phase = "lead_in"
+            elif frame_direction == 1:
+                if x_interp < frame_chip_edge_x:
+                    phase = "lead_in"
+                elif x_interp > frame_far_edge_x:
+                    phase = "lead_out"
                 else:
-                    in_lead_in = x_start_interp > frame_chip_edge_x
+                    phase = "capture"
             else:
-                in_lead_in = True  # no position data → treat as lead-in
-
-            # Lead-out check: frame start has crossed far hull edge
-            if x_start_interp is not None:
-                if frame_direction == 1:
-                    in_lead_out = x_start_interp > frame_far_edge_x
+                if x_interp > frame_chip_edge_x:
+                    phase = "lead_in"
+                elif x_interp < frame_far_edge_x:
+                    phase = "lead_out"
                 else:
-                    in_lead_out = x_start_interp < frame_far_edge_x
-            else:
-                in_lead_out = False
+                    phase = "capture"
 
             saved_frames_meta.append(
                 {
                     "n": frame_idx,
-                    "row": row_idx,
-                    "t_start": t_start - t0,
-                    "t_end": t_end - t0,
-                    "x_start": x_start_interp,
-                    "x_end": x_end_interp,
-                    "x_vel": x_vel,
+                    "line": row_idx,
+                    "t_capture": t_start - t0,
+                    "capture_duration_s": t_end - t_start,
+                    "x_um": x_interp,
+                    "x_vel_um_s": 0.0,  # overwritten by smooth_frame_positions
                     "y_um": row_y,
-                    "z_actual": z_interp,
-                    "z_ideal": z_ideal,
-                    "z_error": z_error,
-                    "in_lead_in": in_lead_in,
-                    "in_lead_out": in_lead_out,
+                    "y_vel_um_s": 0.0,
+                    "z_um": z_interp,
+                    "z_vel_um_s": 0.0,
+                    "z_plane_um": z_plane,
+                    "z_error_um": z_err,
+                    "phase": phase,
                 }
             )
 
@@ -1009,14 +1001,10 @@ def run(
     saved_frames_meta.sort(key=lambda f: f["n"])
 
     # Z tracking error stats (exclude lead-in and lead-out frames)
-    tracking_frames = [
-        f
-        for f in saved_frames_meta
-        if f["z_error"] is not None and not f.get("in_lead_in", False) and not f.get("in_lead_out", False)
-    ]
-    n_lead_in = sum(1 for f in saved_frames_meta if f.get("in_lead_in", False))
-    n_lead_out = sum(1 for f in saved_frames_meta if f.get("in_lead_out", False))
-    z_errors = [f["z_error"] for f in tracking_frames]
+    tracking_frames = [f for f in saved_frames_meta if f["z_error_um"] is not None and f["phase"] == "capture"]
+    n_lead_in = sum(1 for f in saved_frames_meta if f["phase"] == "lead_in")
+    n_lead_out = sum(1 for f in saved_frames_meta if f["phase"] == "lead_out")
+    z_errors = [f["z_error_um"] for f in tracking_frames]
     if z_errors:
         z_error_arr = np.array(z_errors)
         z_error_mean = float(np.mean(z_error_arr))
@@ -1033,28 +1021,22 @@ def run(
         dir_frames = [
             f
             for f in saved_frames_meta
-            if f["row"] in dir_row_idxs
-            and f["z_error"] is not None
-            and not f.get("in_lead_in", False)
-            and not f.get("in_lead_out", False)
+            if f["line"] in dir_row_idxs and f["z_error_um"] is not None and f["phase"] == "capture"
         ]
         if not dir_frames:
             continue
-        dir_errors = [f["z_error"] for f in dir_frames]
+        dir_errors = [f["z_error_um"] for f in dir_frames]
 
-        # Z-jump per row: first two non-lead-in frames
+        # Z-jump per line: first two capture frames
         z_jumps = []
         for ri in sorted(dir_row_idxs):
             rf = [
                 f
                 for f in saved_frames_meta
-                if f["row"] == ri
-                and f["z_error"] is not None
-                and not f.get("in_lead_in", False)
-                and not f.get("in_lead_out", False)
+                if f["line"] == ri and f["z_error_um"] is not None and f["phase"] == "capture"
             ]
             if len(rf) >= 2:
-                z_jumps.append(abs(rf[1]["z_error"] - rf[0]["z_error"]))
+                z_jumps.append(abs(rf[1]["z_error_um"] - rf[0]["z_error_um"]))
 
         dir_stats[direction] = {
             "mean_error_um": float(np.mean(dir_errors)),
@@ -1066,20 +1048,15 @@ def run(
     row_drift_values: list[float | None] = []
     for ri in range(len(plan.rows)):
         chip_frames = [
-            f
-            for f in saved_frames_meta
-            if f["row"] == ri
-            and not f.get("in_lead_in", False)
-            and not f.get("in_lead_out", False)
-            and f["z_error"] is not None
+            f for f in saved_frames_meta if f["line"] == ri and f["phase"] == "capture" and f["z_error_um"] is not None
         ]
         if chip_frames:
-            row_frame1_errors.append(chip_frames[0]["z_error"])
+            row_frame1_errors.append(chip_frames[0]["z_error_um"])
         else:
             row_frame1_errors.append(None)
         if len(chip_frames) >= 10:
-            first5 = float(np.mean([f["z_error"] for f in chip_frames[:5]]))
-            last5 = float(np.mean([f["z_error"] for f in chip_frames[-5:]]))
+            first5 = float(np.mean([f["z_error_um"] for f in chip_frames[:5]]))
+            last5 = float(np.mean([f["z_error_um"] for f in chip_frames[-5:]]))
             row_drift_values.append(abs(first5 - last5))
         else:
             row_drift_values.append(None)
@@ -1091,13 +1068,13 @@ def run(
     drift_arr = np.array(valid_drift) if valid_drift else np.array([])
 
     # Build rows metadata
-    rows_meta = []
+    lines_meta = []
     for row_idx, (row_y, row_x_min, row_x_max) in enumerate(plan.rows):
         direction = 1 if row_idx % 2 == 0 else -1
-        row_frames = [f for f in saved_frames_meta if f["row"] == row_idx]
+        row_frames = [f for f in saved_frames_meta if f["line"] == row_idx]
         frame_start = row_frames[0]["n"] if row_frames else global_frame_idx
         frame_end = (row_frames[-1]["n"] + 1) if row_frames else global_frame_idx
-        row_pos_samples = [s for s in all_position_samples if s["row"] == row_idx]
+        row_pos_samples = [s for s in all_position_samples if s["line"] == row_idx]
 
         timing = row_timings[row_idx]
         if timing and timing.get("capture_end") is not None and timing.get("preposition_start") is not None:
@@ -1105,9 +1082,9 @@ def run(
         else:
             duration = None
 
-        rows_meta.append(
+        lines_meta.append(
             {
-                "row_idx": row_idx,
+                "line_idx": row_idx,
                 "y_um": row_y,
                 "x_min_um": row_x_min,
                 "x_max_um": row_x_max,
@@ -1177,7 +1154,7 @@ def run(
             },
         },
         **micro_meta,
-        "rows": rows_meta,
+        "lines": lines_meta,
         "position_stream": all_position_samples,
         "frames": saved_frames_meta,
     }

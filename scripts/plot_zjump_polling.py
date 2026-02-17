@@ -29,7 +29,7 @@ def load_data(scan_dir):
 
 def plot_polling(scan_dir, output=None):
     meta, polling = load_data(scan_dir)
-    rows = meta["rows"]
+    rows = meta["lines"]
     frames = meta["frames"]
 
     z_t = np.array([s["t"] for s in polling["z_samples"]])
@@ -43,12 +43,12 @@ def plot_polling(scan_dir, output=None):
     # Row background shading (all panels)
     row_colors = ["#e8f0fe", "#fef3e8"]
     for row in rows:
-        rf = [f for f in frames if f["row"] == row["row_idx"]]
+        rf = [f for f in frames if f["line"] == row["line_idx"]]
         if not rf:
             continue
-        t0 = rf[0]["t_start"] - 0.1
-        t1 = rf[-1]["t_end"] + 0.1
-        color = row_colors[row["row_idx"] % 2]
+        t0 = rf[0]["t_capture"] - 0.1
+        t1 = (rf[-1]["t_capture"] + rf[-1]["capture_duration_s"]) + 0.1
+        color = row_colors[row["line_idx"] % 2]
         for ax in (ax_z, ax_x, ax_f):
             ax.axvspan(t0, t1, alpha=0.4, color=color, zorder=0)
         direction = "+X" if row["direction"] == 1 else "-X"
@@ -74,16 +74,16 @@ def plot_polling(scan_dir, output=None):
 
     # Panel 3: Frame pacing — horizontal bars per row
     for f in frames:
-        row_idx = f["row"]
+        row_idx = f["line"]
         color = (
             "red"
-            if f["n"] == meta["rows"][row_idx]["frame_start"]
-            else ("orange" if f["n"] == meta["rows"][row_idx]["frame_start"] + 1 else "C0")
+            if f["n"] == meta["lines"][row_idx]["frame_start"]
+            else ("orange" if f["n"] == meta["lines"][row_idx]["frame_start"] + 1 else "C0")
         )
         ax_f.barh(
             row_idx,
-            f["t_end"] - f["t_start"],
-            left=f["t_start"],
+            f["capture_duration_s"],
+            left=f["t_capture"],
             height=0.6,
             color=color,
             alpha=0.7,
@@ -93,13 +93,13 @@ def plot_polling(scan_dir, output=None):
 
     # Annotate frame 0→1 gaps
     for row in rows:
-        rf = sorted([f for f in frames if f["row"] == row["row_idx"]], key=lambda f: f["t_start"])
+        rf = sorted([f for f in frames if f["line"] == row["line_idx"]], key=lambda f: f["t_capture"])
         if len(rf) >= 2:
-            dt_ms = (rf[1]["t_start"] - rf[0]["t_end"]) * 1000
-            mid_t = (rf[0]["t_end"] + rf[1]["t_start"]) / 2
+            dt_ms = (rf[1]["t_capture"] - (rf[0]["t_capture"] + rf[0]["capture_duration_s"])) * 1000
+            mid_t = ((rf[0]["t_capture"] + rf[0]["capture_duration_s"]) + rf[1]["t_capture"]) / 2
             ax_f.annotate(
                 f"{dt_ms:.0f}ms",
-                xy=(mid_t, row["row_idx"]),
+                xy=(mid_t, row["line_idx"]),
                 ha="center",
                 va="center",
                 fontsize=7,
@@ -117,10 +117,10 @@ def plot_polling(scan_dir, output=None):
 
     # Re-annotate row labels on Z panel now that ylim is set
     for row in rows:
-        rf = [f for f in frames if f["row"] == row["row_idx"]]
+        rf = [f for f in frames if f["line"] == row["line_idx"]]
         if not rf:
             continue
-        t_mid = (rf[0]["t_start"] + rf[-1]["t_end"]) / 2
+        t_mid = (rf[0]["t_capture"] + (rf[-1]["t_capture"] + rf[-1]["capture_duration_s"])) / 2
         direction = "+X" if row["direction"] == 1 else "-X"
         ax_z.text(
             t_mid, ax_z.get_ylim()[1], f"R{row['row_idx']} ({direction})", ha="center", va="top", fontsize=8, alpha=0.5
