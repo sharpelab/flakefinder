@@ -19,8 +19,9 @@ import cv2
 import numpy as np
 
 from ..image_utils import sdk_image_to_numpy
-from ..types import Point2F, RGBImage
+from ..types import Point2F, PositionSample, RGBImage
 from .microscope import Microscope
+from .polling import start_motion_polling
 from .units import Axis, Nosepiece, ZDrive
 
 # Working distances in µm by objective position (from commands/stage.py)
@@ -167,7 +168,7 @@ def sharpness(image: RGBImage, method: str = "tenengrad") -> float:
     return float(fn(image))
 
 
-def interpolate_position(t: float, samples: list[tuple[float, float, float]]) -> float | None:
+def interpolate_position(t: float, samples: list[PositionSample]) -> float | None:
     """Interpolate position at time t from polled position samples.
 
     Uses midpoint of t_before/t_after as the effective sample time
@@ -175,7 +176,7 @@ def interpolate_position(t: float, samples: list[tuple[float, float, float]]) ->
 
     Args:
         t: Time to interpolate at (from time.perf_counter()).
-        samples: List of (t_before, t_after, z_um) tuples from position polling.
+        samples: List of PositionSample from position polling.
 
     Returns:
         Interpolated Z position in µm, or None if samples is empty.
@@ -413,9 +414,7 @@ def _run_z_scan(
     """
     t_func_start = time.perf_counter()
     # Data collection
-    z_samples: list[tuple[float, float, float]] = []  # (t_before, t_after, z_um)
     frame_data: list[tuple[float, np.ndarray]] = []  # (t_capture, image)
-    stop_polling = threading.Event()
 
     # Get fast position reading interfaces (prefer hysteresis-corrected for accurate Z during motion)
     z_bcv = getattr(z_axis, "bcv_hysteresis", None) or z_axis.bcv
@@ -430,15 +429,6 @@ def _run_z_scan(
     from LeicaMicrosystems.HardwareModel import Extensions
 
     context.ImageAcquiredHandler = Extensions.UCAPI.DelegateOnImageAcquired(on_image)
-
-    def z_poll_thread():
-        """Poll Z position continuously during scan."""
-        while not stop_polling.is_set():
-            t_before = time.perf_counter()
-            z_native = z_bcv.GetControlValue()
-            t_after = time.perf_counter()
-            z_um = z_converter.GetMetricsValue(z_native)
-            z_samples.append((t_before, t_after, z_um))
 
     # Sharpness worker: compute sharpness in background as frames arrive.
     # OpenCV releases the GIL, so this runs in true parallel with SDK Acquire.
@@ -480,17 +470,23 @@ def _run_z_scan(
         time.sleep(0.1)  # Brief settle
     t_pre_scan_done = time.perf_counter()
 
-    # Start Z polling
-    z_thread = threading.Thread(target=z_poll_thread, daemon=True)
-    z_thread.start()
+    # Start Z polling (adaptive Hz: 10 Hz startup, ramps to 100 Hz on motion)
+    z_polling = start_motion_polling(z_bcv, z_converter)
 
     scan_start_time = time.perf_counter()
 
-    # Start async Z move (downward)
+    # Start async Z move (downward: z_start > z_end)
     z_handle = z_axis.move_to_async(z_end)
 
-    # Capture frames during move, enqueue for background sharpness
-    while not z_handle.is_complete:
+    # Capture frames during move, using position to detect arrival
+    # (avoids calling GetState on the same axis as polling — see
+    # docs/poll_throttling_plan.md for starvation background)
+    _STOP_MARGIN_UM = 0.1
+    scan_range_um = z_start - z_end
+    scan_speed = z_axis.velocity_um_s or 1000
+    scan_timeout_s = max(30.0, (scan_range_um / scan_speed) * 5)
+
+    while True:
         t_capture = time.perf_counter()
         current_image[0] = None
         acquisition.Acquire(context, None)
@@ -502,12 +498,22 @@ def _run_z_scan(
             frame_data.append((t_capture, img_arr))
             sharpness_q.put(img_arr)
 
-    scan_end_time = time.perf_counter()
-    z_handle.dispose()
+            # Stop when Z reaches target (scan is always downward)
+            z_now = z_polling.samples[-1].axis_um
+            if z_now <= z_end + _STOP_MARGIN_UM:
+                break
 
-    # Stop polling
-    stop_polling.set()
-    z_thread.join(timeout=1.0)
+        # Safety timeout
+        if time.perf_counter() - scan_start_time > scan_timeout_s:
+            break
+
+    scan_end_time = time.perf_counter()
+
+    # Stop polling to free bus, then wait for SDK move completion
+    z_polling.join()
+    if not z_handle.is_complete:
+        z_handle.wait(timeout=2.0)
+    z_handle.dispose()
 
     scan_duration = scan_end_time - scan_start_time
 
@@ -517,6 +523,7 @@ def _run_z_scan(
     t_sharpness_done = time.perf_counter()
 
     # Assemble results (Z interpolation is cheap, sharpness already computed)
+    z_samples = z_polling.samples
     sharpness_curve = []
     frames = [] if store_frames else None
 

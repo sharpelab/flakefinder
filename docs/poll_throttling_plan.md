@@ -38,21 +38,21 @@ def poll_position(
 
 Replace the 4 inline poll loops with `poll_position()` calls:
 
-1. `commands/scan.py` x_poll_thread — same-axis X poll during X move
-2. `commands/chip_scan.py` x_poll_fn — same-axis X poll during X move
-3. `commands/chip_scan.py` z_poll_fn — Z poll during X move + Z directed vel
-4. `src/flakefinder/leica/autofocus.py` z_poll_thread — same-axis Z poll during Z move
+1. `commands/scan.py` x_poll_thread — same-axis X poll during X move ✅
+2. `commands/chip_scan.py` x_poll_fn — same-axis X poll during X move ✅
+3. `commands/chip_scan.py` z_poll_fn — Z poll during X move + Z directed vel ✅
+4. `src/flakefinder/leica/autofocus.py` z_poll_thread — same-axis Z poll during Z move ✅
 
-Each becomes `Thread(target=poll_position, args=(...))`.
+All 4 now use `start_motion_polling` / `start_polling` from `polling.py`.
+Autofocus also replaced `is_complete` loop termination with position-based
+termination (stop margin 0.1µm for fine Z scans).
 
 ### Sample format migration
 
-- scan.py x_samples: `list[tuple]` → `list[PositionSample]` (drop-in,
-  all consumers use index access or tuple unpacking)
-- chip_scan.py z_samples: `list[tuple[float, float]]` → `list[PositionSample]`
-  — update `interpolate_z_position` to use midpoint of t_before/t_after
-- autofocus.py z_samples: `list[tuple[float, float, float]]` → `list[PositionSample]`
-  — autofocus.py's `interpolate_position` already accesses by index
+- scan.py x_samples: `list[tuple]` → `list[PositionSample]` ✅
+- chip_scan.py z_samples: `list[tuple[float, float]]` → `list[PositionSample]` ✅
+- autofocus.py z_samples: `list[tuple[float, float, float]]` → `list[PositionSample]` ✅
+  — `interpolate_position` works unchanged (NamedTuple supports index access)
 
 ## Starvation risks addressed
 
@@ -66,7 +66,8 @@ Each becomes `Thread(target=poll_position, args=(...))`.
 ## Already safe (no changes needed)
 
 - `wait_all()` / `MoveHandle.wait()`: built-in 10ms sleep
-- Capture loop `is_complete` checks: paced by ~15ms Acquire()
+- Capture loop `is_complete` checks: replaced with position-based termination
+  in scan.py, chip_scan.py, and autofocus.py
 - `focus_map.py`: no concurrent polling during moves
 - `find_flakes.py`: pure orchestrator
 - Camera fps: independent of polling (confirmed experimentally)
