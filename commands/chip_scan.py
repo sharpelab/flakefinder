@@ -330,7 +330,7 @@ def scan_row(
     z_start_x_um = None
 
     # TODO: derive stop margin from frame size or commanded speed
-    _STOP_MARGIN_UM = 50.0
+    _STOP_MARGIN_UM = 1.0
     row_distance_um = abs(x_end_pos - x_start_pos)
     row_timeout_s = max(30.0, (row_distance_um / cfg.x_speed_um_s) * 5)
 

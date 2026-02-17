@@ -503,7 +503,7 @@ def run(
         x_polling = start_motion_polling(x_bcv, x_converter)
         handle = stage.x.move_to_async(x_end_pos)
         # TODO: derive stop margin from frame size or commanded speed
-        _STOP_MARGIN_UM = 50.0
+        _STOP_MARGIN_UM = 1.0
         row_distance_um = abs(x_end_pos - x_start_pos)
         row_timeout_s = max(30.0, (row_distance_um / (actual_speed_mm * 1000)) * 5)
 
