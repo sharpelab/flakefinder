@@ -574,7 +574,7 @@ def _print_chip_scan_summary(chip_idx: int, scan_dir: Path) -> None:
             with open(meta_path) as f:
                 csm = json.load(f)
             frames = csm.get("frame_count", "?")
-            rows = len(csm.get("rows", []))
+            rows = len(csm.get("lines", []))
             dur = csm.get("scan_duration_s", 0)
             te = csm.get("tracking_error", {})
             z_std = te.get("std_um")
@@ -651,7 +651,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
             with open(meta_path) as f:
                 scan_meta = json.load(f)
             frames = scan_meta.get("frame_count", "?")
-            rows = len(scan_meta.get("rows", []))
+            rows = len(scan_meta.get("lines", []))
             dur = checkpoint["step_timing"].get("overview_scan", 0)
             print(f"[overview] {frames} frames, {rows} rows, {_format_duration_compact(dur)}")
 

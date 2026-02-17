@@ -32,7 +32,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -58,6 +58,7 @@ from flakefinder.types import (
     MicroscopeDescription,
     PlanarScanPlan,
     PositionSample,
+    ScanMeta,
 )
 
 
@@ -1160,7 +1161,7 @@ def run(
     }
 
     # Smooth frame positions from raw position polls
-    smooth_frame_positions(meta, quiet=quiet)
+    smooth_frame_positions(cast(ScanMeta, meta), quiet=quiet)
 
     # Save metadata
     meta_path = os.path.join(output, "scan_meta.json")

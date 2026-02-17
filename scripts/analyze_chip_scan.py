@@ -9,7 +9,6 @@ Usage:
 """
 
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
@@ -21,17 +20,19 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from flakefinder.data_utils import load_chip_scan_meta
 from flakefinder.leica.autofocus import sharpness
+from flakefinder.types import ChipScanFrameMeta, ChipScanMeta
 
 
-def plot_row_map(meta: dict, output_path: Path, *, notes: str | None = None) -> None:
+def plot_row_map(meta: ChipScanMeta, output_path: Path, *, notes: str | None = None) -> None:
     """Plot chip hull outline with per-row extents and lead-in arrows."""
-    rows = meta.get("lines", [])
+    rows = meta["lines"]
     if not rows:
         print("  No row data for row map")
         return
 
-    lead_in = meta.get("scan_params", {}).get("lead_in_um", 2000)
+    lead_in = meta["scan_params"]["lead_in_um"]
 
     fig, ax = plt.subplots(1, 1, figsize=(10, 8))
 
@@ -92,30 +93,19 @@ def plot_row_map(meta: dict, output_path: Path, *, notes: str | None = None) -> 
     print(f"  Row map saved to {output_path}")
 
 
-def load_scan_meta(scan_dir: Path) -> dict:
-    """Load scan_meta.json from a scan directory."""
-    meta_path = scan_dir / "scan_meta.json"
-    if not meta_path.exists():
-        raise FileNotFoundError(f"scan_meta.json not found in {scan_dir}")
-    with open(meta_path) as f:
-        return json.load(f)
-
-
-def compute_z_tracking_stats(meta: dict) -> dict:
+def compute_z_tracking_stats(meta: ChipScanMeta) -> dict:
     """Compute Z tracking error statistics from frame metadata.
 
-    Lead-in frames (where ``in_lead_in`` is true) are excluded from all
-    statistics.  Older scans without the field are treated as all non-lead-in.
+    Lead-in/lead-out frames are excluded from all statistics.
 
     Returns dict with overall and per-row stats, plus ``n_lead_in``.
     """
     frames = meta["frames"]
     rows = meta["lines"]
 
-    # Separate lead-in/lead-out vs tracking frames (backwards compatible)
-    tracking_frames = [f for f in frames if not f.get("in_lead_in", False) and not f.get("in_lead_out", False)]
-    n_lead_in = sum(1 for f in frames if f.get("in_lead_in", False))
-    n_lead_out = sum(1 for f in frames if f.get("in_lead_out", False))
+    tracking_frames = [f for f in frames if f["phase"] != "lead_in" and f["phase"] != "lead_out"]
+    n_lead_in = sum(1 for f in frames if f["phase"] == "lead_in")
+    n_lead_out = sum(1 for f in frames if f["phase"] == "lead_out")
 
     # Overall arrays (tracking frames only)
     z_errors = np.array([f["z_error_um"] for f in tracking_frames])
@@ -167,7 +157,7 @@ def compute_z_tracking_stats(meta: dict) -> dict:
     return {"overall": overall, "per_row": per_row}
 
 
-def compute_slope_metrics(meta: dict) -> dict:
+def compute_slope_metrics(meta: ChipScanMeta) -> dict:
     """Compute per-row Z slope accuracy, drift, and velocity metrics.
 
     Uses non-lead-in frames only.  Returns dict with per_row list and overall
@@ -178,7 +168,7 @@ def compute_slope_metrics(meta: dict) -> dict:
     plane_a = meta["focus_plane"]["a"]  # um/um  (dZ/dX)
     cmd_speed_mm = meta["scan_params"]["scan_speed_mm_s"]
 
-    tracking = [f for f in frames if not f.get("in_lead_in", False) and not f.get("in_lead_out", False)]
+    tracking = [f for f in frames if f["phase"] != "lead_in" and f["phase"] != "lead_out"]
 
     per_row: list[dict] = []
     for row in rows_meta:
@@ -270,7 +260,7 @@ def compute_slope_metrics(meta: dict) -> dict:
     return {"overall": overall, "per_row": per_row}
 
 
-def compute_sharpness_values(scan_dir: Path, meta: dict, sample_every: int = 1) -> dict:
+def compute_sharpness_values(scan_dir: Path, meta: ChipScanMeta, sample_every: int = 1) -> dict:
     """Compute tenengrad sharpness for saved frame JPGs.
 
     Args:
@@ -310,7 +300,7 @@ def compute_sharpness_values(scan_dir: Path, meta: dict, sample_every: int = 1) 
         sharpness_vals.append(s)
         x_positions.append(frame["x_um"])
         y_positions.append(frame["y_um"])
-        row_ids.append(frame["row"])
+        row_ids.append(frame["line"])
         processed += 1
 
         # Progress every 100 frames
@@ -365,7 +355,7 @@ def compute_sharpness_values(scan_dir: Path, meta: dict, sample_every: int = 1) 
 
 def _plot_spatial_z_error(
     ax: plt.Axes,
-    frames: list[dict],
+    frames: list[ChipScanFrameMeta],
     z_errors: list,
     lead_in_mask: list[bool],
     lead_out_mask: list[bool],
@@ -412,7 +402,7 @@ def _plot_spatial_z_error(
 
 
 def plot_analysis(
-    meta: dict,
+    meta: ChipScanMeta,
     z_stats: dict,
     sharpness_data: dict | None,
     output_path: Path,
@@ -449,8 +439,8 @@ def plot_analysis(
 
     # --- Panel 1: Z error vs frame number ---
     # Separate lead-in/lead-out from tracking frames for distinct styling
-    lead_in_mask = [f.get("in_lead_in", False) for f in frames]
-    lead_out_mask = [f.get("in_lead_out", False) for f in frames]
+    lead_in_mask = [f["phase"] == "lead_in" for f in frames]
+    lead_out_mask = [f["phase"] == "lead_out" for f in frames]
     excluded = [li or lo for li, lo in zip(lead_in_mask, lead_out_mask, strict=True)]
     tracking_idx = [i for i, ex in enumerate(excluded) if not ex]
     lead_in_idx = [i for i, li in enumerate(lead_in_mask) if li]
@@ -649,11 +639,10 @@ def plot_analysis(
     ax_sharpmap.invert_yaxis()  # +Y down
 
     # Suptitle with scan summary
-    scan_time = meta.get("scan_duration_s", 0)
-    n_frames = meta.get("frame_count", len(frames))
-    chip_info = meta.get("chip_info", {})
-    chip_idx = chip_info.get("chip_index", "?")
-    obj_mag = meta.get("optics", {}).get("objective_mag", "?")
+    scan_time = meta["scan_duration_s"]
+    n_frames = meta["frame_count"]
+    chip_idx = meta["chip_info"]["chip_index"]
+    obj_mag = meta["optics"]["objective_mag"]
     notes = kwargs.get("notes")
     notes_str = f"  [{notes}]" if notes else ""
     fig.suptitle(
@@ -671,7 +660,7 @@ def plot_analysis(
 
 
 def print_summary(
-    meta: dict,
+    meta: ChipScanMeta,
     z_stats: dict,
     sharpness_data: dict | None,
     min_sharpness: float | None,
@@ -684,12 +673,11 @@ def print_summary(
     When *quiet* is True, print only a compact 2-3 line summary suitable
     for pipeline use.
     """
-    chip_info = meta.get("chip_info", {})
-    chip_idx = chip_info.get("chip_index", "?")
-    obj_mag = meta.get("optics", {}).get("objective_mag", "?")
-    n_frames = meta.get("frame_count", "?")
-    n_rows = len(meta.get("lines", []))
-    duration = meta.get("scan_duration_s", 0)
+    chip_idx = meta["chip_info"]["chip_index"]
+    obj_mag = meta["optics"]["objective_mag"]
+    n_frames = meta["frame_count"]
+    n_rows = len(meta["lines"])
+    duration = meta["scan_duration_s"]
     ov = z_stats["overall"]
 
     if quiet:
@@ -721,7 +709,7 @@ def print_summary(
     print("=" * 65)
 
     # Scan info
-    print(f"Timestamp:    {meta.get('timestamp', 'unknown')}")
+    print(f"Timestamp:    {meta['timestamp']}")
     print(f"Chip index:   {chip_idx}")
     print(f"Objective:    {obj_mag}x")
     n_lead_in = ov.get("n_lead_in", 0)
@@ -737,9 +725,7 @@ def print_summary(
     print(f"Duration:     {duration:.1f}s")
 
     # Focus plane
-    fp = meta.get("focus_plane", {})
-    if fp:
-        print(f"\nFocus plane:  {fp.get('equation', 'N/A')}")
+    print(f"\nFocus plane:  {meta['focus_plane']['equation']}")
 
     # Z tracking
     print()
@@ -1007,11 +993,11 @@ def main() -> int:
     # Load metadata
     if not args.quiet:
         print(f"Loading scan metadata from {scan_dir}")
-    meta = load_scan_meta(scan_dir)
-    n_frames = meta.get("frame_count", len(meta["frames"]))
-    n_rows = len(meta.get("lines", []))
+    meta = load_chip_scan_meta(scan_dir)
+    n_frames = meta["frame_count"]
+    n_rows = len(meta["lines"])
     if not args.quiet:
-        print(f"  {n_frames} frames, {n_rows} rows, {meta.get('scan_duration_s', 0):.1f}s")
+        print(f"  {n_frames} frames, {n_rows} rows, {meta['scan_duration_s']:.1f}s")
 
     # Z tracking analysis (always, from metadata only)
     z_stats = compute_z_tracking_stats(meta)
@@ -1034,7 +1020,7 @@ def main() -> int:
             print(f"Error: Compare directory not found: {compare_dir}")
             return 1
         print(f"\nLoading comparison scan from {compare_dir}")
-        meta_b = load_scan_meta(compare_dir)
+        meta_b = load_chip_scan_meta(compare_dir)
         z_stats_b = compute_z_tracking_stats(meta_b)
         print_comparison(
             z_stats,

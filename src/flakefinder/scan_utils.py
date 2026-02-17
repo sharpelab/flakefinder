@@ -21,6 +21,7 @@ from flakefinder.types import (
     PlanarScanPlan,
     Point2F,
     PositionSample,
+    ScanMeta,
     ScanRow,
     StageBounds,
 )
@@ -210,7 +211,7 @@ def interpolate_position(
     return x0 + alpha * (x1 - x0)
 
 
-def smooth_frame_positions(meta: dict, *, quiet: bool = False) -> None:
+def smooth_frame_positions(meta: ScanMeta, *, quiet: bool = False) -> None:
     """Smooth frame x_um and x_vel_um_s using the raw position sample stream.
 
     Applies savgol smoothing to the ~63 Hz position polls per line, then

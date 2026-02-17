@@ -20,6 +20,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from typing import cast
 
 from PIL import Image as PILImage
 
@@ -37,7 +38,7 @@ from flakefinder.scan_utils import (
     smooth_frame_positions,
     validate_area_rect,
 )
-from flakefinder.types import AreaRect, GainRGB, Point2F
+from flakefinder.types import AreaRect, GainRGB, Point2F, ScanMeta
 
 
 @dataclass
@@ -629,7 +630,7 @@ def run(
     meta["position_stream"] = all_position_samples
 
     # Smooth frame positions from raw position polls
-    smooth_frame_positions(meta)
+    smooth_frame_positions(cast(ScanMeta, meta))
 
     # Save metadata
     meta_path = os.path.join(output, "scan_meta.json")

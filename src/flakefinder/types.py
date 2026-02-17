@@ -221,16 +221,19 @@ class ScanLineMeta(TypedDict):
     frame_end: int
 
 
+class ChipScanLineMeta(ScanLineMeta):
+    """Line metadata with row extents (chip_scan only)."""
+
+    x_min_um: float
+    x_max_um: float
+
+
 type Phase = str  # "lead_in" | "capture" | "lead_out"
 
 
-class FrameMeta(TypedDict, total=False):
-    """Per-frame metadata from scan_meta.json frames array.
+class FrameMeta(TypedDict):
+    """Per-frame metadata from scan_meta.json frames array."""
 
-    Shared fields (total=False so chip_scan-only fields are optional):
-    """
-
-    # Required fields (both scan.py and chip_scan.py)
     n: int
     line: int
     t_capture: float
@@ -241,11 +244,14 @@ class FrameMeta(TypedDict, total=False):
     y_vel_um_s: float
     phase: Phase
 
-    # chip_scan only
-    z_um: float | None
+
+class ChipScanFrameMeta(FrameMeta):
+    """Per-frame metadata with Z tracking (chip_scan only)."""
+
+    z_um: float
     z_vel_um_s: float
-    z_plane_um: float | None
-    z_error_um: float | None
+    z_plane_um: float
+    z_error_um: float
 
 
 class PositionStreamSample(TypedDict):
@@ -306,3 +312,70 @@ class MicroscopeMeta(TypedDict):
     camera: CameraMeta
     optics: OpticsMeta
     lighting: LightingMeta
+
+
+# ============================================================================
+# Top-level scan_meta.json
+# ============================================================================
+
+
+class ScanParamsMeta(TypedDict):
+    """Common scan parameters (present in both overview and chip scans)."""
+
+    scan_speed_mm_s: float
+    move_speed_mm_s: float
+
+
+class ChipScanParamsMeta(ScanParamsMeta):
+    """Chip scan parameters (extends common with lead-in/out)."""
+
+    lead_in_um: float
+    lead_out_um: float
+
+
+class FocusPlaneMeta(TypedDict):
+    """Focus plane metadata (chip_scan only)."""
+
+    a: float
+    b: float
+    c: float
+    equation: str
+
+
+class ScanMeta(TypedDict):
+    """Top-level scan metadata — common fields for all scan types."""
+
+    timestamp: str
+    downsample: int
+    y_step_um: float
+    scan_duration_s: float
+    frame_count: int
+    camera: CameraMeta
+    optics: OpticsMeta
+    lighting: LightingMeta
+    lines: list[ScanLineMeta]
+    frames: list[FrameMeta]
+    position_stream: list[PositionStreamSample]
+
+
+class ChipScanMeta(TypedDict):
+    """Top-level chip scan metadata — all fields required.
+
+    Cannot inherit ScanMeta because lines/frames have narrower element
+    types (ChipScanLineMeta, ChipScanFrameMeta).
+    """
+
+    timestamp: str
+    downsample: int
+    y_step_um: float
+    scan_duration_s: float
+    frame_count: int
+    camera: CameraMeta
+    optics: OpticsMeta
+    lighting: LightingMeta
+    lines: list[ChipScanLineMeta]
+    frames: list[ChipScanFrameMeta]
+    position_stream: list[PositionStreamSample]
+    scan_params: ChipScanParamsMeta
+    focus_plane: FocusPlaneMeta
+    chip_info: dict[str, Any]

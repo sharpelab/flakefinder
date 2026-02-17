@@ -2,10 +2,14 @@
 
 Each scan directory contains a `scan_meta.json` file with complete metadata about the scan, including camera settings, optics, timing, and per-frame position data.
 
+Type definitions: `src/flakefinder/types.py` (`ScanMeta`, `FrameMeta`, `ScanLineMeta`, etc.).
+Loader: `flakefinder.data_utils.load_scan_meta()`.
+
 ## Top-Level Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `timestamp` | string | ISO 8601 timestamp |
 | `x_min_um` | float | Scan area X minimum (µm) |
 | `x_max_um` | float | Scan area X maximum (µm) |
 | `y_min_um` | float | Scan area Y minimum (µm) |
@@ -19,19 +23,18 @@ Each scan directory contains a `scan_meta.json` file with complete metadata abou
 
 ## `scan_params` Object
 
-Parameters passed to scan_area_v1.py:
-
 | Field | Type | Description |
 |-------|------|-------------|
-| `speed_mm_s` | float | Actual stage speed used (mm/s) |
-| `area_rect` | string\|null | Area rect argument if provided |
-| `margin_um` | float\|null | Margin from stage edges if area_rect not used |
-| `auto_focus_pos_um` | [x,y]\|null | Autofocus position if specified |
-| `objective_requested` | string\|null | Objective argument if provided |
+| `scan_speed_mm_s` | float | Actual stage speed used (mm/s) |
+| `move_speed_mm_s` | float | Stage repositioning speed (mm/s) |
+| `lead_in_um` | float | Lead-in distance (chip_scan only) |
+| `lead_out_um` | float | Lead-out distance (chip_scan only) |
+| `area_rect` | string\|null | Area rect argument (overview scan only) |
+| `margin_um` | float\|null | Margin from stage edges (overview scan only) |
 
 ## `camera` Object
 
-Camera hardware settings:
+Camera hardware settings (`CameraMeta`):
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -52,7 +55,7 @@ Camera hardware settings:
 
 ## `optics` Object
 
-Optical configuration:
+Optical configuration (`OpticsMeta`):
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -67,7 +70,7 @@ Optical configuration:
 
 ## `lighting` Object
 
-Illumination settings:
+Illumination settings (`LightingMeta`):
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -77,74 +80,88 @@ Illumination settings:
 | `shutter_name` | string | Shutter unit name |
 | `shutter_open` | bool | Shutter state during scan |
 
-## `rows` Array
+## `lines` Array
 
-Per-row metadata for the snake scan pattern:
+Per-line (row) metadata for the snake scan pattern (`ScanLineMeta`):
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `row_idx` | int | Row index (0-based) |
+| `line_idx` | int | Line index (0-based) |
 | `y_um` | float | Row Y position (µm) |
 | `direction` | int | Scan direction: 1 = +X, -1 = -X |
-| `frame_start` | int | First frame index for this row |
-| `frame_end` | int | Last frame index + 1 for this row |
+| `frame_start` | int | First frame index for this line |
+| `frame_end` | int | Last frame index + 1 for this line |
+| `x_min_um` | float | Row X minimum (chip_scan only) |
+| `x_max_um` | float | Row X maximum (chip_scan only) |
 | `duration_s` | float | Row scan duration (seconds) |
 | `position_samples` | int | Position samples recorded for this row |
 
 ## `frames` Array
 
-Per-frame metadata with interpolated positions:
+Per-frame metadata with interpolated positions (`FrameMeta`):
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `n` | int | Frame index |
-| `row` | int | Row index |
-| `t_start` | float | Exposure start time (seconds from scan start) |
-| `t_end` | float | Exposure end time (seconds from scan start) |
-| `x_start` | float | Interpolated X position at exposure start (µm) |
-| `x_end` | float | Interpolated X position at exposure end (µm) |
-| `x_vel` | float | X velocity during exposure (µm/s) |
+| `line` | int | Line (row) index |
+| `t_capture` | float | Capture start time (seconds from scan start) |
+| `capture_duration_s` | float | Capture duration (seconds) |
+| `x_um` | float | Interpolated X position (µm) |
 | `y_um` | float | Row Y position (µm) |
+| `x_vel_um_s` | float | X velocity (µm/s) |
+| `y_vel_um_s` | float | Y velocity (µm/s) |
+| `phase` | string | `"lead_in"`, `"capture"`, or `"lead_out"` |
+| `z_um` | float\|null | Z position (chip_scan only) |
+| `z_vel_um_s` | float | Z velocity (chip_scan only) |
+| `z_plane_um` | float\|null | Ideal Z from focus plane (chip_scan only) |
+| `z_error_um` | float\|null | Z tracking error (chip_scan only) |
 
 ## `position_stream` Array
 
-Raw position samples used for interpolation:
+Raw position samples used for interpolation (`PositionStreamSample`):
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `t_before` | float | Timestamp before SDK read (seconds) |
 | `t_after` | float | Timestamp after SDK read (seconds) |
 | `x_um` | float | X position (µm) |
-| `row` | int | Row index |
+| `line` | int | Line (row) index |
 
 Position interpolation uses the midpoint of `t_before` and `t_after` as the effective sample time.
+
+## `focus_plane` Object (chip_scan only)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `a` | float | Plane coefficient dZ/dX (µm/µm) |
+| `b` | float | Plane coefficient dZ/dY (µm/µm) |
+| `c` | float | Plane intercept (µm) |
+| `equation` | string | Human-readable plane equation |
+| `z_range_um` | [min, max] | Validated Z range |
 
 ## Example Usage
 
 ```python
-import json
+from flakefinder.data_utils import load_scan_meta
 
-with open("scans/my_scan/scan_meta.json") as f:
-    meta = json.load(f)
+meta = load_scan_meta(Path("scans/my_scan"))
 
 # Get sample pixel size for coordinate conversion
 um_per_px = meta["optics"]["sample_pixel_x_um"]
 
 # Get frame position
 frame = meta["frames"][100]
-x_center = (frame["x_start"] + frame["x_end"]) / 2
-y_center = frame["y_um"]
-print(f"Frame 100 center: ({x_center:.1f}, {y_center:.1f}) µm")
+print(f"Frame 100: ({frame['x_um']:.1f}, {frame['y_um']:.1f}) µm")
 
-# Iterate rows
-for row in meta["rows"]:
-    n_frames = row["frame_end"] - row["frame_start"]
-    print(f"Row {row['row_idx']}: {n_frames} frames, Y={row['y_um']:.0f} µm")
+# Iterate lines
+for line in meta["lines"]:
+    n_frames = line["frame_end"] - line["frame_start"]
+    print(f"Line {line['line_idx']}: {n_frames} frames, Y={line['y_um']:.0f} µm")
 ```
 
 ## Coordinate System
 
 - **Stage coordinates**: X and Y in micrometers (µm), matching SDK/hardware
-- **Frame positions**: `x_start`/`x_end` are stage X coordinates at frame edges
-- **Y positions**: Each row has a constant Y value; frames within a row share `y_um`
+- **Frame positions**: `x_um` is interpolated stage X at capture time
+- **Y positions**: Each line has a constant Y value; frames within a line share `y_um`
 - **Time**: All timestamps relative to scan start (seconds)

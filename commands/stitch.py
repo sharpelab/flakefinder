@@ -20,8 +20,9 @@ import numpy as np
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 from scipy.signal import savgol_filter
 
+from flakefinder.data_utils import load_scan_meta
 from flakefinder.scan_utils import apply_flatfield, parse_area_rect
-from flakefinder.types import AreaRect, AreaRectI, Point2I, ScanLineMeta
+from flakefinder.types import AreaRect, AreaRectI, Point2I, ScanLineMeta, ScanMeta
 
 REPO_DIR = Path(__file__).parent.parent
 DEFAULT_SCAN_DIR = REPO_DIR / "test_area_2"
@@ -257,7 +258,7 @@ def draw_frame_outlines(
 
 
 def stitch_row_to_global(
-    meta: dict,
+    meta: ScanMeta,
     row: ScanLineMeta,
     frame_w: int,
     frame_h: int,
@@ -288,6 +289,7 @@ def stitch_row_to_global(
     frames = meta["frames"]
     optics = meta["optics"]
     fov_width_um = optics["frame_width_um"]
+    assert fov_width_um is not None
 
     all_row_frames = frames[row["frame_start"] : row["frame_end"]]
     direction = row["direction"]
@@ -548,11 +550,7 @@ def run(
     start_time = time.perf_counter()
 
     # Load metadata
-    with open(scan_dir / "scan_meta.json") as f:
-        meta = json.load(f)
-
-    if "lines" not in meta:
-        raise ValueError("scan_meta.json has no 'lines' array — is this a valid scan directory?")
+    meta = load_scan_meta(scan_dir)
 
     rows = meta["lines"]
     optics = meta["optics"]
@@ -590,7 +588,10 @@ def run(
             row_idx = int(rows_range)
             rows = [r for r in rows if r["line_idx"] == row_idx]
 
-    # Calibration
+    # Calibration — assert optics fields are populated (always true for scan output)
+    assert optics["sample_pixel_x_um"] is not None
+    assert optics["frame_width_um"] is not None
+    assert optics["frame_height_um"] is not None
     um_per_px = optics["sample_pixel_x_um"] * scan_downsample * downsample
     fov_width_um = optics["frame_width_um"]
     fov_height_um = optics["frame_height_um"]
@@ -619,7 +620,7 @@ def run(
             flatfield = ff_resized
 
     if not quiet:
-        print(f"Scan: {len(meta['rows'])} rows, {meta['frame_count']} frames")
+        print(f"Scan: {len(meta['lines'])} rows, {meta['frame_count']} frames")
         print(f"Processing: {len(rows)} rows")
         ds_total = scan_downsample * downsample
         print(f"Calibration: {um_per_px:.3f} µm/px (scan {scan_downsample}x, stitch {downsample}x, total {ds_total}x)")
@@ -642,7 +643,7 @@ def run(
         row_results.append({"line": row, "x_min": x_min, "x_max": x_max})
 
         if not quiet:
-            print(f"  Row {row['row_idx']:2d}: {len(row_frames)} frames, X: {x_min:.0f} - {x_max:.0f} µm")
+            print(f"  Row {row['line_idx']:2d}: {len(row_frames)} frames, X: {x_min:.0f} - {x_max:.0f} µm")
 
     # Find global X bounds: union of all rows (including accel zones)
     global_x_min = min(r["x_min"] for r in row_results)

@@ -11,9 +11,11 @@ from flakefinder.types import (
     BinningLevel,
     CameraDescription,
     ChipGeometry,
+    ChipScanMeta,
     MicroscopeDescription,
     ObjectiveDescription,
     Point2F,
+    ScanMeta,
     StageDescription,
 )
 
@@ -102,6 +104,47 @@ def compute_frame_size_um(
     sample_pixel_y = camera.physical_pixel_y_um * bl.factor / objective_mag
 
     return Point2F(bl.frame_width_px * sample_pixel_x, bl.frame_height_px * sample_pixel_y)
+
+
+def load_scan_meta(scan_dir: Path) -> ScanMeta:
+    """Load typed scan_meta.json from a scan directory.
+
+    Args:
+        scan_dir: Directory containing scan_meta.json.
+
+    Returns:
+        ScanMeta typed dict.
+
+    Raises:
+        FileNotFoundError: If scan_meta.json not found.
+    """
+    meta_path = scan_dir / "scan_meta.json"
+    if not meta_path.exists():
+        raise FileNotFoundError(f"scan_meta.json not found in {scan_dir}")
+    with open(meta_path) as f:
+        return json.load(f)
+
+
+def load_chip_scan_meta(scan_dir: Path) -> ChipScanMeta:
+    """Load typed scan_meta.json for a chip scan directory.
+
+    Same as load_scan_meta but returns ChipScanMeta with Z tracking
+    fields, focus_plane, chip_info, etc.
+
+    Args:
+        scan_dir: Directory containing scan_meta.json from chip_scan.py.
+
+    Returns:
+        ChipScanMeta typed dict.
+
+    Raises:
+        FileNotFoundError: If scan_meta.json not found.
+    """
+    meta_path = scan_dir / "scan_meta.json"
+    if not meta_path.exists():
+        raise FileNotFoundError(f"scan_meta.json not found in {scan_dir}")
+    with open(meta_path) as f:
+        return json.load(f)
 
 
 def load_chip_geometry(chips_path: Path, chip_index: int) -> ChipGeometry:
