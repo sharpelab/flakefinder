@@ -21,11 +21,10 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from detector_config import DetectorConfig
 from mosaic_util import make_mosaic
-from segment_flakes import classify_detections, draw_scale_bar, score_detections
 
 from flakefinder.scan_utils import PARFOCAL_Z_UM
+from flakefinder.segmentation import DetectorConfig, classify_detections, draw_scale_bar, score_detections
 
 
 def main() -> int:

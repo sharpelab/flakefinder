@@ -8,7 +8,6 @@ Usage:
 
 import argparse
 import json
-import re
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -17,64 +16,222 @@ from pathlib import Path
 from typing import NamedTuple
 
 import cv2
-import numpy as np
-from detector_config import DetectorConfig
 
-from flakefinder.scan_utils import apply_flatfield
-
-_cached_ff: np.ndarray | None = None
-_cached_ff_path: str | None = None
-
-
-class FrameResult(NamedTuple):
-    frame_name: str
-    detections: list[dict]
-    dark_frac: float
-    skipped: bool
+from flakefinder.segmentation import (
+    DetectorConfig,
+    FrameResult,
+    draw_detections,
+    natural_sort_key,
+    process_frame,
+    strip_geometry,
+)
 
 
-def _process_frame(
-    frame_path: str,
-    flatfield_path: str | None,
-    config: DetectorConfig,
-    um_per_px: float,
-    dark_frac_cutoff: float,
-) -> FrameResult:
-    """Worker: load image, apply flatfield, segment. Imports inside worker for pickling."""
-    from segment_flakes import compute_dark_frac, segment_frame
+class SegStats(NamedTuple):
+    """Summary statistics from a segmentation run."""
 
-    frame_name = Path(frame_path).stem
-    raw = cv2.imread(frame_path)
-    if raw is None:
-        return FrameResult(frame_name, [], 0.0, True)
-
-    if flatfield_path:
-        global _cached_ff, _cached_ff_path
-        if _cached_ff_path != flatfield_path:
-            _cached_ff = np.load(flatfield_path).astype(np.float32)[:, :, ::-1]
-            _cached_ff_path = flatfield_path
-        assert _cached_ff is not None
-        corrected = apply_flatfield(raw, _cached_ff)
-    else:
-        corrected = raw
-
-    dark_frac = compute_dark_frac(corrected)
-    if dark_frac > dark_frac_cutoff:
-        return FrameResult(frame_name, [], dark_frac, True)
-
-    detections = segment_frame(corrected, config, um_per_px)
-    return FrameResult(frame_name, detections, dark_frac, False)
+    total_frames: int
+    skipped_frames: int
+    frames_with_detections: int
+    total_detections: int
+    tier_1: int
+    tier_2: int
+    tier_3: int
+    duration_s: float
 
 
-def _natural_sort_key(path: Path) -> int:
-    """Extract frame number for natural sorting."""
-    m = re.search(r"\d+", path.stem)
-    return int(m.group()) if m else 0
+def run(
+    scan_dir: Path,
+    output: Path,
+    *,
+    flatfield: Path | None = None,
+    material: str = "hbn",
+    contrast_offset: float | None = None,
+    min_size_um: float | None = None,
+    edge_margin: int | None = None,
+    dark_frac_cutoff: float = 0.05,
+    jobs: int = 16,
+    viz: bool = False,
+    pixel_size: float = 0.36,
+    quiet: bool = False,
+) -> SegStats:
+    """Run parallel flake segmentation over a chip scan directory.
 
+    Args:
+        scan_dir: Directory containing frame_NNNN.jpg files.
+        output: Output directory for results.
+        flatfield: Flatfield .npy file for correction.
+        material: Material preset name.
+        jobs: Number of parallel workers.
+        pixel_size: µm per pixel.
+        quiet: Suppress progress output.
 
-def _strip_geometry(det: dict) -> dict:
-    """Return detection dict without hull/contour (large point lists)."""
-    return {k: v for k, v in det.items() if k not in ("hull", "contour")}
+    Returns:
+        SegStats with detection counts and timing.
+
+    Raises:
+        ValueError: If no frames found in scan_dir.
+    """
+    from dataclasses import replace
+
+    # Discover frames
+    frames = sorted(scan_dir.glob("frame_*.jpg"), key=natural_sort_key)
+    if not frames:
+        raise ValueError(f"No frame_*.jpg files found in {scan_dir}")
+    if not quiet:
+        print(f"Found {len(frames)} frames in {scan_dir}")
+
+    output.mkdir(parents=True, exist_ok=True)
+    flatfield_str = str(flatfield) if flatfield else None
+
+    config = DetectorConfig.from_material(material)
+    overrides = {}
+    if contrast_offset is not None:
+        overrides["contrast_offset"] = contrast_offset
+    if min_size_um is not None:
+        overrides["min_size_um2"] = min_size_um
+    if edge_margin is not None:
+        overrides["edge_margin_px"] = edge_margin
+    if overrides:
+        config = replace(config, **overrides)
+
+    # Submit all frames to worker pool
+    t0 = time.monotonic()
+    results: dict[str, FrameResult] = {}
+    total_det_count = 0
+
+    with ProcessPoolExecutor(max_workers=jobs) as pool:
+        future_to_name = {}
+        for fp in frames:
+            fut = pool.submit(
+                process_frame,
+                str(fp),
+                flatfield_str,
+                config,
+                pixel_size,
+                dark_frac_cutoff,
+            )
+            future_to_name[fut] = fp.stem
+
+        for done_count, fut in enumerate(as_completed(future_to_name), 1):
+            result = fut.result()
+            results[result.frame_name] = result
+            total_det_count += len(result.detections)
+            if not quiet and done_count % 100 == 0:
+                print(f"  [{done_count}/{len(frames)}] {total_det_count} detections so far...")
+
+    elapsed = time.monotonic() - t0
+    if not quiet:
+        print(f"Processed {len(frames)} frames in {elapsed:.1f}s ({len(frames) / elapsed:.1f} fps)")
+
+    # Write per-frame JSONs and optional viz
+    for fp in frames:
+        name = fp.stem
+        r = results[name]
+        if not r.detections:
+            continue
+
+        # Per-frame JSON (geometry only — tier/score live in summary.json)
+        geom_dets = [{k: v for k, v in d.items() if k not in ("tier", "score", "classification")} for d in r.detections]
+        frame_json = {"frame": name, "dark_frac": round(r.dark_frac, 4), "detections": geom_dets}
+        with open(output / f"{name}.json", "w") as f:
+            json.dump(frame_json, f, indent=2)
+
+        # Annotated image
+        if viz:
+            raw = cv2.imread(fp)
+            if raw is not None:
+                vis = draw_detections(raw, r.detections, um_per_px=pixel_size)
+                cv2.imwrite(output / f"{name}.jpg", vis)
+
+    # Build summary
+    tier_counts = {1: 0, 2: 0, 3: 0}
+    skipped_count = 0
+    frames_with_dets = 0
+    all_detections: dict[str, list[dict]] = {}
+
+    for fp in frames:
+        name = fp.stem
+        r = results[name]
+        if r.skipped:
+            skipped_count += 1
+        if r.detections:
+            frames_with_dets += 1
+            stripped = [strip_geometry(d) for d in r.detections]
+            # Tag each detection with its frame name
+            for d in stripped:
+                d["frame"] = name
+            all_detections[name] = stripped
+            for d in r.detections:
+                tier = d.get("tier", 3)
+                tier_counts[tier] = tier_counts.get(tier, 0) + 1
+
+    summary = {
+        "timestamp": datetime.now().isoformat(),
+        "command": sys.argv,
+        "duration_s": round(elapsed, 2),
+        "scan_dir": str(scan_dir),
+        "params": {
+            "material": material,
+            "flatfield": flatfield_str,
+            "contrast_offset": config.contrast_offset,
+            "min_size_um2": config.min_size_um2,
+            "min_size_px": int(config.min_size_um2 / (pixel_size**2)),
+            "edge_margin_px": config.edge_margin_px,
+            "dark_frac_cutoff": dark_frac_cutoff,
+            "pixel_size_um": pixel_size,
+        },
+        "stats": {
+            "total_frames": len(frames),
+            "skipped_frames": skipped_count,
+            "frames_with_detections": frames_with_dets,
+            "total_detections": total_det_count,
+            "tier_1": tier_counts[1],
+            "tier_2": tier_counts[2],
+            "tier_3": tier_counts[3],
+        },
+        "detections_by_frame": all_detections,
+    }
+
+    summary_path = output / "summary.json"
+    with open(summary_path, "w") as f:
+        json.dump(summary, f, indent=2)
+    if not quiet:
+        print(f"Saved: {summary_path}")
+
+    if not quiet:
+        print(f"\n{'=' * 50}")
+        print(f"Total frames:       {len(frames)}")
+        print(f"Skipped (dark):     {skipped_count}")
+        print(f"Frames w/ dets:     {frames_with_dets}")
+        print(f"Total detections:   {total_det_count}")
+        print(f"  Tier 1:           {tier_counts[1]}")
+        print(f"  Tier 2:           {tier_counts[2]}")
+        print(f"  Tier 3:           {tier_counts[3]}")
+
+        all_flat = [d for dets in all_detections.values() for d in dets]
+        if all_flat:
+            print("\n--- Top 10 by score ---")
+            by_score = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))[:10]
+            for i, d in enumerate(by_score):
+                print(
+                    f"  {i + 1}. {d['frame']} "
+                    f"score={d.get('score', 0):.3f} "
+                    f"tier={d.get('tier', '?')} "
+                    f"size={d['size_px']}px "
+                    f"cal_dist={d.get('cal_dist', 0):.3f}"
+                )
+
+    return SegStats(
+        total_frames=len(frames),
+        skipped_frames=skipped_count,
+        frames_with_detections=frames_with_dets,
+        total_detections=total_det_count,
+        tier_1=tier_counts[1],
+        tier_2=tier_counts[2],
+        tier_3=tier_counts[3],
+        duration_s=round(elapsed, 2),
+    )
 
 
 def main() -> int:
@@ -97,157 +254,23 @@ def main() -> int:
     parser.add_argument("--pixel-size", type=float, default=0.36, help="µm per pixel (default: 0.36 for 20x bin3)")
     args = parser.parse_args()
 
-    # Discover frames
-    frames = sorted(args.scan_dir.glob("frame_*.jpg"), key=_natural_sort_key)
-    if not frames:
-        print(f"No frame_*.jpg files found in {args.scan_dir}")
+    try:
+        run(
+            scan_dir=args.scan_dir,
+            output=args.output,
+            flatfield=args.flatfield,
+            material=args.material,
+            contrast_offset=args.contrast_offset,
+            min_size_um=args.min_size_um,
+            edge_margin=args.edge_margin,
+            dark_frac_cutoff=args.dark_frac_cutoff,
+            jobs=args.jobs,
+            viz=args.viz,
+            pixel_size=args.pixel_size,
+        )
+    except ValueError as e:
+        print(f"Error: {e}")
         return 1
-    print(f"Found {len(frames)} frames in {args.scan_dir}")
-
-    args.output.mkdir(parents=True, exist_ok=True)
-    flatfield_str = str(args.flatfield) if args.flatfield else None
-
-    from dataclasses import replace
-
-    config = DetectorConfig.from_material(args.material)
-    overrides = {}
-    if args.contrast_offset is not None:
-        overrides["contrast_offset"] = args.contrast_offset
-    if args.min_size_um is not None:
-        overrides["min_size_um2"] = args.min_size_um
-    if args.edge_margin is not None:
-        overrides["edge_margin_px"] = args.edge_margin
-    if overrides:
-        config = replace(config, **overrides)
-
-    # Submit all frames to worker pool
-    t0 = time.monotonic()
-    results: dict[str, FrameResult] = {}
-    total_det_count = 0
-
-    with ProcessPoolExecutor(max_workers=args.jobs) as pool:
-        future_to_name = {}
-        for fp in frames:
-            fut = pool.submit(
-                _process_frame,
-                str(fp),
-                flatfield_str,
-                config,
-                args.pixel_size,
-                args.dark_frac_cutoff,
-            )
-            future_to_name[fut] = fp.stem
-
-        for done_count, fut in enumerate(as_completed(future_to_name), 1):
-            result = fut.result()
-            results[result.frame_name] = result
-            total_det_count += len(result.detections)
-            if done_count % 100 == 0:
-                print(f"  [{done_count}/{len(frames)}] {total_det_count} detections so far...")
-
-    elapsed = time.monotonic() - t0
-    print(f"Processed {len(frames)} frames in {elapsed:.1f}s ({len(frames) / elapsed:.1f} fps)")
-
-    # Write per-frame JSONs and optional viz
-    from segment_flakes import draw_detections
-
-    for fp in frames:
-        name = fp.stem
-        r = results[name]
-        if not r.detections:
-            continue
-
-        # Per-frame JSON (geometry only — tier/score live in summary.json)
-        geom_dets = [{k: v for k, v in d.items() if k not in ("tier", "score", "classification")} for d in r.detections]
-        frame_json = {"frame": name, "dark_frac": round(r.dark_frac, 4), "detections": geom_dets}
-        with open(args.output / f"{name}.json", "w") as f:
-            json.dump(frame_json, f, indent=2)
-
-        # Annotated image
-        if args.viz:
-            raw = cv2.imread(fp)
-            if raw is not None:
-                vis = draw_detections(raw, r.detections, um_per_px=args.pixel_size)
-                cv2.imwrite(args.output / f"{name}.jpg", vis)
-
-    # Build summary
-    tier_counts = {1: 0, 2: 0, 3: 0}
-    skipped_count = 0
-    frames_with_dets = 0
-    all_detections: dict[str, list[dict]] = {}
-
-    for fp in frames:
-        name = fp.stem
-        r = results[name]
-        if r.skipped:
-            skipped_count += 1
-        if r.detections:
-            frames_with_dets += 1
-            stripped = [_strip_geometry(d) for d in r.detections]
-            # Tag each detection with its frame name
-            for d in stripped:
-                d["frame"] = name
-            all_detections[name] = stripped
-            for d in r.detections:
-                tier = d.get("tier", 3)
-                tier_counts[tier] = tier_counts.get(tier, 0) + 1
-
-    summary = {
-        "timestamp": datetime.now().isoformat(),
-        "command": sys.argv,
-        "duration_s": round(elapsed, 2),
-        "scan_dir": str(args.scan_dir),
-        "params": {
-            "material": args.material,
-            "flatfield": flatfield_str,
-            "contrast_offset": config.contrast_offset,
-            "min_size_um2": config.min_size_um2,
-            "min_size_px": int(config.min_size_um2 / (args.pixel_size**2)),
-            "edge_margin_px": config.edge_margin_px,
-            "dark_frac_cutoff": args.dark_frac_cutoff,
-            "pixel_size_um": args.pixel_size,
-        },
-        "stats": {
-            "total_frames": len(frames),
-            "skipped_frames": skipped_count,
-            "frames_with_detections": frames_with_dets,
-            "total_detections": total_det_count,
-            "tier_1": tier_counts[1],
-            "tier_2": tier_counts[2],
-            "tier_3": tier_counts[3],
-        },
-        "detections_by_frame": all_detections,
-    }
-
-    summary_path = args.output / "summary.json"
-    with open(summary_path, "w") as f:
-        json.dump(summary, f, indent=2)
-    print(f"Saved: {summary_path}")
-
-    # Final stats
-    print(f"\n{'=' * 50}")
-    print(f"Total frames:       {len(frames)}")
-    print(f"Skipped (dark):     {skipped_count}")
-    print(f"Frames w/ dets:     {frames_with_dets}")
-    print(f"Total detections:   {total_det_count}")
-    print(f"  Tier 1:           {tier_counts[1]}")
-    print(f"  Tier 2:           {tier_counts[2]}")
-    print(f"  Tier 3:           {tier_counts[3]}")
-
-    # Top 10 by score
-    all_flat = [d for dets in all_detections.values() for d in dets]
-    if all_flat:
-        print("\n--- Top 10 by score ---")
-        by_score = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))[:10]
-        for i, d in enumerate(by_score):
-            print(
-                f"  {i + 1}. {d['frame']} "
-                f"score={d.get('score', 0):.3f} "
-                f"tier={d.get('tier', '?')} "
-                f"size={d['size_px']}px "
-                f"cal_dist={d.get('cal_dist', 0):.3f}"
-            )
-
     return 0
 
 

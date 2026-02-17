@@ -18,11 +18,10 @@ from pathlib import Path
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
-from detector_config import DetectorConfig
 from mosaic_util import make_mosaic
-from segment_flakes import draw_scale_bar, segment_frame
 
 from flakefinder.scan_utils import apply_flatfield
+from flakefinder.segmentation import DetectorConfig, draw_scale_bar, segment_frame
 
 # R-G calibration curve: R = 0.193*G^2 - 0.217*G - 0.604
 # Polynomial coefficients (G^2, G, constant)

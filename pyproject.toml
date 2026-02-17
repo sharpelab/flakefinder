@@ -65,9 +65,9 @@ include = ["archive/**"]
 [tool.ty.overrides.rules]
 all = "ignore"
 
-# segment_flakes.py — cv2 contour types don't satisfy ty's max() overloads
+# cv2 contour types don't satisfy ty's max() overloads
 [[tool.ty.overrides]]
-include = ["scripts/segment_flakes.py"]
+include = ["src/flakefinder/segmentation.py"]
 [tool.ty.overrides.rules]
 no-matching-overload = "ignore"
 

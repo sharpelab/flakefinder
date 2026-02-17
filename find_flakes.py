@@ -1,11 +1,18 @@
 """End-to-end flake finding pipeline.
 
 Orchestrates: overview scan → stitch → chip detection →
-per-chip focus mapping → plane analysis → chip scanning.
+per-chip focus mapping → plane analysis → chip scanning →
+background segmentation.
 
 Overview and chip scan magnifications are configurable (default: 5x
 overview, 20x chip scan). Scan speeds scale automatically with
 magnification.
+
+Segmentation runs in a background thread after each chip scan completes,
+using reduced workers (--seg-jobs-bg) to limit CPU contention with
+hardware operations. After the microscope is parked, remaining jobs are
+boosted to --seg-jobs-idle workers. Use --seg-wait for a safe baseline
+that blocks between chips, or --no-segment to disable entirely.
 
 Calls command modules in-process with a shared Microscope connection.
 If any step fails, prints what completed and exits. Output goes under
@@ -27,14 +34,14 @@ Usage:
     # Resume a previous run (config loaded from checkpoint)
     uv run python find_flakes.py --resume scans/run_20260208_1430
 
-    # Process chips after chip 3, limit to 2 chips
-    uv run python find_flakes.py --after 3 --limit 2
+    # Disable background segmentation
+    uv run python find_flakes.py --no-segment
+
+    # Safe seg baseline (blocks between chips)
+    uv run python find_flakes.py --seg-wait
 
     # Preview commands without running
     uv run python find_flakes.py --dry-run
-
-    # Pause for confirmation between each stage
-    uv run python find_flakes.py --pause
 """
 
 import argparse
@@ -42,10 +49,11 @@ import contextlib
 import json
 import sys
 import time
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TypedDict
+from typing import NamedTuple, TypedDict
 
 from commands import analyze_focus_map, chip_scan, find_chips, focus_map, scan, stage, stitch
 from flakefinder.cli_utils import park_microscope
@@ -85,6 +93,7 @@ class TeeWriter:
 # Defaults
 DEFAULT_AREA_RECT = "8000,95000,0,78000"
 DEFAULT_INITIAL_Z = 24690
+REPO_DIR = Path(__file__).resolve().parent
 
 
 class ScanPreset(TypedDict):
@@ -265,6 +274,18 @@ def _always_console():
 
 
 @dataclass
+class SegConfig:
+    """Segmentation pipeline configuration."""
+
+    enabled: bool
+    wait: bool  # --seg-wait: block before next chip until seg completes
+    flatfield: Path | None
+    material: str
+    jobs_bg: int  # workers during hardware ops
+    jobs_idle: int  # workers after park (boost)
+
+
+@dataclass
 class _Preflight:
     """Validated pipeline configuration from _plan()."""
 
@@ -284,7 +305,14 @@ class _Preflight:
     chip_scan_exposure_ms: float
     focus_map_gain: float
     focus_map_exposure_ms: float
+    seg: SegConfig
     args: argparse.Namespace  # raw CLI args for forwarding
+
+
+def _resolve_flatfield(chip_scan_mag: str) -> Path | None:
+    """Auto-detect flatfield file for a chip scan magnification."""
+    path = REPO_DIR / "calibration" / f"flatfield_{chip_scan_mag}_bin3.npy"
+    return path if path.exists() else None
 
 
 def _plan(args: argparse.Namespace) -> _Preflight:
@@ -333,6 +361,21 @@ def _plan(args: argparse.Namespace) -> _Preflight:
     mag_scale = 20.0 / chip_mag_num
     scan_z_speed = args.scan_z_speed if args.scan_z_speed is not None else min(1250.0 * mag_scale, 5000.0)
 
+    # Segmentation config
+    if args.flatfield:
+        flatfield = Path(args.flatfield)
+    else:
+        flatfield = _resolve_flatfield(chip_scan_mag)
+
+    seg = SegConfig(
+        enabled=not args.no_segment,
+        wait=args.seg_wait,
+        flatfield=flatfield,
+        material=args.material,
+        jobs_bg=args.seg_jobs_bg,
+        jobs_idle=args.seg_jobs_idle,
+    )
+
     return _Preflight(
         run_dir=run_dir,
         overview_dir=overview_dir,
@@ -350,6 +393,7 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         chip_scan_exposure_ms=preset["chip_scan_exposure_ms"],
         focus_map_gain=preset["focus_map_gain"],
         focus_map_exposure_ms=preset["focus_map_exposure_ms"],
+        seg=seg,
         args=args,
     )
 
@@ -487,6 +531,44 @@ Examples:
         action="store_true",
         help="Print one summary line per step (full output still in pipeline.log)",
     )
+
+    # Segmentation (runs in background after each chip scan)
+    seg_group = parser.add_argument_group("Segmentation")
+    seg_group.add_argument(
+        "--no-segment",
+        action="store_true",
+        help="Disable background segmentation",
+    )
+    seg_group.add_argument(
+        "--seg-wait",
+        action="store_true",
+        help="Wait for segmentation to complete before next chip (safe baseline for comparison)",
+    )
+    seg_group.add_argument(
+        "--flatfield",
+        type=str,
+        default=None,
+        help="Flatfield .npy file (default: auto-detect from calibration/flatfield_{mag}_bin3.npy)",
+    )
+    seg_group.add_argument(
+        "--material",
+        type=str,
+        default="hbn",
+        choices=["hbn", "graphene"],
+        help="Material preset for segmentation (default: hbn)",
+    )
+    seg_group.add_argument(
+        "--seg-jobs-bg",
+        type=int,
+        default=4,
+        help="Segmentation workers during hardware ops (default: 4)",
+    )
+    seg_group.add_argument(
+        "--seg-jobs-idle",
+        type=int,
+        default=8,
+        help="Segmentation workers after park / boost (default: 8)",
+    )
     return parser
 
 
@@ -511,6 +593,14 @@ def _print_header(p: _Preflight) -> None:
         print(f"After:         {args.after}")
     if args.limit is not None:
         print(f"Limit:         {args.limit}")
+    if p.seg.enabled:
+        ff_label = str(p.seg.flatfield) if p.seg.flatfield else "none"
+        print(f"Segmentation:  {p.seg.material}, {p.seg.jobs_bg}j bg / {p.seg.jobs_idle}j idle")
+        print(f"Flatfield:     {ff_label}")
+        if p.seg.wait:
+            print("Seg mode:      WAIT (blocking)")
+    else:
+        print("Segmentation:  disabled")
     if args.dry_run:
         print("Mode:          DRY RUN")
     if args.pause:
@@ -593,6 +683,220 @@ def _print_chip_summary(chip_idx: int, plane_path: Path, scan_dir: Path) -> None
     _print_chip_scan_summary(chip_idx, scan_dir)
 
 
+# ============================================================================
+# Background segmentation
+# ============================================================================
+
+
+@dataclass
+class _SegJob:
+    """Tracks one chip's segmentation work."""
+
+    chip_idx: int
+    seg_key: str  # checkpoint key
+    scan_dir: Path  # chip scan directory (frame_NNNN.jpg)
+    seg_dir: Path  # segmentation output directory
+
+
+class _SegResult(NamedTuple):
+    success: bool
+    duration: float
+    summary: str  # one-line summary for console
+    error: str  # error message on failure
+
+
+def _run_chip_seg(
+    job: _SegJob,
+    flatfield: Path | None,
+    material: str,
+    jobs: int,
+) -> _SegResult:
+    """Run segmentation for one chip in-process. Called in background thread."""
+    from flakefinder.segmentation import (
+        DetectorConfig,
+        FrameResult,
+        natural_sort_key,
+        process_frame,
+        strip_geometry,
+    )
+
+    start = time.perf_counter()
+    try:
+        # Read pixel size from scan metadata
+        pixel_size = 0.36  # fallback for 20x bin3
+        scan_meta_path = job.scan_dir / "scan_meta.json"
+        if scan_meta_path.exists():
+            with open(scan_meta_path) as f:
+                sm = json.load(f)
+            pixel_size = sm.get("optics", {}).get("sample_pixel_x_um", pixel_size)
+
+        # Discover frames
+        frames = sorted(job.scan_dir.glob("frame_*.jpg"), key=natural_sort_key)
+        if not frames:
+            return _SegResult(success=False, duration=0, summary="", error="No frame_*.jpg files found")
+
+        job.seg_dir.mkdir(parents=True, exist_ok=True)
+        flatfield_str = str(flatfield) if flatfield else None
+        config = DetectorConfig.from_material(material)
+        dark_frac_cutoff = 0.05
+
+        # Process all frames in parallel
+        results: dict[str, FrameResult] = {}
+        total_det_count = 0
+
+        with ProcessPoolExecutor(max_workers=jobs) as pool:
+            future_to_name = {}
+            for fp in frames:
+                fut = pool.submit(process_frame, str(fp), flatfield_str, config, pixel_size, dark_frac_cutoff)
+                future_to_name[fut] = fp.stem
+
+            for fut in as_completed(future_to_name):
+                r = fut.result()
+                results[r.frame_name] = r
+                total_det_count += len(r.detections)
+
+        # Write per-frame JSONs (geometry only)
+        for fp in frames:
+            name = fp.stem
+            r = results[name]
+            if not r.detections:
+                continue
+            geom_dets = [
+                {k: v for k, v in d.items() if k not in ("tier", "score", "classification")} for d in r.detections
+            ]
+            frame_json = {"frame": name, "dark_frac": round(r.dark_frac, 4), "detections": geom_dets}
+            with open(job.seg_dir / f"{name}.json", "w") as f:
+                json.dump(frame_json, f, indent=2)
+
+        # Build summary
+        tier_counts: dict[int, int] = {1: 0, 2: 0, 3: 0}
+        skipped_count = 0
+        frames_with_dets = 0
+        all_detections: dict[str, list[dict]] = {}
+
+        for fp in frames:
+            name = fp.stem
+            r = results[name]
+            if r.skipped:
+                skipped_count += 1
+            if r.detections:
+                frames_with_dets += 1
+                stripped = [strip_geometry(d) for d in r.detections]
+                for d in stripped:
+                    d["frame"] = name
+                all_detections[name] = stripped
+                for d in r.detections:
+                    tier = d.get("tier", 3)
+                    tier_counts[tier] = tier_counts.get(tier, 0) + 1
+
+        seg_elapsed = time.perf_counter() - start
+
+        summary_data = {
+            "timestamp": datetime.now().isoformat(),
+            "duration_s": round(seg_elapsed, 2),
+            "scan_dir": str(job.scan_dir),
+            "params": {
+                "material": material,
+                "flatfield": flatfield_str,
+                "contrast_offset": config.contrast_offset,
+                "min_size_um2": config.min_size_um2,
+                "min_size_px": int(config.min_size_um2 / (pixel_size**2)),
+                "edge_margin_px": config.edge_margin_px,
+                "dark_frac_cutoff": dark_frac_cutoff,
+                "pixel_size_um": pixel_size,
+            },
+            "stats": {
+                "total_frames": len(frames),
+                "skipped_frames": skipped_count,
+                "frames_with_detections": frames_with_dets,
+                "total_detections": total_det_count,
+                "tier_1": tier_counts[1],
+                "tier_2": tier_counts[2],
+                "tier_3": tier_counts[3],
+            },
+            "detections_by_frame": all_detections,
+        }
+
+        with open(job.seg_dir / "summary.json", "w") as f:
+            json.dump(summary_data, f, indent=2)
+
+        summary_str = (
+            f"{len(frames)} frames, "
+            f"{total_det_count} det "
+            f"(T1:{tier_counts[1]} T2:{tier_counts[2]} "
+            f"T3:{tier_counts[3]}), {seg_elapsed:.1f}s @ {jobs}j"
+        )
+
+        return _SegResult(success=True, duration=seg_elapsed, summary=summary_str, error="")
+
+    except Exception as e:
+        duration = time.perf_counter() - start
+        return _SegResult(success=False, duration=duration, summary="", error=str(e))
+
+
+def _on_seg_done(future: Future, chip_idx: int) -> None:
+    """Print seg completion summary. Runs in executor thread."""
+    try:
+        result = future.result()
+        with _always_console():
+            if result.success:
+                print(f"[seg chip {chip_idx}] {result.summary}")
+            else:
+                print(f"[seg chip {chip_idx}] FAILED: {result.error[:200]}")
+    except Exception as e:
+        with _always_console():
+            print(f"[seg chip {chip_idx}] ERROR: {e}")
+
+
+def _drain_seg(
+    seg_futures: list[tuple[_SegJob, Future]],
+    seg_executor: ThreadPoolExecutor,
+    seg: SegConfig,
+    checkpoint: dict,
+    run_dir: Path,
+) -> float:
+    """Wait for all seg futures, boost queued jobs, checkpoint completions.
+
+    Returns total segmentation wall-clock time across all chips.
+    """
+    total_seg_time = 0.0
+    to_boost: list[_SegJob] = []
+
+    for job, future in seg_futures:
+        if future.cancel():
+            to_boost.append(job)
+            continue
+        # Done or running — result() blocks if still running
+        try:
+            result = future.result()
+            total_seg_time += result.duration
+            if result.success:
+                mark_step(run_dir, checkpoint, job.seg_key, result.duration)
+        except Exception:
+            pass  # callback already logged
+
+    # Re-submit cancelled jobs at idle (boosted) speed
+    if to_boost:
+        with _always_console():
+            print(f"[seg] Boosting {len(to_boost)} job(s) to {seg.jobs_idle} workers")
+        for job in to_boost:
+            future = seg_executor.submit(_run_chip_seg, job, seg.flatfield, seg.material, seg.jobs_idle)
+            try:
+                result = future.result()
+                total_seg_time += result.duration
+                with _always_console():
+                    if result.success:
+                        print(f"[seg chip {job.chip_idx}] {result.summary}")
+                        mark_step(run_dir, checkpoint, job.seg_key, result.duration)
+                    else:
+                        print(f"[seg chip {job.chip_idx}] FAILED: {result.error[:200]}")
+            except Exception as e:
+                with _always_console():
+                    print(f"[seg chip {job.chip_idx}] ERROR: {e}")
+
+    return total_seg_time
+
+
 def run(scope: Microscope, p: _Preflight) -> int:
     """Execute the flake-finding pipeline with a live Microscope.
 
@@ -618,6 +922,12 @@ def run(scope: Microscope, p: _Preflight) -> int:
         print(f"\nResuming from checkpoint ({len(checkpoint['completed_steps'])} steps complete)")
         for s in checkpoint["completed_steps"]:
             print(f"  [checkpoint] {s}")
+
+    # Background segmentation executor (max 1 concurrent seg job)
+    seg_executor: ThreadPoolExecutor | None = None
+    seg_futures: list[tuple[_SegJob, Future]] = []
+    if p.seg.enabled:
+        seg_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="seg")
 
     pipeline_start = time.perf_counter()
 
@@ -816,6 +1126,23 @@ def run(scope: Microscope, p: _Preflight) -> int:
         # Summary: chip scan
         _print_chip_scan_summary(chip_idx, chip_scan_dir)
 
+        # Submit background segmentation
+        seg_key = f"chip_{chip_idx}_segment"
+        if seg_executor is not None and not step_done(checkpoint, seg_key):
+            seg_dir = chip_dir / "seg"
+            job = _SegJob(chip_idx, seg_key, chip_scan_dir, seg_dir)
+            future = seg_executor.submit(_run_chip_seg, job, p.seg.flatfield, p.seg.material, p.seg.jobs_bg)
+            future.add_done_callback(lambda f, ci=chip_idx: _on_seg_done(f, ci))
+            seg_futures.append((job, future))
+            if p.seg.wait:
+                # Safe mode: block until this chip's seg completes before next chip
+                try:
+                    result = future.result()
+                    if result.success:
+                        mark_step(run_dir, checkpoint, seg_key, result.duration)
+                except Exception:
+                    pass  # callback already logged
+
         # ETA for remaining chips
         chips_processed += 1
         chips_remaining = len(chip_indices) - (loop_pos + 1)
@@ -830,13 +1157,49 @@ def run(scope: Microscope, p: _Preflight) -> int:
                 )
 
     # ----------------------------------------------------------------
+    # Scans complete
+    # ----------------------------------------------------------------
+    with _always_console():
+        seg_pending = sum(1 for _, f in seg_futures if not f.done())
+        seg_note = f", {seg_pending} seg pending" if seg_pending > 0 else ""
+        print(f"[scans done] {len(chip_indices)} chips{seg_note}")
+
+    # ----------------------------------------------------------------
+    # Step 6: Park microscope
+    # ----------------------------------------------------------------
+    if not step_done(checkpoint, "park"):
+        duration, _ = run_in_process(
+            "Park Microscope",
+            lambda: park_microscope(scope),
+            pause=args.pause,
+            quiet=quiet,
+        )
+        mark_step(run_dir, checkpoint, "park", duration)
+
+    # ----------------------------------------------------------------
+    # Step 7: Drain background segmentation (boost remaining jobs)
+    # ----------------------------------------------------------------
+    if seg_futures and seg_executor is not None:
+        seg_wall_start = time.perf_counter()
+        total_seg_time = _drain_seg(seg_futures, seg_executor, p.seg, checkpoint, run_dir)
+        seg_wall = time.perf_counter() - seg_wall_start
+        with _always_console():
+            print(
+                f"[seg done] {len(seg_futures)} chips, "
+                f"{_format_duration_compact(total_seg_time)} cpu, "
+                f"{_format_duration_compact(seg_wall)} waited after park"
+            )
+    if seg_executor is not None:
+        seg_executor.shutdown(wait=False)
+
+    # ----------------------------------------------------------------
     # Summary
     # ----------------------------------------------------------------
     pipeline_duration = time.perf_counter() - pipeline_start
     t = checkpoint["step_timing"]
 
     with _always_console():
-        print(f"[done] {len(chip_indices)} chips, {_format_duration_compact(pipeline_duration)} total")
+        print(f"[done] {_format_duration_compact(pipeline_duration)} total")
 
     if not quiet:
         print()
@@ -854,13 +1217,19 @@ def run(scope: Microscope, p: _Preflight) -> int:
             fm = t.get(f"chip_{chip_idx}_focus_map", 0)
             an = t.get(f"chip_{chip_idx}_analyze", 0)
             sc = t.get(f"chip_{chip_idx}_scan", 0)
+            sg = t.get(f"chip_{chip_idx}_segment", 0)
             print(f"{'  Chip ' + str(chip_idx) + ' focus map':<30} {format_duration(fm):>12}")
             print(f"{'  Chip ' + str(chip_idx) + ' analyze':<30} {format_duration(an):>12}")
             print(f"{'  Chip ' + str(chip_idx) + ' ' + p.chip_scan_mag + ' scan':<30} {format_duration(sc):>12}")
+            if sg > 0:
+                print(f"{'  Chip ' + str(chip_idx) + ' segment':<30} {format_duration(sg):>12}")
 
-        total_recorded = sum(t.values())
+        hw_total = sum(v for k, v in t.items() if "segment" not in k)
+        seg_total = sum(v for k, v in t.items() if "segment" in k)
         print("-" * 42)
-        print(f"{'Total (recorded)':<30} {format_duration(total_recorded):>12}")
+        print(f"{'Hardware total':<30} {format_duration(hw_total):>12}")
+        if seg_total > 0:
+            print(f"{'Segmentation total (bg)':<30} {format_duration(seg_total):>12}")
         print(f"{'This invocation':<30} {format_duration(pipeline_duration):>12}")
         print()
         print(f"Output: {run_dir}/")
@@ -882,20 +1251,12 @@ def run(scope: Microscope, p: _Preflight) -> int:
         "chips": args.chips,
         "after": args.after,
         "limit": args.limit,
+        "seg_jobs_bg": p.seg.jobs_bg,
+        "seg_jobs_idle": p.seg.jobs_idle,
+        "material": p.seg.material,
+        "flatfield": str(p.seg.flatfield) if p.seg.flatfield else None,
     }
     save_checkpoint(run_dir, checkpoint)
-
-    # ----------------------------------------------------------------
-    # Step 6: Park microscope
-    # ----------------------------------------------------------------
-    if not step_done(checkpoint, "park"):
-        duration, _ = run_in_process(
-            "Park Microscope",
-            lambda: park_microscope(scope),
-            pause=args.pause,
-            quiet=quiet,
-        )
-        mark_step(run_dir, checkpoint, "park", duration)
 
     return 0
 
@@ -954,8 +1315,13 @@ def main() -> int:
                 run_in_process(f"Chip {ci} - Focus Map", lambda: None, dry_run=True)
                 run_in_process(f"Chip {ci} - Analyze Focus Map", lambda: None, dry_run=True)
                 run_in_process(f"Chip {ci} - {p.chip_scan_mag} Scan", lambda: None, dry_run=True)
+                if p.seg.enabled:
+                    run_in_process(f"Chip {ci} - Segment (bg, {p.seg.jobs_bg}j)", lambda: None, dry_run=True)
         else:
-            print(f"\n  Per-chip steps: Focus Map -> Analyze -> {p.chip_scan_mag} Scan (chips not yet detected)")
+            seg_str = " -> Segment (bg)" if p.seg.enabled else ""
+            print(
+                f"\n  Per-chip steps: Focus Map -> Analyze -> {p.chip_scan_mag} Scan{seg_str} (chips not yet detected)"
+            )
         return 0
 
     # Create run directory and set up log tee
