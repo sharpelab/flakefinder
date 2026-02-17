@@ -14,9 +14,9 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any
 
 from ..types import PositionSample
+from .types import BasicControlValue, MetricsConverter
 
 DEFAULT_POLL_HZ: float = 100.0
 STARTUP_POLL_HZ: float = 10.0
@@ -32,8 +32,8 @@ class PollingHandle:
     thread: threading.Thread | None = None
 
     # Private — stored for deferred thread creation (paused=True)
-    _bcv: Any = field(default=None, repr=False)
-    _converter: Any = field(default=None, repr=False)
+    _bcv: BasicControlValue | None = field(default=None, repr=False)
+    _converter: MetricsConverter | None = field(default=None, repr=False)
     _target_hz: float = field(default=DEFAULT_POLL_HZ, repr=False)
     _startup_hz: float | None = field(default=None, repr=False)
     _motion_threshold_um: float = field(default=_MOTION_THRESHOLD_UM, repr=False)
@@ -62,8 +62,8 @@ class PollingHandle:
 
 
 def poll_position(
-    bcv,
-    converter,
+    bcv: BasicControlValue,
+    converter: MetricsConverter,
     samples: list[PositionSample],
     stop: threading.Event,
     *,
@@ -88,11 +88,12 @@ def poll_position(
     """
     if startup_hz is not None:
         period = 1.0 / startup_hz
-        initial_pos = samples[0].axis_um if samples else None
+        # start_polling always seeds samples[0] before spawning this thread
+        initial_pos = samples[0].axis_um
         ramped = False
     else:
         period = 1.0 / target_hz
-        initial_pos = None
+        initial_pos = 0.0  # unused — ramped is already True
         ramped = True
 
     while not stop.is_set():
@@ -112,8 +113,8 @@ def poll_position(
 
 
 def start_polling(
-    bcv,
-    converter,
+    bcv: BasicControlValue,
+    converter: MetricsConverter,
     *,
     target_hz: float = DEFAULT_POLL_HZ,
     startup_hz: float | None = None,
@@ -161,8 +162,8 @@ def start_polling(
 
 
 def start_motion_polling(
-    bcv,
-    converter,
+    bcv: BasicControlValue,
+    converter: MetricsConverter,
     *,
     target_hz: float = DEFAULT_POLL_HZ,
     startup_hz: float = STARTUP_POLL_HZ,

@@ -8,10 +8,12 @@ from collections.abc import Sequence
 from functools import cache
 from importlib.resources import files
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
+from flakefinder.leica.camera import Camera
+from flakefinder.leica.microscope import Microscope
+from flakefinder.leica.units import Aperture, Lamp, Nosepiece, Shutter
 from flakefinder.types import (
     AreaRect,
     AreaRectI,
@@ -475,15 +477,11 @@ def compute_planar_scan_plan(
 
 def build_lighting_meta(
     *,
-    lamp: Any = None,
-    shutter: Any = None,
-    aperture: Any = None,
+    lamp: Lamp | None = None,
+    shutter: Shutter | None = None,
+    aperture: Aperture | None = None,
 ) -> LightingMeta:
-    """Build lighting metadata dict from hardware objects.
-
-    lamp/shutter/aperture are Leica SDK objects — typed as Any to avoid
-    coupling this module to the leica package.
-    """
+    """Build lighting metadata dict from hardware objects."""
     return LightingMeta(
         lamp_name=lamp.name if lamp else None,
         lamp_intensity=lamp.intensity if lamp else None,
@@ -495,7 +493,7 @@ def build_lighting_meta(
     )
 
 
-def build_camera_meta(camera: Any) -> CameraMeta:
+def build_camera_meta(camera: Camera) -> CameraMeta:
     """Build camera metadata entirely from live hardware state.
 
     Reads all values (gain, white balance, gamma, exposure, binning,
@@ -527,8 +525,8 @@ def build_camera_meta(camera: Any) -> CameraMeta:
 
 def build_optics_meta(
     *,
-    nosepiece: Any,
-    camera: Any,
+    nosepiece: Nosepiece,
+    camera: Camera,
 ) -> OpticsMeta:
     """Build optics metadata from nosepiece and camera.
 
@@ -560,7 +558,7 @@ def build_optics_meta(
     )
 
 
-def build_microscope_meta(scope: Any) -> MicroscopeMeta:
+def build_microscope_meta(scope: Microscope) -> MicroscopeMeta:
     """Build combined microscope metadata from live hardware.
 
     Reads camera, optics, and lighting state from the Microscope facade.
