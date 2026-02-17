@@ -186,23 +186,25 @@ def interpolate_position(
     t: float,
     samples: list[PositionSample],
 ) -> float | None:
-    """Interpolate position at time t from (t_before, t_after, x_um) samples.
+    """Interpolate position at time t from position samples.
 
-    Uses midpoint of t_before/t_after as the effective sample time.
+    Uses t_after as the effective sample time — the SDK position read
+    completes at the end of the call, so t_after best represents when
+    the encoder value was latched.
     """
     if not samples:
         return None
 
-    times = [(s[0] + s[1]) / 2 for s in samples]
+    times = [s.t_after for s in samples]
     idx = bisect.bisect_left(times, t)
 
     if idx == 0:
-        return samples[0][2]
+        return samples[0].axis_um
     if idx >= len(samples):
-        return samples[-1][2]
+        return samples[-1].axis_um
 
-    t0, x0 = times[idx - 1], samples[idx - 1][2]
-    t1, x1 = times[idx], samples[idx][2]
+    t0, x0 = times[idx - 1], samples[idx - 1].axis_um
+    t1, x1 = times[idx], samples[idx].axis_um
 
     if t1 == t0:
         return x0
@@ -214,13 +216,28 @@ def interpolate_position(
 def smooth_frame_positions(meta: ScanMeta, *, quiet: bool = False) -> None:
     """Smooth frame x_um and x_vel_um_s using the raw position sample stream.
 
-    Applies savgol smoothing to the ~63 Hz position polls per line, then
-    evaluates the smooth curve at each frame's t_capture.  Also recomputes
-    x_vel_um_s from the savgol derivative.
+    Uses t_after as the timing base for position samples — the SDK read
+    completes at the end of the call, so t_after best represents when
+    the encoder was latched.  Fits a smoothing spline (UnivariateSpline)
+    which handles non-uniform time spacing correctly, unlike savgol which
+    assumes uniform sample intervals.
+
+    Applies a velocity-proportional timing correction to align position
+    samples (read at t_after) with frame exposures (at t_start).  The
+    correction is largest at full scan velocity and zero at row edges
+    during accel/decel.
+
+    Drops sparse boundary samples (from adaptive 10→100 Hz polling ramp).
+    Frames outside the dense region keep their raw interpolated positions.
 
     Modifies meta["frames"] in place.  No-op if position_stream is absent.
     """
-    from scipy.signal import savgol_filter
+    from scipy.interpolate import UnivariateSpline
+
+    # Empirical offset between position read (t_after) and frame exposure
+    # (t_start).  Calibrated from USB (D2XX) scans by minimizing the
+    # directional offset between +X and -X rows.
+    _TIMING_OFFSET_S = 0.000825
 
     if "position_stream" not in meta:
         return
@@ -236,24 +253,39 @@ def smooth_frame_positions(meta: ScanMeta, *, quiet: bool = False) -> None:
         if len(line_ps) < 5:
             continue
 
-        t_ps = np.array([(s["t_before"] + s["t_after"]) / 2 for s in line_ps])
+        t_ps = np.array([s["t_after"] for s in line_ps])
         x_ps = np.array([s["x_um"] for s in line_ps])
 
-        win = min(15, len(x_ps) if len(x_ps) % 2 == 1 else len(x_ps) - 1)
-        if win < 5:
+        # Drop 3 boundary samples each side to avoid edge
+        # distortion from the adaptive 10→100 Hz polling ramp.
+        trim = 3
+        if len(t_ps) <= 2 * trim + 5:
             continue
-        x_smooth = savgol_filter(x_ps, win, 3)
+        t_dense = t_ps[trim:-trim]
+        x_dense = x_ps[trim:-trim]
 
-        # Velocity from savgol derivative
-        dt_mean = float(np.mean(np.diff(t_ps)))
-        x_vel_smooth = savgol_filter(x_ps, win, 3, deriv=1, delta=dt_mean)
+        if len(t_dense) < 5:
+            continue
+
+        # Estimate noise from second-differences (robust to velocity/accel).
+        # MAD of d²x ≈ σ * sqrt(6) * 0.6745, so σ ≈ MAD / 0.6745 / sqrt(6).
+        d2x = np.diff(x_dense, 2)
+        noise_um = float(np.median(np.abs(d2x)) / 0.6745 / np.sqrt(6))
+        s_factor = len(t_dense) * noise_um**2
+
+        spline = UnivariateSpline(t_dense, x_dense, k=3, s=s_factor)
+        spline_deriv = spline.derivative()
 
         for fi in range(line["frame_start"], line["frame_end"]):
             f = frames[fi]
             t = f["t_capture"]
-            f["x_um"] = float(np.interp(t, t_ps, x_smooth))
-            f["x_vel_um_s"] = float(np.interp(t, t_ps, x_vel_smooth))
-            count += 1
+            # Frames inside dense region get smoothed positions;
+            # frames outside (boundary) keep raw interpolated values.
+            if t_dense[0] <= t <= t_dense[-1]:
+                vel = float(spline_deriv(t))
+                f["x_um"] = float(spline(t)) - vel * _TIMING_OFFSET_S
+                f["x_vel_um_s"] = vel
+                count += 1
 
     if not quiet:
         print(f"Position smoothing: updated {count} frames from {len(ps)} raw samples")
