@@ -34,6 +34,20 @@ from flakefinder.scan_utils import DEFAULT_WB, build_microscope_meta, get_git_ve
 from flakefinder.types import ChipGeometry, GainRGB, Point2F
 
 
+class FMAfDefaults(NamedTuple):
+    """Focus-map-specific autofocus defaults per objective."""
+
+    z_range_um: float
+    z_speed_um_s: float
+
+
+# Tighter coarse scan for focus map AF (vs standalone autofocus auto-range).
+# 10x: 250 µm at 1250 µm/s gives ~3.5 µm/frame spacing (was 500/2500 → ~7 µm/frame).
+FM_AF_DEFAULTS: dict[int, FMAfDefaults] = {
+    2: FMAfDefaults(z_range_um=250, z_speed_um_s=1250),  # 10x
+}
+
+
 class SamplePoint(NamedTuple):
     x_um: float
     y_um: float
@@ -543,6 +557,14 @@ def run(
     if not quiet:
         print(f"Camera: {camera.name}")
         print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
+
+    # Apply focus-map-specific AF defaults if not explicitly set
+    fm_defaults = FM_AF_DEFAULTS.get(scope.nosepiece.position)
+    if fm_defaults is not None:
+        if z_range is None:
+            z_range = fm_defaults.z_range_um
+        if z_speed is None:
+            z_speed = fm_defaults.z_speed_um_s
 
     # Resolve reference Z
     if z is not None:

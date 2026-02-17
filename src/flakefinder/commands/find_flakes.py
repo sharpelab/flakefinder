@@ -141,7 +141,6 @@ _RESUME_FORBIDDEN_FLAGS = frozenset(
         "--overview-mag",
         "--chip-scan-mag",
         "--scan-speed",
-        "--scan-z-speed",
         "--area-rect",
         "--initial-z",
         "--white-balance",
@@ -307,7 +306,6 @@ class _Preflight:
     overview_mag: str
     chip_scan_mag: str
     scan_speed: float
-    scan_z_speed: float
     chip_scan_gain: float
     chip_scan_exposure_ms: float
     focus_map_gain: float
@@ -362,11 +360,8 @@ def _plan(args: argparse.Namespace) -> _Preflight:
     if args.chips is not None:
         chip_filter = [int(c.strip()) for c in args.chips.split(",")]
 
-    # Scan speed from preset; CLI overrides. AF Z speed still auto-derived from mag.
+    # Scan speed from preset; CLI overrides.
     scan_speed = args.scan_speed if args.scan_speed is not None else preset["chip_scan_speed_mm"]
-    chip_mag_num = float(chip_scan_mag.rstrip("x"))
-    mag_scale = 20.0 / chip_mag_num
-    scan_z_speed = args.scan_z_speed if args.scan_z_speed is not None else min(1250.0 * mag_scale, 5000.0)
 
     # Segmentation config
     if args.flatfield:
@@ -402,7 +397,6 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         overview_mag=overview_mag,
         chip_scan_mag=chip_scan_mag,
         scan_speed=scan_speed,
-        scan_z_speed=scan_z_speed,
         chip_scan_gain=preset["chip_scan_gain"],
         chip_scan_exposure_ms=preset["chip_scan_exposure_ms"],
         focus_map_gain=preset["focus_map_gain"],
@@ -512,12 +506,6 @@ Examples:
         help="Chip scan speed in mm/s (default: scales with magnification, 5 at 20x)",
     )
     parser.add_argument(
-        "--scan-z-speed",
-        type=float,
-        default=None,
-        help="Focus map AF Z speed in µm/s (default: scales with magnification, 1250 at 20x)",
-    )
-    parser.add_argument(
         "--white-balance",
         type=str,
         default="2.51,1.02,1.41",
@@ -616,7 +604,6 @@ def _print_header(p: _Preflight) -> None:
     print(f"Area rect:     {args.area_rect}")
     print(f"Initial Z:     {args.initial_z} µm")
     print(f"Scan speed:    {p.scan_speed} mm/s")
-    print(f"AF Z speed:    {p.scan_z_speed} µm/s")
     print(f"Chip camera:   gain={p.chip_scan_gain}, exposure={p.chip_scan_exposure_ms}ms")
     print(f"AF camera:     gain={p.focus_map_gain}, exposure={p.focus_map_exposure_ms}ms")
     print(f"White balance: {args.white_balance} (B,G,R)")
@@ -1341,7 +1328,6 @@ def run(scope: Microscope, p: _Preflight) -> int:
                     exposure_ms=p.focus_map_exposure_ms,
                     chip=ci,
                     save_images=args.debug_focus_map,
-                    z_speed=p.scan_z_speed,
                     af_settle=0.2 if args.debug_focus_map else 0,
                     move_to_best_z=args.debug_focus_map,
                     white_balance=p.wb,
@@ -1567,7 +1553,6 @@ def run(scope: Microscope, p: _Preflight) -> int:
         "overview_mag": p.overview_mag,
         "chip_scan_mag": p.chip_scan_mag,
         "scan_speed": p.scan_speed,
-        "scan_z_speed": p.scan_z_speed,
         "chip_scan_gain": p.chip_scan_gain,
         "chip_scan_exposure_ms": p.chip_scan_exposure_ms,
         "focus_map_gain": p.focus_map_gain,
@@ -1614,7 +1599,6 @@ def _apply_resume(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
     args.overview_mag = saved["overview_mag"]
     args.chip_scan_mag = saved["chip_scan_mag"]
     args.scan_speed = saved["scan_speed"]
-    args.scan_z_speed = saved["scan_z_speed"]
     if "white_balance" in saved:
         args.white_balance = saved["white_balance"]
 
