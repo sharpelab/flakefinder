@@ -56,7 +56,7 @@ from pathlib import Path
 from typing import NamedTuple, TypedDict
 
 from flakefinder.cli_utils import park_microscope
-from flakefinder.commands import analyze_focus_map, chip_scan, find_chips, focus_map, scan, stage, stitch
+from flakefinder.commands import analyze_focus_map, chip_scan, find_chips, focus_map, revisit, scan, stage, stitch
 from flakefinder.leica import Microscope
 from flakefinder.scan_utils import (
     CALIBRATION_DIR,
@@ -629,7 +629,7 @@ def _print_header(p: _Preflight) -> None:
             print("Seg mode:      WAIT (blocking)")
         if p.seg.revisit_mags:
             mags = ", ".join(f"{m:g}x" for m in p.seg.revisit_mags)
-            print(f"Revisit:       top {p.seg.revisit_top} → {mags}")
+            print(f"Revisit:       top {p.seg.revisit_top} → {mags} (capture after scans)")
     else:
         print("Segmentation:  disabled")
     if args.dry_run:
@@ -1044,6 +1044,128 @@ def _drain_seg(
     return total_seg_time
 
 
+def _run_revisit_phase(
+    scope: Microscope,
+    seg_futures: list[tuple[_SegJob, Future]],
+    seg_executor: ThreadPoolExecutor,
+    seg: SegConfig,
+    chip_indices: list[int],
+    run_dir: Path,
+    checkpoint: dict,
+    p: _Preflight,
+) -> tuple[float, float]:
+    """Drain seg and run revisit captures, overlapping where possible.
+
+    Boosts pending seg jobs to idle worker count, then iterates magnifications
+    (one at a time).  Within each mag, visits each chip's detections as soon as
+    its seg completes — overlapping microscope I/O with background seg CPU work.
+
+    Returns (total_seg_cpu_time, total_revisit_time).
+    """
+    # Map chip_idx → (job, future) for lookup
+    job_by_chip: dict[int, tuple[_SegJob, Future]] = {}
+    for job, future in seg_futures:
+        job_by_chip[job.chip_idx] = (job, future)
+
+    # Boost: cancel not-yet-started seg jobs, re-submit at idle worker count
+    to_boost: list[_SegJob] = []
+    for job, future in seg_futures:
+        if future.cancel():
+            to_boost.append(job)
+    if to_boost:
+        with _always_console():
+            print(f"[seg] Boosting {len(to_boost)} job(s) to {seg.jobs_idle} workers")
+        for job in to_boost:
+            new_future = seg_executor.submit(
+                _run_chip_seg,
+                job,
+                seg.flatfield,
+                seg.material,
+                seg.jobs_idle,
+                seg.revisit_mags,
+                seg.revisit_top,
+            )
+            new_future.add_done_callback(lambda f, ci=job.chip_idx: _on_seg_done(f, ci))
+            job_by_chip[job.chip_idx] = (job, new_future)
+
+    total_seg_time = 0.0
+    total_revisit_time = 0.0
+
+    def _wait_for_seg(chip_idx: int) -> None:
+        """Block until chip's seg is done, checkpoint if successful."""
+        nonlocal total_seg_time
+        if chip_idx not in job_by_chip:
+            return
+        job, future = job_by_chip[chip_idx]
+        if step_done(checkpoint, job.seg_key):
+            return
+        try:
+            result = future.result()
+            total_seg_time += result.duration
+            if result.success:
+                mark_step(run_dir, checkpoint, job.seg_key, result.duration)
+        except Exception:
+            pass  # _on_seg_done callback already logged
+
+    # Process revisits per magnification (one mag at a time)
+    for mag in seg.revisit_mags:
+        mag_label = f"{mag:g}x"
+
+        # Which chips need revisit at this mag?
+        chips_for_mag = []
+        for ci in chip_indices:
+            key = f"chip_{ci}_revisit_{mag_label}"
+            if not step_done(checkpoint, key):
+                chips_for_mag.append((ci, key))
+
+        if not chips_for_mag:
+            continue
+
+        with _always_console():
+            print(f"\n[revisit] {mag_label}: {len(chips_for_mag)} chip(s)")
+
+        for ci, key in chips_for_mag:
+            # Wait for seg to finish for this chip
+            _wait_for_seg(ci)
+
+            # Load revisit JSON
+            chip_dir = run_dir / f"chip_{ci}"
+            revisit_json = chip_dir / "seg" / f"revisit_{mag_label}.json"
+            output_dir = chip_dir / f"revisit_{mag_label}"
+
+            if not revisit_json.exists():
+                with _always_console():
+                    print(f"[revisit chip {ci}] No {mag_label} detections, skipping")
+                mark_step(run_dir, checkpoint, key, 0)
+                continue
+
+            revisit_file = revisit._parse_points_file(revisit_json)
+            n_pts = len(revisit_file.points)
+
+            t_start = time.perf_counter()
+            revisit.run(
+                scope,
+                output=str(output_dir),
+                points=revisit_file.points,
+                objective_mag=mag_label,
+                white_balance=p.wb,
+                quiet=True,
+            )
+            duration = time.perf_counter() - t_start
+
+            with _always_console():
+                print(f"[revisit chip {ci}] {mag_label}: {n_pts} pts, {_format_duration_compact(duration)}")
+
+            mark_step(run_dir, checkpoint, key, duration)
+            total_revisit_time += duration
+
+    # Drain any remaining seg futures (chips not involved in revisit)
+    for ci in chip_indices:
+        _wait_for_seg(ci)
+
+    return total_seg_time, total_revisit_time
+
+
 def run(scope: Microscope, p: _Preflight) -> int:
     """Execute the flake-finding pipeline with a live Microscope.
 
@@ -1320,32 +1442,65 @@ def run(scope: Microscope, p: _Preflight) -> int:
         print(f"[scans done] {len(chip_indices)} chips{seg_note}")
 
     # ----------------------------------------------------------------
-    # Step 6: Park microscope
+    # Step 6+7: Seg drain + revisit captures, or park + seg drain
     # ----------------------------------------------------------------
-    if not step_done(checkpoint, "park"):
+    has_revisits = bool(p.seg.revisit_mags) and seg_futures and seg_executor is not None
+
+    if has_revisits:
+        assert seg_executor is not None
+        # Revisit path: drain seg interleaved with revisit captures, then park
+        seg_wall_start = time.perf_counter()
+        total_seg_time, total_revisit_time = _run_revisit_phase(
+            scope,
+            seg_futures,
+            seg_executor,
+            p.seg,
+            chip_indices,
+            run_dir,
+            checkpoint,
+            p,
+        )
+        seg_wall = time.perf_counter() - seg_wall_start
+        with _always_console():
+            print(
+                f"[seg+revisit done] seg {_format_duration_compact(total_seg_time)} cpu, "
+                f"revisit {_format_duration_compact(total_revisit_time)}, "
+                f"{_format_duration_compact(seg_wall)} wall"
+            )
+        seg_executor.shutdown(wait=False)
+
+        # Park after revisits
         duration, _ = run_in_process(
             "Park Microscope",
             lambda: park_microscope(scope),
             pause=args.pause,
             quiet=quiet,
         )
-        mark_step(run_dir, checkpoint, "park", duration)
-
-    # ----------------------------------------------------------------
-    # Step 7: Drain background segmentation (boost remaining jobs)
-    # ----------------------------------------------------------------
-    if seg_futures and seg_executor is not None:
-        seg_wall_start = time.perf_counter()
-        total_seg_time = _drain_seg(seg_futures, seg_executor, p.seg, checkpoint, run_dir)
-        seg_wall = time.perf_counter() - seg_wall_start
-        with _always_console():
-            print(
-                f"[seg done] {len(seg_futures)} chips, "
-                f"{_format_duration_compact(total_seg_time)} cpu, "
-                f"{_format_duration_compact(seg_wall)} waited after park"
+        if not step_done(checkpoint, "park"):
+            mark_step(run_dir, checkpoint, "park", duration)
+    else:
+        # No-revisit path: park first, then drain seg
+        if not step_done(checkpoint, "park"):
+            duration, _ = run_in_process(
+                "Park Microscope",
+                lambda: park_microscope(scope),
+                pause=args.pause,
+                quiet=quiet,
             )
-    if seg_executor is not None:
-        seg_executor.shutdown(wait=False)
+            mark_step(run_dir, checkpoint, "park", duration)
+
+        if seg_futures and seg_executor is not None:
+            seg_wall_start = time.perf_counter()
+            total_seg_time = _drain_seg(seg_futures, seg_executor, p.seg, checkpoint, run_dir)
+            seg_wall = time.perf_counter() - seg_wall_start
+            with _always_console():
+                print(
+                    f"[seg done] {len(seg_futures)} chips, "
+                    f"{_format_duration_compact(total_seg_time)} cpu, "
+                    f"{_format_duration_compact(seg_wall)} waited after park"
+                )
+        if seg_executor is not None:
+            seg_executor.shutdown(wait=False)
 
     # ----------------------------------------------------------------
     # Summary
@@ -1378,13 +1533,21 @@ def run(scope: Microscope, p: _Preflight) -> int:
             print(f"{'  Chip ' + str(chip_idx) + ' ' + p.chip_scan_mag + ' scan':<30} {format_duration(sc):>12}")
             if sg > 0:
                 print(f"{'  Chip ' + str(chip_idx) + ' segment':<30} {format_duration(sg):>12}")
+            for mag in p.seg.revisit_mags:
+                mag_label = f"{mag:g}x"
+                rv = t.get(f"chip_{chip_idx}_revisit_{mag_label}", 0)
+                if rv > 0:
+                    print(f"{'  Chip ' + str(chip_idx) + ' revisit ' + mag_label:<30} {format_duration(rv):>12}")
 
-        hw_total = sum(v for k, v in t.items() if "segment" not in k)
+        hw_total = sum(v for k, v in t.items() if "segment" not in k and "revisit" not in k)
         seg_total = sum(v for k, v in t.items() if "segment" in k)
+        revisit_total = sum(v for k, v in t.items() if "revisit" in k)
         print("-" * 42)
         print(f"{'Hardware total':<30} {format_duration(hw_total):>12}")
         if seg_total > 0:
             print(f"{'Segmentation total (bg)':<30} {format_duration(seg_total):>12}")
+        if revisit_total > 0:
+            print(f"{'Revisit total':<30} {format_duration(revisit_total):>12}")
         print(f"{'This invocation':<30} {format_duration(pipeline_duration):>12}")
         print()
         print(f"Output: {run_dir}/")
@@ -1473,10 +1636,23 @@ def main() -> int:
                 run_in_process(f"Chip {ci} - {p.chip_scan_mag} Scan", lambda: None, dry_run=True)
                 if p.seg.enabled:
                     run_in_process(f"Chip {ci} - Segment (bg, {p.seg.jobs_bg}j)", lambda: None, dry_run=True)
+            if p.seg.revisit_mags:
+                for mag in p.seg.revisit_mags:
+                    mag_label = f"{mag:g}x"
+                    run_in_process(
+                        f"Revisit {mag_label} ({len(chip_indices)} chips, top {p.seg.revisit_top})",
+                        lambda: None,
+                        dry_run=True,
+                    )
         else:
             seg_str = " -> Segment (bg)" if p.seg.enabled else ""
+            revisit_str = ""
+            if p.seg.revisit_mags:
+                mags = ", ".join(f"{m:g}x" for m in p.seg.revisit_mags)
+                revisit_str = f" -> Revisit ({mags})"
             print(
-                f"\n  Per-chip steps: Focus Map -> Analyze -> {p.chip_scan_mag} Scan{seg_str} (chips not yet detected)"
+                f"\n  Per-chip steps: Focus Map -> Analyze -> {p.chip_scan_mag} Scan"
+                f"{seg_str}{revisit_str} (chips not yet detected)"
             )
         return 0
 

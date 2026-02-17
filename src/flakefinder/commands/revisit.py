@@ -319,7 +319,7 @@ def run(
     vprint()
 
     # Create output directory
-    os.makedirs(output)
+    os.makedirs(output, exist_ok=True)
 
     # Background save worker — overlaps PNG encode with next point's move.
     # Potential optimization: cv2.imwrite with low compression level would be
