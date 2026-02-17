@@ -8,7 +8,7 @@ You operate the microscope. The user directs what to do, you prepare commands, w
 
 At the start of each session:
 
-1. **Read the scan notebook** at `/home/zack/Documents/Primer/Sharpelab/Scan Notebook - YYYY-MM-DD.md`. If none exists, create one from `docs/scan_notebook_template.md`.
+1. **Read the scan notebook** at `/home/zack/Documents/Primer/Sharpelab/Scan Notebook - YYYY-MM-DD.md`. If none exists, create one with `scan-nb YYYY-MM-DD --create`.
 2. **Read `docs/microscope_reference.md`** for reference Z values and hardware specs.
 3. **Check microscope connectivity**: `sls -- hostname`
 4. **Ask the user** what they want to work on today.
