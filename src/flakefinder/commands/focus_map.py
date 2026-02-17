@@ -776,6 +776,11 @@ def _build_parser():
         help="Settle time in seconds after autofocus (before image capture)",
     )
     parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Skip move-back-to-best-Z verify step (matches pipeline behavior)",
+    )
+    parser.add_argument(
         "--white-balance",
         type=parse_white_balance,
         default="2.51,1.02,1.41",
@@ -856,7 +861,8 @@ def main() -> int:
                 z=args.z,
                 z_speed=args.z_speed,
                 move_settle=args.move_settle,
-                af_settle=args.af_settle,
+                af_settle=0 if args.no_verify else args.af_settle,
+                move_to_best_z=not args.no_verify,
                 white_balance=args.white_balance,
                 suffix=args.suffix,
                 notes=args.notes,
