@@ -545,6 +545,11 @@ Examples:
         action="store_true",
         help="Print one summary line per step (full output still in pipeline.log)",
     )
+    parser.add_argument(
+        "--debug-focus-map",
+        action="store_true",
+        help="Save per-point images and verify sharpness during focus map (slower)",
+    )
 
     # Segmentation (runs in background after each chip scan)
     seg_group = parser.add_argument_group("Segmentation")
@@ -1335,9 +1340,10 @@ def run(scope: Microscope, p: _Preflight) -> int:
                     gain=p.focus_map_gain,
                     exposure_ms=p.focus_map_exposure_ms,
                     chip=ci,
-                    save_images=True,
+                    save_images=args.debug_focus_map,
                     z_speed=p.scan_z_speed,
-                    af_settle=0.2,
+                    af_settle=0.2 if args.debug_focus_map else 0,
+                    move_to_best_z=args.debug_focus_map,
                     white_balance=p.wb,
                     output_dir=cd,
                     quiet=True,

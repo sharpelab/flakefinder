@@ -228,6 +228,7 @@ def run_focus_map(
     all_metrics: bool = False,
     move_settle_s: float = 0,
     af_settle_s: float = 0,
+    move_to_best_z: bool = True,
     images_dir: Path | None = None,
     debug_dir: Path | None = None,
     save_executor: ThreadPoolExecutor | None = None,
@@ -248,6 +249,8 @@ def run_focus_map(
         all_metrics: Compute all sharpness metrics per frame.
         move_settle_s: Settle time after XY move.
         af_settle_s: Settle time after autofocus (before image capture).
+        move_to_best_z: Move Z back to best position and verify sharpness.
+            False skips the return move, settle, and final capture.
         images_dir: Directory for after-images, or None.
         debug_dir: Directory for AF debug frames, or None.
         save_executor: ThreadPoolExecutor for background disk writes, or None.
@@ -300,6 +303,7 @@ def run_focus_map(
                 sharpness_method=sharpness_method,
                 store_frames=bool(debug_dir),
                 compute_all_metrics=all_metrics,
+                move_to_best_z=move_to_best_z,
             )
             best_z = af_result.selected_z_um
             selected_sharpness = af_result.selected_sharpness
@@ -476,6 +480,7 @@ def run(
     z_speed: float | None = None,
     move_settle: float = 0,
     af_settle: float = 0,
+    move_to_best_z: bool = True,
     white_balance: GainRGB = DEFAULT_WB,
     suffix: str | None = None,
     notes: str | None = None,
@@ -586,6 +591,7 @@ def run(
         all_metrics=all_metrics,
         move_settle_s=move_settle,
         af_settle_s=af_settle,
+        move_to_best_z=move_to_best_z,
         images_dir=images_dir,
         debug_dir=debug_dir,
         save_executor=save_executor,
