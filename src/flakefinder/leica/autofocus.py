@@ -864,6 +864,9 @@ def continuous_autofocus(
     actual_fine_z_end = None
 
     # Optional fine pass (skip if dynamic range too low)
+    fine_curve: list[SharpnessSample] = []
+    fine_frames = None
+
     if fine_pass and not stayed_at_initial:
         fine_z_start = best_z + fine_range_um / 2
         fine_z_end = best_z - fine_range_um / 2
@@ -1022,8 +1025,8 @@ def continuous_autofocus(
         stayed_at_initial=stayed_at_initial,
         sharpness_curve=sharpness_curve,
         frames=frames if store_frames else None,
-        fine_sharpness_curve=fine_curve if fine_pass and not stayed_at_initial and fine_curve else [],
-        fine_frames=fine_frames if store_frames and fine_pass and not stayed_at_initial else None,
+        fine_sharpness_curve=fine_curve,
+        fine_frames=fine_frames if store_frames else None,
         super_fine_sharpness_curve=super_fine_curve,
         super_fine_frames=super_fine_frames_result if store_frames else None,
         initial_image=stored_initial_image,
