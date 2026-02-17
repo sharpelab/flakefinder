@@ -569,7 +569,7 @@ def _plan(
     row_limit: int | None = None,
     speed_mm: float = 5.0,
     lead_in_um: float = 1000,
-    z_lead_ms: float = 30,
+    z_lead_ms: float = 45,
     z_max: float = 26000.0,
 ) -> _Preflight:
     """Compute and validate chip scan plan (pure computation, no hardware).
@@ -674,7 +674,7 @@ def run(
     row_limit: int | None = None,
     row_settle: float = 0.1,
     lead_in_um: float = 1000,
-    z_lead_ms: float = 30,
+    z_lead_ms: float = 45,
     objective_mag: str | None = None,
     speed_mm: float = 5.0,
     move_speed_mm: float = 40,
@@ -1267,8 +1267,8 @@ Examples:
     scan_group.add_argument(
         "--z-lead-ms",
         type=float,
-        default=30,
-        help="Start Z tracking this many ms before X reaches chip edge (default: 30)",
+        default=45,
+        help="Start Z tracking this many ms before X reaches chip edge (default: 45)",
     )
 
     # Optics
