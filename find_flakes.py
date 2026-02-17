@@ -283,6 +283,8 @@ class SegConfig:
     material: str
     jobs_bg: int  # workers during hardware ops
     jobs_idle: int  # workers after park (boost)
+    revisit_mags: list[float]  # target magnifications for revisit JSONs
+    revisit_top: int  # number of top detections for revisit
 
 
 @dataclass
@@ -367,6 +369,11 @@ def _plan(args: argparse.Namespace) -> _Preflight:
     else:
         flatfield = _resolve_flatfield(chip_scan_mag)
 
+    revisit_mags = []
+    if args.revisit_mags:
+        for m in args.revisit_mags:
+            revisit_mags.append(float(m.lower().rstrip("x")))
+
     seg = SegConfig(
         enabled=not args.no_segment,
         wait=args.seg_wait,
@@ -374,6 +381,8 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         material=args.material,
         jobs_bg=args.seg_jobs_bg,
         jobs_idle=args.seg_jobs_idle,
+        revisit_mags=revisit_mags,
+        revisit_top=args.revisit_top,
     )
 
     return _Preflight(
@@ -569,6 +578,20 @@ Examples:
         default=8,
         help="Segmentation workers after park / boost (default: 8)",
     )
+    seg_group.add_argument(
+        "--revisit-mag",
+        type=str,
+        action="append",
+        dest="revisit_mags",
+        metavar="MAG",
+        help="Target mag for parfocal-adjusted revisit JSON (e.g. 50x). Repeatable.",
+    )
+    seg_group.add_argument(
+        "--revisit-top",
+        type=int,
+        default=10,
+        help="Number of top detections for revisit (default: 10)",
+    )
     return parser
 
 
@@ -599,6 +622,9 @@ def _print_header(p: _Preflight) -> None:
         print(f"Flatfield:     {ff_label}")
         if p.seg.wait:
             print("Seg mode:      WAIT (blocking)")
+        if p.seg.revisit_mags:
+            mags = ", ".join(f"{m:g}x" for m in p.seg.revisit_mags)
+            print(f"Revisit:       top {p.seg.revisit_top} → {mags}")
     else:
         print("Segmentation:  disabled")
     if args.dry_run:
@@ -696,6 +722,7 @@ class _SegJob:
     seg_key: str  # checkpoint key
     scan_dir: Path  # chip scan directory (frame_NNNN.jpg)
     seg_dir: Path  # segmentation output directory
+    plane_path: Path | None  # focus plane JSON for revisit Z computation
 
 
 class _SegResult(NamedTuple):
@@ -705,11 +732,106 @@ class _SegResult(NamedTuple):
     error: str  # error message on failure
 
 
+def _generate_revisits(
+    job: _SegJob,
+    all_detections: dict[str, list[dict]],
+    revisit_mags: list[float],
+    revisit_top: int,
+) -> str:
+    """Generate revisit JSONs from segmentation results. Returns summary string."""
+    import re
+
+    from flakefinder.scan_utils import PARFOCAL_Z_UM
+
+    # Load scan metadata for coordinate mapping
+    scan_meta_path = job.scan_dir / "scan_meta.json"
+    if not scan_meta_path.exists():
+        return ""
+
+    with open(scan_meta_path) as f:
+        scan_meta = json.load(f)
+
+    um_per_px = scan_meta["optics"]["sample_pixel_x_um"]
+    frame_w_px = scan_meta["camera"]["frame_width_px"]
+    frame_h_px = scan_meta["camera"]["frame_height_px"]
+    frame_positions: dict[int, tuple[float, float]] = {}
+    for fr in scan_meta["frames"]:
+        frame_positions[fr["n"]] = (fr["x_um"], fr["y_um"])
+
+    # Flatten and add stage coordinates
+    all_flat = [d for dets in all_detections.values() for d in dets]
+    for d in all_flat:
+        m = re.search(r"\d+", d["frame"])
+        if m is None:
+            continue
+        frame_n = int(m.group())
+        if frame_n not in frame_positions:
+            continue
+        fx, fy = frame_positions[frame_n]
+        px_x, px_y = d["center"]
+        d["stage_x"] = fx + (px_x - frame_w_px / 2) * um_per_px
+        d["stage_y"] = fy + (px_y - frame_h_px / 2) * um_per_px
+
+    # Rank by (tier asc, score desc), take top N
+    ranked = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
+
+    # Load focus plane
+    assert job.plane_path is not None
+    with open(job.plane_path) as f:
+        plane_data = json.load(f)
+    plane = plane_data["plane"]
+    a, b, c = plane["a"], plane["b"], plane["c"]
+    scan_mag = plane_data.get("source", {}).get("objective_mag")
+    if scan_mag is None or scan_mag not in PARFOCAL_Z_UM:
+        return ""
+
+    # Build base points at scan magnification
+    base_points = []
+    for i, d in enumerate(ranked[:revisit_top]):
+        sx = d.get("stage_x")
+        sy = d.get("stage_y")
+        if sx is None or sy is None:
+            continue
+        sx, sy = float(sx), float(sy)
+        z = a * sx + b * sy + c
+        label = f"rank{i + 1:02d}_{d['frame']}_d{d.get('det_idx', 0)}"
+        base_points.append({"x": round(sx, 2), "y": round(sy, 2), "z": round(z, 2), "label": label})
+
+    if not base_points:
+        return ""
+
+    # Write parfocal-adjusted revisit JSONs
+    written = []
+    for target_mag in revisit_mags:
+        if target_mag not in PARFOCAL_Z_UM:
+            continue
+        delta = PARFOCAL_Z_UM[target_mag] - PARFOCAL_Z_UM[scan_mag]
+        adjusted = [{**pt, "z": round(pt["z"] + delta, 2)} for pt in base_points]
+        revisit_obj = {
+            "objective_mag": target_mag,
+            "scan_mag": scan_mag,
+            "applied_parfocal_delta_um": round(delta, 1),
+            "plane_source": str(job.plane_path),
+            "points": adjusted,
+        }
+        mag_label = f"{target_mag:g}"
+        revisit_path = job.seg_dir / f"revisit_{mag_label}x.json"
+        with open(revisit_path, "w") as f:
+            json.dump(revisit_obj, f, indent=2)
+        written.append(f"{mag_label}x")
+
+    if written:
+        return f"revisit {len(base_points)}pts → {', '.join(written)}"
+    return ""
+
+
 def _run_chip_seg(
     job: _SegJob,
     flatfield: Path | None,
     material: str,
     jobs: int,
+    revisit_mags: list[float],
+    revisit_top: int,
 ) -> _SegResult:
     """Run segmentation for one chip in-process. Called in background thread."""
     from flakefinder.segmentation import (
@@ -820,12 +942,24 @@ def _run_chip_seg(
         with open(job.seg_dir / "summary.json", "w") as f:
             json.dump(summary_data, f, indent=2)
 
+        # Generate revisit JSONs if configured
+        revisit_str = ""
+        if revisit_mags and job.plane_path and total_det_count > 0:
+            revisit_str = _generate_revisits(
+                job,
+                all_detections,
+                revisit_mags,
+                revisit_top,
+            )
+
         summary_str = (
             f"{len(frames)} frames, "
             f"{total_det_count} det "
             f"(T1:{tier_counts[1]} T2:{tier_counts[2]} "
             f"T3:{tier_counts[3]}), {seg_elapsed:.1f}s @ {jobs}j"
         )
+        if revisit_str:
+            summary_str += f", {revisit_str}"
 
         return _SegResult(success=True, duration=seg_elapsed, summary=summary_str, error="")
 
@@ -880,7 +1014,15 @@ def _drain_seg(
         with _always_console():
             print(f"[seg] Boosting {len(to_boost)} job(s) to {seg.jobs_idle} workers")
         for job in to_boost:
-            future = seg_executor.submit(_run_chip_seg, job, seg.flatfield, seg.material, seg.jobs_idle)
+            future = seg_executor.submit(
+                _run_chip_seg,
+                job,
+                seg.flatfield,
+                seg.material,
+                seg.jobs_idle,
+                seg.revisit_mags,
+                seg.revisit_top,
+            )
             try:
                 result = future.result()
                 total_seg_time += result.duration
@@ -1130,8 +1272,16 @@ def run(scope: Microscope, p: _Preflight) -> int:
         seg_key = f"chip_{chip_idx}_segment"
         if seg_executor is not None and not step_done(checkpoint, seg_key):
             seg_dir = chip_dir / "seg"
-            job = _SegJob(chip_idx, seg_key, chip_scan_dir, seg_dir)
-            future = seg_executor.submit(_run_chip_seg, job, p.seg.flatfield, p.seg.material, p.seg.jobs_bg)
+            job = _SegJob(chip_idx, seg_key, chip_scan_dir, seg_dir, plane_path)
+            future = seg_executor.submit(
+                _run_chip_seg,
+                job,
+                p.seg.flatfield,
+                p.seg.material,
+                p.seg.jobs_bg,
+                p.seg.revisit_mags,
+                p.seg.revisit_top,
+            )
             future.add_done_callback(lambda f, ci=chip_idx: _on_seg_done(f, ci))
             seg_futures.append((job, future))
             if p.seg.wait:
