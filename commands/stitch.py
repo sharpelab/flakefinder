@@ -364,8 +364,9 @@ def stitch_row_to_global(
     overlap_px = max(0, frame_w - frame_spacing_px)
     blend_width_x = overlap_px // 2 if blend else 0
 
-    # Create canvas
-    canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+    # Weighted-average accumulators (per-row X blending)
+    color_sum = np.zeros((canvas_h, canvas_w, 3), dtype=np.float32)
+    weight_sum = np.zeros((canvas_h, canvas_w), dtype=np.float32)
 
     # Use all frames (including accel zones)
     num_frames = len(row_frames)
@@ -419,16 +420,39 @@ def stitch_row_to_global(
 
     num_work = len(work_items)
 
-    # Pre-compute blend alpha masks: first, interior, last (reused across all frames in row)
+    # Pre-compute blend weight masks (float32, 0-1).
+    # "first_x" = spatially leftmost (no left ramp), "last_x" = rightmost (no right ramp).
     if blend and num_work > 0:
-        alpha_first = create_blend_alpha(frame_w, frame_h, blend_width_x, 0, is_first_x=True, is_last_x=(num_work == 1))
-        alpha_last = create_blend_alpha(frame_w, frame_h, blend_width_x, 0, is_first_x=False, is_last_x=True)
-        alpha_interior = create_blend_alpha(frame_w, frame_h, blend_width_x, 0, is_first_x=False, is_last_x=False)
+
+        def _wt(first: bool = False, last: bool = False) -> np.ndarray:
+            return (
+                np.array(
+                    create_blend_alpha(frame_w, frame_h, blend_width_x, 0, is_first_x=first, is_last_x=last),
+                    dtype=np.float32,
+                )
+                / 255.0
+            )
+
+        wt_first_x = _wt(first=True, last=(num_work == 1))
+        wt_last_x = _wt(last=True)
+        wt_interior = _wt()
     else:
-        alpha_first = alpha_last = alpha_interior = Image.new("L", (frame_w, frame_h), 128)
+        wt_first_x = wt_last_x = wt_interior = np.ones((frame_h, frame_w), dtype=np.float32)
+
+    # Map capture-order sequence to spatial position for weight selection.
+    # +X: capture order = spatial order; -X: reversed.
+    if direction > 0:
+        _leftmost_seq = 0
+        _rightmost_seq = num_work - 1
+    else:
+        _leftmost_seq = num_work - 1
+        _rightmost_seq = 0
 
     def load_frame(item):
-        """Load, resize, flatfield-correct, deskew, and alpha-blend a single frame."""
+        """Load, resize, flatfield-correct, and deskew a single frame.
+
+        Returns (rgb, weight): float32 (H,W,3) and float32 (H,W).
+        """
         seq_i, frame_idx, _, frame_deskew = item
         path = scan_dir / f"frame_{frame_idx:04d}.jpg"
 
@@ -446,45 +470,34 @@ def stitch_row_to_global(
             img_arr = apply_flatfield(img_arr[:, :, :3], flatfield)
             img = Image.fromarray(img_arr, mode="RGB")
 
-        # Deskew on RGB (3 channels) before converting to RGBA — faster.
         if frame_deskew != 0:
             img = deskew_image(img, frame_deskew, resample=deskew_resample)
 
-        # PERF: converting to RGBA here + alpha_composite below accounts for ~0.8s
-        # at 8x. Could switch to RGB canvas + paste(img, pos, mask=alpha) to eliminate
-        # RGBA entirely, but requires restructuring Y-blend which manipulates row alpha.
-        img = img.convert("RGBA")
+        rgb = np.array(img, dtype=np.float32)
 
-        # Select pre-computed blend alpha
-        if seq_i == 0:
-            alpha = alpha_first
-        elif seq_i == num_work - 1:
-            alpha = alpha_last
+        # Select blend weight by spatial position (not capture order)
+        if seq_i == _leftmost_seq:
+            weight = wt_first_x.copy()
+        elif seq_i == _rightmost_seq:
+            weight = wt_last_x.copy()
         else:
-            alpha = alpha_interior
+            weight = wt_interior.copy()
 
-        # Mask deskew void: the shear leaves a triangle of edge-replicated
-        # pixels that grows from 0 px at top to |shear| px at bottom.
-        # Zero alpha there so they don't contaminate blending.
+        # Zero weight in deskew void region
         if frame_deskew != 0:
-            alpha_arr = np.array(alpha)
             abs_shear = abs(frame_deskew)
-            # Build column index array and compare against void boundary per row
             ys = np.arange(frame_h)
             void_widths = (abs_shear * ys / frame_h + 1).astype(int)
             cols = np.arange(frame_w)
             if frame_deskew < 0:  # +X motion: void at left
-                mask = cols[np.newaxis, :] < void_widths[:, np.newaxis]
+                void = cols[np.newaxis, :] < void_widths[:, np.newaxis]
             else:  # -X motion: void at right
-                mask = cols[np.newaxis, :] >= (frame_w - void_widths[:, np.newaxis])
-            alpha_arr[mask] = 0
-            alpha = Image.fromarray(alpha_arr, mode="L")
+                void = cols[np.newaxis, :] >= (frame_w - void_widths[:, np.newaxis])
+            weight[void] = 0.0
 
-        img.putalpha(alpha)
+        return rgb, weight
 
-        return img
-
-    # Load frames in parallel, composite sequentially
+    # Load frames in parallel, accumulate sequentially
     if num_threads > 1 and num_work > 1:
         with ThreadPoolExecutor(max_workers=num_threads) as pool:
             loaded = list(pool.map(load_frame, work_items))
@@ -493,22 +506,27 @@ def stitch_row_to_global(
 
     frames_placed = 0
     frame_rects: list[AreaRectI] = []
-    for img, (_, _, x_offset, _) in zip(loaded, work_items, strict=True):
+    for (rgb, weight), (_, _, x_offset, _) in zip(loaded, work_items, strict=True):
         # Clamp to canvas bounds
-        actual_x = x_offset
-        actual_w = img.width
-        if x_offset < 0:
-            img = img.crop((-x_offset, 0, img.width, img.height))
-            actual_x = 0
-            actual_w = img.width
-        if actual_x + img.width > canvas_w:
-            img = img.crop((0, 0, canvas_w - actual_x, img.height))
-            actual_w = img.width
+        src_x0 = max(0, -x_offset)
+        dst_x0 = max(0, x_offset)
+        src_x1 = min(frame_w, canvas_w - x_offset)
 
-        if img.width > 0 and img.height > 0:
-            canvas.alpha_composite(img, (actual_x, 0))
-            frame_rects.append(AreaRectI(actual_x, actual_x + actual_w - 1, 0, img.height - 1))
+        if src_x1 > src_x0:
+            w = src_x1 - src_x0
+            wgt_s = weight[:, src_x0:src_x1]
+            color_sum[:, dst_x0 : dst_x0 + w, :] += rgb[:, src_x0:src_x1, :] * wgt_s[:, :, np.newaxis]
+            weight_sum[:, dst_x0 : dst_x0 + w] += wgt_s
+            frame_rects.append(AreaRectI(dst_x0, dst_x0 + w - 1, 0, canvas_h - 1))
             frames_placed += 1
+
+    # Weighted average → RGBA with binary coverage alpha
+    covered = weight_sum > 0
+    safe_weight = np.where(covered, weight_sum, 1.0)
+    result_rgb = (color_sum / safe_weight[:, :, np.newaxis]).clip(0, 255).astype(np.uint8)
+    result_rgb[~covered] = 0
+    result_a = np.where(covered, np.uint8(255), np.uint8(0))
+    canvas = Image.fromarray(np.dstack([result_rgb, result_a]), mode="RGBA")
 
     return RowStitchResult(image=canvas, frames_placed=frames_placed, frame_rects=frame_rects)
 
