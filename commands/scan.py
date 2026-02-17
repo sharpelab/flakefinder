@@ -95,7 +95,7 @@ def _plan(
     margin: float = 1000,
     objective_mag: str | None = None,
     binning: int = 3,
-    x_overlap_percent: float = 100,
+    x_overlap_percent: float = 30,
     y_overlap_percent: float = 2,
 ) -> _Preflight:
     """Compute and validate scan plan (pure computation, no hardware).
@@ -168,7 +168,7 @@ def run(
     move_speed_mm: float = 40,
     initial_z: float | None = None,
     auto_focus_pos: Point2F | None = None,
-    x_overlap_percent: float = 100,
+    x_overlap_percent: float = 30,
     y_overlap_percent: float = 2,
     downsample: int = 1,
     white_balance: GainRGB = DEFAULT_WB,
@@ -754,8 +754,8 @@ Examples:
     frame_group.add_argument(
         "--x-overlap-percent",
         type=float,
-        default=100,
-        help="Target X overlap between saved frames, %% (default: 100 = save all). "
+        default=30,
+        help="Target X overlap between saved frames, %% (default: 30). "
         "Frames captured before advancing enough are discarded.",
     )
     frame_group.add_argument(
