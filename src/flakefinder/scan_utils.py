@@ -256,32 +256,23 @@ def smooth_frame_positions(meta: ScanMeta, *, quiet: bool = False) -> None:
         t_ps = np.array([s["t_after"] for s in line_ps])
         x_ps = np.array([s["x_um"] for s in line_ps])
 
-        # Drop 3 boundary samples each side to avoid edge
-        # distortion from the adaptive 10→100 Hz polling ramp.
-        trim = 3
-        if len(t_ps) <= 2 * trim + 5:
-            continue
-        t_dense = t_ps[trim:-trim]
-        x_dense = x_ps[trim:-trim]
+        # Estimate position noise from second-differences, corrected for
+        # non-uniform time spacing.  Raw d²x = v*d²t + noise; subtract
+        # the velocity contribution so only noise remains.
+        d2x = np.diff(x_ps, 2)
+        d2t = np.diff(t_ps, 2)
+        v_triplet = (x_ps[2:] - x_ps[:-2]) / (t_ps[2:] - t_ps[:-2])
+        d2x_corrected = d2x - v_triplet * d2t
+        noise_um = float(np.median(np.abs(d2x_corrected)) / 0.6745 / np.sqrt(6))
+        s_factor = len(t_ps) * noise_um**2
 
-        if len(t_dense) < 5:
-            continue
-
-        # Estimate noise from second-differences (robust to velocity/accel).
-        # MAD of d²x ≈ σ * sqrt(6) * 0.6745, so σ ≈ MAD / 0.6745 / sqrt(6).
-        d2x = np.diff(x_dense, 2)
-        noise_um = float(np.median(np.abs(d2x)) / 0.6745 / np.sqrt(6))
-        s_factor = len(t_dense) * noise_um**2
-
-        spline = UnivariateSpline(t_dense, x_dense, k=3, s=s_factor)
+        spline = UnivariateSpline(t_ps, x_ps, k=3, s=s_factor)
         spline_deriv = spline.derivative()
 
         for fi in range(line["frame_start"], line["frame_end"]):
             f = frames[fi]
             t = f["t_capture"]
-            # Frames inside dense region get smoothed positions;
-            # frames outside (boundary) keep raw interpolated values.
-            if t_dense[0] <= t <= t_dense[-1]:
+            if t_ps[0] <= t <= t_ps[-1]:
                 vel = float(spline_deriv(t))
                 f["x_um"] = float(spline(t)) - vel * _TIMING_OFFSET_S
                 f["x_vel_um_s"] = vel
