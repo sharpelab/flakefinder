@@ -21,12 +21,8 @@ from PIL import Image, ImageColor, ImageDraw, ImageFont
 from scipy.signal import savgol_filter
 
 from flakefinder.data_utils import load_scan_meta
-from flakefinder.scan_utils import apply_flatfield, parse_area_rect
+from flakefinder.scan_utils import CALIBRATION_DIR, apply_flatfield, parse_area_rect
 from flakefinder.types import AreaRect, AreaRectI, Point2I, ScanLineMeta, ScanMeta
-
-REPO_DIR = Path(__file__).parent.parent
-DEFAULT_SCAN_DIR = REPO_DIR / "test_area_2"
-CALIBRATION_DIR = REPO_DIR / "calibration"
 
 
 @dataclass
@@ -38,9 +34,10 @@ class StitchResult:
 
 @dataclass
 class RowStitchResult:
-    """Output from stitching a single row."""
+    """Output from stitching a single row (raw accumulators, not normalized)."""
 
-    image: Image.Image
+    color_sum: np.ndarray  # float32 (H, W, 3) — weighted pixel sums
+    weight_sum: np.ndarray  # float32 (H, W) — weight sums
     frames_placed: int
     frame_rects: list[AreaRectI]
 
@@ -503,15 +500,9 @@ def stitch_row_to_global(
             frame_rects.append(AreaRectI(dst_x0, dst_x0 + w - 1, 0, canvas_h - 1))
             frames_placed += 1
 
-    # Weighted average → RGBA with binary coverage alpha
-    covered = weight_sum > 0
-    safe_weight = np.where(covered, weight_sum, 1.0)
-    result_rgb = (color_sum / safe_weight[:, :, np.newaxis]).clip(0, 255).astype(np.uint8)
-    result_rgb[~covered] = 0
-    result_a = np.where(covered, np.uint8(255), np.uint8(0))
-    canvas = Image.fromarray(np.dstack([result_rgb, result_a]), mode="RGBA")
-
-    return RowStitchResult(image=canvas, frames_placed=frames_placed, frame_rects=frame_rects)
+    return RowStitchResult(
+        color_sum=color_sum, weight_sum=weight_sum, frames_placed=frames_placed, frame_rects=frame_rects
+    )
 
 
 def run(
@@ -667,8 +658,9 @@ def run(
     y_overlap_px = int(y_overlap_um / um_per_px)
     blend_width_y = y_overlap_px // 2 if blend else 0
 
-    # Create final canvas
-    canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+    # Global weighted-average accumulators
+    global_color = np.zeros((canvas_h, canvas_w, 3), dtype=np.float32)
+    global_weight = np.zeros((canvas_h, canvas_w), dtype=np.float32)
 
     if not quiet:
         print("\nStitching rows...")
@@ -700,42 +692,38 @@ def run(
             num_threads=threads,
             deskew_resample=Image.Resampling.BICUBIC if bicubic_deskew else Image.Resampling.BILINEAR,
         )
-        row_img = row_stitch.image
 
         # Calculate Y position for this row (min Y = top of image)
         row_y = row["y_um"]
         y_offset_um = row_y - min_y
         y_offset_px = int(y_offset_um / um_per_px)
+        row_h = row_stitch.color_sum.shape[0]
+        row_w = min(row_stitch.color_sum.shape[1], canvas_w)
 
-        # Apply Y blending
-        # is_first_y = don't fade top edge, is_last_y = don't fade bottom edge
-        if blend:
+        # Compute Y blend weight (1D array, varies only along Y)
+        if blend and blend_width_y > 0:
             is_at_top = row_y == min_y
             is_at_bottom = row_y == max_y
+            y_weight = np.ones(row_h, dtype=np.float32)
+            if not is_at_top:
+                for y in range(min(blend_width_y, row_h)):
+                    y_weight[y] = y / blend_width_y
+            if not is_at_bottom:
+                for y in range(max(0, row_h - blend_width_y), row_h):
+                    y_weight[y] = (row_h - 1 - y) / blend_width_y
+        else:
+            y_weight = None
 
-            row_alpha = row_img.split()[3]
-            y_blend = create_blend_alpha(
-                row_img.width,
-                row_img.height,
-                0,
-                blend_width_y,
-                is_first_y=is_at_top,
-                is_last_y=is_at_bottom,
-            )
-
-            existing = np.array(row_alpha, dtype=np.float32)
-            new_blend = np.array(y_blend, dtype=np.float32)
-            combined = (existing * new_blend / 255).astype("uint8")
-            row_img.putalpha(Image.fromarray(combined, mode="L"))
-
-        # Ensure row image fits canvas width (handle rounding)
-        if row_img.width != canvas_w:
-            if row_img.width > canvas_w:
-                row_img = row_img.crop((0, 0, canvas_w, row_img.height))
-            # If smaller, composite will just leave edges transparent
-
-        # Composite onto canvas
-        canvas.alpha_composite(row_img, (0, y_offset_px))
+        # Accumulate into global arrays with Y weight
+        y1 = min(y_offset_px + row_h, canvas_h)
+        src_h = y1 - y_offset_px
+        if y_weight is not None:
+            yw = y_weight[:src_h, np.newaxis]  # (H, 1) for broadcasting
+            global_color[y_offset_px:y1, :row_w, :] += row_stitch.color_sum[:src_h, :row_w, :] * yw[:, :, np.newaxis]
+            global_weight[y_offset_px:y1, :row_w] += row_stitch.weight_sum[:src_h, :row_w] * yw
+        else:
+            global_color[y_offset_px:y1, :row_w, :] += row_stitch.color_sum[:src_h, :row_w, :]
+            global_weight[y_offset_px:y1, :row_w] += row_stitch.weight_sum[:src_h, :row_w]
 
         # Collect frame rects in global canvas coords
         for rect in row_stitch.frame_rects:
@@ -746,9 +734,15 @@ def run(
         if not quiet:
             print(f"  Row {row_idx}: {row_stitch.frames_placed} frames, y={y_offset_px} px")
 
-    # Convert to RGB with background color
-    background = Image.new("RGB", canvas.size, bg_color)
-    background.paste(canvas, mask=canvas.split()[3])
+    # Single global normalization → RGB
+    covered = global_weight > 0
+    np.divide(global_color[:, :, 0], global_weight, out=global_color[:, :, 0], where=covered)
+    np.divide(global_color[:, :, 1], global_weight, out=global_color[:, :, 1], where=covered)
+    np.divide(global_color[:, :, 2], global_weight, out=global_color[:, :, 2], where=covered)
+    np.clip(global_color, 0, 255, out=global_color)
+    result_rgb = global_color.astype(np.uint8)
+    result_rgb[~covered] = bg_color[:3] if len(bg_color) >= 3 else 0
+    background = Image.fromarray(result_rgb, mode="RGB")
 
     # Stage bounds before crop
     # Note: reported positions are frame CENTERS, so coverage extends ±FOV/2
@@ -873,7 +867,7 @@ def run(
 
 def _build_parser():
     parser = argparse.ArgumentParser(description="Stitch multi-row snake scan into 2D image")
-    parser.add_argument("scan_dir", nargs="?", type=Path, default=DEFAULT_SCAN_DIR, help="Scan directory")
+    parser.add_argument("scan_dir", type=Path, help="Scan directory")
     parser.add_argument("--no-deskew", action="store_true", help="Disable rolling shutter deskew")
     parser.add_argument("--no-blend", action="store_true", help="Disable gradient blending")
     parser.add_argument("--downsample", type=int, default=1, help="Additional downsample factor")
