@@ -1233,10 +1233,10 @@ def run(
     focus_map_path: Path,
     *,
     output: Path | None = None,
-    plot: bool = True,
+    plot: bool = False,
     max_dim: int = 4500,
     margin: int = 5,
-    mosaic: bool = True,
+    mosaic: bool = False,
     export_plane_path: Path | None = None,
     cf_threshold: float = 20.0,
     min_sharpness: float = 20.0,
@@ -1327,8 +1327,9 @@ def run(
             print(f"Exported to: {export_plane_path}")
 
         # Generate contour map
-        contour_path = export_plane_path.with_name(export_plane_path.stem.replace("_plane", "") + "_contour.png")
-        plot_contour_map(result, contour_path, quiet=quiet)
+        if plot:
+            contour_path = export_plane_path.with_name(export_plane_path.stem.replace("_plane", "") + "_contour.png")
+            plot_contour_map(result, contour_path, quiet=quiet)
 
 
 def _build_parser():
