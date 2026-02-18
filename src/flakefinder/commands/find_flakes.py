@@ -679,6 +679,10 @@ def _print_focus_map_summary(chip_idx: int, plane_path: Path) -> None:
                 f"[chip {chip_idx}] focus_map {pts_used}/{pts_total} pts, "
                 f"R\u00b2={r2:.3f}, residual {resid:.1f} \u00b5m"
             )
+            conf = plane_data.get("confidence", {})
+            if conf.get("low_confidence"):
+                reasons = ", ".join(conf["reasons"])
+                print(f"[chip {chip_idx}] \u26a0\ufe0f  FOCUS MAP LOW CONFIDENCE: {reasons}")
 
 
 def _print_chip_scan_summary(chip_idx: int, scan_dir: Path) -> None:

@@ -1056,6 +1056,8 @@ def compute_robust_plane_fit(
     cf_threshold: float = 20.0,
     corner_margin_um: float = 5000.0,
     min_sharpness: float = 0.0,
+    reject_sharpness: float = 10.0,
+    min_dynamic_range: float = 0.05,
     mad_sigma_threshold: float = 3.0,
     max_reject_frac: float = 0.3,
     min_points_after_reject: int = 4,
@@ -1064,16 +1066,22 @@ def compute_robust_plane_fit(
     """Compute robust plane fit with outlier rejection and coverage analysis.
 
     Two-stage filtering:
-      Stage 1 (pre-filter): Exclude points with coarse-fine disagreement
-        > cf_threshold, and sharpness < min_sharpness.
+      Stage 1 (pre-filter): Hard-reject points with sharpness below noise floor
+        (< reject_sharpness) or flat AF curves (DR < min_dynamic_range).
       Stage 2 (post-fit): MAD-based residual rejection. Fit initial plane,
         compute MAD of residuals, reject points > mad_sigma_threshold * robust_sigma.
 
+    After fitting, computes whole-FM confidence assessment from aggregate
+    quality signals (peak_near_edge fraction, median DR). Reports low_confidence
+    when the pattern matches a false-success focus map.
+
     Args:
         data: Focus map data dict.
-        cf_threshold: Max coarse-fine disagreement in µm for high-confidence points.
+        cf_threshold: Unused, kept for API compatibility.
         corner_margin_um: Distance from edge to consider "corner" region.
-        min_sharpness: Minimum selected_sharpness to include a point in the fit.
+        min_sharpness: Sharpness warning threshold (points below flagged, not rejected).
+        reject_sharpness: Hard reject threshold (below = noise floor, Z meaningless).
+        min_dynamic_range: Hard reject threshold for DR (below = flat curve).
         mad_sigma_threshold: Reject residuals beyond this many robust-sigma (MAD * 1.4826).
         max_reject_frac: Never reject more than this fraction of pre-filtered points.
         min_points_after_reject: Require at least this many points after rejection.
@@ -1081,7 +1089,7 @@ def compute_robust_plane_fit(
             normal chips are 2-6 µm/mm, degenerate fits produce 100+).
 
     Returns:
-        Dict with plane parameters, quality metrics, and coverage info.
+        Dict with plane parameters, quality metrics, coverage info, and confidence.
     """
     points = [p for p in data["sample_points"] if "selected" in p]
 
@@ -1098,10 +1106,14 @@ def compute_robust_plane_fit(
     drift_pct = np.clip((sel_sharpness - final_sharpness) / sel_sharpness * 100, 0, 100)
     coarse_best_z = np.array([p.get("coarse", {}).get("best_z_um", p["selected"]["z_um"]) for p in points])
     coarse_fine_diff = np.abs(coarse_best_z - z)
+    dynamic_range = np.array([p.get("dynamic_range", 0) for p in points])
+    peak_near_edge = np.array([p.get("peak_near_edge", False) for p in points])
 
-    # --- Stage 1: Pre-filter ---
-    # Exclude high coarse-fine disagreement and low sharpness
-    prefilter_mask = (coarse_fine_diff <= cf_threshold) & (sel_sharpness >= min_sharpness)
+    # --- Stage 1: Pre-filter (hard rejects only) ---
+    # Reject points with truly bad measurements:
+    # - sharpness below reject threshold (noise floor, Z is meaningless)
+    # - dynamic range near zero (flat curve, no focus signal)
+    prefilter_mask = (sel_sharpness >= reject_sharpness) & (dynamic_range >= min_dynamic_range)
 
     if prefilter_mask.sum() < 3:
         # Fall back to all points if not enough pass pre-filter
@@ -1112,10 +1124,10 @@ def compute_robust_plane_fit(
     prefilter_reasons: dict[int, str] = {}
     for i in range(len(points)):
         if not prefilter_mask[i]:
-            if sel_sharpness[i] < min_sharpness:
+            if sel_sharpness[i] < reject_sharpness:
                 prefilter_reasons[i] = "low_sharpness"
             else:
-                prefilter_reasons[i] = "cf_disagreement"
+                prefilter_reasons[i] = "flat_curve"
 
     # --- Stage 2: MAD-based residual rejection ---
     # Initial plane fit on pre-filtered points
@@ -1210,6 +1222,45 @@ def compute_robust_plane_fit(
         else:
             corners_extrapolated.append(corner_name)
 
+    # --- Whole-FM confidence assessment ---
+    # Evaluate aggregate quality of points that survived hard reject.
+    # A false-success FM has: majority peak_near_edge + low median DR.
+    pf_edge = peak_near_edge[prefilter_mask]
+    pf_dr = dynamic_range[prefilter_mask]
+    pf_sharpness = sel_sharpness[prefilter_mask]
+
+    n_pf = len(pf_edge)
+    edge_frac = float(pf_edge.sum() / n_pf) if n_pf > 0 else 0.0
+    median_dr = float(np.median(pf_dr)) if n_pf > 0 else 0.0
+    median_sharpness = float(np.median(pf_sharpness)) if n_pf > 0 else 0.0
+
+    confidence_reasons: list[str] = []
+    if edge_frac >= 0.5:
+        confidence_reasons.append("majority_peak_near_edge")
+    if median_dr < 0.20:
+        confidence_reasons.append("low_median_dr")
+
+    low_confidence = len(confidence_reasons) >= 2
+
+    # Per-point warnings (informational, not rejected from fit)
+    point_warnings = []
+    for i in range(len(points)):
+        if not prefilter_mask[i]:
+            continue  # already rejected
+        warnings: list[str] = []
+        if peak_near_edge[i]:
+            warnings.append("peak_near_edge")
+        if sel_sharpness[i] < min_sharpness:
+            warnings.append("low_sharpness")
+        if warnings:
+            point_warnings.append(
+                {
+                    "type": points[i]["type"],
+                    "index": points[i]["index"],
+                    "warnings": warnings,
+                }
+            )
+
     # Build points_dropped with specific reasons
     points_dropped = []
     for i in range(len(points)):
@@ -1222,6 +1273,8 @@ def compute_robust_plane_fit(
             "y_um": float(y[i]),
             "z_um": float(z[i]),
             "selected_sharpness": float(sel_sharpness[i]),
+            "dynamic_range": float(dynamic_range[i]),
+            "peak_near_edge": bool(peak_near_edge[i]),
         }
         if i in mad_reject_reasons:
             entry["reason"] = "residual_outlier"
@@ -1250,7 +1303,8 @@ def compute_robust_plane_fit(
             "points_prefiltered": n_prefiltered,
             "residual_outliers_rejected": int(mad_reject_mask.sum()),
             "mad_threshold_um": float(mad_threshold_um),
-            "cf_threshold_um": cf_threshold,
+            "reject_sharpness": reject_sharpness,
+            "min_dynamic_range": min_dynamic_range,
             "min_sharpness": min_sharpness,
         },
         "tilt": {
@@ -1276,11 +1330,21 @@ def compute_robust_plane_fit(
                 "z_um": float(z[i]),
                 "coarse_fine_diff_um": float(coarse_fine_diff[i]),
                 "drift_pct": float(drift_pct[i]),
+                "dynamic_range": float(dynamic_range[i]),
+                "peak_near_edge": bool(peak_near_edge[i]),
             }
             for i in range(len(points))
             if high_conf_mask[i]
         ],
         "points_dropped": points_dropped,
+        "confidence": {
+            "low_confidence": low_confidence,
+            "reasons": confidence_reasons,
+            "edge_frac": edge_frac,
+            "median_dr": median_dr,
+            "median_sharpness": median_sharpness,
+        },
+        "point_warnings": point_warnings,
     }
 
     # Compute interpolated Z grid from good points
@@ -1510,12 +1574,20 @@ def run(
             f"corners: {corners_str}, {export_plane_path}"
         )
 
+        # Warn if low confidence (always printed, not gated by quiet)
+        conf = result.get("confidence", {})
+        if conf.get("low_confidence"):
+            reasons = ", ".join(conf["reasons"])
+            print(f"  \u26a0\ufe0f  LOW CONFIDENCE: {reasons}")
+
         if not quiet:
             print()
             print("=" * 60)
             print("ROBUST PLANE FIT EXPORT")
             print("=" * 60)
-            print(f"Points used: {q['points_used']}/{q['points_total']} (CF <= {q['cf_threshold_um']} um)")
+            rej_s = q["reject_sharpness"]
+            rej_dr = q["min_dynamic_range"]
+            print(f"Points used: {q['points_used']}/{q['points_total']} (reject S<{rej_s}, DR<{rej_dr})")
             print(f"R²: {q['r_squared']:.4f}")
             print(f"Residual std: {q['residual_std_um']:.2f} um")
             print(f"Residual max: {q['residual_max_um']:.2f} um")
