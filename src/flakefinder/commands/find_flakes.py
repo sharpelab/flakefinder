@@ -1247,6 +1247,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
     # ----------------------------------------------------------------
     chip_loop_start = time.perf_counter()
     chips_processed = 0
+    prev_chip_z: float | None = None  # chain Z between chips
 
     for loop_pos, chip_idx in enumerate(chip_indices):
         chip_dir = run_dir / f"chip_{chip_idx}"
@@ -1261,11 +1262,21 @@ def run(scope: Microscope, p: _Preflight) -> int:
         if step_done(checkpoint, fm_key) and step_done(checkpoint, an_key) and step_done(checkpoint, sc_key):
             print(f"\n  [checkpoint] Skipping chip {chip_idx} (all steps complete)")
             _print_chip_summary(chip_idx, plane_path, chip_scan_dir)
+            # Extract Z for chaining to next chip
+            if focus_map_path.exists():
+                with open(focus_map_path) as f:
+                    prev_chip_z = json.load(f).get("grid_params", {}).get("z_start_um")
             continue
 
         print(f"\n{'#' * 70}")
         print(f"# CHIP {chip_idx}")
         print(f"{'#' * 70}")
+
+        # Chain Z from previous chip's focus map
+        if prev_chip_z is not None:
+            with _always_console():
+                print(f"[chain] Z → {prev_chip_z:.0f} µm from previous chip")
+            stage.run(scope=scope, z=prev_chip_z)
 
         # Step 5a: Focus map
         if step_done(checkpoint, fm_key):
@@ -1290,6 +1301,11 @@ def run(scope: Microscope, p: _Preflight) -> int:
                 quiet=quiet,
             )
             mark_step(run_dir, checkpoint, fm_key, duration)
+
+        # Extract Z for chaining to next chip
+        if focus_map_path.exists():
+            with open(focus_map_path) as f:
+                prev_chip_z = json.load(f).get("grid_params", {}).get("z_start_um")
 
         # Step 5b: Analyze focus map + export plane
         if step_done(checkpoint, an_key):
