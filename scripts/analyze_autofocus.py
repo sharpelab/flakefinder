@@ -458,87 +458,19 @@ def plot_sharpness_curve(
     else:
         ax = fig.add_axes((0.08, 0.12, 0.88, 0.80))
 
-    # Plot coarse data
-    if coarse_curve:
-        coarse_z = [r["z_um"] for r in coarse_curve]
-        coarse_s = [r["sharpness"] for r in coarse_curve]
-        ax.plot(
-            coarse_z,
-            coarse_s,
-            "o-",
-            color="#4488cc",
-            markersize=4,
-            linewidth=1.2,
-            label="Coarse",
-            zorder=3,
-        )
+    # Plot curves, scan ranges, and markers (shared with analyze_focus_map --curves)
+    from flakefinder.commands.analyze_focus_map import plot_af_curves
 
-    # Plot fine data
-    if fine_curve:
-        fine_z = [r["z_um"] for r in fine_curve]
-        fine_s = [r["sharpness"] for r in fine_curve]
-        ax.plot(
-            fine_z,
-            fine_s,
-            "o-",
-            color="#ee8833",
-            markersize=4,
-            linewidth=1.2,
-            label="Fine",
-            zorder=3,
-        )
-
-    # Plot super_fine data
-    if super_fine_curve:
-        sf_z = [r["z_um"] for r in super_fine_curve]
-        sf_s = [r["sharpness"] for r in super_fine_curve]
-        ax.plot(
-            sf_z,
-            sf_s,
-            "o-",
-            color="#cc4488",
-            markersize=3,
-            linewidth=1.2,
-            label="Super fine",
-            zorder=3,
-        )
-
-    # Shaded scan ranges
-    y_min, y_max = ax.get_ylim()
-    if coarse_curve:
-        z_lo = min(coarse_z)
-        z_hi = max(coarse_z)
-        ax.axvspan(z_lo, z_hi, alpha=0.08, color="#4488cc", zorder=0)
-    if fine_curve:
-        z_lo = min(fine_z)
-        z_hi = max(fine_z)
-        ax.axvspan(z_lo, z_hi, alpha=0.12, color="#ee8833", zorder=1)
-    if super_fine_curve:
-        z_lo = min(sf_z)
-        z_hi = max(sf_z)
-        ax.axvspan(z_lo, z_hi, alpha=0.15, color="#cc4488", zorder=1)
-
-    # Marker lines
-    ax.axvline(
-        before["z_um"],
-        color="red",
-        linestyle="--",
-        linewidth=1.2,
-        alpha=0.8,
-        label=f"Initial Z = {before['z_um']:.1f}",
-        zorder=2,
-    )
-
-    ax.plot(
-        best["z_um"],
-        best["sharpness"],
-        "*",
-        color="gold",
-        markersize=16,
-        markeredgecolor="black",
-        markeredgewidth=0.8,
-        label=f"Best Z = {best['z_um']:.1f}",
-        zorder=5,
+    plot_af_curves(
+        ax,
+        coarse_curve=coarse_curve,
+        fine_curve=fine_curve,
+        super_fine_curve=super_fine_curve,
+        initial_z_um=before["z_um"],
+        selected_z_um=best["z_um"],
+        selected_sharpness=best["sharpness"],
+        initial_label=f"Initial Z = {before['z_um']:.1f}",
+        selected_label=f"Best Z = {best['z_um']:.1f}",
     )
 
     # Only show final Z line if it differs from best Z

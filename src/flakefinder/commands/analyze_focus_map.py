@@ -84,6 +84,88 @@ def get_sharpness(point: dict) -> float | None:
     return point.get("selected", {}).get("sharpness")
 
 
+def plot_af_curves(
+    ax,
+    *,
+    coarse_curve: list[dict],
+    fine_curve: list[dict],
+    super_fine_curve: list[dict],
+    initial_z_um: float,
+    selected_z_um: float,
+    selected_sharpness: float,
+    initial_label: str = "Initial Z",
+    selected_label: str = "Selected Z",
+    markersize: float = 4,
+    star_markersize: float = 16,
+) -> None:
+    """Plot autofocus sharpness curves with markers on the given axes.
+
+    Shared between standalone analyze_autofocus plots and focus map curve mosaics.
+    Draws coarse/fine/super_fine curves, shaded scan ranges, initial Z vline,
+    and selected Z star marker.
+    """
+    sf_ms = max(1, markersize - 1)  # super_fine slightly smaller
+
+    if coarse_curve:
+        coarse_z = [r["z_um"] for r in coarse_curve]
+        coarse_s = [r["sharpness"] for r in coarse_curve]
+        ax.plot(
+            coarse_z,
+            coarse_s,
+            "o-",
+            color="#4488cc",
+            markersize=markersize,
+            linewidth=1.2,
+            label="Coarse",
+            zorder=3,
+        )
+
+    if fine_curve:
+        fine_z = [r["z_um"] for r in fine_curve]
+        fine_s = [r["sharpness"] for r in fine_curve]
+        ax.plot(
+            fine_z,
+            fine_s,
+            "o-",
+            color="#ee8833",
+            markersize=markersize,
+            linewidth=1.2,
+            label="Fine",
+            zorder=3,
+        )
+
+    if super_fine_curve:
+        sf_z = [r["z_um"] for r in super_fine_curve]
+        sf_s = [r["sharpness"] for r in super_fine_curve]
+        ax.plot(sf_z, sf_s, "o-", color="#cc4488", markersize=sf_ms, linewidth=1.2, label="Super fine", zorder=3)
+
+    # Shaded scan ranges
+    if coarse_curve:
+        ax.axvspan(min(coarse_z), max(coarse_z), alpha=0.08, color="#4488cc", zorder=0)
+    if fine_curve:
+        ax.axvspan(min(fine_z), max(fine_z), alpha=0.12, color="#ee8833", zorder=1)
+    if super_fine_curve:
+        ax.axvspan(min(sf_z), max(sf_z), alpha=0.15, color="#cc4488", zorder=1)
+
+    # Initial Z marker
+    ax.axvline(initial_z_um, color="red", linestyle="--", linewidth=1.2, alpha=0.8, label=initial_label, zorder=2)
+
+    # Selected Z marker
+    ax.plot(
+        selected_z_um,
+        selected_sharpness,
+        "*",
+        color="gold",
+        markersize=star_markersize,
+        markeredgecolor="black",
+        markeredgewidth=0.8,
+        label=selected_label,
+        zorder=5,
+    )
+
+    ax.grid(True, alpha=0.3)
+
+
 def analyze_focus_map(data: dict) -> dict:
     """Analyze focus map data.
 
@@ -864,6 +946,111 @@ def create_mosaic(
         print(f"Mosaic saved to {output_path}")
 
 
+def plot_curves_mosaic(
+    data: dict,
+    output_path: Path,
+    *,
+    cf_threshold: float = 20.0,
+    min_sharpness: float = 20.0,
+    quiet: bool = False,
+) -> None:
+    """Generate mosaic of per-point sharpness curves from focus map data.
+
+    Each subplot shows coarse/fine/super_fine sharpness curves for one sample point,
+    with initial Z and selected Z marked. Dropped points are labeled with reason.
+    """
+    points = data["sample_points"]
+    if not points:
+        if not quiet:
+            print("No sample points found")
+        return
+
+    # Get drop reasons from robust plane fit
+    try:
+        result = compute_robust_plane_fit(data, cf_threshold=cf_threshold, min_sharpness=min_sharpness)
+        dropped_map: dict[tuple[str, int], str] = {
+            (d["type"], d["index"]): d["reason"] for d in result["points_dropped"]
+        }
+    except ValueError:
+        dropped_map = {}
+
+    n = len(points)
+    cols = int(np.ceil(np.sqrt(n)))
+    rows = int(np.ceil(n / cols))
+
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 3, rows * 2.5), squeeze=False)
+
+    for i, point in enumerate(points):
+        ax = axes[i // cols, i % cols]
+
+        prefix = "c" if point["type"] == "contour" else "g"
+        label = f"{prefix}{point['index']:02d}"
+
+        # Build subtitle
+        parts: list[str] = []
+        drop_key = (point["type"], point["index"])
+        if drop_key in dropped_map:
+            parts.append(f"DROPPED {dropped_map[drop_key]}")
+
+        dr = point.get("dynamic_range")
+        if dr is not None:
+            parts.append(f"DR={dr:.0%}")
+
+        sel = point.get("selected", {})
+        s = sel.get("sharpness")
+        if s is not None:
+            parts.append(f"S={s:.1f}")
+
+        subtitle = "  ".join(parts)
+
+        # Plot curves if point has data
+        has_selected = "selected" in point
+        has_curves = bool(point.get("sharpness_curve"))
+
+        if has_selected and has_curves:
+            initial = point.get("initial", {})
+            plot_af_curves(
+                ax,
+                coarse_curve=point.get("sharpness_curve", []),
+                fine_curve=point.get("fine_sharpness_curve", []),
+                super_fine_curve=point.get("super_fine_sharpness_curve", []),
+                initial_z_um=initial.get("z_um", sel["z_um"]),
+                selected_z_um=sel["z_um"],
+                selected_sharpness=sel["sharpness"],
+                markersize=2,
+                star_markersize=10,
+            )
+            # Add y-padding so curves don't crowd the title/bottom
+            y_lo, y_hi = ax.get_ylim()
+            y_pad = (y_hi - y_lo) * 0.1
+            ax.set_ylim(y_lo - y_pad, y_hi + y_pad)
+
+        # Title color: red for dropped/error points
+        title_color = "red" if drop_key in dropped_map or not has_selected else "black"
+        if not has_selected:
+            subtitle = "ERROR (no selected Z)"
+
+        ax.set_title(f"{label}\n{subtitle}", fontsize=7, color=title_color)
+        ax.tick_params(labelsize=6)
+
+    # Hide unused axes
+    for i in range(n, rows * cols):
+        axes[i // cols, i % cols].set_visible(False)
+
+    # Shared legend from first subplot with data
+    for i in range(min(n, rows * cols)):
+        handles, labels = axes[i // cols, i % cols].get_legend_handles_labels()
+        if handles:
+            fig.legend(handles, labels, loc="lower right", fontsize=7)
+            break
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=210)
+    plt.close()
+    if not quiet:
+        print(f"Curves mosaic saved to {output_path}")
+
+
 def compute_robust_plane_fit(
     data: dict,
     cf_threshold: float = 20.0,
@@ -1251,6 +1438,7 @@ def run(
     max_dim: int = 4500,
     margin: int = 5,
     mosaic: bool = False,
+    curves: bool = False,
     export_plane_path: Path | None = None,
     cf_threshold: float = 20.0,
     min_sharpness: float = 20.0,
@@ -1265,6 +1453,7 @@ def run(
         max_dim: Maximum canvas dimension for mosaic.
         margin: Gap between images in mosaic (pixels).
         mosaic: Generate mosaic image.
+        curves: Generate per-point sharpness curve mosaic.
         export_plane_path: Export robust plane fit to this JSON path.
         cf_threshold: Coarse-fine disagreement threshold (µm).
         min_sharpness: Minimum sharpness to include in plane fit.
@@ -1300,6 +1489,11 @@ def run(
         elif not quiet:
             print(f"Images directory not found: {images_dir}")
             print("  (Run focus_map.py with --save-images to generate)")
+
+    # Generate curves mosaic
+    if curves:
+        curves_path = focus_map_path.with_name(focus_map_path.stem + "_curves.png")
+        plot_curves_mosaic(data, curves_path, cf_threshold=cf_threshold, min_sharpness=min_sharpness, quiet=quiet)
 
     # Export plane fit
     if export_plane_path:
@@ -1357,6 +1551,7 @@ def _build_parser():
     parser.add_argument("--max-dim", type=int, default=4500, help="Max canvas dimension for mosaic")
     parser.add_argument("--margin", type=int, default=5, help="Gap between images in mosaic")
     parser.add_argument("--no-mosaic", action="store_true", help="Skip generating mosaic image")
+    parser.add_argument("--curves", action="store_true", help="Generate per-point sharpness curve mosaic")
     parser.add_argument("--export-plane", type=Path, default=None, help="Export plane fit to JSON")
     parser.add_argument("--cf-threshold", type=float, default=20.0, help="Coarse-fine disagreement threshold (um)")
     parser.add_argument("--min-sharpness", type=float, default=20.0, help="Min sharpness for plane fit")
@@ -1375,6 +1570,7 @@ def main() -> int:
             max_dim=args.max_dim,
             margin=args.margin,
             mosaic=not args.no_mosaic,
+            curves=args.curves,
             export_plane_path=args.export_plane,
             cf_threshold=args.cf_threshold,
             min_sharpness=args.min_sharpness,
