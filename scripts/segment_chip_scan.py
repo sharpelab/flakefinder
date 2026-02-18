@@ -2,8 +2,10 @@
 
 Usage:
     python scripts/segment_chip_scan.py scans/run_20260212_1843/chip_0/scan_20x \
-        --flatfield calibration/flatfield_20x_bin3.npy \
         -o /tmp/seg_run1843 -j 16
+
+Flatfield is auto-detected from scan_meta.json objective magnification
+(e.g. 10x -> calibration/flatfield_10x_bin3.npy). Override with --flatfield.
 """
 
 import argparse
@@ -80,9 +82,22 @@ def run(
     with open(scan_meta_path) as f:
         scan_meta = json.load(f)
     pixel_size = scan_meta["optics"]["sample_pixel_x_um"]
+    mag = scan_meta["optics"].get("objective_mag")
     if not quiet:
-        mag = scan_meta["optics"].get("objective_mag", "?")
-        print(f"pixel_size: {pixel_size} µm/px ({mag}x, from scan_meta.json)")
+        print(f"pixel_size: {pixel_size} µm/px ({mag or '?'}x, from scan_meta.json)")
+
+    # Auto-detect flatfield from objective magnification
+    if flatfield is None and mag is not None:
+        from flakefinder.scan_utils import CALIBRATION_DIR
+
+        mag_str = f"{mag}x" if not str(mag).endswith("x") else str(mag)
+        candidate = CALIBRATION_DIR / f"flatfield_{mag_str}_bin3.npy"
+        if candidate.exists():
+            flatfield = candidate
+            if not quiet:
+                print(f"flatfield: {candidate.name} (auto-detected)")
+        elif not quiet:
+            print(f"flatfield: none (no {candidate.name} found)")
 
     # Discover frames
     frames = sorted(scan_dir.glob("frame_*.jpg"), key=natural_sort_key)
