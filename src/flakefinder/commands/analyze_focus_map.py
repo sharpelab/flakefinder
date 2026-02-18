@@ -1108,12 +1108,19 @@ def compute_robust_plane_fit(
     coarse_fine_diff = np.abs(coarse_best_z - z)
     dynamic_range = np.array([p.get("dynamic_range", 0) for p in points])
     peak_near_edge = np.array([p.get("peak_near_edge", False) for p in points])
+    mean_intensity = np.array([p.get("mean_intensity", float("inf")) for p in points])
 
     # --- Stage 1: Pre-filter (hard rejects only) ---
     # Reject points with truly bad measurements:
     # - sharpness below reject threshold (noise floor, Z is meaningless)
     # - dynamic range near zero (flat curve, no focus signal)
-    prefilter_mask = (sel_sharpness >= reject_sharpness) & (dynamic_range >= min_dynamic_range)
+    # - black frame (mean intensity near zero — missed chip or light off)
+    BLACK_FRAME_THRESHOLD = 5.0
+    prefilter_mask = (
+        (sel_sharpness >= reject_sharpness)
+        & (dynamic_range >= min_dynamic_range)
+        & (mean_intensity >= BLACK_FRAME_THRESHOLD)
+    )
 
     if prefilter_mask.sum() < 3:
         # Fall back to all points if not enough pass pre-filter
@@ -1124,7 +1131,9 @@ def compute_robust_plane_fit(
     prefilter_reasons: dict[int, str] = {}
     for i in range(len(points)):
         if not prefilter_mask[i]:
-            if sel_sharpness[i] < reject_sharpness:
+            if mean_intensity[i] < BLACK_FRAME_THRESHOLD:
+                prefilter_reasons[i] = "black_frame"
+            elif sel_sharpness[i] < reject_sharpness:
                 prefilter_reasons[i] = "low_sharpness"
             else:
                 prefilter_reasons[i] = "flat_curve"
@@ -1275,6 +1284,7 @@ def compute_robust_plane_fit(
             "selected_sharpness": float(sel_sharpness[i]),
             "dynamic_range": float(dynamic_range[i]),
             "peak_near_edge": bool(peak_near_edge[i]),
+            "mean_intensity": float(mean_intensity[i]),
         }
         if i in mad_reject_reasons:
             entry["reason"] = "residual_outlier"
@@ -1332,6 +1342,7 @@ def compute_robust_plane_fit(
                 "drift_pct": float(drift_pct[i]),
                 "dynamic_range": float(dynamic_range[i]),
                 "peak_near_edge": bool(peak_near_edge[i]),
+                "mean_intensity": float(mean_intensity[i]),
             }
             for i in range(len(points))
             if high_conf_mask[i]

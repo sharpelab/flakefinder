@@ -222,6 +222,7 @@ class _SharpnessSampleBase(TypedDict):
     frame: int
     z_um: float
     sharpness: float
+    mean_intensity: float
 
 
 class SharpnessSample(_SharpnessSampleBase, total=False):
@@ -289,6 +290,7 @@ class AutofocusResult:
     initial_sharpness: float
     final_sharpness: float
     dynamic_range: float  # (s_max - s_min) / s_mean of coarse curve
+    mean_intensity: float  # Median of per-frame mean pixel brightness (coarse curve)
     z_range_um: float  # Actual range used
     objective_position: int | None  # Queried from microscope
     scan_duration_s: float
@@ -322,6 +324,7 @@ class AutofocusResult:
             "initial": {"z_um": self.initial_z_um, "sharpness": self.initial_sharpness},
             "final_sharpness": self.final_sharpness,
             "dynamic_range": self.dynamic_range,
+            "mean_intensity": self.mean_intensity,
             "peak_near_edge": self.peak_near_edge,
             "position_um": list(self.position_um),
             "scan": {
@@ -451,8 +454,8 @@ def _run_z_scan(
     # Sharpness worker: compute sharpness in background as frames arrive.
     # OpenCV releases the GIL, so this runs in true parallel with SDK Acquire.
     sharpness_q: queue.Queue[np.ndarray | None] = queue.Queue()
-    # (sharpness_value, metrics_dict_or_None) per frame, in capture order
-    sharpness_out: list[tuple[float, dict | None]] = []
+    # (sharpness_value, mean_intensity, metrics_dict_or_None) per frame, in capture order
+    sharpness_out: list[tuple[float, float, dict | None]] = []
     use_fast_tenengrad = sharpness_method == "tenengrad"
 
     def sharpness_worker():
@@ -474,10 +477,11 @@ def _run_z_scan(
                 s = _sharpness_tenengrad_into(img, **bufs)
             else:
                 s = sharpness(img, method=sharpness_method)
+            mean_int = float(img.mean())
             metrics = (
                 {name: float(fn(img)) for name, fn in ALL_SHARPNESS_METRICS.items()} if compute_all_metrics else None
             )
-            sharpness_out.append((s, metrics))
+            sharpness_out.append((s, mean_int, metrics))
 
     worker = threading.Thread(target=sharpness_worker, daemon=True)
     worker.start()
@@ -556,11 +560,12 @@ def _run_z_scan(
         z_interp = interpolate_position(t_capture, z_samples)
         if z_interp is None:
             raise RuntimeError(f"Frame {i}: Z interpolation failed at t={t_capture:.6f}s")
-        s, metrics = sharpness_out[i]
+        s, mean_int, metrics = sharpness_out[i]
         entry = SharpnessSample(
             frame=i,
             z_um=z_interp,
             sharpness=s,
+            mean_intensity=mean_int,
         )
         if metrics is not None:
             entry["metrics"] = metrics
@@ -846,6 +851,7 @@ def continuous_autofocus(
     s_min, s_max = min(sharpness_values), max(sharpness_values)
     s_mean = sum(sharpness_values) / len(sharpness_values)
     dynamic_range = (s_max - s_min) / s_mean if s_mean > 0 else 0
+    mean_intensity = float(np.median([r["mean_intensity"] for r in sharpness_curve]))
 
     # Track coarse results for diagnostics
     coarse_best_z = best_z
@@ -986,6 +992,7 @@ def continuous_autofocus(
         initial_sharpness=initial_sharpness,
         final_sharpness=final_sharpness,
         dynamic_range=dynamic_range,
+        mean_intensity=mean_intensity,
         z_range_um=safe_range,
         objective_position=objective_position,
         scan_duration_s=scan_duration,
