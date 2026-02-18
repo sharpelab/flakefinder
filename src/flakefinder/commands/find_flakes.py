@@ -9,10 +9,9 @@ overview, 20x chip scan). Scan speeds scale automatically with
 magnification.
 
 Segmentation runs in a background thread after each chip scan completes,
-using reduced workers (--seg-jobs-bg) to limit CPU contention with
-hardware operations. After the microscope is parked, remaining jobs are
-boosted to --seg-jobs-idle workers. Use --seg-wait for a safe baseline
-that blocks between chips, or --no-segment to disable entirely.
+Use --seg-jobs to control parallelism (default 4). Use --seg-wait for
+a safe baseline that blocks between chips, or --no-segment to disable
+entirely.
 
 Calls command modules in-process with a shared Microscope connection.
 If any step fails, prints what completed and exits. Output goes under
@@ -49,7 +48,13 @@ import contextlib
 import json
 import sys
 import time
-from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    CancelledError,
+    Future,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+)
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -285,8 +290,7 @@ class SegConfig:
     wait: bool  # --seg-wait: block before next chip until seg completes
     flatfield: Path | None
     material: str
-    jobs_bg: int  # workers during hardware ops
-    jobs_idle: int  # workers after park (boost)
+    jobs: int  # parallel workers for frame processing
     revisit_mags: list[float]  # target magnifications for revisit JSONs
     revisit_top: int  # number of top detections for revisit
 
@@ -379,8 +383,7 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         wait=args.seg_wait,
         flatfield=flatfield,
         material=args.material,
-        jobs_bg=args.seg_jobs_bg,
-        jobs_idle=args.seg_jobs_idle,
+        jobs=args.seg_jobs,
         revisit_mags=revisit_mags,
         revisit_top=args.revisit_top,
     )
@@ -565,16 +568,10 @@ Examples:
         help="Material preset for segmentation (default: hbn)",
     )
     seg_group.add_argument(
-        "--seg-jobs-bg",
+        "--seg-jobs",
         type=int,
         default=4,
-        help="Segmentation workers during hardware ops (default: 4)",
-    )
-    seg_group.add_argument(
-        "--seg-jobs-idle",
-        type=int,
-        default=8,
-        help="Segmentation workers after park / boost (default: 8)",
+        help="Segmentation parallel workers (default: 4)",
     )
     seg_group.add_argument(
         "--revisit-mag",
@@ -615,7 +612,7 @@ def _print_header(p: _Preflight) -> None:
         print(f"Limit:         {args.limit}")
     if p.seg.enabled:
         ff_label = str(p.seg.flatfield) if p.seg.flatfield else "none"
-        print(f"Segmentation:  {p.seg.material}, {p.seg.jobs_bg}j bg / {p.seg.jobs_idle}j idle")
+        print(f"Segmentation:  {p.seg.material}, {p.seg.jobs}j")
         print(f"Flatfield:     {ff_label}")
         if p.seg.wait:
             print("Seg mode:      WAIT (blocking)")
@@ -974,6 +971,8 @@ def _on_seg_done(future: Future, chip_idx: int) -> None:
                 print(f"[seg chip {chip_idx}] {result.summary}")
             else:
                 print(f"[seg chip {chip_idx}] FAILED: {result.error[:200]}")
+    except CancelledError:
+        pass  # will be re-submitted at boosted worker count
     except Exception as e:
         with _always_console():
             print(f"[seg chip {chip_idx}] ERROR: {e}")
@@ -981,23 +980,15 @@ def _on_seg_done(future: Future, chip_idx: int) -> None:
 
 def _drain_seg(
     seg_futures: list[tuple[_SegJob, Future]],
-    seg_executor: ThreadPoolExecutor,
-    seg: SegConfig,
     checkpoint: dict,
     run_dir: Path,
 ) -> float:
-    """Wait for all seg futures, boost queued jobs, checkpoint completions.
+    """Wait for all seg futures, checkpoint completions.
 
     Returns total segmentation wall-clock time across all chips.
     """
     total_seg_time = 0.0
-    to_boost: list[_SegJob] = []
-
     for job, future in seg_futures:
-        if future.cancel():
-            to_boost.append(job)
-            continue
-        # Done or running — result() blocks if still running
         try:
             result = future.result()
             total_seg_time += result.duration
@@ -1005,41 +996,12 @@ def _drain_seg(
                 mark_step(run_dir, checkpoint, job.seg_key, result.duration)
         except Exception:
             pass  # callback already logged
-
-    # Re-submit cancelled jobs at idle (boosted) speed
-    if to_boost:
-        with _always_console():
-            print(f"[seg] Boosting {len(to_boost)} job(s) to {seg.jobs_idle} workers")
-        for job in to_boost:
-            future = seg_executor.submit(
-                _run_chip_seg,
-                job,
-                seg.flatfield,
-                seg.material,
-                seg.jobs_idle,
-                seg.revisit_mags,
-                seg.revisit_top,
-            )
-            try:
-                result = future.result()
-                total_seg_time += result.duration
-                with _always_console():
-                    if result.success:
-                        print(f"[seg chip {job.chip_idx}] {result.summary}")
-                        mark_step(run_dir, checkpoint, job.seg_key, result.duration)
-                    else:
-                        print(f"[seg chip {job.chip_idx}] FAILED: {result.error[:200]}")
-            except Exception as e:
-                with _always_console():
-                    print(f"[seg chip {job.chip_idx}] ERROR: {e}")
-
     return total_seg_time
 
 
 def _run_revisit_phase(
     scope: Microscope,
     seg_futures: list[tuple[_SegJob, Future]],
-    seg_executor: ThreadPoolExecutor,
     seg: SegConfig,
     chip_indices: list[int],
     run_dir: Path,
@@ -1048,9 +1010,9 @@ def _run_revisit_phase(
 ) -> tuple[float, float]:
     """Drain seg and run revisit captures, overlapping where possible.
 
-    Boosts pending seg jobs to idle worker count, then iterates magnifications
-    (one at a time).  Within each mag, visits each chip's detections as soon as
-    its seg completes — overlapping microscope I/O with background seg CPU work.
+    Iterates magnifications (one at a time).  Within each mag, visits each
+    chip's detections as soon as its seg completes — overlapping microscope
+    I/O with background seg CPU work.
 
     Returns (total_seg_cpu_time, total_revisit_time).
     """
@@ -1058,27 +1020,6 @@ def _run_revisit_phase(
     job_by_chip: dict[int, tuple[_SegJob, Future]] = {}
     for job, future in seg_futures:
         job_by_chip[job.chip_idx] = (job, future)
-
-    # Boost: cancel not-yet-started seg jobs, re-submit at idle worker count
-    to_boost: list[_SegJob] = []
-    for job, future in seg_futures:
-        if future.cancel():
-            to_boost.append(job)
-    if to_boost:
-        with _always_console():
-            print(f"[seg] Boosting {len(to_boost)} job(s) to {seg.jobs_idle} workers")
-        for job in to_boost:
-            new_future = seg_executor.submit(
-                _run_chip_seg,
-                job,
-                seg.flatfield,
-                seg.material,
-                seg.jobs_idle,
-                seg.revisit_mags,
-                seg.revisit_top,
-            )
-            new_future.add_done_callback(lambda f, ci=job.chip_idx: _on_seg_done(f, ci))
-            job_by_chip[job.chip_idx] = (job, new_future)
 
     total_seg_time = 0.0
     total_revisit_time = 0.0
@@ -1397,7 +1338,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
                 job,
                 p.seg.flatfield,
                 p.seg.material,
-                p.seg.jobs_bg,
+                p.seg.jobs,
                 p.seg.revisit_mags,
                 p.seg.revisit_top,
             )
@@ -1445,7 +1386,6 @@ def run(scope: Microscope, p: _Preflight) -> int:
         total_seg_time, total_revisit_time = _run_revisit_phase(
             scope,
             seg_futures,
-            seg_executor,
             p.seg,
             chip_indices,
             run_dir,
@@ -1483,7 +1423,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
 
         if seg_futures and seg_executor is not None:
             seg_wall_start = time.perf_counter()
-            total_seg_time = _drain_seg(seg_futures, seg_executor, p.seg, checkpoint, run_dir)
+            total_seg_time = _drain_seg(seg_futures, checkpoint, run_dir)
             seg_wall = time.perf_counter() - seg_wall_start
             with _always_console():
                 print(
@@ -1561,8 +1501,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
         "chips": args.chips,
         "after": args.after,
         "limit": args.limit,
-        "seg_jobs_bg": p.seg.jobs_bg,
-        "seg_jobs_idle": p.seg.jobs_idle,
+        "seg_jobs": p.seg.jobs,
         "material": p.seg.material,
         "flatfield": str(p.seg.flatfield) if p.seg.flatfield else None,
     }
@@ -1625,7 +1564,7 @@ def main() -> int:
                 run_in_process(f"Chip {ci} - Analyze Focus Map", lambda: None, dry_run=True)
                 run_in_process(f"Chip {ci} - {p.chip_scan_mag} Scan", lambda: None, dry_run=True)
                 if p.seg.enabled:
-                    run_in_process(f"Chip {ci} - Segment (bg, {p.seg.jobs_bg}j)", lambda: None, dry_run=True)
+                    run_in_process(f"Chip {ci} - Segment ({p.seg.jobs}j)", lambda: None, dry_run=True)
             if p.seg.revisit_mags:
                 for mag in p.seg.revisit_mags:
                     mag_label = f"{mag:g}x"
