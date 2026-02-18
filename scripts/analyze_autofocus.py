@@ -766,8 +766,8 @@ def main():
             pct = (after["sharpness"] / before["sharpness"] - 1) * 100
             print(f"  Improvement: {improvement:+.2f} ({pct:+.1f}%)")
 
-        if summary.get("stayed_at_initial"):
-            print("  (Stayed at initial position)")
+        if summary.get("peak_near_edge"):
+            print("  (Peak near edge of coarse scan window)")
 
         if args.pick_z is not None:
             all_curves = (

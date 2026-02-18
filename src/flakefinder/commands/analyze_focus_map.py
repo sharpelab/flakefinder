@@ -1064,8 +1064,8 @@ def compute_robust_plane_fit(
     """Compute robust plane fit with outlier rejection and coverage analysis.
 
     Two-stage filtering:
-      Stage 1 (pre-filter): Exclude stayed_at_initial points (AF gave up),
-        coarse-fine disagreement > cf_threshold, and sharpness < min_sharpness.
+      Stage 1 (pre-filter): Exclude points with coarse-fine disagreement
+        > cf_threshold, and sharpness < min_sharpness.
       Stage 2 (post-fit): MAD-based residual rejection. Fit initial plane,
         compute MAD of residuals, reject points > mad_sigma_threshold * robust_sigma.
 
@@ -1094,16 +1094,14 @@ def compute_robust_plane_fit(
     z = np.array([p["selected"]["z_um"] for p in points])
     sel_sharpness = np.array([p["selected"]["sharpness"] for p in points])
     final_sharpness = np.array([p["final_sharpness"] for p in points])
-    stayed = np.array([p.get("stayed_at_initial", False) for p in points])
-
     # Compute quality metrics
     drift_pct = np.clip((sel_sharpness - final_sharpness) / sel_sharpness * 100, 0, 100)
     coarse_best_z = np.array([p.get("coarse", {}).get("best_z_um", p["selected"]["z_um"]) for p in points])
     coarse_fine_diff = np.abs(coarse_best_z - z)
 
     # --- Stage 1: Pre-filter ---
-    # Exclude stayed_at_initial, high coarse-fine disagreement, low sharpness
-    prefilter_mask = (coarse_fine_diff <= cf_threshold) & (sel_sharpness >= min_sharpness) & (~stayed)
+    # Exclude high coarse-fine disagreement and low sharpness
+    prefilter_mask = (coarse_fine_diff <= cf_threshold) & (sel_sharpness >= min_sharpness)
 
     if prefilter_mask.sum() < 3:
         # Fall back to all points if not enough pass pre-filter
@@ -1114,9 +1112,7 @@ def compute_robust_plane_fit(
     prefilter_reasons: dict[int, str] = {}
     for i in range(len(points)):
         if not prefilter_mask[i]:
-            if stayed[i]:
-                prefilter_reasons[i] = "stayed_at_initial"
-            elif sel_sharpness[i] < min_sharpness:
+            if sel_sharpness[i] < min_sharpness:
                 prefilter_reasons[i] = "low_sharpness"
             else:
                 prefilter_reasons[i] = "cf_disagreement"

@@ -98,14 +98,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--min-dynamic-range",
         type=float,
         default=0.20,
-        help="Minimum sharpness dynamic range to trust AF result (default: 0.20)",
+        help="Unused, kept for CLI compatibility",
     )
     parser.add_argument(
         "--quiet",
         "-q",
         action="store_true",
-        help="Single-line output: 'AF: Z=... (adj ...), sharpness=sel/after, Ns, N frames' "
-        "or 'AF: stayed_at_initial, DR=..., scan_best_z=..., Ns, N frames'",
+        help="Single-line output: 'AF: Z=... (adj ...), sharpness=sel/after, DR=..., Ns, N frames'",
     )
     return parser
 
@@ -284,10 +283,9 @@ def main():
         vprint(f"  Mean sharpness: {mean_sharpness:.2f}")
         vprint(f"  Selected Z: {af_result.selected_z_um:.2f} um")
         vprint(f"  Selected sharpness: {af_result.selected_sharpness:.2f}")
-        if af_result.stayed_at_initial:
-            vprint("  ** Stayed at initial (scan found nothing better) **")
-            vprint(f"     Scan best: Z={af_result.scan_best_z_um:.2f}, sharpness={af_result.scan_best_sharpness:.2f}")
-            vprint(f"     Dynamic range: {af_result.dynamic_range:.4f}")
+        vprint(f"  Dynamic range: {af_result.dynamic_range:.4f}")
+        if af_result.peak_near_edge:
+            vprint("  ** Peak near edge of coarse scan window **")
 
         # Find best frame for saving — check coarse and fine separately
         best_scan_path = None
@@ -395,18 +393,13 @@ def main():
         if args.quiet:
             # Single-line output for programmatic use
             z_adj = af_result.selected_z_um - target_z
-            if af_result.stayed_at_initial:
-                print(
-                    f"AF: stayed_at_initial, DR={af_result.dynamic_range:.3f}, "
-                    f"scan_best_z={af_result.scan_best_z_um:.1f}, "
-                    f"{af_result.scan_duration_s:.1f}s, {af_result.frame_count} frames"
-                )
-            else:
-                print(
-                    f"AF: Z={af_result.selected_z_um:.1f} (adj {z_adj:+.1f}), "
-                    f"sharpness={af_result.selected_sharpness:.1f}/{after_sharpness:.1f}, "
-                    f"{af_result.scan_duration_s:.1f}s, {af_result.frame_count} frames"
-                )
+            edge_str = " EDGE" if af_result.peak_near_edge else ""
+            print(
+                f"AF: Z={af_result.selected_z_um:.1f} (adj {z_adj:+.1f}), "
+                f"sharpness={af_result.selected_sharpness:.1f}/{after_sharpness:.1f}, "
+                f"DR={af_result.dynamic_range:.3f}{edge_str}, "
+                f"{af_result.scan_duration_s:.1f}s, {af_result.frame_count} frames"
+            )
         else:
             vprint()
             vprint("=" * 50)
