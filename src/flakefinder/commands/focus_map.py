@@ -570,6 +570,11 @@ def run(
     if z is not None:
         reference_z_um = z
     else:
+        # Centroid AF uses wider range than grid points (2x FM default, cap 500 µm)
+        # to tolerate initial Z uncertainty after objective swap.
+        CENTROID_RANGE_CAP_UM = 500.0
+        centroid_z_range = min(z_range * 2, CENTROID_RANGE_CAP_UM) if z_range is not None else None
+
         cx, cy = chip_geo.centroid
         cx_mm, cy_mm = cx / 1000, cy / 1000
         if not quiet:
@@ -578,7 +583,7 @@ def run(
         wait_all([hx, hy])
         centroid_af = continuous_autofocus(
             scope,
-            z_range_um=z_range,
+            z_range_um=centroid_z_range,
             z_speed_um_s=z_speed,
             fine_pass=fine_pass,
             fine_range_um=fine_range,

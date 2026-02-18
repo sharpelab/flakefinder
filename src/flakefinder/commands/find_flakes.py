@@ -43,6 +43,8 @@ Usage:
     uv run python find_flakes.py --dry-run
 """
 
+from __future__ import annotations
+
 import argparse
 import contextlib
 import json
@@ -832,7 +834,6 @@ def _run_chip_seg(
 ) -> _SegResult:
     """Run segmentation for one chip in-process. Called in background thread."""
     from flakefinder.segmentation import (
-        Detection,
         DetectorConfig,
         FrameResult,
         natural_sort_key,
@@ -1222,9 +1223,15 @@ def run(scope: Microscope, p: _Preflight) -> int:
     if step_done(checkpoint, switch_key):
         print(f"\n  [checkpoint] Skipping Switch to {p.chip_scan_mag} (already complete)")
     else:
+
+        def _switch_and_set_z():
+            stage.run(scope=scope, objective_mag=p.chip_scan_mag)
+            # Override SDK parfocal Z with operator's initial_z
+            stage.run(scope=scope, z=args.initial_z)
+
         duration, _ = run_in_process(
             f"Switch to {p.chip_scan_mag}",
-            lambda: stage.run(scope=scope, objective_mag=p.chip_scan_mag),
+            _switch_and_set_z,
             pause=args.pause,
             quiet=quiet,
         )
