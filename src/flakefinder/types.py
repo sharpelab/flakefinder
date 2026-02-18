@@ -44,6 +44,27 @@ class GainRGB(NamedTuple):
     blue: float
 
 
+class ContrastRGB(NamedTuple):
+    """Per-channel normalized contrast (red, green, blue)."""
+
+    red: float
+    green: float
+    blue: float
+
+
+class XYWHRect(NamedTuple):
+    """Pixel bounding box in OpenCV XYWH convention."""
+
+    x: int
+    y: int
+    w: int
+    h: int
+
+
+# Pixel coordinate polygon from numpy .tolist() — [[x, y], ...]
+type PixelPolygon = list[list[int]]
+
+
 class AreaRect(NamedTuple):
     """Stage-coordinate rectangle in µm."""
 

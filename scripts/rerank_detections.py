@@ -24,7 +24,7 @@ import numpy as np
 from mosaic_util import make_mosaic
 
 from flakefinder.scan_utils import PARFOCAL_Z_UM
-from flakefinder.segmentation import DetectorConfig, classify_detections, draw_scale_bar, score_detections
+from flakefinder.segmentation import Detection, DetectorConfig, classify_detections, draw_scale_bar, score_detections
 
 
 def main() -> int:
@@ -84,7 +84,7 @@ def main() -> int:
     with open(summary_path) as f:
         summary = json.load(f)
 
-    all_detections: dict[str, list[dict]] = summary.get("detections_by_frame", {})
+    all_detections: dict[str, list[Detection]] = summary.get("detections_by_frame", {})
     if not all_detections:
         print(f"No detections_by_frame in {summary_path}")
         return 1

@@ -18,6 +18,7 @@ from typing import NamedTuple
 import cv2
 
 from flakefinder.segmentation import (
+    Detection,
     DetectorConfig,
     FrameResult,
     draw_detections,
@@ -157,7 +158,7 @@ def run(
     tier_counts = {1: 0, 2: 0, 3: 0}
     skipped_count = 0
     frames_with_dets = 0
-    all_detections: dict[str, list[dict]] = {}
+    all_detections: dict[str, list[Detection]] = {}
 
     for fp in frames:
         name = fp.stem

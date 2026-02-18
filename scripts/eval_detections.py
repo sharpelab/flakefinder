@@ -21,7 +21,7 @@ import numpy as np
 from mosaic_util import make_mosaic
 
 from flakefinder.scan_utils import apply_flatfield
-from flakefinder.segmentation import DetectorConfig, draw_scale_bar, segment_frame
+from flakefinder.segmentation import Detection, DetectorConfig, draw_scale_bar, segment_frame
 
 # R-G calibration curve: R = 0.193*G^2 - 0.217*G - 0.604
 # Polynomial coefficients (G^2, G, constant)
@@ -82,7 +82,7 @@ def mask_centroid(mask_path: Path) -> tuple[float, float] | None:
 
 
 def match_detection_to_target(
-    detections: list[dict],
+    detections: list[Detection],
     target_center: tuple[float, float],
     match_radius: float,
 ) -> int | None:
@@ -101,7 +101,7 @@ def match_detection_to_target(
 
 def draw_eval_frame(
     raw_image: np.ndarray,
-    detections: list[dict],
+    detections: list[Detection],
     classifications: list[tuple[str, tuple[int, int, int]]],
     target_idx: int | None,
     um_per_px: float,

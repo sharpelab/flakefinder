@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, TypedDict
 
 import cv2
 import numpy as np
@@ -20,6 +20,50 @@ from scipy import ndimage
 from scipy.stats import kurtosis as scipy_kurtosis
 
 from flakefinder.scan_utils import apply_flatfield
+from flakefinder.types import ContrastRGB, PixelPolygon, Point2F, XYWHRect
+
+# ============================================================================
+# Detection types
+# ============================================================================
+
+
+class _DetectionBase(TypedDict):
+    bbox: XYWHRect
+    center: Point2F
+    size_px: int
+    mean_contrast: float
+    contrast_rgb: ContrastRGB
+    cal_dist: float
+    solidity: float
+    circularity: float
+    perim_ratio: float
+    r_std: float
+    r_kurt: float
+    g_std: float
+    g_kurt: float
+    b_std: float
+    b_kurt: float
+    grad_energy: float
+    g_entropy: float
+    hull: PixelPolygon
+    contour: PixelPolygon
+
+
+class Detection(_DetectionBase, total=False):
+    """Flake detection with optional classification fields.
+
+    Base fields from _analyze_component. Optional fields added
+    in-place by classify_detections/score_detections.
+    """
+
+    classification: str | None
+    tier: int
+    score: float
+    frame: str
+    stage_x: float
+    stage_y: float
+    det_idx: int
+
 
 # ============================================================================
 # Detector configuration (from scripts/detector_config.py)
@@ -89,7 +133,7 @@ class DetectorConfig:
             return "possible"
         return self.non_match_label
 
-    def score_detection(self, det: dict) -> tuple[int, float]:
+    def score_detection(self, det: Detection) -> tuple[int, float]:
         """Compute (tier, score) for a detection dict."""
         pr = det["perim_ratio"]
         cd = det["cal_dist"]
@@ -191,7 +235,7 @@ def _analyze_component(
     norm_contrast: np.ndarray,
     grad_mag: np.ndarray,
     config: DetectorConfig,
-) -> dict:
+) -> Detection:
     """Analyze a binary component mask and return detection metrics."""
     rows = np.any(component, axis=1)
     cols = np.any(component, axis=0)
@@ -252,27 +296,27 @@ def _analyze_component(
     g_contrast = round(float(norm_contrast_bgr[1]), 4)
     b_contrast = round(float(norm_contrast_bgr[0]), 4)
 
-    return {
-        "bbox": [x_min, y_min, x_max - x_min, y_max - y_min],
-        "center": [round((x_min + x_max) / 2, 1), round((y_min + y_max) / 2, 1)],
-        "size_px": int(component.sum()),
-        "mean_contrast": round(mean_contrast, 1),
-        "contrast_rgb": [r_contrast, g_contrast, b_contrast],
-        "cal_dist": round(config.cal_distance(r_contrast, g_contrast), 4),
-        "solidity": round(solidity, 4),
-        "circularity": round(circularity, 4),
-        "perim_ratio": round(perim_ratio, 4),
-        "r_std": round(r_std, 4),
-        "r_kurt": round(r_kurt, 4),
-        "g_std": round(g_std, 4),
-        "g_kurt": round(g_kurt, 4),
-        "b_std": round(b_std, 4),
-        "b_kurt": round(b_kurt, 4),
-        "grad_energy": round(grad_energy, 2),
-        "g_entropy": round(g_entropy, 4),
-        "hull": hull_pts,
-        "contour": contour_pts,
-    }
+    return Detection(
+        bbox=XYWHRect(x_min, y_min, x_max - x_min, y_max - y_min),
+        center=Point2F(round((x_min + x_max) / 2, 1), round((y_min + y_max) / 2, 1)),
+        size_px=int(component.sum()),
+        mean_contrast=round(mean_contrast, 1),
+        contrast_rgb=ContrastRGB(r_contrast, g_contrast, b_contrast),
+        cal_dist=round(config.cal_distance(r_contrast, g_contrast), 4),
+        solidity=round(solidity, 4),
+        circularity=round(circularity, 4),
+        perim_ratio=round(perim_ratio, 4),
+        r_std=round(r_std, 4),
+        r_kurt=round(r_kurt, 4),
+        g_std=round(g_std, 4),
+        g_kurt=round(g_kurt, 4),
+        b_std=round(b_std, 4),
+        b_kurt=round(b_kurt, 4),
+        grad_energy=round(grad_energy, 2),
+        g_entropy=round(g_entropy, 4),
+        hull=hull_pts,
+        contour=contour_pts,
+    )
 
 
 def _otsu_split(
@@ -371,7 +415,7 @@ def segment_frame(
     config: DetectorConfig,
     um_per_px: float,
     perim_ratio_thresh: float = 0.0,
-) -> list[dict]:
+) -> list[Detection]:
     """Segment flakes by thresholding relative to background mode.
 
     For 'above' contrast mode (hBN), finds pixels brighter than background.
@@ -442,7 +486,7 @@ def segment_frame(
     return detections
 
 
-def score_detections(detections: list[dict], config: DetectorConfig) -> None:
+def score_detections(detections: list[Detection], config: DetectorConfig) -> None:
     """Compute tier and score for detections in place.
 
     Reads existing keys (perim_ratio, cal_dist, contrast_rgb, size_px).
@@ -453,7 +497,7 @@ def score_detections(detections: list[dict], config: DetectorConfig) -> None:
 
 
 def classify_detections(
-    detections: list[dict],
+    detections: list[Detection],
     config: DetectorConfig,
     perim_ratio_thresh: float = 0.0,
 ) -> None:
@@ -505,7 +549,7 @@ def draw_scale_bar(image: np.ndarray, um_per_px: float) -> None:
 
 def draw_detections(
     image: np.ndarray,
-    detections: list[dict],
+    detections: list[Detection],
     um_per_px: float = 0.0,
     draw_bbox: bool = True,
     draw_hull: bool = False,
@@ -548,7 +592,7 @@ def draw_detections(
 
 def save_plot(
     image: np.ndarray,
-    detections: list[dict],
+    detections: list[Detection],
     title: str,
     output_path: Path,
     config: DetectorConfig,
@@ -597,7 +641,7 @@ _cached_ff_path: str | None = None
 
 class FrameResult(NamedTuple):
     frame_name: str
-    detections: list[dict]
+    detections: list[Detection]
     dark_frac: float
     skipped: bool
 
@@ -639,6 +683,6 @@ def natural_sort_key(path: Path) -> int:
     return int(m.group()) if m else 0
 
 
-def strip_geometry(det: dict) -> dict:
+def strip_geometry(det: Detection) -> Detection:
     """Return detection dict without hull/contour (large point lists)."""
-    return {k: v for k, v in det.items() if k not in ("hull", "contour")}
+    return {k: v for k, v in det.items() if k not in ("hull", "contour")}  # type: ignore[return-value]

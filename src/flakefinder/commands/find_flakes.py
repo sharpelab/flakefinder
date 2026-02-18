@@ -58,7 +58,7 @@ from concurrent.futures import (
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import NamedTuple, TypedDict
+from typing import TYPE_CHECKING, NamedTuple, TypedDict
 
 from flakefinder.cli_utils import park_microscope
 from flakefinder.commands import analyze_focus_map, chip_scan, find_chips, focus_map, revisit, scan, stage, stitch
@@ -71,6 +71,9 @@ from flakefinder.scan_utils import (
     validate_area_rect,
 )
 from flakefinder.types import AreaRect, GainRGB
+
+if TYPE_CHECKING:
+    from flakefinder.segmentation import Detection
 
 
 class TeeWriter:
@@ -728,7 +731,7 @@ class _SegResult(NamedTuple):
 
 def _generate_revisits(
     job: _SegJob,
-    all_detections: dict[str, list[dict]],
+    all_detections: dict[str, list[Detection]],
     revisit_mags: list[float],
     revisit_top: int,
 ) -> str:
@@ -829,6 +832,7 @@ def _run_chip_seg(
 ) -> _SegResult:
     """Run segmentation for one chip in-process. Called in background thread."""
     from flakefinder.segmentation import (
+        Detection,
         DetectorConfig,
         FrameResult,
         natural_sort_key,
@@ -888,7 +892,7 @@ def _run_chip_seg(
         tier_counts: dict[int, int] = {1: 0, 2: 0, 3: 0}
         skipped_count = 0
         frames_with_dets = 0
-        all_detections: dict[str, list[dict]] = {}
+        all_detections: dict[str, list[Detection]] = {}
 
         for fp in frames:
             name = fp.stem
