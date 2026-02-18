@@ -52,7 +52,6 @@ def run(
     dark_frac_cutoff: float = 0.05,
     jobs: int = 16,
     viz: bool = False,
-    pixel_size: float = 0.36,
     quiet: bool = False,
 ) -> SegStats:
     """Run parallel flake segmentation over a chip scan directory.
@@ -63,16 +62,26 @@ def run(
         flatfield: Flatfield .npy file for correction.
         material: Material preset name.
         jobs: Number of parallel workers.
-        pixel_size: µm per pixel.
         quiet: Suppress progress output.
 
     Returns:
         SegStats with detection counts and timing.
 
     Raises:
-        ValueError: If no frames found in scan_dir.
+        ValueError: If no frames found in scan_dir or scan_meta.json missing.
     """
     from dataclasses import replace
+
+    # Read pixel size from scan metadata
+    scan_meta_path = scan_dir / "scan_meta.json"
+    if not scan_meta_path.exists():
+        raise ValueError(f"scan_meta.json not found in {scan_dir}")
+    with open(scan_meta_path) as f:
+        scan_meta = json.load(f)
+    pixel_size = scan_meta["optics"]["sample_pixel_x_um"]
+    if not quiet:
+        mag = scan_meta["optics"].get("objective_mag", "?")
+        print(f"pixel_size: {pixel_size} µm/px ({mag}x, from scan_meta.json)")
 
     # Discover frames
     frames = sorted(scan_dir.glob("frame_*.jpg"), key=natural_sort_key)
@@ -251,7 +260,6 @@ def main() -> int:
     parser.add_argument("-j", "--jobs", type=int, default=16, help="Worker count")
     parser.add_argument("-o", "--output", type=Path, required=True, help="Output directory")
     parser.add_argument("--viz", action="store_true", help="Write annotated frame images (expensive)")
-    parser.add_argument("--pixel-size", type=float, default=0.36, help="µm per pixel (default: 0.36 for 20x bin3)")
     args = parser.parse_args()
 
     try:
@@ -266,7 +274,6 @@ def main() -> int:
             dark_frac_cutoff=args.dark_frac_cutoff,
             jobs=args.jobs,
             viz=args.viz,
-            pixel_size=args.pixel_size,
         )
     except ValueError as e:
         print(f"Error: {e}")
