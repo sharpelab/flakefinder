@@ -686,3 +686,42 @@ def natural_sort_key(path: Path) -> int:
 def strip_geometry(det: Detection) -> Detection:
     """Return detection dict without hull/contour (large point lists)."""
     return {k: v for k, v in det.items() if k not in ("hull", "contour")}  # type: ignore[return-value]
+
+
+def dedup_detections(
+    detections: list[Detection],
+    radius_um: float = 50.0,
+) -> list[Detection]:
+    """Greedy NMS spatial dedup on stage coordinates.
+
+    Expects detections pre-sorted by priority (tier asc, score desc).
+    Detections without stage_x/stage_y are kept unconditionally.
+    """
+    from scipy.spatial import KDTree
+
+    with_coords = []
+    without_coords = []
+    for d in detections:
+        if d.get("stage_x") is not None:
+            with_coords.append(d)
+        else:
+            without_coords.append(d)
+
+    if not with_coords:
+        return list(detections)
+
+    import numpy as np
+
+    coords = np.array([(d["stage_x"], d["stage_y"]) for d in with_coords])
+    tree = KDTree(coords)
+    suppressed: set[int] = set()
+    kept = list(without_coords)
+    for idx, d in enumerate(with_coords):
+        if idx in suppressed:
+            continue
+        kept.append(d)
+        for n_idx in tree.query_ball_point(coords[idx], radius_um):
+            if n_idx > idx:
+                suppressed.add(n_idx)
+
+    return kept

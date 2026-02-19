@@ -775,8 +775,12 @@ def _generate_revisits(
         d["stage_x"] = fx + (px_x - frame_w_px / 2) * um_per_px
         d["stage_y"] = fy + (px_y - frame_h_px / 2) * um_per_px
 
-    # Rank by (tier asc, score desc), take top N
+    # Rank by (tier asc, score desc), dedup, take top N
     ranked = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
+
+    from flakefinder.segmentation import dedup_detections
+
+    ranked = dedup_detections(ranked)
 
     # Load focus plane
     assert job.plane_path is not None

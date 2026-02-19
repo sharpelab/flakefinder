@@ -24,7 +24,14 @@ import numpy as np
 from mosaic_util import make_mosaic
 
 from flakefinder.scan_utils import PARFOCAL_Z_UM
-from flakefinder.segmentation import Detection, DetectorConfig, classify_detections, draw_scale_bar, score_detections
+from flakefinder.segmentation import (
+    Detection,
+    DetectorConfig,
+    classify_detections,
+    dedup_detections,
+    draw_scale_bar,
+    score_detections,
+)
 
 
 def main() -> int:
@@ -162,37 +169,9 @@ def main() -> int:
 
     # Spatial deduplication via greedy NMS on stage coordinates
     if not args.no_dedup and all_flat:
-        from scipy.spatial import KDTree
-
         sorted_all = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
-
-        # Separate detections with/without stage coords
-        with_coords = []
-        without_coords = []
-        for d in sorted_all:
-            if d.get("stage_x") is not None:
-                with_coords.append(d)
-            else:
-                without_coords.append(d)
-
-        if with_coords:
-            coords = np.array([(d["stage_x"], d["stage_y"]) for d in with_coords])
-            tree = KDTree(coords)
-            suppressed: set[int] = set()
-            kept = list(without_coords)
-            for idx, d in enumerate(with_coords):
-                if idx in suppressed:
-                    continue
-                kept.append(d)
-                neighbors = tree.query_ball_point(coords[idx], args.dedup_radius)
-                for n_idx in neighbors:
-                    if n_idx > idx:
-                        suppressed.add(n_idx)
-        else:
-            kept = sorted_all
-
         n_before = len(all_flat)
-        all_flat = kept
+        all_flat = dedup_detections(sorted_all, radius_um=args.dedup_radius)
         print(f"Dedup: {n_before} → {len(all_flat)} unique (radius={args.dedup_radius:.0f} µm)")
 
     # Print top N
