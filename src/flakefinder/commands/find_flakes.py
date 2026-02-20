@@ -112,6 +112,7 @@ DEFAULT_INITIAL_Z = 24690
 
 
 class ScanPreset(TypedDict):
+    name: str
     overview_mag: str
     chip_scan_mag: str
     chip_scan_speed_mm: float
@@ -123,6 +124,7 @@ class ScanPreset(TypedDict):
 
 PRESETS: dict[str, ScanPreset] = {
     "5_20": {
+        "name": "5x overview, 20x scan",
         "overview_mag": "5x",
         "chip_scan_mag": "20x",
         "chip_scan_speed_mm": 5.0,
@@ -132,6 +134,7 @@ PRESETS: dict[str, ScanPreset] = {
         "focus_map_exposure_ms": 1.0,
     },
     "2.5_10": {
+        "name": "2.5x overview, 10x scan",
         "overview_mag": "2.5x",
         "chip_scan_mag": "10x",
         "chip_scan_speed_mm": 10.0,

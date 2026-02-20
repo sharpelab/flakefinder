@@ -9,24 +9,64 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
 import threading
 import time
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox, ttk
 
-# Presets from find_flakes.py (keep in sync)
-PRESETS = ("5_20", "2.5_10")
+from PIL import Image, ImageTk
+
+from flakefinder.commands.find_flakes import PRESETS
+
+# gui_state.json lives next to the script's working directory (repo root)
+GUI_STATE_PATH = Path("gui_state.json")
+MAX_RECENT_OPERATORS = 10
+
 DEFAULT_PRESET = "2.5_10"
 MATERIALS = ("hbn", "graphene")
 DEFAULT_INITIAL_Z = "24690"
 DEFAULT_AREA_RECT = "8000,95000,0,78000"
 DEFAULT_REVISIT_TOP = "20"
 
-# Sub-steps per chip for progress tracking: focus_map, scan, seg
-SUBSTEPS_PER_CHIP = 3
+# Sub-steps per chip for progress tracking: focus_map, scan (seg is pipelined/free)
+SUBSTEPS_PER_CHIP = 2
+
+# Overview image display width
+OVERVIEW_MAX_WIDTH = 500
+
+
+def _load_gui_state() -> dict:
+    """Load GUI state from disk, or return empty defaults."""
+    if GUI_STATE_PATH.exists():
+        try:
+            with open(GUI_STATE_PATH) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"recent_operators": []}
+
+
+def _save_gui_state(state: dict) -> None:
+    """Persist GUI state to disk."""
+    try:
+        with open(GUI_STATE_PATH, "w") as f:
+            json.dump(state, f, indent=2)
+    except OSError:
+        pass  # non-critical
+
+
+def _add_recent_operator(state: dict, name: str) -> None:
+    """Add operator to recent list (most-recent first, deduped, capped)."""
+    ops = state.setdefault("recent_operators", [])
+    if name in ops:
+        ops.remove(name)
+    ops.insert(0, name)
+    state["recent_operators"] = ops[:MAX_RECENT_OPERATORS]
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -49,6 +89,10 @@ class FindFlakesGUI:
         self.total_chips: int | None = None
         self.substeps_done: int = 0
         self.chip_phase_start: float | None = None  # when chip processing began
+        self.chip_pos: int = 0  # 1-based position of current chip
+        self.run_dir: Path | None = None
+        self._overview_photo: ImageTk.PhotoImage | None = None  # prevent GC
+        self._gui_state = _load_gui_state()
 
         self._build_ui()
 
@@ -76,8 +120,9 @@ class FindFlakesGUI:
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="Operator name:", width=18, anchor="w").pack(side="left")
         self.operator_var = tk.StringVar()
-        self.operator_entry = ttk.Entry(row, textvariable=self.operator_var)
-        self.operator_entry.pack(side="left", fill="x", expand=True)
+        self.operator_combo = ttk.Combobox(row, textvariable=self.operator_var)
+        self.operator_combo["values"] = self._gui_state.get("recent_operators", [])
+        self.operator_combo.pack(side="left", fill="x", expand=True)
 
         # Notes
         row = ttk.Frame(form_frame)
@@ -86,12 +131,15 @@ class FindFlakesGUI:
         self.notes_text = tk.Text(row, height=3, width=40)
         self.notes_text.pack(side="left", fill="x", expand=True)
 
-        # Preset
+        # Preset — dropdown shows human-readable names, maps back to keys
+        self._preset_key_by_name = {p["name"]: k for k, p in PRESETS.items()}
+        preset_names = list(self._preset_key_by_name)
+        default_name = PRESETS[DEFAULT_PRESET]["name"]
         row = ttk.Frame(form_frame)
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="Scan preset:", width=18, anchor="w").pack(side="left")
-        self.preset_var = tk.StringVar(value=DEFAULT_PRESET)
-        ttk.OptionMenu(row, self.preset_var, DEFAULT_PRESET, *PRESETS).pack(side="left")
+        self.preset_var = tk.StringVar(value=default_name)
+        ttk.OptionMenu(row, self.preset_var, default_name, *preset_names).pack(side="left")
 
         # Material
         row = ttk.Frame(form_frame)
@@ -157,22 +205,34 @@ class FindFlakesGUI:
         self.stop_btn = ttk.Button(btn_frame, text="Stop", command=self._on_stop, state="disabled")
         self.stop_btn.pack(side="left")
 
-        # ── Log area ────────────────────────────────────────────
-        log_frame = ttk.LabelFrame(self.root, text="Log", padding=4)
-        log_frame.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        # ── Overview image (hidden until chip detection) ────────
+        self.overview_toggle = ttk.Button(self.root, text="▶ Overview", command=self._toggle_overview)
+        # Not packed yet — shown when detection image is available
+        self.overview_visible = tk.BooleanVar(value=False)
+        self.overview_frame = ttk.LabelFrame(self.root, text="Overview", padding=4)
+        self.overview_label = ttk.Label(self.overview_frame)
+        self.overview_label.pack()
 
-        self.log_text = tk.Text(log_frame, wrap="word", state="disabled", height=12)
-        scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
+        # ── Log area ────────────────────────────────────────────
+        self.log_frame = ttk.LabelFrame(self.root, text="Log", padding=4)
+        self.log_frame.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+
+        self.log_text = tk.Text(self.log_frame, wrap="word", state="disabled", height=12)
+        scrollbar = ttk.Scrollbar(self.log_frame, orient="vertical", command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
         self.log_text.pack(fill="both", expand=True)
 
         # Collect all form widgets for enable/disable
         self._form_widgets = [
-            self.operator_entry,
+            self.operator_combo,
             self.notes_text,
             self.start_btn,
         ]
+
+    def _selected_preset_key(self) -> str:
+        """Get preset key from the human-readable dropdown selection."""
+        return self._preset_key_by_name.get(self.preset_var.get(), DEFAULT_PRESET)
 
     def _toggle_advanced(self):
         if self.advanced_visible.get():
@@ -183,6 +243,16 @@ class FindFlakesGUI:
             self.advanced_frame.pack(fill="x", padx=8, pady=(0, 4), after=self.advanced_toggle)
             self.advanced_toggle.configure(text="▼ Advanced options")
             self.advanced_visible.set(True)
+
+    def _toggle_overview(self):
+        if self.overview_visible.get():
+            self.overview_frame.pack_forget()
+            self.overview_toggle.configure(text="▶ Overview")
+            self.overview_visible.set(False)
+        else:
+            self.overview_frame.pack(fill="x", padx=8, pady=(0, 4), after=self.overview_toggle)
+            self.overview_toggle.configure(text="▼ Overview")
+            self.overview_visible.set(True)
 
     def _log(self, text: str):
         self.log_text.configure(state="normal")
@@ -200,11 +270,38 @@ class FindFlakesGUI:
         self.start_btn.configure(state="normal" if enabled else "disabled")
         self.stop_btn.configure(state="disabled" if enabled else "normal")
 
+    def _show_overview_image(self):
+        """Load and display the chip detection overlay image."""
+        if not self.run_dir:
+            return
+        preset_key = self._selected_preset_key()
+        mag = PRESETS[preset_key]["overview_mag"]
+        img_path = self.run_dir / f"overview_{mag}_stitch_chips_detected.png"
+        if not img_path.exists():
+            return
+
+        try:
+            img = Image.open(img_path)
+            # Scale to fit panel width, preserving aspect ratio
+            w, h = img.size
+            scale = OVERVIEW_MAX_WIDTH / w
+            new_w = OVERVIEW_MAX_WIDTH
+            new_h = int(h * scale)
+            img = img.resize((new_w, new_h), Image.LANCZOS)
+            self._overview_photo = ImageTk.PhotoImage(img)
+            self.overview_label.configure(image=self._overview_photo)
+            # Show toggle button and auto-expand
+            self.overview_toggle.pack(fill="x", padx=8, pady=(4, 0), before=self.log_frame)
+            self.overview_visible.set(False)
+            self._toggle_overview()  # expand it
+        except Exception as e:
+            self._log(f"[gui] Could not load overview image: {e}\n")
+
     def _build_command(self) -> list[str]:
         cmd = ["uv", "run", "find-flakes", "-q"]
 
-        preset = self.preset_var.get()
-        cmd += ["--preset", preset]
+        preset_key = self._selected_preset_key()
+        cmd += ["--preset", preset_key]
 
         material = self.material_var.get()
         cmd += ["--material", material]
@@ -247,8 +344,13 @@ class FindFlakesGUI:
         operator = self.operator_var.get().strip()
         if not operator:
             messagebox.showwarning("Missing field", "Operator name is required.")
-            self.operator_entry.focus_set()
+            self.operator_combo.focus_set()
             return
+
+        # Save operator to recent list
+        _add_recent_operator(self._gui_state, operator)
+        _save_gui_state(self._gui_state)
+        self.operator_combo["values"] = self._gui_state["recent_operators"]
 
         cmd = self._build_command()
         self._log(f"$ {' '.join(cmd)}\n\n")
@@ -257,6 +359,13 @@ class FindFlakesGUI:
         self.total_chips = None
         self.substeps_done = 0
         self.chip_phase_start = None
+        self.chip_pos = 0
+        self.run_dir = None
+        # Hide overview from previous run
+        self.overview_frame.pack_forget()
+        self.overview_toggle.pack_forget()
+        self.overview_visible.set(False)
+        self._overview_photo = None
         self.progress.configure(mode="indeterminate", maximum=100)
         self.progress.start(30)
         self.status_var.set("Starting pipeline...")
@@ -310,8 +419,14 @@ class FindFlakesGUI:
             self.progress.configure(value=min(self.substeps_done, total))
 
     def _compute_eta(self) -> str:
-        """Compute ETA string from chip-phase pace, or empty string."""
-        if not self.chip_phase_start or not self.total_chips or self.substeps_done == 0:
+        """Compute ETA string from chip-phase pace, or empty string.
+
+        Only shows ETA after at least one full chip is complete to avoid
+        misleading estimates during the first chip's long sub-steps.
+        """
+        if not self.chip_phase_start or not self.total_chips:
+            return ""
+        if self.substeps_done < SUBSTEPS_PER_CHIP:
             return ""
         total = self.total_chips * SUBSTEPS_PER_CHIP
         remaining = total - self.substeps_done
@@ -326,42 +441,59 @@ class FindFlakesGUI:
         self._log(line)
         stripped = line.strip()
 
-        # Parse progress from quiet-mode output
+        # Parse run directory from [run] line
         if stripped.startswith("[run]"):
-            self.status_var.set("Pipeline started")
+            m = re.match(r"\[run\]\s+(.+?)/?$", stripped)
+            if m:
+                self.run_dir = Path(m.group(1))
+            self.status_var.set("Taking overview...")
         elif stripped.startswith("[overview]"):
-            self.status_var.set("Overview complete")
+            self.status_var.set("Stitching overview...")
         elif stripped.startswith("[stitch]"):
-            self.status_var.set("Stitch complete")
+            self.status_var.set("Detecting chips...")
         elif stripped.startswith("[detect]"):
             m = re.search(r"(\d+)\s+chips?", stripped)
             if m:
                 self.total_chips = int(m.group(1))
                 self.substeps_done = 0
+                self.chip_pos = 1
                 self.chip_phase_start = time.monotonic()
                 self.progress.stop()
                 total = self.total_chips * SUBSTEPS_PER_CHIP
                 self.progress.configure(mode="determinate", maximum=total, value=0)
-            self.status_var.set(f"Detected {self.total_chips} chips")
+            n = self.total_chips or "?"
+            self.status_var.set(f"Focusing chip 1/{n}...")
+            self._show_overview_image()
         elif re.match(r"\[chip \d+\] focus_map", stripped):
             m = re.match(r"\[chip (\d+)\]", stripped)
             if m:
                 self._advance_substep()
-                self.status_var.set(f"Chip {m.group(1)} — focus map done")
+                n = self.total_chips or "?"
+                self.status_var.set(f"Scanning chip {self.chip_pos}/{n}...")
         elif re.match(r"\[chip \d+\] scan", stripped):
             m = re.match(r"\[chip (\d+)\]", stripped)
             if m:
                 self._advance_substep()
-                self.status_var.set(f"Chip {m.group(1)} — scan done")
+                n = self.total_chips or "?"
+                if self.chip_pos < (self.total_chips or 0):
+                    self.chip_pos += 1
+                    self.status_var.set(f"Focusing chip {self.chip_pos}/{n}...")
+                else:
+                    self.status_var.set("Finishing scans...")
         elif stripped.startswith("[seg chip"):
-            m = re.match(r"\[seg chip (\d+)\]", stripped)
-            if m:
-                self._advance_substep()
-                self.status_var.set(f"Segmentation chip {m.group(1)} done")
+            pass  # seg is pipelined, don't count as progress substep
         elif stripped.startswith("[scans done]"):
-            self.status_var.set("Scans complete, finishing segmentation...")
-        elif stripped.startswith("[revisit"):
-            self.status_var.set("Revisit captures...")
+            self.status_var.set("Finishing segmentation...")
+        elif re.match(r"\[revisit\]", stripped):
+            # [revisit] 20x: 8 chip(s)
+            m = re.match(r"\[revisit\]\s+(\S+):", stripped)
+            mag = m.group(1) if m else ""
+            self.status_var.set(f"Revisiting {mag}...")
+        elif re.match(r"\[revisit chip", stripped):
+            # [revisit chip 0] 20x: 5 pts, 15s
+            m = re.match(r"\[revisit chip (\d+)\]\s+(\S+):", stripped)
+            if m:
+                self.status_var.set(f"Revisiting chip {m.group(1)} at {m.group(2)}...")
         elif stripped.startswith("[done]"):
             self.status_var.set(f"Complete! {stripped[6:].strip()}")
             if self.total_chips:
@@ -400,9 +532,17 @@ class FindFlakesGUI:
 
         if rc == 0:
             self._log("\n--- Pipeline completed successfully ---\n")
+        elif rc is not None and rc < 0:
+            # Negative return code = killed by signal (Unix)
+            self._log("\n--- Pipeline stopped ---\n")
+            self.status_var.set("Stopped")
+        elif rc is not None and rc > 255:
+            # Large positive return code = terminated (Windows)
+            self._log("\n--- Pipeline stopped ---\n")
+            self.status_var.set("Stopped")
         else:
-            self._log(f"\n--- Pipeline exited with code {rc} ---\n")
-            self.status_var.set(f"Exited (code {rc})")
+            self._log(f"\n--- Pipeline failed (code {rc}) ---\n")
+            self.status_var.set(f"Failed (code {rc})")
 
         self._set_form_enabled(True)
 

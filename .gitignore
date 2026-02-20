@@ -54,6 +54,9 @@ leica_sdk/
 .DS_Store
 Thumbs.db
 
+# GUI local state
+gui_state.json
+
 # Scan and experiment data (large, generated)
 scans/*
 !scans/.gitkeep
