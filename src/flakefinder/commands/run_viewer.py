@@ -117,6 +117,7 @@ class ChipInfo(NamedTuple):
     tier_3: int
     total_detections: int
     crop_images: list[Path]
+    scatter_path: Path | None  # R-G scatter plot from rerank
     revisit_images: list[Path]
     scan_dir: Path | None  # for rerank --scan-dir
     ranked_detections: list[Detection]  # top detections sorted by tier/score
@@ -159,6 +160,11 @@ def _load_chip_info(run_dir: Path, chip_idx: int) -> ChipInfo:
     if crops_dir.is_dir():
         crop_images = sorted(crops_dir.glob("rank*.jpg"))
 
+    # R-G scatter plot
+    scatter_path = seg_dir / "rg_scatter.png"
+    if not scatter_path.exists():
+        scatter_path = None
+
     # Revisit images — look for revisit_* directories
     for revisit_dir in sorted(chip_dir.glob("revisit_*")):
         if revisit_dir.is_dir():
@@ -180,6 +186,7 @@ def _load_chip_info(run_dir: Path, chip_idx: int) -> ChipInfo:
         tier_3=tier_3,
         total_detections=total_det,
         crop_images=crop_images,
+        scatter_path=scatter_path,
         revisit_images=revisit_images,
         scan_dir=scan_dir,
         ranked_detections=ranked_detections,
@@ -226,7 +233,11 @@ class ImagePopup(tk.Toplevel):
         max_h = int(screen_h * 0.8)
         w, h = self._src_image.size
         scale = min(max_w / w, max_h / h)
-        self.geometry(f"{int(w * scale)}x{int(h * scale)}")
+        init_w, init_h = int(w * scale), int(h * scale)
+        self.geometry(f"{init_w}x{init_h}")
+
+        # Render initial image immediately (can't rely on Configure for first frame)
+        self._render(init_w, init_h)
 
         # Resize on window change
         self._resize_pending = False
@@ -247,8 +258,9 @@ class ImagePopup(tk.Toplevel):
 
     def _do_resize(self):
         self._resize_pending = False
-        win_w = self._label.winfo_width()
-        win_h = self._label.winfo_height()
+        self._render(self._label.winfo_width(), self._label.winfo_height())
+
+    def _render(self, win_w: int, win_h: int):
         if win_w < 2 or win_h < 2:
             return
         src_w, src_h = self._src_image.size
@@ -272,6 +284,7 @@ class RunViewerGUI:
 
         # Image references (prevent GC)
         self._overview_photo: ImageTk.PhotoImage | None = None
+        self._scatter_photo: ImageTk.PhotoImage | None = None
         self._crop_photos: list[ImageTk.PhotoImage] = []
         self._revisit_photos: list[ImageTk.PhotoImage] = []
 
@@ -401,6 +414,7 @@ class RunViewerGUI:
         for w in self._detail_frame.winfo_children():
             w.destroy()
         self._overview_photo = None
+        self._scatter_photo = None
         self._crop_photos = []
         self._revisit_photos = []
 
@@ -484,6 +498,7 @@ class RunViewerGUI:
         # Clear previous chip detail
         for w in self._chip_detail_frame.winfo_children():
             w.destroy()
+        self._scatter_photo = None
         self._crop_photos = []
         self._revisit_photos = []
 
@@ -532,6 +547,12 @@ class RunViewerGUI:
             table_frame = ttk.LabelFrame(self._chip_detail_frame, text=f"Chip {chip_idx} — Scoring Data", padding=4)
             table_frame.pack(fill="x", pady=4)
             self._populate_detection_table(table_frame, chip.ranked_detections)
+
+        # ── R-G scatter plot ──────────────────────────────────────
+        if chip.scatter_path:
+            scatter_frame = ttk.LabelFrame(self._chip_detail_frame, text=f"Chip {chip_idx} — R-G Scatter", padding=4)
+            scatter_frame.pack(fill="x", pady=4)
+            self._load_image_into_label(chip.scatter_path, scatter_frame, OVERVIEW_MAX_WIDTH, "_scatter_photo")
 
         # ── Revisit images ───────────────────────────────────────
         if chip.revisit_images:
