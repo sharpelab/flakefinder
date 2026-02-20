@@ -25,6 +25,17 @@ DEFAULT_INITIAL_Z = "24690"
 DEFAULT_AREA_RECT = "8000,95000,0,78000"
 DEFAULT_REVISIT_TOP = "20"
 
+# Sub-steps per chip for progress tracking: focus_map, scan, seg
+SUBSTEPS_PER_CHIP = 3
+
+
+def _fmt_duration(seconds: float) -> str:
+    """Format seconds as MM:SS or H:MM:SS."""
+    s = int(seconds)
+    if s < 3600:
+        return f"{s // 60:02d}:{s % 60:02d}"
+    return f"{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+
 
 class FindFlakesGUI:
     def __init__(self, root: tk.Tk):
@@ -36,7 +47,8 @@ class FindFlakesGUI:
         self.start_time: float | None = None
         self.timer_id: str | None = None
         self.total_chips: int | None = None
-        self.chips_done: int = 0
+        self.substeps_done: int = 0
+        self.chip_phase_start: float | None = None  # when chip processing began
 
         self._build_ui()
 
@@ -243,20 +255,25 @@ class FindFlakesGUI:
 
         self._set_form_enabled(False)
         self.total_chips = None
-        self.chips_done = 0
+        self.substeps_done = 0
+        self.chip_phase_start = None
         self.progress.configure(mode="indeterminate", maximum=100)
         self.progress.start(30)
         self.status_var.set("Starting pipeline...")
         self.start_time = time.monotonic()
-        self._tick_timer()
 
         try:
+            # CREATE_NEW_PROCESS_GROUP on Windows so CTRL_BREAK_EVENT reaches children
+            kwargs = {}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
             self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                **kwargs,
             )
         except FileNotFoundError:
             self._log("ERROR: Could not find 'uv' command. Is uv installed?\n")
@@ -264,11 +281,18 @@ class FindFlakesGUI:
             return
 
         threading.Thread(target=self._read_output, daemon=True).start()
+        self._tick_timer()
 
     def _on_stop(self):
         if self.process and self.process.poll() is None:
             self._log("\n--- Stopping process ---\n")
-            self.process.terminate()
+            if sys.platform == "win32":
+                # Send Ctrl+C to process group so Python gets KeyboardInterrupt
+                import signal
+
+                self.process.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                self.process.terminate()
 
     def _read_output(self):
         assert self.process is not None
@@ -277,6 +301,26 @@ class FindFlakesGUI:
             self.root.after(0, self._process_line, line)
         self.process.wait()
         self.root.after(0, self._run_finished)
+
+    def _advance_substep(self):
+        """Increment sub-step counter and update progress bar."""
+        self.substeps_done += 1
+        if self.total_chips:
+            total = self.total_chips * SUBSTEPS_PER_CHIP
+            self.progress.configure(value=min(self.substeps_done, total))
+
+    def _compute_eta(self) -> str:
+        """Compute ETA string from chip-phase pace, or empty string."""
+        if not self.chip_phase_start or not self.total_chips or self.substeps_done == 0:
+            return ""
+        total = self.total_chips * SUBSTEPS_PER_CHIP
+        remaining = total - self.substeps_done
+        if remaining <= 0:
+            return ""
+        elapsed_chip = time.monotonic() - self.chip_phase_start
+        pace = elapsed_chip / self.substeps_done
+        eta_s = pace * remaining
+        return f"~{_fmt_duration(eta_s)} remaining"
 
     def _process_line(self, line: str):
         self._log(line)
@@ -293,47 +337,45 @@ class FindFlakesGUI:
             m = re.search(r"(\d+)\s+chips?", stripped)
             if m:
                 self.total_chips = int(m.group(1))
-                self.chips_done = 0
+                self.substeps_done = 0
+                self.chip_phase_start = time.monotonic()
                 self.progress.stop()
-                self.progress.configure(mode="determinate", maximum=self.total_chips, value=0)
+                total = self.total_chips * SUBSTEPS_PER_CHIP
+                self.progress.configure(mode="determinate", maximum=total, value=0)
             self.status_var.set(f"Detected {self.total_chips} chips")
         elif re.match(r"\[chip \d+\] focus_map", stripped):
             m = re.match(r"\[chip (\d+)\]", stripped)
             if m:
+                self._advance_substep()
                 self.status_var.set(f"Chip {m.group(1)} — focus map done")
         elif re.match(r"\[chip \d+\] scan", stripped):
             m = re.match(r"\[chip (\d+)\]", stripped)
             if m:
+                self._advance_substep()
                 self.status_var.set(f"Chip {m.group(1)} — scan done")
-        elif re.match(r"\[\d+/\d+ chips\]", stripped):
-            m = re.match(r"\[(\d+)/(\d+) chips\]", stripped)
-            if m:
-                done = int(m.group(1))
-                total = int(m.group(2))
-                self.chips_done = done
-                self.progress.configure(value=done, maximum=total)
-                self.status_var.set(f"Chip {done}/{total}")
         elif stripped.startswith("[seg chip"):
             m = re.match(r"\[seg chip (\d+)\]", stripped)
             if m:
+                self._advance_substep()
                 self.status_var.set(f"Segmentation chip {m.group(1)} done")
         elif stripped.startswith("[scans done]"):
             self.status_var.set("Scans complete, finishing segmentation...")
-            if self.total_chips:
-                self.progress.configure(value=self.total_chips)
         elif stripped.startswith("[revisit"):
             self.status_var.set("Revisit captures...")
         elif stripped.startswith("[done]"):
             self.status_var.set(f"Complete! {stripped[6:].strip()}")
             if self.total_chips:
-                self.progress.configure(value=self.total_chips)
+                total = self.total_chips * SUBSTEPS_PER_CHIP
+                self.progress.configure(value=total)
 
     def _tick_timer(self):
         if self.start_time is not None and self.process is not None and self.process.poll() is None:
             elapsed = time.monotonic() - self.start_time
-            mins = int(elapsed) // 60
-            secs = int(elapsed) % 60
-            self.elapsed_var.set(f"{mins:02d}:{secs:02d}")
+            eta = self._compute_eta()
+            if eta:
+                self.elapsed_var.set(f"{_fmt_duration(elapsed)} elapsed · {eta}")
+            else:
+                self.elapsed_var.set(f"{_fmt_duration(elapsed)} elapsed")
             self.timer_id = self.root.after(1000, self._tick_timer)
 
     def _run_finished(self):
@@ -344,9 +386,15 @@ class FindFlakesGUI:
         rc = self.process.returncode if self.process else -1
         self.process = None
 
+        # Show final elapsed
+        if self.start_time is not None:
+            elapsed = time.monotonic() - self.start_time
+            self.elapsed_var.set(f"{_fmt_duration(elapsed)} total")
+
         self.progress.stop()
         if self.total_chips:
-            self.progress.configure(mode="determinate", value=self.total_chips, maximum=self.total_chips)
+            total = self.total_chips * SUBSTEPS_PER_CHIP
+            self.progress.configure(mode="determinate", value=total, maximum=total)
         else:
             self.progress.configure(mode="determinate", value=0)
 
