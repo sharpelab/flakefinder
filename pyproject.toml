@@ -77,10 +77,4 @@ include = ["src/flakefinder/segmentation.py"]
 [tool.ty.overrides.rules]
 no-matching-overload = "ignore"
 
-# UPS scripts use `hid` which is only available on the microscope PC
-[[tool.ty.overrides]]
-include = ["scripts/ups_*.py"]
-[tool.ty.overrides.rules]
-all = "ignore"
-
 
