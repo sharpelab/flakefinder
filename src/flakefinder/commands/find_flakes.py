@@ -1581,6 +1581,13 @@ def _apply_resume(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
 
 
 def main() -> int:
+    # On Windows, CTRL_BREAK_EVENT sends SIGBREAK which terminates by default.
+    # Re-register it to raise KeyboardInterrupt so graceful shutdown works.
+    if sys.platform == "win32":
+        import signal
+
+        signal.signal(signal.SIGBREAK, signal.default_int_handler)
+
     parser = _build_parser()
     args = parser.parse_args()
 
