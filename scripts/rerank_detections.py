@@ -20,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 from mosaic_util import make_mosaic
 
@@ -32,6 +33,80 @@ from flakefinder.segmentation import (
     draw_scale_bar,
     score_detections,
 )
+
+
+def plot_rg_scatter(
+    ax: plt.Axes,
+    detections: list[Detection],
+    config: DetectorConfig,
+    top_indices: set[int] | None = None,
+    title: str | None = None,
+) -> None:
+    """Plot R-G contrast scatter on the given axes.
+
+    Points colored by calibration distance (RdYlGn_r: green=near curve, red=far).
+    Top-N detections drawn as stars.  Reusable for single-chip or multi-chip grids.
+
+    Args:
+        ax: Matplotlib axes to draw on.
+        detections: Flat list of detection dicts with ``contrast_rgb`` and ``cal_dist``.
+        config: DetectorConfig (provides ``cal_poly`` for the calibration curve).
+        top_indices: Indices into *detections* to highlight as stars.
+        title: Optional axes title.
+    """
+    if not detections:
+        return
+    top_indices = top_indices or set()
+
+    rs = np.array([d["contrast_rgb"][0] for d in detections])
+    gs = np.array([d["contrast_rgb"][1] for d in detections])
+    cal_dists = np.array([d.get("cal_dist", 0.0) for d in detections])
+
+    # Regular points (not in top-N)
+    mask_reg = np.array([i not in top_indices for i in range(len(detections))])
+    if mask_reg.any():
+        ax.scatter(
+            gs[mask_reg],
+            rs[mask_reg],
+            c=cal_dists[mask_reg],
+            s=8,
+            alpha=0.5,
+            cmap="RdYlGn_r",
+            vmin=0,
+            vmax=2,
+            zorder=2,
+        )
+
+    # Top-N as stars
+    mask_top = ~mask_reg
+    if mask_top.any():
+        ax.scatter(
+            gs[mask_top],
+            rs[mask_top],
+            c=cal_dists[mask_top],
+            s=120,
+            alpha=0.9,
+            marker="*",
+            cmap="RdYlGn_r",
+            vmin=0,
+            vmax=2,
+            edgecolors="black",
+            linewidths=0.8,
+            zorder=5,
+        )
+
+    # Calibration curve
+    g_range = np.linspace(-0.5, 5.0, 200)
+    r_curve = np.polyval(config.cal_poly, g_range)
+    ax.plot(g_range, r_curve, "k-", linewidth=2, label="Cal curve")
+
+    ax.set_xlabel("G contrast")
+    ax.set_ylabel("R contrast")
+    ax.set_xlim(-1, 5.5)
+    ax.set_ylim(-2, 5)
+    ax.grid(True, alpha=0.3)
+    if title:
+        ax.set_title(title)
 
 
 def main() -> int:
@@ -276,6 +351,29 @@ def main() -> int:
                 print(f"\nSaved mosaic: {mosaic_path}")
                 print(f"Saved {len(crop_paths)} crops: {crops_dir}/")
                 subprocess.Popen(["present", str(mosaic_path)])
+
+    # Generate R-G scatter plot
+    if not args.no_mosaic and all_flat:
+        top_set = set(id(d) for d in ranked[: args.top]) if ranked else set()
+        # Map back to indices in all_flat for plot_rg_scatter
+        top_idx = {i for i, d in enumerate(all_flat) if id(d) in top_set}
+
+        fig, ax = plt.subplots(figsize=(10, 7))
+        chip_label = args.seg_dir.parent.name if args.seg_dir.parent.name.startswith("chip") else args.seg_dir.name
+        plot_rg_scatter(
+            ax,
+            all_flat,
+            config,
+            top_indices=top_idx,
+            title=f"{chip_label}: {len(all_flat)} detections (top {min(args.top, len(all_flat))} starred)",
+        )
+        scatter_name = f"{args.name}_rg_scatter.png" if args.name else "rg_scatter.png"
+        scatter_path = args.seg_dir / scatter_name
+        fig.tight_layout()
+        fig.savefig(scatter_path, dpi=150)
+        plt.close(fig)
+        print(f"Saved scatter: {scatter_path}")
+        subprocess.Popen(["present", str(scatter_path)])
 
     # Write revisit JSON for top N
     if args.plane and all_flat:
