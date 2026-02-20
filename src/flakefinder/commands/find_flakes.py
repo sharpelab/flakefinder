@@ -1633,7 +1633,17 @@ def main() -> int:
     try:
         _print_header(p)
         with Microscope() as scope:
-            return run(scope, p)
+            try:
+                return run(scope, p)
+            except KeyboardInterrupt:
+                with _always_console():
+                    print("\n[interrupted] Parking microscope...")
+                try:
+                    park_microscope(scope)
+                    print("[parked]")
+                except Exception:
+                    print("[park failed]")
+                return 1
     finally:
         sys.stdout = sys.__stdout__
         sys.stderr = sys.__stderr__

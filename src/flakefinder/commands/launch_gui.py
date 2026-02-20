@@ -120,9 +120,12 @@ class FindFlakesGUI:
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="Operator name:", width=18, anchor="w").pack(side="left")
         self.operator_var = tk.StringVar()
+        self.operator_var.trace_add("write", self._on_operator_changed)
         self.operator_combo = ttk.Combobox(row, textvariable=self.operator_var)
         self.operator_combo["values"] = self._gui_state.get("recent_operators", [])
         self.operator_combo.pack(side="left", fill="x", expand=True)
+        # Highlight empty field
+        self.root.after(10, self._on_operator_changed)
 
         # Notes
         row = ttk.Frame(form_frame)
@@ -229,6 +232,12 @@ class FindFlakesGUI:
             self.notes_text,
             self.start_btn,
         ]
+
+    def _on_operator_changed(self, *_args):
+        if self.operator_var.get().strip():
+            self.operator_combo.configure(foreground="")
+        else:
+            self.operator_combo.configure(foreground="red")
 
     def _selected_preset_key(self) -> str:
         """Get preset key from the human-readable dropdown selection."""
