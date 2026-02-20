@@ -26,6 +26,7 @@ chip-scan = "flakefinder.commands.chip_scan:main"
 revisit = "flakefinder.commands.revisit:main"
 stage = "flakefinder.commands.stage:main"
 launch-gui = "flakefinder.commands.launch_gui:main"
+run-viewer = "flakefinder.commands.run_viewer:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -75,5 +76,11 @@ all = "ignore"
 include = ["src/flakefinder/segmentation.py"]
 [tool.ty.overrides.rules]
 no-matching-overload = "ignore"
+
+# UPS scripts use `hid` which is only available on the microscope PC
+[[tool.ty.overrides]]
+include = ["scripts/ups_*.py"]
+[tool.ty.overrides.rules]
+all = "ignore"
 
 

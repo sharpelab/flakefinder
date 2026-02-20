@@ -1,4 +1,4 @@
-"""Download favorited flakes (images + metadata) from flakes.sharpelab.science."""
+"""Download flakes (images + metadata) from flakes.sharpelab.science."""
 
 import argparse
 import gzip
@@ -50,6 +50,11 @@ def main():
         default=None,
         help="Target directory (default: downloads/flakes_scan<id>)",
     )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Download all flakes, not just favorites",
+    )
     args = parser.parse_args()
 
     # Fetch scan metadata
@@ -62,13 +67,18 @@ def main():
     scan_name = scan_meta["scan_name"]
     print(f"  Scan: {scan_name} (user: {scan_meta['scan_user']})")
 
-    # Fetch favorited flakes
-    print("Fetching favorited flakes...")
-    flakes = api_get("flakes", {"scan_id": args.scan_id, "flake_favorite": 1})
+    # Fetch flakes
+    params: dict = {"scan_id": args.scan_id}
+    if not args.all:
+        params["flake_favorite"] = 1
+    label = "all" if args.all else "favorited"
+    print(f"Fetching {label} flakes...")
+    flakes = api_get("flakes", params)
     if not flakes:
-        print("No favorited flakes found.", file=sys.stderr)
+        print(f"No {label} flakes found.", file=sys.stderr)
         sys.exit(1)
-    print(f"  Found {len(flakes)} favorited flakes")
+    n_fav = sum(1 for f in flakes if f.get("flake_favorite"))
+    print(f"  Found {len(flakes)} flakes ({n_fav} favorites)")
 
     # Resolve target directory
     if args.target:
@@ -87,14 +97,24 @@ def main():
     total_bytes = 0
     total_files = 0
 
+    skipped = 0
+
     for i, flake in enumerate(flakes):
         flake_path = flake["flake_path"]  # e.g. "SF118_ABCD_E13-16/Chip_4/Flake_7"
-        # Strip scan name prefix to get relative chip/flake path
-        rel_path = "/".join(flake_path.split("/")[1:])  # "Chip_4/Flake_7"
-        flake_dir = target / rel_path
+        flake_dir = target / flake_path
         flake_id = flake["flake_id"]
 
-        print(f"  [{i + 1}/{len(flakes)}] Flake {flake_id} ({rel_path})")
+        # Skip if already downloaded (meta.json exists)
+        if (flake_dir / "meta.json").exists():
+            skipped += 1
+            continue
+
+        fav_marker = " *" if flake.get("flake_favorite") else ""
+        print(f"  [{i + 1}/{len(flakes)}] Flake {flake_id} ({flake_path}){fav_marker}")
+
+        # Save per-flake metadata
+        flake_dir.mkdir(parents=True, exist_ok=True)
+        (flake_dir / "meta.json").write_text(json.dumps(flake, indent=2))
 
         # Standard images
         for filename in FLAKE_IMAGES:
@@ -104,7 +124,6 @@ def main():
             if size is not None:
                 total_bytes += size
                 total_files += 1
-                print(f"    {filename} ({size / 1024:.0f} KB)")
 
         # Magnification images
         for mag in flake.get("flake_available_magnifications", []):
@@ -116,8 +135,9 @@ def main():
             if size is not None:
                 total_bytes += size
                 total_files += 1
-                print(f"    {filename} ({size / 1024:.0f} KB)")
 
+    if skipped:
+        print(f"  ({skipped} flakes already downloaded, skipped)")
     print(f"\nDone: {total_files} files, {total_bytes / 1024 / 1024:.1f} MB total")
 
 

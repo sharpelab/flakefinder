@@ -29,6 +29,7 @@ All commands are registered as pyproject.toml entry points and invokable via `sl
 |--------|---------|
 | `scripts/process_overview.py` | Overview post-processing pipeline (rsync + stitch + detect chips) |
 | `scripts/process_chip_scan.py` | Chip scan analysis pipeline (rsync + analyze_chip_scan) |
+| `scripts/download_flakes.py` | Download flake images + metadata from flakes.sharpelab.science |
 
 Hardware characterization experiments (SDK probes, Z-tracking tests, speed sweeps) are in `scripts/experiments/`.
 

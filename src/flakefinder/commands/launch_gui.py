@@ -297,7 +297,7 @@ class FindFlakesGUI:
             scale = OVERVIEW_MAX_WIDTH / w
             new_w = OVERVIEW_MAX_WIDTH
             new_h = int(h * scale)
-            img = img.resize((new_w, new_h), Image.LANCZOS)
+            img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
             self._overview_photo = ImageTk.PhotoImage(img)
             self.overview_label.configure(image=self._overview_photo)
             # Show toggle button and auto-expand

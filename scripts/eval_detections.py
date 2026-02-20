@@ -399,7 +399,7 @@ def main():
         f.write(f"Flatfield: {args.flatfield or 'none'}\n")
         f.write(
             f"Parameters: contrast_offset={args.contrast_offset}, "
-            f"min_size={args.min_size}, match_radius={args.match_radius}\n\n"
+            f"min_size_um={args.min_size_um}, match_radius={args.match_radius}\n\n"
         )
 
         f.write(f"Frames: {len(frames)}\n")

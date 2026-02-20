@@ -4,7 +4,7 @@ REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 
 if [[ "$1" == "--spawn" ]]; then
     shift
-    wezterm start --always-new-process --cwd "$REPO_DIR" -- "$0" "$@" &
+    alacritty --working-directory "$REPO_DIR" -e env -u CLAUDECODE "$0" "$@" &
     exit 0
 fi
 
