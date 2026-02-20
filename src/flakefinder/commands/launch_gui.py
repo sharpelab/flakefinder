@@ -118,14 +118,14 @@ class FindFlakesGUI:
         # Operator name
         row = ttk.Frame(form_frame)
         row.pack(fill="x", pady=2)
-        ttk.Label(row, text="Operator name:", width=18, anchor="w").pack(side="left")
+        self.operator_required_label = ttk.Label(row, text="*", foreground="red")
+        self.operator_required_label.pack(side="left")
+        ttk.Label(row, text="Operator name:", width=17, anchor="w").pack(side="left")
         self.operator_var = tk.StringVar()
         self.operator_var.trace_add("write", self._on_operator_changed)
         self.operator_combo = ttk.Combobox(row, textvariable=self.operator_var)
         self.operator_combo["values"] = self._gui_state.get("recent_operators", [])
         self.operator_combo.pack(side="left", fill="x", expand=True)
-        self.operator_required_label = ttk.Label(row, text=" *", foreground="red")
-        self.operator_required_label.pack(side="left")
         # Show/hide indicator on startup
         self.root.after(10, self._on_operator_changed)
 
