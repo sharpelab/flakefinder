@@ -25,6 +25,7 @@ analyze-focus-map = "flakefinder.commands.analyze_focus_map:main"
 chip-scan = "flakefinder.commands.chip_scan:main"
 revisit = "flakefinder.commands.revisit:main"
 stage = "flakefinder.commands.stage:main"
+launch-gui = "flakefinder.commands.launch_gui:main"
 
 [build-system]
 requires = ["hatchling"]
