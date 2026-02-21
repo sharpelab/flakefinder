@@ -13,6 +13,8 @@ Usage (scan-wide — all chips in a run):
     python scripts/rerank_detections.py scans/run_20260220_1543/
     python scripts/rerank_detections.py scans/run_20260220_1543/ --top 20
     python scripts/rerank_detections.py scans/run_20260220_1543/ --seg-name seg_10x
+    python scripts/rerank_detections.py scans/run_20260220_1543/ --tier 1 \\
+        --revisit-mag 20x --revisit-mag 50x
 """
 
 import argparse
@@ -139,6 +141,17 @@ def _find_scan_dir(chip_dir: Path) -> Path | None:
     return None
 
 
+def _find_chip_planes(run_dir: Path, chip_indices: list[int]) -> dict[int, dict]:
+    """Auto-discover per-chip focus plane JSONs."""
+    planes: dict[int, dict] = {}
+    for idx in chip_indices:
+        plane_path = run_dir / f"chip_{idx}" / f"focus_map_chip{idx}_plane.json"
+        if plane_path.exists():
+            with open(plane_path) as f:
+                planes[idx] = json.load(f)
+    return planes
+
+
 def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
     """Scan-wide reranking: aggregate detections from all chips in a run."""
     import math
@@ -209,11 +222,19 @@ def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
         all_flat = dedup_detections(sorted_all, radius_um=args.dedup_radius)
         print(f"\nDedup: {n_before} -> {len(all_flat)} unique (radius={args.dedup_radius:.0f} um)")
 
+    # Tier filtering
+    if args.tier is not None and all_flat:
+        n_before_tier = len(all_flat)
+        all_flat = [d for d in all_flat if d.get("tier") == args.tier]
+        print(f"\nTier {args.tier} filter: {n_before_tier} -> {len(all_flat)}")
+
     # Rank and print top N
     ranked: list[Detection] = []
     if all_flat:
         ranked = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
-        print(f"\n--- Top {args.top} ---")
+        n_show = min(args.top, len(ranked))
+        tier_label = f" T{args.tier}" if args.tier is not None else ""
+        print(f"\n--- Top {n_show}{tier_label} ---")
         hdr = (
             f"{'#':>3}  {'chip':>6} {'frame':<16} {'det':>3} {'size':>7}"
             f" {'R':>7} {'G':>7} {'score':>7} {'cal_d':>7} {'grad':>7} {'entr':>6}"
@@ -299,7 +320,7 @@ def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
             crop_labels.append(f"#{i + 1} chip_{chip_idx} {frame_name} R={r:+.2f} G={g:+.2f}")
 
         if crop_paths:
-            mosaic_name = args.name or f"top{args.top}"
+            mosaic_name = args._name_base
             mosaic_path = output_dir / f"{mosaic_name}.jpg"
             n_cols = 5
             n_rows = math.ceil(len(crop_paths) / n_cols)
@@ -357,28 +378,53 @@ def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
             start_new_session=True,
         )
 
-    # Revisit JSON for top N
-    if args.plane and ranked:
-        with open(args.plane) as f:
-            plane_data = json.load(f)
-        plane = plane_data["plane"]
-        a, b, c = plane["a"], plane["b"], plane["c"]
+    # Revisit JSON for top N — use --plane override or auto-discovered per-chip planes
+    chip_planes: dict[int, dict] | None = None
+    if not args.plane:
+        chip_planes = _find_chip_planes(run_dir, list(seg_dirs.keys()))
+        if chip_planes:
+            print(f"\nAuto-discovered focus planes for {len(chip_planes)} chips: {sorted(chip_planes.keys())}")
+
+    has_planes = args.plane or chip_planes
+    if has_planes and ranked:
+        # Single-plane override
+        if args.plane:
+            with open(args.plane) as f:
+                single_plane = json.load(f)
+        else:
+            single_plane = None
+
+        def _get_plane_for_chip(chip_idx: int) -> dict | None:
+            if single_plane:
+                return single_plane
+            if chip_planes:
+                return chip_planes.get(chip_idx)
+            return None
 
         base_points = []
+        scan_mag = None
         for i, d in enumerate(ranked[: args.top]):
             sx = d.get("stage_x")
             sy = d.get("stage_y")
             if sx is None or sy is None:
                 continue
-            z = a * sx + b * sy + c
             chip_idx = d.get("chip_idx", 0)
+            pd = _get_plane_for_chip(chip_idx)
+            if pd is None:
+                print(f"  Warning: no plane for chip_{chip_idx}, skipping revisit point")
+                continue
+            plane = pd["plane"]
+            z = plane["a"] * sx + plane["b"] * sy + plane["c"]
+            if scan_mag is None:
+                scan_mag = pd.get("source", {}).get("objective_mag")
             label = f"rank{i + 1:02d}_c{chip_idx}_{d['frame']}_d{d.get('det_idx', 0)}"
             base_points.append({"x": round(sx, 2), "y": round(sy, 2), "z": round(z, 2), "label": label})
 
+        plane_source = str(args.plane) if args.plane else "per-chip auto-discovery"
+
         if args.revisit_mags:
-            scan_mag = plane_data.get("source", {}).get("objective_mag")
             if scan_mag is None:
-                print("Error: plane JSON missing source.objective_mag")
+                print("Error: plane JSON(s) missing source.objective_mag")
                 return 1
             if scan_mag not in PARFOCAL_Z_UM:
                 print(f"Error: scan mag {scan_mag}x not in PARFOCAL_Z_UM")
@@ -395,10 +441,10 @@ def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
                     "objective_mag": target_mag,
                     "scan_mag": scan_mag,
                     "applied_parfocal_delta_um": round(delta, 1),
-                    "plane_source": str(args.plane),
+                    "plane_source": plane_source,
                     "points": adjusted,
                 }
-                name_base = args.name or f"top{args.top}"
+                name_base = args._name_base
                 revisit_name = f"revisit_{name_base}_{mag_label}x.json"
                 revisit_path = output_dir / revisit_name
                 with open(revisit_path, "w") as f:
@@ -407,15 +453,14 @@ def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
                     f"\nSaved revisit JSON ({len(adjusted)} pts, {mag_label}x, delta={delta:+.1f} um): {revisit_path}"
                 )
         else:
-            scan_mag = plane_data.get("source", {}).get("objective_mag")
             revisit_obj = {
                 "objective_mag": scan_mag,
                 "scan_mag": scan_mag,
                 "applied_parfocal_delta_um": 0,
-                "plane_source": str(args.plane),
+                "plane_source": plane_source,
                 "points": base_points,
             }
-            revisit_name = f"revisit_{args.name}.json" if args.name else f"revisit_top{args.top}.json"
+            revisit_name = f"revisit_{args._name_base}.json"
             revisit_path = output_dir / revisit_name
             with open(revisit_path, "w") as f:
                 json.dump(revisit_obj, f, indent=2)
@@ -438,7 +483,10 @@ def main() -> int:
         choices=["hbn", "hbn_thin", "hbn_thick", "graphene"],
         help="Material preset",
     )
-    parser.add_argument("--top", type=int, default=10, help="Number of top results to print")
+    parser.add_argument(
+        "--top", type=int, default=None, help="Number of top results (default: 10, or all when --tier is set)"
+    )
+    parser.add_argument("--tier", type=int, default=None, help="Filter to tier N detections (e.g. --tier 1 for all T1)")
     parser.add_argument(
         "--reclassify",
         action="store_true",
@@ -487,8 +535,26 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # Resolve --top default: 10 normally, unlimited when --tier is set
+    explicit_top = args.top is not None
+    if args.top is None:
+        args.top = 10 if args.tier is None else 999999
+
+    # Auto-generate a name base for output files when not explicitly named
+    if args.name:
+        args._name_base = args.name
+    elif args.tier is not None and not explicit_top:
+        args._name_base = f"t{args.tier}"
+    elif args.tier is not None:
+        args._name_base = f"t{args.tier}_top{args.top}"
+    else:
+        args._name_base = f"top{args.top}"
+
     if args.revisit_mags and not args.plane:
-        parser.error("--revisit-mag requires --plane")
+        # In scan-wide mode, per-chip planes are auto-discovered — defer the check
+        summary_path = args.seg_dir / "summary.json"
+        if summary_path.exists():
+            parser.error("--revisit-mag requires --plane (single-chip mode)")
 
     t0 = time.monotonic()
 
@@ -573,10 +639,18 @@ def main() -> int:
         all_flat = dedup_detections(sorted_all, radius_um=args.dedup_radius)
         print(f"Dedup: {n_before} → {len(all_flat)} unique (radius={args.dedup_radius:.0f} µm)")
 
+    # Tier filtering
+    if args.tier is not None and all_flat:
+        n_before_tier = len(all_flat)
+        all_flat = [d for d in all_flat if d.get("tier") == args.tier]
+        print(f"\nTier {args.tier} filter: {n_before_tier} -> {len(all_flat)}")
+
     # Print top N
     if all_flat:
         ranked = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
-        print(f"\n--- Top {args.top} ---")
+        n_show = min(args.top, len(ranked))
+        tier_label = f" T{args.tier}" if args.tier is not None else ""
+        print(f"\n--- Top {n_show}{tier_label} ---")
         hdr = (
             f"{'#':>3}  {'frame':<16} {'det':>3} {'size':>7}"
             f" {'R':>7} {'G':>7} {'score':>7} {'cal_d':>7} {'grad':>7} {'entr':>6}"
@@ -657,7 +731,7 @@ def main() -> int:
                 crop_labels.append(f"#{i + 1} {frame_name} R={r:+.2f} G={g:+.2f}")
 
             if crop_paths:
-                mosaic_name = args.name or f"top{args.top}"
+                mosaic_name = args._name_base
                 mosaic_path = args.seg_dir / f"{mosaic_name}.jpg"
                 import math
 
@@ -758,7 +832,7 @@ def main() -> int:
                     "plane_source": str(args.plane),
                     "points": adjusted,
                 }
-                name_base = args.name or f"top{args.top}"
+                name_base = args._name_base
                 revisit_name = f"revisit_{name_base}_{mag_label}x.json"
                 revisit_path = args.seg_dir / revisit_name
                 with open(revisit_path, "w") as f:
@@ -776,7 +850,7 @@ def main() -> int:
                 "plane_source": str(args.plane),
                 "points": base_points,
             }
-            revisit_name = f"revisit_{args.name}.json" if args.name else f"revisit_top{args.top}.json"
+            revisit_name = f"revisit_{args._name_base}.json"
             revisit_path = args.seg_dir / revisit_name
             with open(revisit_path, "w") as f:
                 json.dump(revisit_obj, f, indent=2)
