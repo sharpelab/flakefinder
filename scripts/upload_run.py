@@ -256,8 +256,6 @@ def classify_thickness(det: dict, material: str) -> str:
 
 def build_flake_meta(
     det: dict,
-    camera_meta: dict,
-    scan_mag: float,
     material: str,
 ) -> dict:
     """Build per-flake meta.json for upload."""
@@ -281,24 +279,6 @@ def build_flake_meta(
 
     contrast = det["contrast_rgb"]
 
-    # Camera settings for the images dict
-    wb_bgr = camera_meta["white_balance_bgr"]
-    cam_entry = {
-        "aperture": 6,
-        "light": 6.2,
-        "nosepiece": float(scan_mag),
-        "gamma": int(camera_meta["gamma"] * 100),
-        "gain": camera_meta["gain"],
-        "exposure": camera_meta["exposure_s"],
-        "white_balance": [
-            int(wb_bgr[2] * 25),  # R
-            int(wb_bgr[1] * 25),  # G
-            int(wb_bgr[0] * 25),  # B
-        ],
-    }
-
-    mag_str = f"{scan_mag:g}x"
-
     flake_meta = {
         "flake": {
             "position_x": round(pos_x, 4),
@@ -318,9 +298,7 @@ def build_flake_meta(
             "flakefinder_classification": det.get("classification"),
             "flakefinder_cal_dist": det["cal_dist"],
         },
-        "images": {
-            mag_str: cam_entry,
-        },
+        "images": {},
     }
 
     return flake_meta
@@ -505,8 +483,6 @@ Examples:
             with open(scan_meta_path) as f:
                 chip_scan_meta = json.load(f)
             camera_meta = chip_scan_meta["camera"]
-            optics_meta = chip_scan_meta["optics"]
-            scan_mag = optics_meta["objective_mag"]
 
             # Material preset used for segmentation (for thickness classification)
             seg_material = summary.get("params", {}).get("material", "hbn")
@@ -535,7 +511,7 @@ Examples:
                 flake_dir.mkdir(parents=True, exist_ok=True)
 
                 # Flake meta.json
-                flake_meta = build_flake_meta(det, camera_meta, scan_mag, seg_material)
+                flake_meta = build_flake_meta(det, seg_material)
 
                 # Add revisit mag entries to images dict
                 for mag in revisit_mags:
@@ -551,7 +527,11 @@ Examples:
                             "gamma": int(camera_meta["gamma"] * 100),
                             "gain": camera_meta["gain"],
                             "exposure": camera_meta["exposure_s"],
-                            "white_balance": flake_meta["images"][f"{scan_mag:g}x"]["white_balance"],
+                            "white_balance": [
+                                int(camera_meta["white_balance_bgr"][2] * 25),  # R
+                                int(camera_meta["white_balance_bgr"][1] * 25),  # G
+                                int(camera_meta["white_balance_bgr"][0] * 25),  # B
+                            ],
                         }
                         # Queue file copy
                         revisit_copies.append((revisit_img, str(flake_dir / f"{mag_str}.png")))
