@@ -290,7 +290,7 @@ class DetectorConfig:
         return cls(
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=15.0,
-            min_size_um2=400.0,
+            min_size_um2=500.0,
             edge_margin_px=50,
             morph_kernel_size=5,
             cal_poly=(0.193, -0.217, -0.604),
