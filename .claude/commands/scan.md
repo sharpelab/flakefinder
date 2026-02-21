@@ -63,7 +63,7 @@ All remote commands use `sls` (Sharpe Lab Scope) — runs commands on the micros
 - `sls pull <path>...` — rsync remote→local
 - `sls -- <cmd>` — raw commands (ls, du, etc.)
 
-Paths for push/pull are relative to the flakefinder repo root.
+Paths for push/pull are relative to the flakefinder repo root. `sls --` runs from the Windows home directory, NOT the repo — use `flakefinder/` prefix for repo paths (e.g. `sls -- ls flakefinder/scans`).
 
 **Autofocus at a point:**
 ```
