@@ -70,24 +70,18 @@ def park_microscope(scope: Microscope) -> None:
 
     Operations in order:
     1. Move Z to standard 5x focus position (24690 µm)
-    2. Move XY to origin (0, 0)
-    3. Switch to 5x objective
+    2. Switch to 5x objective
+    3. Move XY to origin (0, 0)
     4. Turn lamp off + close shutter
     """
     print("Parking microscope...")
 
-    # 1. Z to standard 5x focus position
+    # 1. Z to safe position first
     z_target = 24690.0
     scope.z.move_to(z_target)
     print(f"  Z -> {scope.z.position_um:.0f} um [ok]")
 
-    # 2. XY to origin
-    hx, hy = scope.stage.move_to_async(0.0, 0.0)
-    wait_all([hx, hy])
-    print(f"  X -> {scope.stage.x.position_um:.0f} um [ok]")
-    print(f"  Y -> {scope.stage.y.position_um:.0f} um [ok]")
-
-    # 3. Switch to 5x objective
+    # 2. Switch to 5x objective
     target_pos = None
     for pos, mag in scope.nosepiece.magnifications.items():
         if mag == 5.0:
@@ -96,6 +90,12 @@ def park_microscope(scope: Microscope) -> None:
     if target_pos is not None:
         scope.switch_objective_pos(target_pos)
     print(f"  Objective -> {scope.objective_mag}x [ok]")
+
+    # 3. XY to origin
+    hx, hy = scope.stage.move_to_async(0.0, 0.0)
+    wait_all([hx, hy])
+    print(f"  X -> {scope.stage.x.position_um:.0f} um [ok]")
+    print(f"  Y -> {scope.stage.y.position_um:.0f} um [ok]")
 
     # 4. Lights off
     scope.light_off()
