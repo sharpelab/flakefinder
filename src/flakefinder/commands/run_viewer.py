@@ -643,7 +643,7 @@ class RunViewerGUI:
                     f"{d.get('score', 0):.3f}",
                     f"{d.get('cal_dist', 0):.3f}",
                     f"{d.get('grad_energy', 0):.1f}",
-                    f"{d.get('g_entropy', 0):.2f}",
+                    f"{d.get('entropy', d.get('g_entropy', 0)):.2f}",
                 ),
             )
 

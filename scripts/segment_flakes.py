@@ -32,7 +32,12 @@ def main():
     parser = argparse.ArgumentParser(description="Segment flakes via flatfield + contrast threshold")
     parser.add_argument("input", type=Path, help="Frame image")
     parser.add_argument("--flatfield", type=Path, default=None, help="Flatfield .npy file")
-    parser.add_argument("--material", default="hbn", choices=["hbn", "graphene"], help="Material preset")
+    parser.add_argument(
+        "--material",
+        default="hbn",
+        choices=["hbn", "hbn_thin", "hbn_thick", "graphene"],
+        help="Material preset",
+    )
     parser.add_argument("--contrast-offset", type=float, default=None, help="Override contrast offset from preset")
     parser.add_argument("--min-size-um", type=float, default=None, help="Override min detection area (µm²)")
     parser.add_argument("--edge-margin", type=int, default=None, help="Override edge margin (px)")
@@ -107,7 +112,7 @@ def main():
             R, G = d["contrast_rgb"][0], d["contrast_rgb"][1]
             print(
                 f"  #{i}: {d['size_px']}px  R={R:+.2f} G={G:+.2f}  "
-                f"grad={d['grad_energy']:.1f}  entropy={d['g_entropy']:.2f}  "
+                f"grad={d['grad_energy']:.1f}  entropy={d.get('entropy', d['g_entropy']):.2f}  "
                 f"pr={d['perim_ratio']:.2f}  r_std={d['r_std']:.3f}"
             )
 

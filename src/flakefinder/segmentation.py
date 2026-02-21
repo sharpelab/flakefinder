@@ -45,7 +45,10 @@ class _DetectionBase(TypedDict):
     b_std: float
     b_kurt: float
     grad_energy: float
+    r_entropy: float
     g_entropy: float
+    b_entropy: float
+    entropy: float
     hull: PixelPolygon
     contour: PixelPolygon
 
@@ -143,7 +146,7 @@ class DetectorConfig:
         pr = det["perim_ratio"]
         cd = det["cal_dist"]
         g = det["contrast_rgb"][1]
-        ent = det.get("g_entropy", 99.0)
+        ent = det.get("entropy", det.get("g_entropy", 99.0))
         r = det["contrast_rgb"][0]
         if (
             pr < self.tier1_perim_ratio
@@ -188,10 +191,10 @@ class DetectorConfig:
             non_match_label="non-hBN",
             tier1_perim_ratio=1.20,
             tier1_cal_dist=0.3,
-            tier1_g_min=0.5,
-            tier1_g_max=4.0,
+            tier1_g_min=0.0,
+            tier1_g_max=0.5,
             tier1_r_max=-0.5,
-            tier1_entropy_max=1.3,
+            tier1_entropy_max=99.0,
             tier2_perim_ratio=1.35,
             tier2_cal_dist=0.3,
             tier2_entropy_max=4.5,
@@ -343,11 +346,16 @@ def _analyze_component(
     # Internal gradient energy (Sobel on G channel, masked to blob)
     grad_energy = float(grad_mag[component].mean())
 
-    # Histogram entropy of G normalized contrast within blob
-    hist, _ = np.histogram(g_vals, bins=50)
-    hist = hist[hist > 0]
-    probs = hist / hist.sum()
-    g_entropy = float(-np.sum(probs * np.log2(probs)))
+    # Histogram entropy of per-channel normalized contrast within blob
+    def _hist_entropy(vals: np.ndarray) -> float:
+        hist, _ = np.histogram(vals, bins=50)
+        hist = hist[hist > 0]
+        probs = hist / hist.sum()
+        return float(-np.sum(probs * np.log2(probs)))
+
+    r_entropy = _hist_entropy(r_vals)
+    g_entropy = _hist_entropy(g_vals)
+    b_entropy = _hist_entropy(b_vals)
 
     r_contrast = round(float(norm_contrast_bgr[2]), 4)
     g_contrast = round(float(norm_contrast_bgr[1]), 4)
@@ -371,7 +379,10 @@ def _analyze_component(
         b_std=round(b_std, 4),
         b_kurt=round(b_kurt, 4),
         grad_energy=round(grad_energy, 2),
+        r_entropy=round(r_entropy, 4),
         g_entropy=round(g_entropy, 4),
+        b_entropy=round(b_entropy, 4),
+        entropy=round(max(r_entropy, g_entropy, b_entropy), 4),
         hull=hull_pts,
         contour=contour_pts,
     )
