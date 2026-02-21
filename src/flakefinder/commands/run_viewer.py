@@ -370,10 +370,6 @@ class FlakeInspector(tk.Toplevel):
         if self._ctx and self._ctx.overview_thumb is None:
             ttk.Label(overview_frame, text="No overview image", foreground="gray").pack(pady=10)
 
-        # Revisit tab stubs
-        if self._ctx:
-            self._add_revisit_stubs()
-
         # Metrics panel (below notebook)
         metrics_frame = ttk.LabelFrame(right_pane, text="Metrics", padding=4)
         metrics_frame.pack(fill="x", padx=2, pady=(2, 4))
@@ -415,21 +411,6 @@ class FlakeInspector(tk.Toplevel):
         # Pan state
         self._drag_x = 0
         self._drag_y = 0
-
-    def _add_revisit_stubs(self):
-        """Add stub tabs for any revisit directories found."""
-        if not self._ctx:
-            return
-        chip_idx = self._det.get("chip_idx", 0)
-        chip_dir = self._ctx.run_dir / f"chip_{chip_idx}"
-        if not chip_dir.is_dir():
-            return
-        for d in sorted(chip_dir.iterdir()):
-            if d.is_dir() and d.name.startswith("revisit_"):
-                mag = d.name.replace("revisit_", "")
-                tab = ttk.Frame(self._notebook)
-                self._notebook.add(tab, text=mag)
-                ttk.Label(tab, text="No revisit image", foreground="gray").pack(pady=20)
 
     def _annotation_key(self) -> str:
         """Generate annotation key for the current detection."""
