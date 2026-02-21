@@ -745,20 +745,10 @@ def _generate_revisits(
     revisit_top: int,
 ) -> str:
     """Generate revisit JSONs from segmentation results. Returns summary string."""
-    from flakefinder.data_utils import add_stage_coords
     from flakefinder.scan_utils import PARFOCAL_Z_UM
 
-    # Load scan metadata for coordinate mapping
-    scan_meta_path = job.scan_dir / "scan_meta.json"
-    if not scan_meta_path.exists():
-        return ""
-
-    with open(scan_meta_path) as f:
-        scan_meta = json.load(f)
-
-    # Flatten and add stage coordinates (with rolling shutter correction)
+    # Flatten (stage coords already in detections from _run_chip_seg)
     all_flat = [d for dets in all_detections.values() for d in dets]
-    add_stage_coords(all_flat, scan_meta)
 
     # Rank by (tier asc, score desc), dedup, take top N
     ranked = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
@@ -902,6 +892,15 @@ def _run_chip_seg(
                 for d in r.detections:
                     tier = d.get("tier", 3)
                     tier_counts[tier] = tier_counts.get(tier, 0) + 1
+
+        # Add stage coordinates to all detections (with rolling shutter correction)
+        if all_detections and scan_meta_path.exists():
+            from flakefinder.data_utils import add_stage_coords
+
+            with open(scan_meta_path) as f:
+                scan_meta = json.load(f)
+            all_flat = [d for dets in all_detections.values() for d in dets]
+            add_stage_coords(all_flat, scan_meta)
 
         seg_elapsed = time.perf_counter() - start
 

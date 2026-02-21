@@ -218,8 +218,9 @@ def main() -> int:
 
     all_flat = [d for dets in all_detections.values() for d in dets]
 
-    # Compute stage coordinates for each detection (with rolling shutter correction)
-    if all_flat:
+    # Stage coordinates are now included in summary.json from segmentation.
+    # Warn if missing (old data generated before this change).
+    if all_flat and all_flat[0].get("stage_x") is None:
         scan_dir = args.scan_dir or (args.seg_dir / ".." / "scan_20x").resolve()
         scan_meta_path = scan_dir / "scan_meta.json"
         if not scan_meta_path.exists():
@@ -229,8 +230,8 @@ def main() -> int:
 
             with open(scan_meta_path) as f:
                 scan_meta = json.load(f)
-
             add_stage_coords(all_flat, scan_meta)
+            print("Note: added stage coords (old summary.json without coords)")
 
     # Spatial deduplication via greedy NMS on stage coordinates
     if not args.no_dedup and all_flat:

@@ -19,6 +19,7 @@ from typing import NamedTuple
 
 import cv2
 
+from flakefinder.data_utils import add_stage_coords
 from flakefinder.segmentation import (
     Detection,
     DetectorConfig,
@@ -190,6 +191,10 @@ def run(
             for d in r.detections:
                 tier = d.get("tier", 3)
                 tier_counts[tier] = tier_counts.get(tier, 0) + 1
+
+    # Add stage coordinates to all detections (with rolling shutter correction)
+    all_flat = [d for dets in all_detections.values() for d in dets]
+    add_stage_coords(all_flat, scan_meta)
 
     summary = {
         "timestamp": datetime.now().isoformat(),
