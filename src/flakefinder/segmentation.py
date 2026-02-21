@@ -130,28 +130,6 @@ def _score_hbn_medium(det: Detection) -> tuple[int, float]:
     return tier, score
 
 
-def _score_hbn_thick(det: Detection) -> tuple[int, float]:
-    """hBN thick: no G or AR penalties (high G expected, AR varies)."""
-    pr = det["perim_ratio"]
-    cd = det["cal_dist"]
-    g = det["contrast_rgb"][1]
-    size_um2 = det["size_um2"]
-    ge = det.get("grad_energy", 0)
-
-    if pr < 1.50 and cd < 0.3 and g >= 0.8 and size_um2 >= 500.0:
-        tier = 1
-    elif pr < 1.50 and cd < 0.5:
-        tier = 2
-    else:
-        tier = 3
-
-    score = round(
-        float(np.log2(max(size_um2, 1.0)) * np.exp(-cd * 8) * (1.0 / (1.0 + ge))),
-        4,
-    )
-    return tier, score
-
-
 def _score_graphene(det: Detection) -> tuple[int, float]:
     """Graphene: all penalties, wide tier gates (stub)."""
     pr = det["perim_ratio"]
@@ -326,35 +304,6 @@ class DetectorConfig:
         )
 
     @classmethod
-    def hbn_thick(cls) -> DetectorConfig:
-        """hBN thick flake detection preset."""
-        return cls(
-            contrast_mode=ContrastMode.ABOVE,
-            contrast_offset=15.0,
-            min_size_um2=400.0,
-            edge_margin_px=50,
-            morph_kernel_size=5,
-            cal_poly=(0.193, -0.217, -0.604),
-            cal_g_range=(-0.5, 6.0),
-            cal_dist_match=0.5,
-            cal_dist_possible=1.0,
-            g_thin_max=1.0,
-            g_medium_max=2.5,
-            non_match_label="non-hBN",
-            score_fn=_score_hbn_thick,
-            tier1_perim_ratio=1.50,
-            tier1_cal_dist=0.3,
-            tier1_g_min=0.8,
-            tier1_g_max=99.0,
-            tier1_r_max=99.0,
-            tier1_entropy_max=99.0,
-            tier1_min_size_um2=500.0,
-            tier2_perim_ratio=1.50,
-            tier2_cal_dist=0.5,
-            tier2_entropy_max=99.0,
-        )
-
-    @classmethod
     def graphene(cls) -> DetectorConfig:
         """Graphene detection preset (stub -- no calibration curve yet)."""
         return cls(
@@ -390,7 +339,6 @@ class DetectorConfig:
             "hbn": cls.hbn,
             "hbn_thin": cls.hbn_thin,
             "hbn_medium": cls.hbn_medium,
-            "hbn_thick": cls.hbn_thick,
             "graphene": cls.graphene,
         }
         if name not in presets:

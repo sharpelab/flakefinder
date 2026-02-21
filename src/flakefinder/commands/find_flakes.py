@@ -300,7 +300,7 @@ class SegConfig:
     material: str
     jobs: int  # parallel workers for frame processing
     revisit_mags: list[float]  # target magnifications for revisit JSONs
-    revisit_top: int  # number of top detections for revisit
+    revisit_top: int | None  # cap on T1 detections for revisit (None = all T1)
 
 
 @dataclass
@@ -572,7 +572,7 @@ Examples:
         "--material",
         type=str,
         default="hbn",
-        choices=["hbn", "hbn_thin", "hbn_thick", "graphene"],
+        choices=["hbn", "hbn_thin", "hbn_medium", "graphene"],
         help="Material preset for segmentation (default: hbn)",
     )
     seg_group.add_argument(
@@ -592,8 +592,8 @@ Examples:
     seg_group.add_argument(
         "--revisit-top",
         type=int,
-        default=10,
-        help="Number of top detections for revisit (default: 10)",
+        default=None,
+        help="Cap revisit to top N tier-1 detections per chip (default: all T1)",
     )
     return parser
 
@@ -626,7 +626,8 @@ def _print_header(p: _Preflight) -> None:
             print("Seg mode:      WAIT (blocking)")
         if p.seg.revisit_mags:
             mags = ", ".join(f"{m:g}x" for m in p.seg.revisit_mags)
-            print(f"Revisit:       top {p.seg.revisit_top} → {mags} (capture after scans)")
+            top_str = f"top {p.seg.revisit_top} " if p.seg.revisit_top is not None else ""
+            print(f"Revisit:       {top_str}T1 → {mags} (capture after scans)")
     else:
         print("Segmentation:  disabled")
     if args.dry_run:
@@ -742,7 +743,7 @@ def _generate_revisits(
     job: _SegJob,
     all_detections: dict[str, list[Detection]],
     revisit_mags: list[float],
-    revisit_top: int,
+    revisit_top: int | None,
 ) -> str:
     """Generate revisit JSONs from segmentation results. Returns summary string."""
     from flakefinder.scan_utils import PARFOCAL_Z_UM
@@ -750,12 +751,15 @@ def _generate_revisits(
     # Flatten (stage coords already in detections from _run_chip_seg)
     all_flat = [d for dets in all_detections.values() for d in dets]
 
-    # Rank by (tier asc, score desc), dedup, take top N
+    # Rank by (tier asc, score desc), dedup, filter to T1
     ranked = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
 
     from flakefinder.segmentation import dedup_detections
 
     ranked = dedup_detections(ranked)
+    ranked = [d for d in ranked if d.get("tier") == 1]
+    if revisit_top is not None:
+        ranked = ranked[:revisit_top]
 
     # Load focus plane
     assert job.plane_path is not None
@@ -769,7 +773,7 @@ def _generate_revisits(
 
     # Build base points at scan magnification
     base_points = []
-    for i, d in enumerate(ranked[:revisit_top]):
+    for i, d in enumerate(ranked):
         sx = d.get("stage_x")
         sy = d.get("stage_y")
         if sx is None or sy is None:
@@ -813,7 +817,7 @@ def _run_chip_seg(
     material: str,
     jobs: int,
     revisit_mags: list[float],
-    revisit_top: int,
+    revisit_top: int | None,
 ) -> _SegResult:
     """Run segmentation for one chip in-process. Called in background thread."""
     from flakefinder.segmentation import (
@@ -1594,8 +1598,9 @@ def main() -> int:
             if p.seg.revisit_mags:
                 for mag in p.seg.revisit_mags:
                     mag_label = f"{mag:g}x"
+                    top_str = f"top {p.seg.revisit_top} " if p.seg.revisit_top is not None else ""
                     run_in_process(
-                        f"Revisit {mag_label} ({len(chip_indices)} chips, top {p.seg.revisit_top})",
+                        f"Revisit {mag_label} ({len(chip_indices)} chips, {top_str}T1)",
                         lambda: None,
                         dry_run=True,
                     )

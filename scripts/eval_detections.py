@@ -253,7 +253,7 @@ def main():
     parser.add_argument(
         "--material",
         default="hbn",
-        choices=["hbn", "hbn_thin", "hbn_thick", "graphene"],
+        choices=["hbn", "hbn_thin", "hbn_medium", "graphene"],
         help="Material preset",
     )
     parser.add_argument("--pixel-size", type=float, default=0.36, help="µm per pixel (20x bin3)")

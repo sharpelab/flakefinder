@@ -31,7 +31,6 @@ DEFAULT_PRESET = "2.5_10"
 MATERIALS = ("hbn", "graphene")
 DEFAULT_INITIAL_Z = "24690"
 DEFAULT_AREA_RECT = "8000,95000,0,78000"
-DEFAULT_REVISIT_TOP = "20"
 
 # Sub-steps per chip for progress tracking: focus_map, scan (seg is pipelined/free)
 SUBSTEPS_PER_CHIP = 2
@@ -163,13 +162,6 @@ class FindFlakesGUI:
         ttk.Checkbutton(row, text="20x", variable=self.revisit_20x).pack(side="left", padx=(0, 8))
         ttk.Checkbutton(row, text="50x", variable=self.revisit_50x).pack(side="left")
 
-        # Revisit top N
-        row = ttk.Frame(form_frame)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="Revisit top N (per chip):", width=24, anchor="w").pack(side="left")
-        self.revisit_top_var = tk.StringVar(value=DEFAULT_REVISIT_TOP)
-        ttk.Entry(row, textvariable=self.revisit_top_var, width=8).pack(side="left")
-
         # ── Advanced options (collapsed) ────────────────────────
         self.advanced_visible = tk.BooleanVar(value=False)
         self.advanced_toggle = ttk.Button(self.root, text="▶ Advanced options", command=self._toggle_advanced)
@@ -200,6 +192,14 @@ class FindFlakesGUI:
         self.area_rect_var = tk.StringVar(value="")
         ttk.Entry(row, textvariable=self.area_rect_var, width=28).pack(side="left")
         ttk.Label(row, text="blank = default", foreground="gray").pack(side="left", padx=4)
+
+        # Max revisit count (per chip)
+        row = ttk.Frame(self.advanced_frame)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="Max revisit count:", width=22, anchor="w").pack(side="left")
+        self.revisit_top_var = tk.StringVar(value="")
+        ttk.Entry(row, textvariable=self.revisit_top_var, width=8).pack(side="left")
+        ttk.Label(row, text="blank = all T1", foreground="gray").pack(side="left", padx=4)
 
         # ── Buttons ─────────────────────────────────────────────
         btn_frame = ttk.Frame(self.root)

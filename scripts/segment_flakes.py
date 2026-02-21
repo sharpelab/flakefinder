@@ -35,7 +35,7 @@ def main():
     parser.add_argument(
         "--material",
         default="hbn",
-        choices=["hbn", "hbn_thin", "hbn_thick", "graphene"],
+        choices=["hbn", "hbn_thin", "hbn_medium", "graphene"],
         help="Material preset",
     )
     parser.add_argument("--contrast-offset", type=float, default=None, help="Override contrast offset from preset")
