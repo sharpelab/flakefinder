@@ -37,6 +37,7 @@ class _DetectionBase(TypedDict):
     solidity: float
     circularity: float
     perim_ratio: float
+    aspect_ratio: float
     r_std: float
     r_kurt: float
     g_std: float
@@ -102,9 +103,13 @@ class DetectorConfig:
     # -- Scoring tier gates --
     tier1_perim_ratio: float
     tier1_cal_dist: float
+    tier1_g_min: float
     tier1_g_max: float
+    tier1_r_max: float
+    tier1_entropy_max: float
     tier2_perim_ratio: float
     tier2_cal_dist: float
+    tier2_entropy_max: float
 
     # Precomputed calibration curve
     _cal_g_curve: np.ndarray = field(init=False, repr=False, compare=False)
@@ -138,9 +143,18 @@ class DetectorConfig:
         pr = det["perim_ratio"]
         cd = det["cal_dist"]
         g = det["contrast_rgb"][1]
-        if pr < self.tier1_perim_ratio and cd < self.tier1_cal_dist and g < self.tier1_g_max:
+        ent = det.get("g_entropy", 99.0)
+        r = det["contrast_rgb"][0]
+        if (
+            pr < self.tier1_perim_ratio
+            and cd < self.tier1_cal_dist
+            and g >= self.tier1_g_min
+            and g < self.tier1_g_max
+            and r < self.tier1_r_max
+            and ent < self.tier1_entropy_max
+        ):
             tier = 1
-        elif pr < self.tier2_perim_ratio or cd < self.tier2_cal_dist:
+        elif pr < self.tier2_perim_ratio and cd < self.tier2_cal_dist and ent < self.tier2_entropy_max:
             tier = 2
         else:
             tier = 3
@@ -153,7 +167,12 @@ class DetectorConfig:
 
     @classmethod
     def hbn(cls) -> DetectorConfig:
-        """hBN detection preset (current production defaults)."""
+        """hBN detection preset (alias for hbn_thin)."""
+        return cls.hbn_thin()
+
+    @classmethod
+    def hbn_thin(cls) -> DetectorConfig:
+        """hBN thin flake detection preset."""
         return cls(
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=15.0,
@@ -169,9 +188,40 @@ class DetectorConfig:
             non_match_label="non-hBN",
             tier1_perim_ratio=1.20,
             tier1_cal_dist=0.3,
+            tier1_g_min=0.5,
             tier1_g_max=4.0,
+            tier1_r_max=-0.5,
+            tier1_entropy_max=1.3,
             tier2_perim_ratio=1.35,
             tier2_cal_dist=0.3,
+            tier2_entropy_max=4.5,
+        )
+
+    @classmethod
+    def hbn_thick(cls) -> DetectorConfig:
+        """hBN thick flake detection preset."""
+        return cls(
+            contrast_mode=ContrastMode.ABOVE,
+            contrast_offset=15.0,
+            min_size_um2=130.0,
+            edge_margin_px=50,
+            morph_kernel_size=5,
+            cal_poly=(0.193, -0.217, -0.604),
+            cal_g_range=(-0.5, 6.0),
+            cal_dist_match=0.5,
+            cal_dist_possible=1.0,
+            g_thin_max=1.0,
+            g_medium_max=2.5,
+            non_match_label="non-hBN",
+            tier1_perim_ratio=1.20,
+            tier1_cal_dist=0.3,
+            tier1_g_min=-99.0,
+            tier1_g_max=99.0,
+            tier1_r_max=99.0,
+            tier1_entropy_max=4.5,
+            tier2_perim_ratio=1.35,
+            tier2_cal_dist=0.3,
+            tier2_entropy_max=5.5,
         )
 
     @classmethod
@@ -192,15 +242,19 @@ class DetectorConfig:
             non_match_label="non-graphene",
             tier1_perim_ratio=1.20,
             tier1_cal_dist=0.3,
+            tier1_g_min=-99.0,
             tier1_g_max=4.0,
+            tier1_r_max=99.0,
+            tier1_entropy_max=99.0,
             tier2_perim_ratio=1.35,
             tier2_cal_dist=0.3,
+            tier2_entropy_max=99.0,
         )
 
     @classmethod
     def from_material(cls, name: str) -> DetectorConfig:
         """Create config from material name."""
-        presets = {"hbn": cls.hbn, "graphene": cls.graphene}
+        presets = {"hbn": cls.hbn, "hbn_thin": cls.hbn_thin, "hbn_thick": cls.hbn_thick, "graphene": cls.graphene}
         if name not in presets:
             raise ValueError(f"Unknown material: {name!r}. Choose from: {', '.join(presets)}")
         return presets[name]()
@@ -265,10 +319,13 @@ def _analyze_component(
         perim_ratio = perim / max(hull_perim, 1.0)
         hull_pts = hull.reshape(-1, 2).tolist()
         contour_pts = cnt.reshape(-1, 2).tolist()
+        _, _, bw, bh = cv2.boundingRect(cnt)
+        aspect_ratio = max(bw, bh) / max(min(bw, bh), 1)
     else:
         solidity = 0.0
         circularity = 0.0
         perim_ratio = 0.0
+        aspect_ratio = 1.0
         hull_pts = []
         contour_pts = []
 
@@ -306,6 +363,7 @@ def _analyze_component(
         solidity=round(solidity, 4),
         circularity=round(circularity, 4),
         perim_ratio=round(perim_ratio, 4),
+        aspect_ratio=round(aspect_ratio, 4),
         r_std=round(r_std, 4),
         r_kurt=round(r_kurt, 4),
         g_std=round(g_std, 4),
