@@ -35,12 +35,14 @@ from pathlib import Path
 from typing import cast
 
 import numpy as np
+from PIL import Image as PILImage
 
 from flakefinder.data_utils import (
     compute_frame_size_um,
     load_chip_geometry,
     require_microscope_description,
 )
+from flakefinder.image_utils import sdk_image_to_numpy
 from flakefinder.leica import Microscope, wait_all
 from flakefinder.leica.polling import start_motion_polling, start_polling
 from flakefinder.scan_utils import (
@@ -648,10 +650,6 @@ def run(
     os.makedirs(output)
 
     # ---- Connect to hardware ----
-    from PIL import Image as PILImage
-
-    from flakefinder.image_utils import sdk_image_to_numpy
-
     scope.validate_description(p.desc)
     stage = scope.stage
     z_drive = scope.z

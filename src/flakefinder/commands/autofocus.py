@@ -18,6 +18,7 @@ from datetime import datetime
 from PIL import Image as PILImage
 
 from flakefinder.autofocus_util import save_debug_frames
+from flakefinder.leica import Microscope, wait_all
 from flakefinder.leica.autofocus import (
     ALL_SHARPNESS_METRICS,
     continuous_autofocus,
@@ -162,9 +163,6 @@ def main():
         elif os.path.exists(d):
             print(f"Error: Directory '{d}' already exists (use --clean to remove)")
             return 1
-
-    # Import hardware libraries
-    from flakefinder.leica import Microscope, wait_all
 
     with Microscope() as scope:
         # Switch objective if requested

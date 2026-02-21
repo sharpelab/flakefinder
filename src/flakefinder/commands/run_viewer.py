@@ -11,11 +11,13 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import json
 import re
 import sys
 import tkinter as tk
+import tkinter.font as tkfont
 from datetime import datetime
 from pathlib import Path
 from tkinter import ttk
@@ -1704,8 +1706,6 @@ class RunViewerGUI:
 
 
 def main():
-    import argparse
-
     parser = argparse.ArgumentParser(description="Browse completed find-flakes runs")
     parser.add_argument(
         "--scans-dir",
@@ -1721,8 +1721,6 @@ def main():
     style = ttk.Style(root)
     if "clam" in style.theme_names():
         style.theme_use("clam")
-    import tkinter.font as tkfont
-
     # Platform-specific font: Windows renders fine with defaults,
     # Linux needs an explicit TrueType family for antialiasing
     if sys.platform == "win32":

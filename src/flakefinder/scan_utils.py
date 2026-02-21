@@ -11,6 +11,7 @@ from importlib.resources import files
 from pathlib import Path
 
 import numpy as np
+from scipy.interpolate import UnivariateSpline
 
 from flakefinder.leica.camera import Camera
 from flakefinder.leica.microscope import Microscope
@@ -283,8 +284,6 @@ def smooth_frame_positions(meta: ScanMeta, *, quiet: bool = False) -> None:
 
     Modifies meta["frames"] in place.  No-op if position_stream is absent.
     """
-    from scipy.interpolate import UnivariateSpline
-
     # Empirical offset between position read (t_after) and frame exposure
     # (t_start).  Calibrated from USB (D2XX) scans by minimizing the
     # directional offset between +X and -X rows.

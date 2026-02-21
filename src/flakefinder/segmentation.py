@@ -16,8 +16,11 @@ from pathlib import Path
 from typing import NamedTuple, TypedDict
 
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import Rectangle
 from scipy import ndimage
+from scipy.spatial import KDTree
 from scipy.stats import kurtosis as scipy_kurtosis
 
 from flakefinder.scan_utils import apply_flatfield
@@ -763,9 +766,6 @@ def save_plot(
     config: DetectorConfig,
 ):
     """Save matplotlib figure with image + threshold mask side by side."""
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Rectangle
-
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
 
     ax1.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
@@ -862,8 +862,6 @@ def dedup_detections(
     Expects detections pre-sorted by priority (tier asc, score desc).
     Detections without stage_x/stage_y are kept unconditionally.
     """
-    from scipy.spatial import KDTree
-
     with_coords = []
     without_coords = []
     for d in detections:
@@ -874,8 +872,6 @@ def dedup_detections(
 
     if not with_coords:
         return list(detections)
-
-    import numpy as np
 
     coords = np.array([(d["stage_x"], d["stage_y"]) for d in with_coords])
     tree = KDTree(coords)

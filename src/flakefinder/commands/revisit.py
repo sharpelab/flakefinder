@@ -33,6 +33,7 @@ from typing import NamedTuple
 import numpy as np
 from PIL import Image as PILImage
 
+from flakefinder.leica import wait_all
 from flakefinder.leica.autofocus import focus_and_capture
 from flakefinder.leica.microscope import Microscope
 from flakefinder.scan_utils import DEFAULT_WB, build_microscope_meta, parse_white_balance
@@ -281,7 +282,6 @@ def run(
     or_opt: bool = False,
 ) -> None:
     """Run revisit loop: move, focus-scan, save best frame at each point."""
-    from flakefinder.leica import wait_all
 
     def vprint(*a, **kw):
         if not quiet:

@@ -27,8 +27,10 @@ from typing import NamedTuple
 import numpy as np
 from PIL import Image as PILImage
 
+from flakefinder.autofocus_util import save_debug_frames
 from flakefinder.data_utils import load_chip_geometry
-from flakefinder.leica.autofocus import ALL_SHARPNESS_METRICS, AutofocusResult
+from flakefinder.leica import wait_all
+from flakefinder.leica.autofocus import ALL_SHARPNESS_METRICS, AutofocusResult, continuous_autofocus
 from flakefinder.leica.microscope import Microscope
 from flakefinder.scan_utils import DEFAULT_WB, build_microscope_meta, get_git_version, parse_white_balance
 from flakefinder.types import ChipGeometry, GainRGB, Point2F
@@ -273,10 +275,6 @@ def run_focus_map(
     Returns:
         List of FocusMapSample (one per point).
     """
-    from flakefinder.autofocus_util import save_debug_frames
-    from flakefinder.leica import wait_all
-    from flakefinder.leica.autofocus import continuous_autofocus
-
     stage = scope.stage
 
     sample_results = []
@@ -523,10 +521,6 @@ def run(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = f"focus_map_chip{chip}_{suffix}" if suffix else f"focus_map_chip{chip}"
-
-    # Import hardware libraries
-    from flakefinder.leica import wait_all
-    from flakefinder.leica.autofocus import continuous_autofocus
 
     start_time = time.perf_counter()
 

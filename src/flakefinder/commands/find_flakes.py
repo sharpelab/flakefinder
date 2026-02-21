@@ -64,15 +64,24 @@ from typing import TYPE_CHECKING, NamedTuple, TypedDict
 
 from flakefinder.cli_utils import park_microscope
 from flakefinder.commands import analyze_focus_map, chip_scan, find_chips, focus_map, revisit, scan, stage, stitch
+from flakefinder.data_utils import add_stage_coords
 from flakefinder.leica import Microscope
 from flakefinder.scan_utils import (
     CALIBRATION_DIR,
+    PARFOCAL_Z_UM,
     get_git_version,
     parse_area_rect,
     parse_white_balance,
     validate_area_rect,
 )
-from flakefinder.segmentation import DetectorConfig
+from flakefinder.segmentation import (
+    DetectorConfig,
+    FrameResult,
+    dedup_detections,
+    natural_sort_key,
+    process_frame,
+    strip_geometry,
+)
 from flakefinder.types import AreaRect, GainRGB
 
 if TYPE_CHECKING:
@@ -747,16 +756,12 @@ def _generate_revisits(
     revisit_top: int | None,
 ) -> str:
     """Generate revisit JSONs from segmentation results. Returns summary string."""
-    from flakefinder.scan_utils import PARFOCAL_Z_UM
 
     # Flatten (stage coords already in detections from _run_chip_seg)
     all_flat = [d for dets in all_detections.values() for d in dets]
 
     # Rank by (tier asc, score desc), dedup, filter to T1
     ranked = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
-
-    from flakefinder.segmentation import dedup_detections
-
     ranked = dedup_detections(ranked)
     ranked = [d for d in ranked if d.get("tier") == 1]
     if revisit_top is not None:
@@ -821,14 +826,6 @@ def _run_chip_seg(
     revisit_top: int | None,
 ) -> _SegResult:
     """Run segmentation for one chip in-process. Called in background thread."""
-    from flakefinder.segmentation import (
-        DetectorConfig,
-        FrameResult,
-        natural_sort_key,
-        process_frame,
-        strip_geometry,
-    )
-
     start = time.perf_counter()
     try:
         # Read pixel size from scan metadata
@@ -901,8 +898,6 @@ def _run_chip_seg(
 
         # Add stage coordinates to all detections (with rolling shutter correction)
         if all_detections and scan_meta_path.exists():
-            from flakefinder.data_utils import add_stage_coords
-
             with open(scan_meta_path) as f:
                 scan_meta = json.load(f)
             all_flat = [d for dets in all_detections.values() for d in dets]
