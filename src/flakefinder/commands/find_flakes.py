@@ -745,8 +745,7 @@ def _generate_revisits(
     revisit_top: int,
 ) -> str:
     """Generate revisit JSONs from segmentation results. Returns summary string."""
-    import re
-
+    from flakefinder.data_utils import add_stage_coords
     from flakefinder.scan_utils import PARFOCAL_Z_UM
 
     # Load scan metadata for coordinate mapping
@@ -757,26 +756,9 @@ def _generate_revisits(
     with open(scan_meta_path) as f:
         scan_meta = json.load(f)
 
-    um_per_px = scan_meta["optics"]["sample_pixel_x_um"]
-    frame_w_px = scan_meta["camera"]["frame_width_px"]
-    frame_h_px = scan_meta["camera"]["frame_height_px"]
-    frame_positions: dict[int, tuple[float, float]] = {}
-    for fr in scan_meta["frames"]:
-        frame_positions[fr["n"]] = (fr["x_um"], fr["y_um"])
-
-    # Flatten and add stage coordinates
+    # Flatten and add stage coordinates (with rolling shutter correction)
     all_flat = [d for dets in all_detections.values() for d in dets]
-    for d in all_flat:
-        m = re.search(r"\d+", d["frame"])
-        if m is None:
-            continue
-        frame_n = int(m.group())
-        if frame_n not in frame_positions:
-            continue
-        fx, fy = frame_positions[frame_n]
-        px_x, px_y = d["center"]
-        d["stage_x"] = fx + (px_x - frame_w_px / 2) * um_per_px
-        d["stage_y"] = fy + (px_y - frame_h_px / 2) * um_per_px
+    add_stage_coords(all_flat, scan_meta)
 
     # Rank by (tier asc, score desc), dedup, take top N
     ranked = sorted(all_flat, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))

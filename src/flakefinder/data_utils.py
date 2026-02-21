@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 from importlib.resources import files
 from pathlib import Path
 
+from flakefinder.segmentation import Detection
 from flakefinder.types import (
     AxisDescription,
     BBox,
@@ -21,6 +23,43 @@ from flakefinder.types import (
 )
 
 _DESCRIPTION_PATH = Path(str(files("flakefinder"))) / "microscope_description.json"
+
+
+def add_stage_coords(detections: list[Detection], scan_meta: ScanMeta) -> None:
+    """Add stage_x/stage_y to detections using scan metadata.
+
+    Applies rolling-shutter correction: the stage moves during the camera
+    readout, so a detection's true X depends on its Y pixel position.
+    Correction term: vel * (px_y / frame_h_px) * readout_time_s.
+    """
+    cam = scan_meta["camera"]
+    optics = scan_meta["optics"]
+    assert optics["sample_pixel_x_um"] is not None
+    assert cam["frame_width_px"] is not None and cam["frame_height_px"] is not None
+    um_per_px = optics["sample_pixel_x_um"]
+    frame_w_px = cam["frame_width_px"]
+    frame_h_px = cam["frame_height_px"]
+    readout_time_s: float = cam.get("readout_time_s") or 0.0
+
+    frame_positions: dict[int, tuple[float, float]] = {}
+    frame_velocities: dict[int, float] = {}
+    for fr in scan_meta["frames"]:
+        n = fr["n"]
+        frame_positions[n] = (fr["x_um"], fr["y_um"])
+        frame_velocities[n] = fr.get("x_vel_um_s", 0.0)
+
+    for d in detections:
+        m = re.search(r"\d+", d["frame"])
+        if m is None:
+            continue
+        frame_n = int(m.group())
+        if frame_n not in frame_positions:
+            continue
+        fx, fy = frame_positions[frame_n]
+        px_x, px_y = d["center"]
+        vel = frame_velocities.get(frame_n, 0.0)
+        d["stage_x"] = fx + (px_x - frame_w_px / 2) * um_per_px + vel * (px_y / frame_h_px) * readout_time_s
+        d["stage_y"] = fy + (px_y - frame_h_px / 2) * um_per_px
 
 
 def require_microscope_description() -> MicroscopeDescription:

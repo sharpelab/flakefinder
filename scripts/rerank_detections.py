@@ -12,7 +12,6 @@ Usage:
 
 import argparse
 import json
-import re
 import subprocess
 import sys
 import time
@@ -129,6 +128,7 @@ def main() -> int:
         help="Directory with raw frame_NNNN.jpg files (default: <seg_dir>/../scan_20x)",
     )
     parser.add_argument("--no-mosaic", action="store_true", help="Skip crop and mosaic generation")
+    parser.add_argument("--no-scatter", action="store_true", help="Skip R-G scatter plot generation")
     parser.add_argument("--name", type=str, default=None, help="Name for mosaic/crops (e.g. v4_entropy)")
     parser.add_argument("--no-dedup", action="store_true", help="Skip spatial deduplication")
     parser.add_argument(
@@ -213,34 +213,19 @@ def main() -> int:
 
     all_flat = [d for dets in all_detections.values() for d in dets]
 
-    # Compute stage coordinates for each detection (needed by dedup and revisit)
+    # Compute stage coordinates for each detection (with rolling shutter correction)
     if all_flat:
         scan_dir = args.scan_dir or (args.seg_dir / ".." / "scan_20x").resolve()
         scan_meta_path = scan_dir / "scan_meta.json"
         if not scan_meta_path.exists():
             print(f"Warning: {scan_meta_path} not found, no stage coords")
         else:
+            from flakefinder.data_utils import add_stage_coords
+
             with open(scan_meta_path) as f:
                 scan_meta = json.load(f)
 
-            um_per_px = scan_meta["optics"]["sample_pixel_x_um"]
-            frame_w_px = scan_meta["camera"]["frame_width_px"]
-            frame_h_px = scan_meta["camera"]["frame_height_px"]
-            frame_positions: dict[int, tuple[float, float]] = {}
-            for fr in scan_meta["frames"]:
-                frame_positions[fr["n"]] = (fr["x_um"], fr["y_um"])
-
-            for d in all_flat:
-                m = re.search(r"\d+", d["frame"])
-                if m is None:
-                    continue
-                frame_n = int(m.group())
-                if frame_n not in frame_positions:
-                    continue
-                fx, fy = frame_positions[frame_n]
-                px_x, px_y = d["center"]
-                d["stage_x"] = fx + (px_x - frame_w_px / 2) * um_per_px
-                d["stage_y"] = fy + (px_y - frame_h_px / 2) * um_per_px
+            add_stage_coords(all_flat, scan_meta)
 
     # Spatial deduplication via greedy NMS on stage coordinates
     if not args.no_dedup and all_flat:
@@ -353,7 +338,7 @@ def main() -> int:
                 subprocess.Popen(["present", str(mosaic_path)])
 
     # Generate R-G scatter plot
-    if not args.no_mosaic and all_flat:
+    if not args.no_scatter and all_flat:
         top_set = set(id(d) for d in ranked[: args.top]) if ranked else set()
         # Map back to indices in all_flat for plot_rg_scatter
         top_idx = {i for i, d in enumerate(all_flat) if id(d) in top_set}
