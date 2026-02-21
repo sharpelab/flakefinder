@@ -57,6 +57,9 @@ Thumbs.db
 # GUI local state
 gui_state.json
 
+# Subtask worktrees
+.worktrees/
+
 # Scan and experiment data (large, generated)
 scans/*
 !scans/.gitkeep
