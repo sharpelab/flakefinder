@@ -118,8 +118,14 @@ def _score_hbn_medium(det: Detection) -> tuple[int, float]:
     size_um2 = det["size_um2"]
     ge = det.get("grad_energy", 0)
 
+    b = det["contrast_rgb"][2]
+    bg_ratio = b / g if g > 0.01 else 99.0
+
     if pr < 1.50 and cd < 0.15 and g >= 0.0 and g < 3.0 and r < 0.6 and ent < 99.0 and ar < 6.0 and size_um2 >= 500.0:
         tier = 1
+        # Demote purple medium/thick flakes and messy interiors to T2
+        if (g > 0.8 and bg_ratio > 1.2) or ent > 4.65:
+            tier = 2
     elif pr < 1.35 and cd < 0.3 and ent < 4.5:
         tier = 2
     else:
