@@ -73,14 +73,13 @@ def select_flakes(
 ) -> list[Detection]:
     """Select and rank flakes from summary detections.
 
-    Returns flat list of detection dicts with frame/det_idx, sorted by
+    Returns flat list of detection dicts with frame/det_id, sorted by
     (tier asc, score desc), filtered by tier, deduped.
     """
     all_dets: list[Detection] = []
     for frame_name, dets in summary.get("detections_by_frame", {}).items():
-        for i, d in enumerate(dets):
+        for d in dets:
             d.setdefault("frame", frame_name)
-            d.setdefault("det_idx", i)
             all_dets.append(d)
 
     # Filter by tier
@@ -342,16 +341,16 @@ def discover_chips(run_dir: Path) -> list[int]:
 def find_revisit_image(
     chip_dir: Path,
     frame_name: str,
-    det_idx: int,
+    det_id: int,
     mag: float,
 ) -> Path | None:
     """Find a revisit image for a detection at a given magnification.
 
-    Revisit images are named like rank{NN}_{frame}_{label}_{mag}x.png
-    where label contains frame_NNNN_dN. We match on the frame+det_idx part.
+    Revisit images are named like rank{NN}_{frame}_d{det_id}_{mag}x.png.
+    We match on the frame+det_id part.
     """
     mag_str = f"{mag:g}x"
-    search_key = f"{frame_name}_d{det_idx}"
+    search_key = f"{frame_name}_d{det_id}"
 
     # Check all revisit directories for this mag
     for revisit_dir in chip_dir.iterdir():
@@ -407,7 +406,7 @@ Examples:
     parser.add_argument("--user", default=None, help="Scan user (default: from checkpoint notes or 'FlakeFinder')")
     parser.add_argument("--material", default="hBN", help="Exfoliated material (default: hBN)")
     parser.add_argument("--substrate", default="285nm", help="Chip thickness / substrate (default: 285nm)")
-    parser.add_argument("--tier", type=int, default=2, help="Max tier to include (default: 2)")
+    parser.add_argument("--tier", type=int, default=1, help="Max tier to include (default: 1)")
     parser.add_argument("--top", type=int, default=None, help="Max flakes per chip (default: all passing tier filter)")
     parser.add_argument("--dry-run", action="store_true", help="Build ZIP but don't upload")
     parser.add_argument("-j", "--jobs", type=int, default=4, help="Parallel workers for eval_img rendering")
@@ -540,7 +539,7 @@ Examples:
 
                 # Add revisit mag entries to images dict
                 for mag in revisit_mags:
-                    revisit_img = find_revisit_image(chip_dir, det["frame"], det["det_idx"], mag)
+                    revisit_img = find_revisit_image(chip_dir, det["frame"], det["det_id"], mag)
                     if revisit_img is not None:
                         mag_str = f"{mag:g}x"
                         # Add image entry (reuse camera meta — not exact but the
@@ -563,7 +562,7 @@ Examples:
                 # Queue eval_img rendering
                 frame_path = str(scan_dir / f"{det['frame']}.jpg")
                 # Load contour from per-frame JSON
-                geom = load_frame_geometry(seg_dir, det["frame"], det["det_idx"])
+                geom = load_frame_geometry(seg_dir, det["frame"], det["det_id"])
                 contour = geom.get("contour") if geom else None
                 eval_img_path = str(flake_dir / "eval_img.jpg")
                 eval_img_jobs.append((frame_path, contour, det["bbox"], eval_img_path))

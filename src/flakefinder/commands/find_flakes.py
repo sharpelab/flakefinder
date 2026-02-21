@@ -781,7 +781,7 @@ def _generate_revisits(
             continue
         sx, sy = float(sx), float(sy)
         z = a * sx + b * sy + c
-        label = f"rank{i + 1:02d}_{d['frame']}_d{d.get('det_idx', 0)}"
+        label = f"rank{i + 1:02d}_{d['frame']}_d{d['det_id']}"
         base_points.append({"x": round(sx, 2), "y": round(sy, 2), "z": round(z, 2), "label": label})
 
     if not base_points:
@@ -891,8 +891,9 @@ def _run_chip_seg(
             if r.detections:
                 frames_with_dets += 1
                 stripped = [strip_geometry(d) for d in r.detections]
-                for d in stripped:
+                for i, d in enumerate(stripped):
                     d["frame"] = name
+                    d["det_id"] = i
                 all_detections[name] = stripped
                 for d in r.detections:
                     tier = d.get("tier", 3)

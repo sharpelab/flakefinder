@@ -152,9 +152,8 @@ def _load_all_detections(run_dir: Path, n_chips: int) -> tuple[list[Detection], 
         um_per_px = ss.get("params", {}).get("pixel_size_um", um_per_px)
 
         for frame_name, dets in ss.get("detections_by_frame", {}).items():
-            for idx, d in enumerate(dets):
+            for d in dets:
                 d.setdefault("frame", frame_name)
-                d.setdefault("det_idx", idx)
                 d["chip_idx"] = chip_idx
             all_dets.extend(dets)
 
@@ -162,7 +161,7 @@ def _load_all_detections(run_dir: Path, n_chips: int) -> tuple[list[Detection], 
     return all_dets, scan_dirs, um_per_px
 
 
-# Type alias for revisit lookup: (chip_idx, frame_name, det_idx) → {mag_str: image_path}
+# Type alias for revisit lookup: (chip_idx, frame_name, det_id) → {mag_str: image_path}
 RevisitLookup = dict[tuple[int, str, int], dict[str, Path]]
 
 _REVISIT_DIR_RE = re.compile(r"revisit_(\d+)x$")
@@ -170,7 +169,7 @@ _REVISIT_FILE_RE = re.compile(r"frame_(\d+)_d(\d+)")
 
 
 def _build_revisit_lookup(run_dir: Path, n_chips: int) -> RevisitLookup:
-    """Build lookup from (chip_idx, frame_name, det_idx) to {mag: image_path}.
+    """Build lookup from (chip_idx, frame_name, det_id) to {mag: image_path}.
 
     Scans pipeline revisit dirs: chip_N/revisit_{mag}x/ (e.g. revisit_20x, revisit_50x).
     """
@@ -191,8 +190,8 @@ def _build_revisit_lookup(run_dir: Path, n_chips: int) -> RevisitLookup:
                 if not fm:
                     continue
                 frame_name = f"frame_{fm.group(1)}"
-                det_idx = int(fm.group(2))
-                key = (chip_idx, frame_name, det_idx)
+                det_id = int(fm.group(2))
+                key = (chip_idx, frame_name, det_id)
                 if key not in lookup:
                     lookup[key] = {}
                 lookup[key][mag] = img_path
@@ -461,18 +460,18 @@ class FlakeInspector(tk.Toplevel):
 
     def _annotation_key(self) -> str:
         """Generate annotation key for the current detection."""
-        chip_idx = self._det.get("chip_idx", 0)
-        frame = self._det.get("frame", "")
-        det_idx = self._det.get("det_idx", 0)
-        return f"chip{chip_idx}_{frame}:{det_idx}"
+        chip_idx = self._det["chip_idx"]
+        frame = self._det["frame"]
+        det_id = self._det["det_id"]
+        return f"chip{chip_idx}_{frame}:{det_id}"
 
     def _update_title_bar(self):
         """Update the title label with current position info."""
         total = self._ctx.total_count if self._ctx else 0
-        chip_idx = self._det.get("chip_idx", 0)
-        frame = self._det.get("frame", "")
-        det_idx = self._det.get("det_idx", 0)
-        text = f"#{self._grid_idx + 1}/{total}  C{chip_idx} {frame} det#{det_idx}"
+        chip_idx = self._det["chip_idx"]
+        frame = self._det["frame"]
+        det_id = self._det["det_id"]
+        text = f"#{self._grid_idx + 1}/{total}  C{chip_idx} {frame} d{det_id}"
         self._title_label.configure(text=text)
         self.title(f"Inspector — {text}")
 
@@ -562,9 +561,9 @@ class FlakeInspector(tk.Toplevel):
     def _revisit_key(self) -> tuple[int, str, int]:
         """Key into the revisit lookup for the current detection."""
         return (
-            self._det.get("chip_idx", 0),
-            self._det.get("frame", ""),
-            self._det.get("det_idx", 0),
+            self._det["chip_idx"],
+            self._det["frame"],
+            self._det["det_id"],
         )
 
     def _update_revisit_tabs(self):
@@ -1156,10 +1155,10 @@ class RunViewerGUI:
 
     def _detection_annotation_key(self, d: Detection) -> str:
         """Generate annotation key for a detection dict."""
-        chip_idx = d.get("chip_idx", 0)
-        frame = d.get("frame", "")
-        det_idx = d.get("det_idx", 0)
-        return f"chip{chip_idx}_{frame}:{det_idx}"
+        chip_idx = d["chip_idx"]
+        frame = d["frame"]
+        det_id = d["det_id"]
+        return f"chip{chip_idx}_{frame}:{det_id}"
 
     # ── Chip toggles ─────────────────────────────────────────────
 
@@ -1506,7 +1505,7 @@ class RunViewerGUI:
         self._frame_cache[key] = img
         return img
 
-    def _load_frame_contour(self, chip_idx: int, frame_name: str, det_idx: int) -> list[list[int]] | None:
+    def _load_frame_contour(self, chip_idx: int, frame_name: str, det_id: int) -> list[list[int]] | None:
         """Load contour points for a detection from per-frame seg JSON."""
         run_dir = self._selected_run.path if self._selected_run else None
         if not run_dir:
@@ -1518,8 +1517,8 @@ class RunViewerGUI:
             with open(frame_json_path) as f:
                 data = json.load(f)
             dets = data.get("detections", [])
-            if det_idx < len(dets):
-                return dets[det_idx].get("contour")
+            if det_id < len(dets):
+                return dets[det_id].get("contour")
         except (json.JSONDecodeError, OSError):
             pass
         return None
@@ -1536,9 +1535,9 @@ class RunViewerGUI:
         frame_img = self._load_frame_cached(chip_idx, frame_name)
         if frame_img is None:
             return None
-        det_idx = d.get("det_idx", -1)
-        contour = self._load_frame_contour(chip_idx, frame_name, det_idx) if det_idx >= 0 else None
-        title = f"#{grid_idx + 1} C{chip_idx} {frame_name} det#{det_idx}"
+        det_id = d["det_id"]
+        contour = self._load_frame_contour(chip_idx, frame_name, det_id)
+        title = f"#{grid_idx + 1} C{chip_idx} {frame_name} d{det_id}"
         return frame_img, d, title, contour
 
     def _show_frame_popup_at(self, grid_idx: int):
@@ -1663,7 +1662,7 @@ class RunViewerGUI:
                     d.get("chip_idx", "?"),
                     d.get("tier", "?"),
                     d.get("frame", "?"),
-                    d.get("det_idx", "?"),
+                    d["det_id"],
                     d.get("size_px", 0),
                     f"{r_val:+.3f}",
                     f"{g_val:+.3f}",

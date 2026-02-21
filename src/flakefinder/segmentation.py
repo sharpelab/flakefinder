@@ -68,7 +68,8 @@ class Detection(_DetectionBase, total=False):
     frame: str
     stage_x: float
     stage_y: float
-    det_idx: int
+    det_id: int
+    chip_idx: int
 
 
 # ============================================================================
