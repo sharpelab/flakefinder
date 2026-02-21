@@ -163,6 +163,16 @@ class FindFlakesGUI:
         ttk.Checkbutton(row, text="20x", variable=self.revisit_20x).pack(side="left", padx=(0, 8))
         ttk.Checkbutton(row, text="50x", variable=self.revisit_50x).pack(side="left")
 
+        # Upload after scan
+        row = ttk.Frame(form_frame)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="Upload:", width=18, anchor="w").pack(side="left")
+        self.upload_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(row, text="Upload after scan", variable=self.upload_var).pack(side="left", padx=(0, 12))
+        self.substrate_var = tk.StringVar(value="90nm")
+        ttk.Label(row, text="Substrate:").pack(side="left", padx=(0, 4))
+        ttk.OptionMenu(row, self.substrate_var, "90nm", *["90nm", "285nm"]).pack(side="left")
+
         # ── Advanced options (collapsed) ────────────────────────
         self.advanced_visible = tk.BooleanVar(value=False)
         self.advanced_toggle = ttk.Button(self.root, text="▶ Advanced options", command=self._toggle_advanced)
@@ -349,6 +359,9 @@ class FindFlakesGUI:
         if area_rect:
             cmd += ["--area-rect", area_rect]
 
+        if self.upload_var.get():
+            cmd += ["--upload", "--substrate", self.substrate_var.get()]
+
         return cmd
 
     def _on_start(self):
@@ -506,10 +519,21 @@ class FindFlakesGUI:
             if m:
                 self.status_var.set(f"Revisiting chip {m.group(1)} at {m.group(2)}...")
         elif stripped.startswith("[done]"):
-            self.status_var.set(f"Complete! {stripped[6:].strip()}")
+            if self.upload_var.get():
+                self.status_var.set("Preparing upload...")
+            else:
+                self.status_var.set(f"Complete! {stripped[6:].strip()}")
             if self.total_chips:
                 total = self.total_chips * SUBSTEPS_PER_CHIP
                 self.progress.configure(value=total)
+        elif stripped.startswith("[upload] Packaging") or stripped.startswith("[upload] Uploading"):
+            self.status_var.set("Uploading...")
+        elif stripped.startswith("[upload] Complete"):
+            self.status_var.set("Upload complete!")
+        elif stripped.startswith("[upload] Dry-run"):
+            self.status_var.set("Upload skipped (dry-run)")
+        elif stripped.startswith("[upload] FAILED"):
+            self.status_var.set("Upload failed")
 
     def _tick_timer(self):
         if self.start_time is not None and self.process is not None and self.process.poll() is None:
