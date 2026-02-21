@@ -166,7 +166,7 @@ class FindFlakesGUI:
         # Revisit top N
         row = ttk.Frame(form_frame)
         row.pack(fill="x", pady=2)
-        ttk.Label(row, text="Revisit top N:", width=18, anchor="w").pack(side="left")
+        ttk.Label(row, text="Revisit top N (per chip):", width=24, anchor="w").pack(side="left")
         self.revisit_top_var = tk.StringVar(value=DEFAULT_REVISIT_TOP)
         ttk.Entry(row, textvariable=self.revisit_top_var, width=8).pack(side="left")
 
@@ -337,7 +337,7 @@ class FindFlakesGUI:
             cmd += ["--revisit-mag", "50x"]
 
         revisit_top = self.revisit_top_var.get().strip()
-        if revisit_top and revisit_top != DEFAULT_REVISIT_TOP:
+        if revisit_top:
             cmd += ["--revisit-top", revisit_top]
 
         scan_speed = self.scan_speed_var.get().strip()
