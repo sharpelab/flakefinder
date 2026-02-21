@@ -219,6 +219,13 @@ DEFAULT_FILTER_TOP_N = 100
 BBOX_PAD_PX = 5
 CONTEXT_PANE_WIDTH = 350
 OVERVIEW_THUMB_MAX = 400
+SLIDER_MIN_G = -2.0
+SLIDER_MAX_G = 6.0
+SLIDER_MIN_R = -3.0
+SLIDER_MAX_ENTROPY = 8.0
+SLIDER_MAX_GRAD_ENERGY = 120.0
+SLIDER_MAX_ASPECT_RATIO = 6.0
+SLIDER_MAX_KURTOSIS = 50.0
 
 
 # ── Image popup viewer ──────────────────────────────────────────────
@@ -1204,14 +1211,14 @@ class RunViewerGUI:
         self._filter_defaults = {
             "perim_ratio": config.tier1_perim_ratio,
             "cal_dist": config.tier1_cal_dist,
-            "g_min": max(config.tier1_g_min, -2.0),
-            "g_max": min(config.tier1_g_max, 6.0),
-            "r_max": max(config.tier1_r_max, -3.0),
-            "entropy": min(config.tier1_entropy_max, 8.0),
+            "g_min": max(config.tier1_g_min, SLIDER_MIN_G),
+            "g_max": min(config.tier1_g_max, SLIDER_MAX_G),
+            "r_max": max(config.tier1_r_max, SLIDER_MIN_R),
+            "entropy": min(config.tier1_entropy_max, SLIDER_MAX_ENTROPY),
             "min_size": config.tier1_min_size_um2,
-            "grad_energy": 50.0,
-            "aspect_ratio": 6.0,
-            "kurtosis": 50.0,
+            "grad_energy": SLIDER_MAX_GRAD_ENERGY,
+            "aspect_ratio": SLIDER_MAX_ASPECT_RATIO,
+            "kurtosis": SLIDER_MAX_KURTOSIS,
         }
         d = self._filter_defaults
 
@@ -1233,13 +1240,13 @@ class RunViewerGUI:
             (0, 0, "perim_ratio \u2264", self._fv_perim_ratio, 1.0, 3.0, 0.05, "{:.2f}"),
             (0, 1, "cal_dist \u2264", self._fv_cal_dist, 0.0, 2.0, 0.05, "{:.2f}"),
             (0, 2, "min \u00b5m\u00b2 \u2265", self._fv_min_size, 0, 2000, 10, "{:.0f}"),
-            (1, 0, "G min \u2265", self._fv_g_min, -2.0, 6.0, 0.1, "{:+.1f}"),
-            (1, 1, "G max \u2264", self._fv_g_max, -2.0, 6.0, 0.1, "{:+.1f}"),
-            (1, 2, "R max \u2264", self._fv_r_max, -3.0, 6.0, 0.1, "{:+.1f}"),
-            (2, 0, "entropy \u2264", self._fv_entropy, 0.0, 8.0, 0.1, "{:.1f}"),
-            (2, 1, "grad_energy \u2264", self._fv_grad_energy, 0.0, 120.0, 0.5, "{:.1f}"),
-            (2, 2, "aspect_ratio \u2264", self._fv_aspect_ratio, 1.0, 6.0, 0.5, "{:.1f}"),
-            (3, 0, "kurtosis \u2264", self._fv_kurtosis, -2.0, 50.0, 1.0, "{:.0f}"),
+            (1, 0, "G min \u2265", self._fv_g_min, SLIDER_MIN_G, SLIDER_MAX_G, 0.1, "{:+.1f}"),
+            (1, 1, "G max \u2264", self._fv_g_max, SLIDER_MIN_G, SLIDER_MAX_G, 0.1, "{:+.1f}"),
+            (1, 2, "R max \u2264", self._fv_r_max, SLIDER_MIN_R, SLIDER_MAX_G, 0.1, "{:+.1f}"),
+            (2, 0, "entropy \u2264", self._fv_entropy, 0.0, SLIDER_MAX_ENTROPY, 0.1, "{:.1f}"),
+            (2, 1, "grad_energy \u2264", self._fv_grad_energy, 0.0, SLIDER_MAX_GRAD_ENERGY, 0.5, "{:.1f}"),
+            (2, 2, "aspect_ratio \u2264", self._fv_aspect_ratio, 1.0, SLIDER_MAX_ASPECT_RATIO, 0.5, "{:.1f}"),
+            (3, 0, "kurtosis \u2264", self._fv_kurtosis, -2.0, SLIDER_MAX_KURTOSIS, 1.0, "{:.0f}"),
         ]
 
         sliders_frame = ttk.Frame(filter_frame)
