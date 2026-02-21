@@ -195,7 +195,7 @@ class DetectorConfig:
             g_thin_max=1.0,
             g_medium_max=2.5,
             non_match_label="non-hBN",
-            tier1_perim_ratio=1.30,
+            tier1_perim_ratio=1.50,
             tier1_cal_dist=0.3,
             tier1_g_min=0.0,
             tier1_g_max=1.2,
