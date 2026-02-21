@@ -21,9 +21,9 @@ from pathlib import Path
 from tkinter import ttk
 from typing import NamedTuple
 
-from PIL import Image, ImageTk
+from PIL import Image, ImageDraw, ImageTk
 
-from flakefinder.segmentation import Detection
+from flakefinder.segmentation import Detection, DetectorConfig
 
 # ── Data loading ─────────────────────────────────────────────────────
 
@@ -121,6 +121,7 @@ class ChipInfo(NamedTuple):
     revisit_images: list[Path]
     scan_dir: Path | None  # for rerank --scan-dir
     ranked_detections: list[Detection]  # top detections sorted by tier/score
+    um_per_px: float  # pixel size in µm (from summary.json params)
 
 
 def _load_chip_info(run_dir: Path, chip_idx: int) -> ChipInfo:
@@ -133,6 +134,7 @@ def _load_chip_info(run_dir: Path, chip_idx: int) -> ChipInfo:
     crop_images: list[Path] = []
     revisit_images: list[Path] = []
     ranked_detections: list[Detection] = []
+    um_per_px = 0.36  # default for 20x
 
     # Seg summary
     seg_summary = seg_dir / "summary.json"
@@ -146,10 +148,14 @@ def _load_chip_info(run_dir: Path, chip_idx: int) -> ChipInfo:
             tier_2 = stats.get("tier_2", 0)
             tier_3 = stats.get("tier_3", 0)
             total_det = stats.get("total_detections", 0)
+            um_per_px = ss.get("params", {}).get("pixel_size_um", 0.36)
 
             # Build ranked detection list from detections_by_frame
             all_dets = []
-            for dets in ss.get("detections_by_frame", {}).values():
+            for frame_name, dets in ss.get("detections_by_frame", {}).items():
+                for idx, d in enumerate(dets):
+                    d.setdefault("frame", frame_name)
+                    d.setdefault("det_idx", idx)
                 all_dets.extend(dets)
             ranked_detections = sorted(all_dets, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
         except (json.JSONDecodeError, OSError):
@@ -190,6 +196,7 @@ def _load_chip_info(run_dir: Path, chip_idx: int) -> ChipInfo:
         revisit_images=revisit_images,
         scan_dir=scan_dir,
         ranked_detections=ranked_detections,
+        um_per_px=um_per_px,
     )
 
 
@@ -205,9 +212,12 @@ def _fmt_duration(seconds: float) -> str:
 
 
 OVERVIEW_MAX_WIDTH = 600
-CROP_THUMB_SIZE = 220
+CROP_THUMB_SIZE = 440
 REVISIT_THUMB_SIZE = 200
 DEFAULT_RERANK_TOP = 10
+FILTER_DEBOUNCE_MS = 200
+FRAME_CACHE_MAX = 30
+DEFAULT_FILTER_TOP_N = 20
 
 
 # ── Image popup viewer ──────────────────────────────────────────────
@@ -272,6 +282,148 @@ class ImagePopup(tk.Toplevel):
         self._label.configure(image=self._photo)
 
 
+class ZoomableFramePopup(tk.Toplevel):
+    """Zoomable image popup centered on a detection. Scroll to zoom, drag to pan, Escape to close."""
+
+    ZOOM_FACTOR = 1.3
+    MIN_ZOOM = 0.05
+    MAX_ZOOM = 5.0
+
+    def __init__(self, parent: tk.Tk, src_image: Image.Image, det: Detection, title: str = ""):
+        super().__init__(parent)
+        self.title(title)
+
+        self._src = src_image
+        self._det = det
+        self._photo: ImageTk.PhotoImage | None = None
+
+        # Zoom state: center in source image coords
+        bx, by, bw, bh = det["bbox"]
+        self._cx = bx + bw / 2.0
+        self._cy = by + bh / 2.0
+
+        # Initial zoom: fit whole image, capped to reasonable window size
+        sw, sh = src_image.size
+        max_w, max_h = min(1200, int(self.winfo_screenwidth() * 0.5)), min(900, int(self.winfo_screenheight() * 0.7))
+        self._zoom = min(max_w / sw, max_h / sh)
+        self._win_w = max(400, int(sw * self._zoom))
+        self._win_h = max(300, int(sh * self._zoom))
+        self.geometry(f"{self._win_w}x{self._win_h}")
+
+        self._canvas = tk.Canvas(self, highlightthickness=0, bg="black")
+        self._canvas.pack(fill="both", expand=True)
+
+        # Pan state
+        self._drag_x = 0
+        self._drag_y = 0
+
+        # Bindings
+        self._canvas.bind("<MouseWheel>", self._on_scroll)
+        self._canvas.bind("<Button-4>", self._on_scroll_linux)
+        self._canvas.bind("<Button-5>", self._on_scroll_linux)
+        self._canvas.bind("<ButtonPress-1>", self._on_drag_start)
+        self._canvas.bind("<B1-Motion>", self._on_drag)
+        self.bind("<Escape>", lambda _: self.destroy())
+        self.bind("<Configure>", self._on_configure)
+
+        self.focus_set()
+        self.after(10, self._render)
+
+    def _on_configure(self, event):
+        if event.widget is not self:
+            return
+        self._win_w = event.width
+        self._win_h = event.height
+        self._render()
+
+    def _on_scroll(self, event):
+        if event.delta > 0:
+            self._zoom_at(event.x, event.y, self.ZOOM_FACTOR)
+        else:
+            self._zoom_at(event.x, event.y, 1.0 / self.ZOOM_FACTOR)
+
+    def _on_scroll_linux(self, event):
+        if event.num == 4:
+            self._zoom_at(event.x, event.y, self.ZOOM_FACTOR)
+        else:
+            self._zoom_at(event.x, event.y, 1.0 / self.ZOOM_FACTOR)
+
+    def _zoom_at(self, mx: int, my: int, factor: float):
+        """Zoom centered on mouse position."""
+        # Convert mouse pos to source coords (use _win_w/h, reliable before mapping)
+        cw, ch = self._win_w, self._win_h
+        src_x = self._cx + (mx - cw / 2.0) / self._zoom
+        src_y = self._cy + (my - ch / 2.0) / self._zoom
+
+        new_zoom = max(self.MIN_ZOOM, min(self.MAX_ZOOM, self._zoom * factor))
+
+        # Adjust center so the point under the mouse stays fixed
+        self._cx = src_x - (mx - cw / 2.0) / new_zoom
+        self._cy = src_y - (my - ch / 2.0) / new_zoom
+        self._zoom = new_zoom
+        self._render()
+
+    def _on_drag_start(self, event):
+        self._drag_x = event.x
+        self._drag_y = event.y
+
+    def _on_drag(self, event):
+        dx = event.x - self._drag_x
+        dy = event.y - self._drag_y
+        self._drag_x = event.x
+        self._drag_y = event.y
+        self._cx -= dx / self._zoom
+        self._cy -= dy / self._zoom
+        self._render()
+
+    def _render(self):
+        cw, ch = self._win_w, self._win_h
+        if cw < 2 or ch < 2:
+            return
+        sw, sh = self._src.size
+        z = self._zoom
+
+        # Source region visible in the canvas
+        half_w = cw / (2.0 * z)
+        half_h = ch / (2.0 * z)
+        src_x0 = self._cx - half_w
+        src_y0 = self._cy - half_h
+        src_x1 = self._cx + half_w
+        src_y1 = self._cy + half_h
+
+        # Clamp to source bounds and compute canvas offsets for black borders
+        crop_x0 = max(0.0, src_x0)
+        crop_y0 = max(0.0, src_y0)
+        crop_x1 = min(float(sw), src_x1)
+        crop_y1 = min(float(sh), src_y1)
+
+        if crop_x1 <= crop_x0 or crop_y1 <= crop_y0:
+            return
+
+        crop = self._src.crop((int(crop_x0), int(crop_y0), int(crop_x1), int(crop_y1)))
+        disp_w = max(1, int((crop_x1 - crop_x0) * z))
+        disp_h = max(1, int((crop_y1 - crop_y0) * z))
+        resample = Image.Resampling.LANCZOS if z < 1.0 else Image.Resampling.NEAREST
+        display = crop.resize((disp_w, disp_h), resample)
+
+        # Draw bbox on display
+        bx, by, bw, bh = self._det["bbox"]
+        draw = ImageDraw.Draw(display)
+        lw = max(1, int(2 / z)) if z < 2 else 2
+        rx0 = int((bx - crop_x0) * z)
+        ry0 = int((by - crop_y0) * z)
+        rx1 = int((bx + bw - crop_x0) * z)
+        ry1 = int((by + bh - crop_y0) * z)
+        draw.rectangle([rx0, ry0, rx1, ry1], outline="lime", width=lw)
+
+        self._photo = ImageTk.PhotoImage(display)
+        # Position so the cropped region aligns correctly
+        canvas_x = int((crop_x0 - src_x0) * z)
+        canvas_y = int((crop_y0 - src_y0) * z)
+        self._canvas.delete("all")
+        self._canvas.create_image(canvas_x, canvas_y, anchor="nw", image=self._photo)
+
+
 # ── GUI ──────────────────────────────────────────────────────────────
 
 
@@ -292,6 +444,17 @@ class RunViewerGUI:
         self._runs: list[RunInfo] = []
         self._selected_run: RunInfo | None = None
         self._chip_selector_frame: ttk.LabelFrame | None = None
+
+        # Filter state
+        self._all_detections: list[Detection] = []
+        self._chip_scan_dir: Path | None = None
+        self._frame_cache: dict[str, Image.Image] = {}
+        self._filter_debounce_id: str | None = None
+        self._filter_val_labels: list[tuple[ttk.Label, tk.DoubleVar, str]] = []
+        self._filtered_crops_frame: ttk.LabelFrame | None = None
+        self._filtered_table_frame: ttk.LabelFrame | None = None
+        self._filter_count_var = tk.StringVar(value="")
+        self._filter_preset_config: DetectorConfig | None = None
 
         self._build_ui()
         self._refresh_runs()
@@ -411,12 +574,18 @@ class RunViewerGUI:
     # ── Run detail ───────────────────────────────────────────────
 
     def _clear_detail(self):
+        if self._filter_debounce_id is not None:
+            self.root.after_cancel(self._filter_debounce_id)
+            self._filter_debounce_id = None
         for w in self._detail_frame.winfo_children():
             w.destroy()
         self._overview_photo = None
         self._scatter_photo = None
         self._crop_photos = []
         self._revisit_photos = []
+        self._all_detections = []
+        self._frame_cache = {}
+        self._filter_val_labels = []
 
     def _show_run_detail(self, run: RunInfo):
         self._clear_detail()
@@ -453,6 +622,9 @@ class RunViewerGUI:
             overview_frame = ttk.LabelFrame(self._detail_frame, text="Overview", padding=4)
             overview_frame.pack(fill="x", padx=8, pady=4)
             self._load_image_into_label(overview_path, overview_frame, OVERVIEW_MAX_WIDTH, "_overview_photo")
+
+        # ── Filter panel (persists across chip switches) ─────────
+        self._build_filter_panel(run.preset)
 
         # ── Chip buttons ─────────────────────────────────────────
         if run.n_chips > 0:
@@ -496,13 +668,20 @@ class RunViewerGUI:
     def _show_chip_detail(self, run: RunInfo, chip_idx: int):
         """Populate chip detail area for the given chip."""
         # Clear previous chip detail
+        if self._filter_debounce_id is not None:
+            self.root.after_cancel(self._filter_debounce_id)
+            self._filter_debounce_id = None
         for w in self._chip_detail_frame.winfo_children():
             w.destroy()
         self._scatter_photo = None
         self._crop_photos = []
         self._revisit_photos = []
+        self._frame_cache = {}
 
         chip = _load_chip_info(run.path, chip_idx)
+        self._all_detections = chip.ranked_detections
+        self._chip_scan_dir = chip.scan_dir
+        self._um_per_px = chip.um_per_px
 
         # ── Seg stats + rerank row ───────────────────────────────
         stats_frame = ttk.LabelFrame(self._chip_detail_frame, text=f"Chip {chip_idx} — Detections", padding=8)
@@ -536,17 +715,19 @@ class RunViewerGUI:
         else:
             ttk.Label(stats_frame, text="No segmentation results", foreground="gray").pack(anchor="w")
 
-        # ── Crop images (individual detection crops) ─────────────
-        if chip.crop_images:
-            crops_frame = ttk.LabelFrame(self._chip_detail_frame, text=f"Chip {chip_idx} — Top Detections", padding=4)
-            crops_frame.pack(fill="x", pady=4)
-            self._populate_image_grid(crops_frame, chip.crop_images, self._crop_photos, CROP_THUMB_SIZE, cols=5)
+        # ── Filtered frame thumbnails area ────────────────────────
+        self._filtered_crops_frame = ttk.LabelFrame(
+            self._chip_detail_frame, text=f"Chip {chip_idx} — Top Detections", padding=4
+        )
+        if chip.has_seg:
+            self._filtered_crops_frame.pack(fill="x", pady=4)
 
-        # ── Detection scoring table ──────────────────────────────
-        if chip.ranked_detections:
-            table_frame = ttk.LabelFrame(self._chip_detail_frame, text=f"Chip {chip_idx} — Scoring Data", padding=4)
-            table_frame.pack(fill="x", pady=4)
-            self._populate_detection_table(table_frame, chip.ranked_detections)
+        # ── Filtered table area ──────────────────────────────────
+        self._filtered_table_frame = ttk.LabelFrame(
+            self._chip_detail_frame, text=f"Chip {chip_idx} — Scoring Data", padding=4
+        )
+        if chip.has_seg:
+            self._filtered_table_frame.pack(fill="x", pady=4)
 
         # ── R-G scatter plot ──────────────────────────────────────
         if chip.scatter_path:
@@ -562,8 +743,293 @@ class RunViewerGUI:
                 revisit_frame, chip.revisit_images, self._revisit_photos, REVISIT_THUMB_SIZE, cols=4
             )
 
+        # Apply current filters (populates frame thumbnails + table)
+        if self._all_detections:
+            self._apply_filters()
+
         # Scroll to chip selector after layout settles
         self.root.after_idle(self._scroll_to_chip_selector)
+
+    # ── Filter panel ─────────────────────────────────────────────
+
+    def _build_filter_panel(self, preset: str):
+        """Create the filter panel with sliders for interactive detection tuning."""
+        try:
+            config = DetectorConfig.from_material(preset)
+        except ValueError:
+            config = DetectorConfig.hbn_thin()
+        self._filter_preset_config = config
+
+        filter_frame = ttk.LabelFrame(self._detail_frame, text="Filters", padding=6)
+        filter_frame.pack(fill="x", padx=8, pady=4)
+
+        # Filter DoubleVars with preset defaults
+        self._fv_perim_ratio = tk.DoubleVar(value=config.tier1_perim_ratio)
+        self._fv_cal_dist = tk.DoubleVar(value=config.tier1_cal_dist)
+        self._fv_g_min = tk.DoubleVar(value=max(config.tier1_g_min, -2.0))
+        self._fv_g_max = tk.DoubleVar(value=min(config.tier1_g_max, 6.0))
+        self._fv_r_max = tk.DoubleVar(value=max(config.tier1_r_max, -3.0))
+        self._fv_entropy = tk.DoubleVar(value=min(config.tier1_entropy_max, 8.0))
+        self._fv_min_size = tk.DoubleVar(value=0)
+        self._fv_grad_energy = tk.DoubleVar(value=50.0)
+        self._fv_aspect_ratio = tk.DoubleVar(value=20.0)
+        self._fv_kurtosis = tk.DoubleVar(value=50.0)
+        self._fv_top_n = tk.IntVar(value=DEFAULT_FILTER_TOP_N)
+
+        # Slider definitions: (row, col, label, var, from_, to, resolution, fmt)
+        slider_defs = [
+            (0, 0, "perim_ratio \u2264", self._fv_perim_ratio, 1.0, 3.0, 0.05, "{:.2f}"),
+            (0, 1, "cal_dist \u2264", self._fv_cal_dist, 0.0, 2.0, 0.05, "{:.2f}"),
+            (0, 2, "min \u00b5m\u00b2 \u2265", self._fv_min_size, 0, 2000, 10, "{:.0f}"),
+            (1, 0, "G min \u2265", self._fv_g_min, -2.0, 6.0, 0.1, "{:+.1f}"),
+            (1, 1, "G max \u2264", self._fv_g_max, -2.0, 6.0, 0.1, "{:+.1f}"),
+            (1, 2, "R max \u2264", self._fv_r_max, -3.0, 6.0, 0.1, "{:+.1f}"),
+            (2, 0, "entropy \u2264", self._fv_entropy, 0.0, 8.0, 0.1, "{:.1f}"),
+            (2, 1, "grad_energy \u2264", self._fv_grad_energy, 0.0, 50.0, 0.5, "{:.1f}"),
+            (2, 2, "aspect_ratio \u2264", self._fv_aspect_ratio, 1.0, 20.0, 0.5, "{:.1f}"),
+            (3, 0, "kurtosis \u2264", self._fv_kurtosis, -2.0, 50.0, 1.0, "{:.0f}"),
+        ]
+
+        sliders_frame = ttk.Frame(filter_frame)
+        sliders_frame.pack(fill="x")
+        for col in range(3):
+            sliders_frame.columnconfigure(col, weight=1)
+
+        self._filter_val_labels = []
+        for row, col, label, var, from_, to, resolution, fmt in slider_defs:
+            cell = ttk.Frame(sliders_frame)
+            cell.grid(row=row, column=col, sticky="ew", padx=4, pady=1)
+            ttk.Label(cell, text=label, width=13, anchor="e").pack(side="left")
+
+            scale = tk.Scale(
+                cell,
+                from_=from_,
+                to=to,
+                resolution=resolution,
+                orient="horizontal",
+                variable=var,
+                showvalue=False,
+                length=130,
+                command=self._on_any_slider_change,
+            )
+            scale.pack(side="left", padx=(2, 0))
+
+            val_lbl = ttk.Label(cell, text=fmt.format(var.get()), width=7, anchor="w")
+            val_lbl.pack(side="left", padx=(2, 0))
+            self._filter_val_labels.append((val_lbl, var, fmt))
+
+        # Bottom row: count + top N + reset
+        bottom = ttk.Frame(filter_frame)
+        bottom.pack(fill="x", pady=(4, 0))
+
+        self._filter_count_var.set("")
+        ttk.Label(bottom, textvariable=self._filter_count_var, font=("TkDefaultFont", 10, "bold")).pack(
+            side="left", padx=4
+        )
+
+        ttk.Button(bottom, text="Reset", command=self._reset_filters).pack(side="right", padx=4)
+
+        top_n_frame = ttk.Frame(bottom)
+        top_n_frame.pack(side="right")
+        ttk.Label(top_n_frame, text="Top N:").pack(side="left")
+        top_n_spin = ttk.Spinbox(
+            top_n_frame, from_=1, to=200, textvariable=self._fv_top_n, width=4, command=self._on_filter_change
+        )
+        top_n_spin.pack(side="left", padx=(2, 4))
+        top_n_spin.bind("<Return>", lambda _: self._on_filter_change())
+        top_n_spin.bind("<FocusOut>", lambda _: self._on_filter_change())
+
+    def _on_any_slider_change(self, _value=None):
+        """Called on every slider move — update value labels and debounce filter."""
+        for lbl, var, fmt in self._filter_val_labels:
+            lbl.configure(text=fmt.format(var.get()))
+        self._on_filter_change()
+
+    def _on_filter_change(self):
+        """Debounced filter trigger."""
+        if self._filter_debounce_id is not None:
+            self.root.after_cancel(self._filter_debounce_id)
+        self._filter_debounce_id = self.root.after(FILTER_DEBOUNCE_MS, self._apply_filters)
+
+    def _apply_filters(self):
+        """Filter all detections by current slider values and update results."""
+        self._filter_debounce_id = None
+        if not self._all_detections:
+            return
+
+        # Read filter values once
+        pr_max = self._fv_perim_ratio.get()
+        cd_max = self._fv_cal_dist.get()
+        g_min = self._fv_g_min.get()
+        g_max = self._fv_g_max.get()
+        r_max = self._fv_r_max.get()
+        ent_max = self._fv_entropy.get()
+        min_size_um2 = self._fv_min_size.get()
+        min_size_px = int(min_size_um2 / (self._um_per_px**2)) if min_size_um2 > 0 else 0
+        ge_max = self._fv_grad_energy.get()
+        ar_max = self._fv_aspect_ratio.get()
+        kurt_max = self._fv_kurtosis.get()
+        top_n = self._fv_top_n.get()
+
+        passing = []
+        for d in self._all_detections:
+            rgb = d.get("contrast_rgb")
+            if not rgb or len(rgb) < 2:
+                continue
+            r, g = rgb[0], rgb[1]
+            if (
+                d.get("perim_ratio", 0) <= pr_max
+                and d.get("cal_dist", 0) <= cd_max
+                and g >= g_min
+                and g <= g_max
+                and r <= r_max
+                and d.get("entropy", d.get("g_entropy", 0)) <= ent_max
+                and d.get("size_px", 0) >= min_size_px
+                and d.get("grad_energy", 0) <= ge_max
+                and d.get("aspect_ratio", 1.0) <= ar_max
+                and max(d.get("r_kurt", 0), d.get("g_kurt", 0), d.get("b_kurt", 0)) <= kurt_max
+            ):
+                passing.append(d)
+
+        passing.sort(key=lambda d: -d.get("score", 0))
+        self._filter_count_var.set(f"{len(passing)} / {len(self._all_detections)} pass")
+
+        top = passing[:top_n]
+        self._update_filtered_table(top)
+        self._update_filtered_frames(top)
+
+    def _reset_filters(self):
+        """Reset all filter sliders to preset defaults."""
+        config = self._filter_preset_config
+        if config is None:
+            return
+        self._fv_perim_ratio.set(config.tier1_perim_ratio)
+        self._fv_cal_dist.set(config.tier1_cal_dist)
+        self._fv_g_min.set(max(config.tier1_g_min, -2.0))
+        self._fv_g_max.set(min(config.tier1_g_max, 6.0))
+        self._fv_r_max.set(max(config.tier1_r_max, -3.0))
+        self._fv_entropy.set(min(config.tier1_entropy_max, 8.0))
+        self._fv_min_size.set(0)
+        self._fv_grad_energy.set(50.0)
+        self._fv_aspect_ratio.set(20.0)
+        self._fv_kurtosis.set(50.0)
+        for lbl, var, fmt in self._filter_val_labels:
+            lbl.configure(text=fmt.format(var.get()))
+        # Cancel pending debounce and apply immediately
+        if self._filter_debounce_id is not None:
+            self.root.after_cancel(self._filter_debounce_id)
+            self._filter_debounce_id = None
+        self._apply_filters()
+
+    def _update_filtered_table(self, top: list[Detection]):
+        """Rebuild the detection table with filtered results."""
+        if self._filtered_table_frame is None:
+            return
+        for w in self._filtered_table_frame.winfo_children():
+            w.destroy()
+        if not top:
+            ttk.Label(self._filtered_table_frame, text="No detections pass filters", foreground="gray").pack(anchor="w")
+            return
+        self._populate_detection_table(self._filtered_table_frame, top)
+
+    def _update_filtered_frames(self, top: list[Detection]):
+        """Show full-frame thumbnails with detection bbox for filtered top detections."""
+        if self._filtered_crops_frame is None:
+            return
+        for w in self._filtered_crops_frame.winfo_children():
+            w.destroy()
+        self._crop_photos = []
+
+        if not top:
+            ttk.Label(self._filtered_crops_frame, text="No detections pass filters", foreground="gray").pack(anchor="w")
+            return
+        if not self._chip_scan_dir:
+            ttk.Label(self._filtered_crops_frame, text="No scan dir — cannot show frames", foreground="gray").pack(
+                anchor="w"
+            )
+            return
+
+        grid_frame = ttk.Frame(self._filtered_crops_frame)
+        grid_frame.pack(fill="x")
+        cols = 3
+
+        for i, d in enumerate(top):
+            frame_name = d.get("frame", "")
+            if not frame_name:
+                continue
+
+            row, col = divmod(i, cols)
+            cell = ttk.Frame(grid_frame, padding=2)
+            cell.grid(row=row * 2, column=col, sticky="nw")
+
+            try:
+                frame_img = self._load_frame_cached(frame_name)
+                if frame_img is None:
+                    ttk.Label(cell, text="[no frame]", foreground="gray").pack()
+                    continue
+
+                # Resize to thumbnail then draw bbox
+                fw, fh = frame_img.size
+                scale = min(CROP_THUMB_SIZE / fw, CROP_THUMB_SIZE / fh)
+                thumb = frame_img.resize((int(fw * scale), int(fh * scale)), Image.Resampling.LANCZOS)
+                draw = ImageDraw.Draw(thumb)
+                bx, by, bw, bh = d["bbox"]
+                draw.rectangle(
+                    [int(bx * scale), int(by * scale), int((bx + bw) * scale), int((by + bh) * scale)],
+                    outline="lime",
+                    width=2,
+                )
+
+                photo = ImageTk.PhotoImage(thumb)
+                self._crop_photos.append(photo)
+                lbl = ttk.Label(cell, image=photo, cursor="hand2")
+                lbl.pack()
+                lbl.bind("<Button-1>", lambda _e, fn=frame_name, det=d: self._show_frame_popup(fn, det))
+            except Exception:
+                ttk.Label(cell, text="[load error]", foreground="red").pack()
+
+            rgb = d.get("contrast_rgb", (0, 0, 0))
+            r_val, g_val = rgb[0], rgb[1]
+            size_um2 = d.get("size_px", 0) * self._um_per_px**2
+            ent = d.get("entropy", d.get("g_entropy", 0))
+            ge = d.get("grad_energy", 0)
+            kurt = max(d.get("r_kurt", 0), d.get("g_kurt", 0), d.get("b_kurt", 0))
+            line1 = f"#{i + 1} R={r_val:+.2f} G={g_val:+.2f} {size_um2:.0f}\u00b5m\u00b2"
+            line2 = f"e={ent:.1f} g={ge:.1f} k={kurt:.0f}"
+            name_lbl = ttk.Label(cell, text=f"{line1}\n{line2}", font=("TkDefaultFont", 7), justify="left")
+            name_lbl.pack(anchor="w")
+
+    def _load_frame_cached(self, frame_name: str) -> Image.Image | None:
+        """Load a frame image with caching."""
+        if frame_name in self._frame_cache:
+            return self._frame_cache[frame_name]
+        if not self._chip_scan_dir:
+            return None
+
+        frame_path = self._chip_scan_dir / f"{frame_name}.jpg"
+        if not frame_path.exists():
+            return None
+
+        try:
+            img = Image.open(frame_path)
+            img.load()  # Force full load so file handle is released
+        except Exception:
+            return None
+
+        # LRU-ish eviction
+        if len(self._frame_cache) >= FRAME_CACHE_MAX:
+            oldest_key = next(iter(self._frame_cache))
+            del self._frame_cache[oldest_key]
+
+        self._frame_cache[frame_name] = img
+        return img
+
+    def _show_frame_popup(self, frame_name: str, det: Detection):
+        """Show a zoomable frame view with detection highlighted. Scroll to zoom, drag to pan."""
+        frame_img = self._load_frame_cached(frame_name)
+        if frame_img is None:
+            return
+        ZoomableFramePopup(self.root, frame_img, det, title=f"{frame_name} det#{det.get('det_idx', '?')}")
 
     def _populate_image_grid(
         self,
@@ -598,12 +1064,26 @@ class RunViewerGUI:
             name_lbl.pack()
 
     def _populate_detection_table(self, parent: ttk.Widget, ranked: list[Detection]):
-        """Show a treeview table of top detection scoring data."""
-        # Show top N matching the number of crops (or all if fewer)
+        """Show a sortable treeview table of top detection scoring data. Click headers to sort."""
         n_show = min(len(ranked), 50)
         top = ranked[:n_show]
 
-        cols = ("rank", "tier", "frame", "det", "size", "R", "G", "score", "cal_d", "grad", "entr")
+        cols = (
+            "rank",
+            "tier",
+            "frame",
+            "det",
+            "size",
+            "R",
+            "G",
+            "score",
+            "cal_d",
+            "grad",
+            "entr",
+            "kurt",
+            "pr",
+            "ar",
+        )
         table = ttk.Treeview(parent, columns=cols, show="headings", height=min(n_show, 15), selectmode="none")
 
         col_spec = {
@@ -618,9 +1098,35 @@ class RunViewerGUI:
             "cal_d": ("CalD", 55),
             "grad": ("Grad", 50),
             "entr": ("Entr", 45),
+            "kurt": ("Kurt", 45),
+            "pr": ("PR", 45),
+            "ar": ("AR", 40),
         }
+        # Sort state per table: {col_id: reverse}
+        sort_state: dict[str, bool] = {}
+
+        def _sort_column(col_id: str):
+            reverse = not sort_state.get(col_id, False)
+            sort_state[col_id] = reverse
+
+            items = [(table.set(iid, col_id), iid) for iid in table.get_children()]
+            # Try numeric sort, fall back to string
+            try:
+                items.sort(key=lambda t: float(t[0]), reverse=reverse)
+            except ValueError:
+                items.sort(key=lambda t: t[0], reverse=reverse)
+
+            for idx, (_val, iid) in enumerate(items):
+                table.move(iid, "", idx)
+
+            # Update header with sort indicator
+            arrow = " \u25bc" if reverse else " \u25b2"
+            for cid, (heading, _w) in col_spec.items():
+                text = heading + arrow if cid == col_id else heading
+                table.heading(cid, text=text)
+
         for col_id, (heading, width) in col_spec.items():
-            table.heading(col_id, text=heading)
+            table.heading(col_id, text=heading, command=lambda c=col_id: _sort_column(c))
             anchor = "w" if col_id == "frame" else "center"
             table.column(col_id, width=width, minwidth=width, anchor=anchor)
 
@@ -644,6 +1150,9 @@ class RunViewerGUI:
                     f"{d.get('cal_dist', 0):.3f}",
                     f"{d.get('grad_energy', 0):.1f}",
                     f"{d.get('entropy', d.get('g_entropy', 0)):.2f}",
+                    f"{max(d.get('r_kurt', 0), d.get('g_kurt', 0), d.get('b_kurt', 0)):.1f}",
+                    f"{d.get('perim_ratio', 0):.2f}",
+                    f"{d.get('aspect_ratio', 1.0):.1f}",
                 ),
             )
 
