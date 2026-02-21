@@ -634,12 +634,12 @@ Examples:
             return 0
 
         # Upload
-        print(f"\nUploading to {BASE_URL}/upload ...")
+        print(f"\nUploading to {BASE_URL}/api/upload ...")
         t0 = time.monotonic()
         with open(zip_file, "rb") as f:
             resp = requests.post(
-                f"{BASE_URL}/upload",
-                files={"file": (f"{scan_name}.zip", f, "application/zip")},
+                f"{BASE_URL}/api/upload",
+                files={"zip": (f"{scan_name}.zip", f, "application/zip")},
                 auth=AUTH,
                 timeout=600,
             )
