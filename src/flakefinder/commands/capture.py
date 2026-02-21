@@ -20,7 +20,9 @@ import sys
 from PIL import Image as PILImage
 
 from flakefinder.cli_utils import report_status
-from flakefinder.leica import Microscope
+from flakefinder.data_utils import require_microscope_description
+from flakefinder.leica import Microscope, wait_all
+from flakefinder.leica.autofocus import focus_and_capture
 from flakefinder.scan_utils import parse_white_balance
 
 
@@ -82,7 +84,8 @@ def main() -> int:
             target_x = args.x if args.x is not None else cur_x
             target_y = args.y if args.y is not None else cur_y
             print(f"Moving to X={target_x:.0f}, Y={target_y:.0f} µm...")
-            scope.stage.move_to(target_x, target_y)
+            hx, hy = scope.stage.move_to_async(target_x, target_y)
+            wait_all([hx, hy])
             x, y = scope.stage.position_um
             print(f"Arrived at X={x:.1f}, Y={y:.1f} µm")
 
@@ -127,8 +130,6 @@ def main() -> int:
             ap_label = " (fully open)" if ap.value == ap.max_value else ""
             print(f"Aperture: {ap.value}/{ap.max_value}{ap_label}")
 
-            from flakefinder.data_utils import require_microscope_description
-
             desc = require_microscope_description()
             binning_str = desc.camera.binning_levels[camera.binning].name
             r, g, b = camera.gain_rgb
@@ -139,8 +140,6 @@ def main() -> int:
 
         # Capture
         if args.focus:
-            from flakefinder.leica.autofocus import focus_and_capture
-
             if not args.quiet:
                 print("Focus-and-capture...")
             z_center = args.z if args.z is not None else None
