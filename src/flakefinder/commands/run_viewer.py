@@ -38,6 +38,7 @@ class RunInfo(NamedTuple):
     name: str
     timestamp: datetime | None
     preset: str
+    material: str
     n_chips: int
     total_detections: int
     duration_s: float
@@ -68,6 +69,7 @@ def _load_run_info(run_dir: Path) -> RunInfo | None:
     timestamp = _parse_run_timestamp(name)
     args = cp.get("args", {})
     preset = args.get("preset", "?")
+    material = args.get("material", "")
     notes = cp.get("notes", "") or ""
     n_chips = cp.get("n_chips") or 0
 
@@ -92,6 +94,7 @@ def _load_run_info(run_dir: Path) -> RunInfo | None:
         name=name,
         timestamp=timestamp,
         preset=preset,
+        material=material,
         n_chips=n_chips,
         total_detections=total_detections,
         duration_s=duration_s,
@@ -995,7 +998,7 @@ class RunViewerGUI:
             ttk.Label(self._overview_container, text="Loading…", foreground="gray").pack()
 
         # Filter panel (cheap — just slider widgets)
-        self._build_filter_panel(run.preset)
+        self._build_filter_panel(run.material)
 
         # Chip toggle buttons
         if run.n_chips > 0:
