@@ -621,7 +621,7 @@ Examples:
         # Create ZIP
         print("Creating ZIP archive...")
         zip_path = Path(tmp_root) / scan_name
-        zip_file = shutil.make_archive(str(zip_path), "zip", str(tmp_root), scan_name)
+        zip_file = shutil.make_archive(str(zip_path), "zip", str(upload_dir))
         zip_size_mb = Path(zip_file).stat().st_size / (1024 * 1024)
         print(f"  ZIP: {zip_file} ({zip_size_mb:.1f} MB)")
 
