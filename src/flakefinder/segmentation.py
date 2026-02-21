@@ -126,7 +126,7 @@ def _score_hbn_medium(det: Detection) -> tuple[int, float]:
         # Demote purple medium/thick flakes and messy interiors to T2
         if (g > 0.8 and bg_ratio > 1.2) or ent > 4.65:
             tier = 2
-    elif pr < 1.35 and cd < 0.3 and ent < 4.5:
+    elif pr < 1.50 and cd < 0.15 and ent < 4.65 and size_um2 >= 500.0:
         tier = 2
     else:
         tier = 3
@@ -308,9 +308,9 @@ class DetectorConfig:
             tier1_r_max=0.6,
             tier1_entropy_max=99.0,
             tier1_min_size_um2=500.0,
-            tier2_perim_ratio=1.35,
-            tier2_cal_dist=0.3,
-            tier2_entropy_max=4.5,
+            tier2_perim_ratio=1.50,
+            tier2_cal_dist=0.15,
+            tier2_entropy_max=4.65,
         )
 
     @classmethod
