@@ -88,7 +88,7 @@ Include session-specific values when relevant (Z positions, file paths, measurem
 ### 5. Spawn
 
 ```bash
-newclaude ~/sharpelab/flakefinder --agent subtask_agent -f /tmp/subtask_<slug>.prompt.md
+tools/subtask-launch <slug> -f /tmp/subtask_<slug>.prompt.md
 ```
 
 Tell the user: the subtask is running in a new terminal. It will propose its plan before writing any code, and write a summary to `/tmp/<name>_summary.md` when done.
@@ -97,7 +97,7 @@ Tell the user: the subtask is running in a new terminal. It will propose its pla
 
 - Log the spawn in the scan notebook: what task, what prompt file
 - When the user says the subtask is done (or you read its summary), review the output
-- Subtasks handle their own code sync (commit/push/pull) — you don't need to scp
+- Subtasks land their own code (rebase + ff-merge into master, push, microscope pull) — you don't need to sync
 
 ---
 

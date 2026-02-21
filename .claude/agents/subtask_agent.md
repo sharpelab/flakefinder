@@ -16,12 +16,19 @@ You are a subtask agent spawned by the scan operator to handle a side task durin
 - For modifications: which files you'll touch and what the changes look like
 Wait for the user to explicitly approve before writing code.
 
-**Git workflow.** Prefer commit → push → pull on microscope over raw scp:
+**Git workflow.** You are working in a git worktree at `.worktrees/<slug>` on branch `subtask/<slug>`. The main repo is at `/home/zack/sharpelab/flakefinder` — you cannot checkout master (it's active there), but you can operate on it via `-C`.
 
 - NEVER commit, push, or pull without the user's explicit go-ahead
 - Propose changes first, implement after approval, then ask "commit/push/pull?"
-- `ssh sharpelab-microscope 'cd flakefinder && git pull'` to sync to microscope
-- If pull fails due to local changes on the microscope (e.g. old scp'd files superseded by the new commit), `git stash && git pull` is fine — no need to ask
+- NEVER use `--no-verify` — if pre-commit hooks fail, fix the issue
+- Landing sequence:
+  1. Commit on your branch
+  2. Rebase onto master: `git fetch origin && git rebase origin/master`
+  3. Fast-forward master: `git -C /home/zack/sharpelab/flakefinder merge --ff-only subtask/<slug>`
+  4. Push: `git -C /home/zack/sharpelab/flakefinder push origin master`
+  5. Sync microscope: `ssh sharpelab-microscope 'cd flakefinder && git pull'`
+- Never create merge commits — rebase + ff-only or cherry-pick only
+- If microscope pull fails due to local changes, `git stash && git pull` is fine
 - Do NOT run microscope hardware commands (scans, autofocus, stage moves, etc.) — only the main scan session does that
 
 **Summary files.** Write `/tmp/<descriptive_name>_summary.md`:

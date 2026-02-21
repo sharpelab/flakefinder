@@ -1,0 +1,43 @@
+#!/bin/bash
+# Launch a subtask agent in an isolated git worktree.
+#
+# Usage: subtask-launch <slug> [-f <prompt-file>]
+#
+# Creates .worktrees/<slug> worktree on branch subtask/<slug>,
+# prunes stale worktrees first, then launches newclaude.
+# Worktree lives under the repo so parent CLAUDE.md files are visible.
+
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: subtask-launch <slug> [-f <prompt-file>]" >&2
+    exit 1
+fi
+
+slug="$1"
+shift
+
+worktree="${REPO_DIR}/.worktrees/${slug}"
+branch="subtask/${slug}"
+
+# Prune stale worktrees
+git -C "${REPO_DIR}" worktree prune 2>/dev/null
+
+# Clean up if this slug was used before
+if git -C "${REPO_DIR}" worktree list --porcelain | grep -q "worktree ${worktree}$"; then
+    echo "Removing existing worktree ${worktree}" >&2
+    git -C "${REPO_DIR}" worktree remove --force "${worktree}" 2>/dev/null || true
+fi
+if git -C "${REPO_DIR}" show-ref --verify --quiet "refs/heads/${branch}"; then
+    git -C "${REPO_DIR}" branch -D "${branch}" 2>/dev/null || true
+fi
+
+# Create worktree on new branch from current HEAD
+mkdir -p "${REPO_DIR}/.worktrees"
+git -C "${REPO_DIR}" worktree add "${worktree}" -b "${branch}" HEAD
+echo "Worktree: ${worktree} (branch: ${branch})"
+
+# Launch subtask
+newclaude "${worktree}" --agent subtask_agent "$@"
