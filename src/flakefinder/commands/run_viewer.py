@@ -174,6 +174,7 @@ CROP_THUMB_SIZE = 440
 FILTER_DEBOUNCE_MS = 200
 FRAME_CACHE_MAX = 30
 DEFAULT_FILTER_TOP_N = 100
+BBOX_PAD_PX = 5
 
 
 # ── Image popup viewer ──────────────────────────────────────────────
@@ -403,11 +404,10 @@ class ZoomableFramePopup(tk.Toplevel):
             pts = [(int((x - crop_x0) * z), int((y - crop_y0) * z)) for x, y in self._contour]
             draw.polygon(pts, outline="cyan")
         bx, by, bw, bh = self._det["bbox"]
-        pad = 5  # px padding around bbox
-        rx0 = int((bx - pad - crop_x0) * z)
-        ry0 = int((by - pad - crop_y0) * z)
-        rx1 = int((bx + bw + pad - crop_x0) * z)
-        ry1 = int((by + bh + pad - crop_y0) * z)
+        rx0 = int((bx - BBOX_PAD_PX - crop_x0) * z)
+        ry0 = int((by - BBOX_PAD_PX - crop_y0) * z)
+        rx1 = int((bx + bw + BBOX_PAD_PX - crop_x0) * z)
+        ry1 = int((by + bh + BBOX_PAD_PX - crop_y0) * z)
         draw.rectangle([rx0, ry0, rx1, ry1], outline="lime", width=2)
 
         self._photo = ImageTk.PhotoImage(display)
@@ -454,6 +454,7 @@ class RunViewerGUI:
         self._n_chips: int = 0
         self._last_top: list[Detection] = []
         self._last_thumb_cols: int = 0
+        self._last_canvas_w: int = 0
 
         self._build_ui()
         self._refresh_runs()
@@ -546,7 +547,7 @@ class RunViewerGUI:
         self._detail_canvas.configure(scrollregion=self._detail_canvas.bbox("all"))
 
     def _on_canvas_configure(self, event):
-        if event.width != getattr(self, "_last_canvas_w", 0):
+        if event.width != self._last_canvas_w:
             self._last_canvas_w = event.width
             self._detail_canvas.itemconfig(self._detail_window, width=event.width)
             # Re-layout thumbnails if column count changed
@@ -750,17 +751,32 @@ class RunViewerGUI:
         filter_frame = ttk.LabelFrame(self._detail_frame, text="Filters", padding=6)
         filter_frame.pack(fill="x", padx=8, pady=4)
 
-        # Filter DoubleVars with preset defaults
-        self._fv_perim_ratio = tk.DoubleVar(value=config.tier1_perim_ratio)
-        self._fv_cal_dist = tk.DoubleVar(value=config.tier1_cal_dist)
-        self._fv_g_min = tk.DoubleVar(value=max(config.tier1_g_min, -2.0))
-        self._fv_g_max = tk.DoubleVar(value=min(config.tier1_g_max, 6.0))
-        self._fv_r_max = tk.DoubleVar(value=max(config.tier1_r_max, -3.0))
-        self._fv_entropy = tk.DoubleVar(value=min(config.tier1_entropy_max, 8.0))
-        self._fv_min_size = tk.DoubleVar(value=0)
-        self._fv_grad_energy = tk.DoubleVar(value=50.0)
-        self._fv_aspect_ratio = tk.DoubleVar(value=6.0)
-        self._fv_kurtosis = tk.DoubleVar(value=50.0)
+        # Compute clamped defaults from preset (reused by _reset_filters)
+        self._filter_defaults = {
+            "perim_ratio": config.tier1_perim_ratio,
+            "cal_dist": config.tier1_cal_dist,
+            "g_min": max(config.tier1_g_min, -2.0),
+            "g_max": min(config.tier1_g_max, 6.0),
+            "r_max": max(config.tier1_r_max, -3.0),
+            "entropy": min(config.tier1_entropy_max, 8.0),
+            "min_size": 0.0,
+            "grad_energy": 50.0,
+            "aspect_ratio": 6.0,
+            "kurtosis": 50.0,
+        }
+        d = self._filter_defaults
+
+        # Filter DoubleVars
+        self._fv_perim_ratio = tk.DoubleVar(value=d["perim_ratio"])
+        self._fv_cal_dist = tk.DoubleVar(value=d["cal_dist"])
+        self._fv_g_min = tk.DoubleVar(value=d["g_min"])
+        self._fv_g_max = tk.DoubleVar(value=d["g_max"])
+        self._fv_r_max = tk.DoubleVar(value=d["r_max"])
+        self._fv_entropy = tk.DoubleVar(value=d["entropy"])
+        self._fv_min_size = tk.DoubleVar(value=d["min_size"])
+        self._fv_grad_energy = tk.DoubleVar(value=d["grad_energy"])
+        self._fv_aspect_ratio = tk.DoubleVar(value=d["aspect_ratio"])
+        self._fv_kurtosis = tk.DoubleVar(value=d["kurtosis"])
         self._fv_top_n = tk.IntVar(value=DEFAULT_FILTER_TOP_N)
 
         # Slider definitions: (row, col, label, var, from_, to, resolution, fmt)
@@ -898,19 +914,17 @@ class RunViewerGUI:
 
     def _reset_filters(self):
         """Reset all filter sliders to preset defaults and clear chip selection."""
-        config = self._filter_preset_config
-        if config is None:
-            return
-        self._fv_perim_ratio.set(config.tier1_perim_ratio)
-        self._fv_cal_dist.set(config.tier1_cal_dist)
-        self._fv_g_min.set(max(config.tier1_g_min, -2.0))
-        self._fv_g_max.set(min(config.tier1_g_max, 6.0))
-        self._fv_r_max.set(max(config.tier1_r_max, -3.0))
-        self._fv_entropy.set(min(config.tier1_entropy_max, 8.0))
-        self._fv_min_size.set(0)
-        self._fv_grad_energy.set(50.0)
-        self._fv_aspect_ratio.set(6.0)
-        self._fv_kurtosis.set(50.0)
+        d = self._filter_defaults
+        self._fv_perim_ratio.set(d["perim_ratio"])
+        self._fv_cal_dist.set(d["cal_dist"])
+        self._fv_g_min.set(d["g_min"])
+        self._fv_g_max.set(d["g_max"])
+        self._fv_r_max.set(d["r_max"])
+        self._fv_entropy.set(d["entropy"])
+        self._fv_min_size.set(d["min_size"])
+        self._fv_grad_energy.set(d["grad_energy"])
+        self._fv_aspect_ratio.set(d["aspect_ratio"])
+        self._fv_kurtosis.set(d["kurtosis"])
         self._active_chips.clear()
         self._update_chip_button_visuals()
         for lbl, var, fmt in self._filter_val_labels:
@@ -950,55 +964,57 @@ class RunViewerGUI:
         cols = max(1, avail_w // (CROP_THUMB_SIZE + 16))
 
         for i, d in enumerate(top):
-            frame_name = d.get("frame", "")
-            chip_idx = d.get("chip_idx", 0)
-            if not frame_name:
-                continue
-
             row, col = divmod(i, cols)
             cell = ttk.Frame(grid_frame, padding=2)
             cell.grid(row=row * 2, column=col, sticky="nw")
+            self._build_thumbnail_cell(cell, d, i)
 
-            try:
-                frame_img = self._load_frame_cached(chip_idx, frame_name)
-                if frame_img is None:
-                    ttk.Label(cell, text="[no frame]", foreground="gray").pack()
-                    continue
+    def _build_thumbnail_cell(self, cell: ttk.Frame, d: Detection, grid_idx: int):
+        """Build a single thumbnail cell with image, bbox overlay, and metric label."""
+        frame_name = d.get("frame", "")
+        chip_idx = d.get("chip_idx", 0)
+        if not frame_name:
+            return
 
-                # Resize to thumbnail then draw bbox
-                fw, fh = frame_img.size
-                scale = min(CROP_THUMB_SIZE / fw, CROP_THUMB_SIZE / fh)
-                thumb = frame_img.resize((int(fw * scale), int(fh * scale)), Image.Resampling.LANCZOS)
-                draw = ImageDraw.Draw(thumb)
-                bx, by, bw, bh = d["bbox"]
-                pad = 5
-                x0 = int((bx - pad) * scale)
-                y0 = int((by - pad) * scale)
-                x1 = int((bx + bw + pad) * scale)
-                y1 = int((by + bh + pad) * scale)
-                draw.rectangle([x0, y0, x1, y1], outline="lime", width=2)
+        try:
+            frame_img = self._load_frame_cached(chip_idx, frame_name)
+            if frame_img is None:
+                ttk.Label(cell, text="[no frame]", foreground="gray").pack()
+                return
 
-                photo = ImageTk.PhotoImage(thumb)
-                self._crop_photos.append(photo)
-                lbl = ttk.Label(cell, image=photo, cursor="hand2")
-                lbl.pack()
-                lbl.bind(
-                    "<Button-1>",
-                    lambda _e, idx=i: self._show_frame_popup_at(idx),
-                )
-            except Exception:
-                ttk.Label(cell, text="[load error]", foreground="red").pack()
+            fw, fh = frame_img.size
+            scale = min(CROP_THUMB_SIZE / fw, CROP_THUMB_SIZE / fh)
+            thumb = frame_img.resize((int(fw * scale), int(fh * scale)), Image.Resampling.LANCZOS)
+            draw = ImageDraw.Draw(thumb)
+            bx, by, bw, bh = d["bbox"]
+            draw.rectangle(
+                [
+                    int((bx - BBOX_PAD_PX) * scale),
+                    int((by - BBOX_PAD_PX) * scale),
+                    int((bx + bw + BBOX_PAD_PX) * scale),
+                    int((by + bh + BBOX_PAD_PX) * scale),
+                ],
+                outline="lime",
+                width=2,
+            )
 
-            rgb = d.get("contrast_rgb", (0, 0, 0))
-            r_val, g_val = rgb[0], rgb[1]
-            size_um2 = d.get("size_px", 0) * self._um_per_px**2
-            ent = d.get("entropy", d.get("g_entropy", 0))
-            ge = d.get("grad_energy", 0)
-            kurt = max(d.get("r_kurt", 0), d.get("g_kurt", 0), d.get("b_kurt", 0))
-            line1 = f"#{i + 1} C{chip_idx} R={r_val:+.2f} G={g_val:+.2f} {size_um2:.0f}\u00b5m\u00b2"
-            line2 = f"e={ent:.1f} g={ge:.1f} k={kurt:.0f}"
-            name_lbl = ttk.Label(cell, text=f"{line1}\n{line2}", font=("TkDefaultFont", 7), justify="left")
-            name_lbl.pack(anchor="w")
+            photo = ImageTk.PhotoImage(thumb)
+            self._crop_photos.append(photo)
+            lbl = ttk.Label(cell, image=photo, cursor="hand2")
+            lbl.pack()
+            lbl.bind("<Button-1>", lambda _e, idx=grid_idx: self._show_frame_popup_at(idx))
+        except Exception:
+            ttk.Label(cell, text="[load error]", foreground="red").pack()
+
+        rgb = d.get("contrast_rgb", (0, 0, 0))
+        r_val, g_val = rgb[0], rgb[1]
+        size_um2 = d.get("size_px", 0) * self._um_per_px**2
+        ent = d.get("entropy", d.get("g_entropy", 0))
+        ge = d.get("grad_energy", 0)
+        kurt = max(d.get("r_kurt", 0), d.get("g_kurt", 0), d.get("b_kurt", 0))
+        line1 = f"#{grid_idx + 1} C{chip_idx} R={r_val:+.2f} G={g_val:+.2f} {size_um2:.0f}\u00b5m\u00b2"
+        line2 = f"e={ent:.1f} g={ge:.1f} k={kurt:.0f}"
+        ttk.Label(cell, text=f"{line1}\n{line2}", font=("TkDefaultFont", 7), justify="left").pack(anchor="w")
 
     def _load_frame_cached(self, chip_idx: int, frame_name: str) -> Image.Image | None:
         """Load a frame image with caching, keyed by (chip_idx, frame_name)."""
