@@ -114,7 +114,12 @@ def main() -> int:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("seg_dir", type=Path, help="Segmentation output directory")
-    parser.add_argument("--material", default="hbn", choices=["hbn", "graphene"], help="Material preset")
+    parser.add_argument(
+        "--material",
+        default="hbn",
+        choices=["hbn", "hbn_thin", "hbn_thick", "graphene"],
+        help="Material preset",
+    )
     parser.add_argument("--top", type=int, default=10, help="Number of top results to print")
     parser.add_argument(
         "--reclassify",
@@ -248,7 +253,8 @@ def main() -> int:
             print(
                 f"{i + 1:>3}  {d['frame']:<16} {d.get('det_idx', '-'):>3} {d['size_px']:>7} "
                 f"{r:>+7.3f} {g:>+7.3f} {d.get('score', 0):>7.3f} "
-                f"{d.get('cal_dist', 0):>7.3f} {d.get('grad_energy', 0):>7.1f} {d.get('g_entropy', 0):>6.2f}"
+                f"{d.get('cal_dist', 0):>7.3f} {d.get('grad_energy', 0):>7.1f}"
+                f" {d.get('entropy', d.get('g_entropy', 0)):>6.2f}"
             )
 
     # Generate cropped mosaic
@@ -335,7 +341,13 @@ def main() -> int:
                 mosaic.save(str(mosaic_path), quality=95)
                 print(f"\nSaved mosaic: {mosaic_path}")
                 print(f"Saved {len(crop_paths)} crops: {crops_dir}/")
-                subprocess.Popen(["present", str(mosaic_path)])
+                subprocess.Popen(
+                    ["present", str(mosaic_path)],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
 
     # Generate R-G scatter plot
     if not args.no_scatter and all_flat:
@@ -358,7 +370,13 @@ def main() -> int:
         fig.savefig(scatter_path, dpi=150)
         plt.close(fig)
         print(f"Saved scatter: {scatter_path}")
-        subprocess.Popen(["present", str(scatter_path)])
+        subprocess.Popen(
+            ["present", str(scatter_path)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
 
     # Write revisit JSON for top N
     if args.plane and all_flat:
