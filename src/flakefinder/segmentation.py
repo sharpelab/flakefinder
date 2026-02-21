@@ -537,7 +537,7 @@ def _otsu_split(
 
         for j in range(1, n_sub + 1):
             roi_piece = roi_labels == j
-            if int(roi_piece.sum()) >= min_size_px // 2:
+            if int(roi_piece.sum()) >= min_size_px:
                 # Expand back to full frame
                 full = np.zeros(component.shape, dtype=bool)
                 full[sl] = roi_piece
