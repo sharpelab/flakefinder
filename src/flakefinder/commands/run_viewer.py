@@ -244,13 +244,21 @@ class ZoomableFramePopup(tk.Toplevel):
     MIN_ZOOM = 0.05
     MAX_ZOOM = 5.0
 
-    def __init__(self, parent: tk.Tk, src_image: Image.Image, det: Detection, title: str = ""):
+    def __init__(
+        self,
+        parent: tk.Tk,
+        src_image: Image.Image,
+        det: Detection,
+        title: str = "",
+        contour: list[list[int]] | None = None,
+    ):
         super().__init__(parent)
         self.withdraw()  # hide until fully rendered
         self.title(title)
 
         self._src = src_image
         self._det = det
+        self._contour = contour
         self._photo: ImageTk.PhotoImage | None = None
 
         # Zoom state: center in source image coords
@@ -364,15 +372,17 @@ class ZoomableFramePopup(tk.Toplevel):
         resample = Image.Resampling.LANCZOS if z < 1.0 else Image.Resampling.NEAREST
         display = crop.resize((disp_w, disp_h), resample)
 
-        # Draw bbox on display
-        bx, by, bw, bh = self._det["bbox"]
+        # Draw contour and bbox on display
         draw = ImageDraw.Draw(display)
-        lw = max(1, int(2 / z)) if z < 2 else 2
+        if self._contour and len(self._contour) >= 3:
+            pts = [(int((x - crop_x0) * z), int((y - crop_y0) * z)) for x, y in self._contour]
+            draw.polygon(pts, outline="cyan")
+        bx, by, bw, bh = self._det["bbox"]
         rx0 = int((bx - crop_x0) * z)
         ry0 = int((by - crop_y0) * z)
         rx1 = int((bx + bw - crop_x0) * z)
         ry1 = int((by + bh - crop_y0) * z)
-        draw.rectangle([rx0, ry0, rx1, ry1], outline="lime", width=lw)
+        draw.rectangle([rx0, ry0, rx1, ry1], outline="lime", width=2)
 
         self._photo = ImageTk.PhotoImage(display)
         # Position so the cropped region aligns correctly
@@ -416,6 +426,8 @@ class RunViewerGUI:
         self._active_chips: set[int] = set()  # empty = all shown
         self._chip_buttons: dict[int, tk.Button] = {}
         self._n_chips: int = 0
+        self._last_top: list[Detection] = []
+        self._last_thumb_cols: int = 0
 
         self._build_ui()
         self._refresh_runs()
@@ -511,6 +523,11 @@ class RunViewerGUI:
         if event.width != getattr(self, "_last_canvas_w", 0):
             self._last_canvas_w = event.width
             self._detail_canvas.itemconfig(self._detail_window, width=event.width)
+            # Re-layout thumbnails if column count changed
+            new_cols = max(1, (event.width - 32) // (CROP_THUMB_SIZE + 16))
+            if new_cols != self._last_thumb_cols and self._last_top:
+                self._last_thumb_cols = new_cols
+                self._update_filtered_frames(self._last_top)
 
     # ── Run list ─────────────────────────────────────────────────
 
@@ -566,6 +583,8 @@ class RunViewerGUI:
         self._filter_val_labels = []
         self._active_chips = set()
         self._chip_buttons = {}
+        self._last_top = []
+        self._last_thumb_cols = 0
 
     def _show_run_detail(self, run: RunInfo):
         self._clear_detail()
@@ -847,6 +866,7 @@ class RunViewerGUI:
         self._filter_count_var.set(f"{len(deduped)} / {len(chip_filtered)} pass ({len(passing) - len(deduped)} dupes)")
 
         top = deduped[:top_n]
+        self._last_top = top
         self._update_filtered_table(top)
         self._update_filtered_frames(top)
 
@@ -900,7 +920,8 @@ class RunViewerGUI:
 
         grid_frame = ttk.Frame(self._filtered_crops_frame)
         grid_frame.pack(fill="x")
-        cols = 3
+        avail_w = self._detail_canvas.winfo_width() - 32  # padding
+        cols = max(1, avail_w // (CROP_THUMB_SIZE + 16))
 
         for i, d in enumerate(top):
             frame_name = d.get("frame", "")
@@ -980,12 +1001,32 @@ class RunViewerGUI:
         self._frame_cache[key] = img
         return img
 
+    def _load_frame_contour(self, chip_idx: int, frame_name: str, det_idx: int) -> list[list[int]] | None:
+        """Load contour points for a detection from per-frame seg JSON."""
+        run_dir = self._selected_run.path if self._selected_run else None
+        if not run_dir:
+            return None
+        frame_json_path = run_dir / f"chip_{chip_idx}" / "seg" / f"{frame_name}.json"
+        if not frame_json_path.exists():
+            return None
+        try:
+            with open(frame_json_path) as f:
+                data = json.load(f)
+            dets = data.get("detections", [])
+            if det_idx < len(dets):
+                return dets[det_idx].get("contour")
+        except (json.JSONDecodeError, OSError):
+            pass
+        return None
+
     def _show_frame_popup(self, chip_idx: int, frame_name: str, det: Detection):
         """Show a zoomable frame view with detection highlighted. Scroll to zoom, drag to pan."""
         frame_img = self._load_frame_cached(chip_idx, frame_name)
         if frame_img is None:
             return
-        ZoomableFramePopup(self.root, frame_img, det, title=f"C{chip_idx} {frame_name} det#{det.get('det_idx', '?')}")
+        det_idx = det.get("det_idx", -1)
+        contour = self._load_frame_contour(chip_idx, frame_name, det_idx) if det_idx >= 0 else None
+        ZoomableFramePopup(self.root, frame_img, det, title=f"C{chip_idx} {frame_name} det#{det_idx}", contour=contour)
 
     def _populate_detection_table(self, parent: ttk.Widget, ranked: list[Detection]):
         """Show a sortable treeview table of top detection scoring data. Click headers to sort."""
