@@ -4,10 +4,10 @@ Packages the run directory into the ZIP format expected by the 2DMatGMM
 website's POST /upload endpoint, then uploads it.
 
 Usage:
-    python scripts/upload_run.py scans/run_20260220_1543/
-    python scripts/upload_run.py scans/run_20260220_1543/ --dry-run
-    python scripts/upload_run.py scans/run_20260220_1543/ --tier 1 --top 20
-    python scripts/upload_run.py scans/run_20260220_1543/ --user Zack --material hBN
+    sls upload scans/run_20260220_1543/
+    sls upload scans/run_20260220_1543/ --dry-run
+    sls upload scans/run_20260220_1543/ --tier 1 --top 20
+    sls upload scans/run_20260220_1543/ --user Sandesh --substrate 285nm
 """
 
 import argparse
@@ -21,6 +21,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 import cv2
 import numpy as np
@@ -38,6 +39,12 @@ THICKNESS_MAP = {
     "thick": "thick",
     "possible": "possible",
 }
+
+
+class UploadResult(NamedTuple):
+    total_flakes: int
+    zip_size_mb: float
+    uploaded: bool
 
 
 def load_summary(seg_dir: Path) -> dict:
@@ -384,71 +391,76 @@ def find_scan_dir(chip_dir: Path) -> Path | None:
     return None
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Upload a find-flakes run to flakes.sharpelab.science",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python scripts/upload_run.py scans/run_20260220_1543/
-  python scripts/upload_run.py scans/run_20260220_1543/ --dry-run
-  python scripts/upload_run.py scans/run_20260220_1543/ --tier 1 --top 20
-  python scripts/upload_run.py scans/run_20260220_1543/ --user Sandesh --substrate 285nm
-""",
-    )
-    parser.add_argument("run_dir", type=Path, help="Find-flakes run directory")
-    parser.add_argument("--user", default=None, help="Scan user (default: from checkpoint notes or 'FlakeFinder')")
-    parser.add_argument("--material", default="hBN", help="Exfoliated material (default: hBN)")
-    parser.add_argument("--substrate", default="285nm", help="Chip thickness / substrate (default: 285nm)")
-    parser.add_argument("--tier", type=int, default=1, help="Max tier to include (default: 1)")
-    parser.add_argument("--top", type=int, default=None, help="Max flakes per chip (default: all passing tier filter)")
-    parser.add_argument("--dry-run", action="store_true", help="Build ZIP but don't upload")
-    parser.add_argument("-j", "--jobs", type=int, default=4, help="Parallel workers for eval_img rendering")
-    parser.add_argument("--name", default=None, help="Scan name override (default: run directory name)")
-    args = parser.parse_args()
+def _resolve_user(run_dir: Path, user: str | None) -> str:
+    """Resolve upload user from explicit value, checkpoint notes, or default."""
+    if user is not None:
+        return user
+    cp_path = run_dir / "checkpoint.json"
+    if cp_path.exists():
+        with open(cp_path) as f:
+            cp = json.load(f)
+        notes = cp.get("notes", "")
+        for line in notes.split("\n"):
+            if line.lower().startswith("operator:"):
+                return line.split(":", 1)[1].strip()
+    return "FlakeFinder"
 
-    run_dir = args.run_dir.resolve()
+
+def run(
+    run_dir: Path,
+    *,
+    user: str | None = None,
+    material: str = "hBN",
+    substrate: str = "285nm",
+    tier: int = 1,
+    top: int | None = None,
+    dry_run: bool = False,
+    jobs: int = 4,
+    name: str | None = None,
+) -> UploadResult:
+    """Package and upload a find-flakes run.
+
+    Args:
+        run_dir: Path to the run directory.
+        user: Scan user name (resolved from checkpoint if None).
+        material: Exfoliated material label.
+        substrate: Chip thickness / substrate label.
+        tier: Max tier to include.
+        top: Max flakes per chip (None = all passing tier filter).
+        dry_run: Build ZIP but don't upload.
+        jobs: Parallel workers for eval_img rendering.
+        name: Scan name override (default: run directory name).
+
+    Returns:
+        UploadResult with flake count, ZIP size, and upload status.
+
+    Raises:
+        FileNotFoundError: If run_dir or required files don't exist.
+        RuntimeError: If no flakes pass the tier filter.
+    """
+    run_dir = run_dir.resolve()
     if not run_dir.exists():
-        print(f"Error: {run_dir} does not exist", file=sys.stderr)
-        return 1
+        raise FileNotFoundError(f"Run directory does not exist: {run_dir}")
 
-    scan_name = args.name or run_dir.name
-
-    # Resolve user from checkpoint notes if not provided
-    user = args.user
-    if user is None:
-        cp_path = run_dir / "checkpoint.json"
-        if cp_path.exists():
-            with open(cp_path) as f:
-                cp = json.load(f)
-            notes = cp.get("notes", "")
-            # Try to extract "Operator: Name" from notes
-            for line in notes.split("\n"):
-                if line.lower().startswith("operator:"):
-                    user = line.split(":", 1)[1].strip()
-                    break
-        if user is None:
-            user = "FlakeFinder"
+    scan_name = name or run_dir.name
+    resolved_user = _resolve_user(run_dir, user)
 
     # Discover chips
     chip_indices = discover_chips(run_dir)
     if not chip_indices:
-        print("Error: no chips with seg/summary.json found", file=sys.stderr)
-        return 1
-    print(f"Found {len(chip_indices)} chips with segmentation data: {chip_indices}")
+        raise FileNotFoundError("No chips with seg/summary.json found")
+    print(f"[upload] {len(chip_indices)} chips with segmentation data")
 
     # Find overview stitch
     stitch_files = list(run_dir.glob("overview_*_stitch.jpg"))
     if not stitch_files:
-        print("Error: no overview stitch image found", file=sys.stderr)
-        return 1
+        raise FileNotFoundError("No overview stitch image found")
     stitch_path = stitch_files[0]
 
     # Load stitch metadata for coordinate mapping
     stitch_meta_path = stitch_path.with_name(stitch_path.stem + "_meta.json")
     if not stitch_meta_path.exists():
-        print(f"Error: no stitch metadata at {stitch_meta_path}", file=sys.stderr)
-        return 1
+        raise FileNotFoundError(f"No stitch metadata at {stitch_meta_path}")
     with open(stitch_meta_path) as f:
         stitch_meta = json.load(f)
     stage_bounds = stitch_meta["stage_bounds_um"]
@@ -460,14 +472,13 @@ Examples:
         upload_dir.mkdir()
 
         # Scan-level meta.json
-        scan_meta = build_scan_meta(run_dir, user, args.material, args.substrate)
+        scan_meta = build_scan_meta(run_dir, resolved_user, material, substrate)
         with open(upload_dir / "meta.json", "w") as f:
             json.dump(scan_meta, f, indent=2)
-        print(f"Scan: {scan_name} (user={user}, material={args.material}, substrate={args.substrate})")
+        print(f"[upload] {scan_name} (user={resolved_user}, material={material}, substrate={substrate})")
 
         # overview_compressed.jpg
         overview_compressed_path = upload_dir / "overview_compressed.jpg"
-        print(f"Generating overview_compressed.jpg from {stitch_path.name}...")
         make_overview_compressed(stitch_path, overview_compressed_path)
 
         # Load overview for marking
@@ -477,9 +488,7 @@ Examples:
         # Process each chip
         total_flakes = 0
         eval_img_jobs: list[tuple] = []
-        # Deferred work: (chip_upload_dir, flake_idx, det, mag, src_path)
         revisit_copies: list[tuple[Path, str]] = []
-        # Deferred work: (overview_img, det, flake_number, output_path)
         overview_marked_jobs: list[tuple[float, float, int, str]] = []
 
         for chip_idx in chip_indices:
@@ -504,9 +513,8 @@ Examples:
             seg_material = summary.get("params", {}).get("material", "hbn")
 
             # Select flakes
-            flakes = select_flakes(summary, args.tier, args.top)
+            flakes = select_flakes(summary, tier, top)
             if not flakes:
-                print(f"  Chip {chip_idx}: no flakes passing tier<={args.tier} filter")
                 continue
 
             n_t1 = sum(1 for d in flakes if d.get("tier") == 1)
@@ -534,8 +542,6 @@ Examples:
                     revisit_img = find_revisit_image(chip_dir, det["frame"], det["det_id"], mag)
                     if revisit_img is not None:
                         mag_str = f"{mag:g}x"
-                        # Add image entry (reuse camera meta — not exact but the
-                        # website needs an entry per mag to create Image rows)
                         flake_meta["images"][mag_str] = {
                             "aperture": 6,
                             "light": 6.2,
@@ -549,7 +555,6 @@ Examples:
                                 int(camera_meta["white_balance_bgr"][0] * 25),  # B
                             ],
                         }
-                        # Queue file copy
                         revisit_copies.append((revisit_img, str(flake_dir / f"{mag_str}.png")))
 
                 with open(flake_dir / "meta.json", "w") as f:
@@ -557,7 +562,6 @@ Examples:
 
                 # Queue eval_img rendering
                 frame_path = str(scan_dir / f"{det['frame']}.jpg")
-                # Load contour from per-frame JSON
                 geom = load_frame_geometry(seg_dir, det["frame"], det["det_id"])
                 contour = geom.get("contour") if geom else None
                 eval_img_path = str(flake_dir / "eval_img.jpg")
@@ -572,17 +576,15 @@ Examples:
                 total_flakes += 1
 
         if total_flakes == 0:
-            print("Error: no flakes to upload", file=sys.stderr)
-            return 1
+            raise RuntimeError("No flakes pass the tier filter")
 
-        print(f"\nTotal: {total_flakes} flakes across {len(chip_indices)} chips")
+        print(f"[upload] Packaging {total_flakes} flakes...")
 
         # Render eval images in parallel
-        print(f"Rendering {len(eval_img_jobs)} eval images ({args.jobs} workers)...")
         t0 = time.monotonic()
         rendered = 0
         failed = 0
-        with ProcessPoolExecutor(max_workers=args.jobs) as pool:
+        with ProcessPoolExecutor(max_workers=jobs) as pool:
             futures = {pool.submit(_render_and_save, job): job for job in eval_img_jobs}
             for fut in as_completed(futures):
                 result = fut.result()
@@ -591,12 +593,11 @@ Examples:
                 else:
                     failed += 1
         elapsed = time.monotonic() - t0
-        print(f"  Rendered {rendered} eval images in {elapsed:.1f}s ({rendered / max(elapsed, 0.001):.0f}/s)")
+        print(f"  Rendered {rendered} eval images in {elapsed:.1f}s")
         if failed:
             print(f"  WARNING: {failed} eval images failed to render")
 
         # Generate overview_marked images
-        print(f"Generating {len(overview_marked_jobs)} overview_marked images...")
         for stage_x, stage_y, flake_number, output_path in overview_marked_jobs:
             marked = make_overview_marked(
                 overview_compressed,
@@ -610,27 +611,22 @@ Examples:
 
         # Copy revisit images
         if revisit_copies:
-            print(f"Copying {len(revisit_copies)} revisit images...")
             for src, dst in revisit_copies:
                 shutil.copy2(src, dst)
 
         # Create ZIP
-        print("Creating ZIP archive...")
         zip_path = Path(tmp_root) / scan_name
         zip_file = shutil.make_archive(str(zip_path), "zip", str(upload_dir))
         zip_size_mb = Path(zip_file).stat().st_size / (1024 * 1024)
-        print(f"  ZIP: {zip_file} ({zip_size_mb:.1f} MB)")
 
-        if args.dry_run:
-            # Copy ZIP to current directory for inspection
+        if dry_run:
             final_zip = Path(f"{scan_name}_upload.zip")
             shutil.copy2(zip_file, final_zip)
-            print(f"\n[dry-run] ZIP saved to {final_zip}")
-            print("  Upload skipped. Inspect the ZIP to verify contents.")
-            return 0
+            print(f"[upload] Dry-run: ZIP saved to {final_zip} ({zip_size_mb:.1f} MB)")
+            return UploadResult(total_flakes=total_flakes, zip_size_mb=zip_size_mb, uploaded=False)
 
         # Upload
-        print(f"\nUploading to {BASE_URL}/api/upload ...")
+        print(f"[upload] Uploading {zip_size_mb:.1f} MB...")
         t0 = time.monotonic()
         with open(zip_file, "rb") as f:
             resp = requests.post(
@@ -642,14 +638,55 @@ Examples:
         elapsed = time.monotonic() - t0
 
         if resp.status_code == 200:
-            print(f"  Upload successful ({elapsed:.1f}s, {zip_size_mb / max(elapsed, 0.001):.1f} MB/s)")
-            print(f"  View at: {BASE_URL}")
-            return 0
+            print(f"[upload] Complete ({elapsed:.1f}s, {zip_size_mb / max(elapsed, 0.001):.1f} MB/s)")
+            print(f"[upload] View at: {BASE_URL}")
+            return UploadResult(total_flakes=total_flakes, zip_size_mb=zip_size_mb, uploaded=True)
         else:
-            print(f"  Upload FAILED: {resp.status_code} {resp.reason}", file=sys.stderr)
+            msg = f"Upload failed: {resp.status_code} {resp.reason}"
             with contextlib.suppress(Exception):
-                print(f"  Response: {resp.text[:500]}", file=sys.stderr)
-            return 1
+                msg += f" — {resp.text[:500]}"
+            raise RuntimeError(msg)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Upload a find-flakes run to flakes.sharpelab.science",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  sls upload scans/run_20260220_1543/
+  sls upload scans/run_20260220_1543/ --dry-run
+  sls upload scans/run_20260220_1543/ --tier 1 --top 20
+  sls upload scans/run_20260220_1543/ --user Sandesh --substrate 285nm
+""",
+    )
+    parser.add_argument("run_dir", type=Path, help="Find-flakes run directory")
+    parser.add_argument("--user", default=None, help="Scan user (default: from checkpoint notes or 'FlakeFinder')")
+    parser.add_argument("--material", default="hBN", help="Exfoliated material (default: hBN)")
+    parser.add_argument("--substrate", default="285nm", help="Chip thickness / substrate (default: 285nm)")
+    parser.add_argument("--tier", type=int, default=1, help="Max tier to include (default: 1)")
+    parser.add_argument("--top", type=int, default=None, help="Max flakes per chip (default: all passing tier filter)")
+    parser.add_argument("--dry-run", action="store_true", help="Build ZIP but don't upload")
+    parser.add_argument("-j", "--jobs", type=int, default=4, help="Parallel workers for eval_img rendering")
+    parser.add_argument("--name", default=None, help="Scan name override (default: run directory name)")
+    args = parser.parse_args()
+
+    try:
+        run(
+            args.run_dir,
+            user=args.user,
+            material=args.material,
+            substrate=args.substrate,
+            tier=args.tier,
+            top=args.top,
+            dry_run=args.dry_run,
+            jobs=args.jobs,
+            name=args.name,
+        )
+        return 0
+    except (FileNotFoundError, RuntimeError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
