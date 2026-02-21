@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import sys
 import tkinter as tk
 from datetime import datetime
@@ -158,6 +159,43 @@ def _load_all_detections(run_dir: Path, n_chips: int) -> tuple[list[Detection], 
     return all_dets, scan_dirs, um_per_px
 
 
+# Type alias for revisit lookup: (chip_idx, frame_name, det_idx) → {mag_str: image_path}
+RevisitLookup = dict[tuple[int, str, int], dict[str, Path]]
+
+_REVISIT_DIR_RE = re.compile(r"revisit_(\d+)x$")
+_REVISIT_FILE_RE = re.compile(r"frame_(\d+)_d(\d+)")
+
+
+def _build_revisit_lookup(run_dir: Path, n_chips: int) -> RevisitLookup:
+    """Build lookup from (chip_idx, frame_name, det_idx) to {mag: image_path}.
+
+    Scans pipeline revisit dirs: chip_N/revisit_{mag}x/ (e.g. revisit_20x, revisit_50x).
+    """
+    lookup: RevisitLookup = {}
+    for chip_idx in range(n_chips):
+        chip_dir = run_dir / f"chip_{chip_idx}"
+        if not chip_dir.is_dir():
+            continue
+        for revisit_dir in chip_dir.iterdir():
+            if not revisit_dir.is_dir():
+                continue
+            m = _REVISIT_DIR_RE.match(revisit_dir.name)
+            if not m:
+                continue
+            mag = m.group(1) + "x"
+            for img_path in revisit_dir.glob("*.png"):
+                fm = _REVISIT_FILE_RE.search(img_path.stem)
+                if not fm:
+                    continue
+                frame_name = f"frame_{fm.group(1)}"
+                det_idx = int(fm.group(2))
+                key = (chip_idx, frame_name, det_idx)
+                if key not in lookup:
+                    lookup[key] = {}
+                lookup[key][mag] = img_path
+    return lookup
+
+
 # ── Formatting helpers ───────────────────────────────────────────────
 
 
@@ -185,7 +223,7 @@ OVERVIEW_THUMB_MAX = 400
 class ImagePopup(tk.Toplevel):
     """Resizable image popup with contain scaling. Dismiss with Escape or click."""
 
-    def __init__(self, parent: tk.Tk, img_path: Path):
+    def __init__(self, parent: tk.Tk | tk.Toplevel, img_path: Path):
         super().__init__(parent)
         self.withdraw()  # hide until fully rendered
         self.title(img_path.name)
@@ -254,6 +292,7 @@ class FlakeInspectorContext(NamedTuple):
     on_annotation_change: Callable[[str, str | None], None]
     um_per_px: float
     total_count: int
+    revisit_lookup: RevisitLookup
 
 
 class FlakeInspector(tk.Toplevel):
@@ -285,6 +324,8 @@ class FlakeInspector(tk.Toplevel):
         self._grid_idx = grid_idx
         self._photo: ImageTk.PhotoImage | None = None
         self._overview_photo: ImageTk.PhotoImage | None = None
+        self._revisit_photos: dict[str, ImageTk.PhotoImage] = {}
+        self._revisit_tabs: dict[str, ttk.Frame] = {}  # mag -> tab widget
 
         # Zoom state: center in source image coords
         bx, by, bw, bh = det["bbox"]
@@ -310,6 +351,7 @@ class FlakeInspector(tk.Toplevel):
         self._update_annotation_buttons()
         self._update_overview_dot()
         self._update_metrics()
+        self._update_revisit_tabs()
 
         # Bindings
         self._frame_canvas.bind("<MouseWheel>", self._on_scroll)
@@ -356,9 +398,11 @@ class FlakeInspector(tk.Toplevel):
         right_pane = ttk.Frame(self._paned, width=CONTEXT_PANE_WIDTH)
         self._paned.add(right_pane, weight=0)
 
-        # Notebook for overview (+ future revisit tabs)
-        self._notebook = ttk.Notebook(right_pane)
+        # Notebook for overview + revisit tabs
+        self._notebook = ttk.Notebook(right_pane, takefocus=False)
         self._notebook.pack(fill="both", expand=True, padx=2, pady=2)
+        # Refocus toplevel after tab clicks so arrow keys navigate detections, not tabs
+        self._notebook.bind("<<NotebookTabChanged>>", lambda _: self.focus_set())
 
         # Overview tab
         overview_frame = ttk.Frame(self._notebook)
@@ -512,6 +556,59 @@ class FlakeInspector(tk.Toplevel):
             if key in self._metrics_labels:
                 self._metrics_labels[key].configure(text=text)
 
+    def _revisit_key(self) -> tuple[int, str, int]:
+        """Key into the revisit lookup for the current detection."""
+        return (
+            self._det.get("chip_idx", 0),
+            self._det.get("frame", ""),
+            self._det.get("det_idx", 0),
+        )
+
+    def _update_revisit_tabs(self):
+        """Add/remove revisit image tabs based on current detection."""
+        # Remember which tab is selected so we can restore it
+        selected_text = None
+        with contextlib.suppress(tk.TclError, KeyError):
+            selected_text = self._notebook.tab(self._notebook.select(), "text")
+
+        # Remove old revisit tabs
+        for tab_widget in self._revisit_tabs.values():
+            self._notebook.forget(tab_widget)
+            tab_widget.destroy()
+        self._revisit_tabs.clear()
+        self._revisit_photos.clear()
+
+        if not self._ctx:
+            return
+        mags = self._ctx.revisit_lookup.get(self._revisit_key(), {})
+        for mag in sorted(mags, key=lambda m: int(m.rstrip("x"))):
+            img_path = mags[mag]
+            tab_frame = ttk.Frame(self._notebook)
+            self._notebook.add(tab_frame, text=mag)
+            self._revisit_tabs[mag] = tab_frame
+
+            try:
+                img = Image.open(img_path)
+                img.load()
+                w, h = img.size
+                max_dim = CONTEXT_PANE_WIDTH - 10
+                scale = min(max_dim / w, max_dim / h)
+                if scale < 1.0:
+                    thumb = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+                else:
+                    thumb = img
+                photo = ImageTk.PhotoImage(thumb)
+                self._revisit_photos[mag] = photo
+                lbl = ttk.Label(tab_frame, image=photo, cursor="hand2")
+                lbl.pack(fill="both", expand=True)
+                lbl.bind("<Button-1>", lambda _e, p=img_path: ImagePopup(self, p))
+            except Exception:
+                ttk.Label(tab_frame, text=f"Could not load {mag}", foreground="red").pack(pady=10)
+
+        # Restore previously selected tab if still present
+        if selected_text and selected_text in self._revisit_tabs:
+            self._notebook.select(self._revisit_tabs[selected_text])
+
     def _navigate(self, delta: int):
         if not self._on_navigate:
             return
@@ -533,6 +630,7 @@ class FlakeInspector(tk.Toplevel):
         self._update_annotation_buttons()
         self._update_overview_dot()
         self._update_metrics()
+        self._update_revisit_tabs()
         self._render_frame()
 
     def _on_configure(self, event):
@@ -666,12 +764,44 @@ class RunViewerGUI:
         self._overview_stitch_size_px: tuple[int, int] | None = None
         self._overview_stitch_meta: dict | None = None
 
+        # Revisit images
+        self._revisit_lookup: RevisitLookup = {}
+
         # Annotations
         self._annotations: dict[str, str] = {}
         self._thumb_borders: dict[str, tk.Frame] = {}
 
+        self._state_path = scans_dir / ".viewer_state.json"
+
         self._build_ui()
+        self._restore_geometry()
         self._refresh_runs()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _restore_geometry(self):
+        """Restore window geometry from saved state."""
+        if self._state_path.exists():
+            with contextlib.suppress(Exception):
+                with open(self._state_path) as f:
+                    state = json.load(f)
+                if geo := state.get("geometry"):
+                    self.root.geometry(geo)
+
+    def _save_geometry(self):
+        """Save window geometry to state file."""
+        with contextlib.suppress(Exception):
+            state = {}
+            if self._state_path.exists():
+                with open(self._state_path) as f:
+                    state = json.load(f)
+            state["geometry"] = self.root.geometry()
+            with open(self._state_path, "w") as f:
+                json.dump(state, f, indent=2)
+
+    def _on_close(self):
+        """Save state and exit."""
+        self._save_geometry()
+        self.root.destroy()
 
     def _build_ui(self):
         # Main horizontal paned window
@@ -829,6 +959,7 @@ class RunViewerGUI:
         self._overview_stitch_thumb = None
         self._overview_stitch_size_px = None
         self._overview_stitch_meta = None
+        self._revisit_lookup = {}
         self._annotations = {}
         self._thumb_borders = {}
 
@@ -915,6 +1046,7 @@ class RunViewerGUI:
             return
 
         self._all_detections, self._chip_scan_dirs, self._um_per_px = _load_all_detections(run.path, run.n_chips)
+        self._revisit_lookup = _build_revisit_lookup(run.path, run.n_chips)
         self._load_overview_stitch(run.path)
         self._load_annotations(run.path)
 
@@ -1432,6 +1564,7 @@ class RunViewerGUI:
             on_annotation_change=self._on_annotation_change,
             um_per_px=self._um_per_px,
             total_count=len(self._last_top),
+            revisit_lookup=self._revisit_lookup,
         )
 
         FlakeInspector(

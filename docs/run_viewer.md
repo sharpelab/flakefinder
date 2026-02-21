@@ -111,7 +111,7 @@ Clicking a detection thumbnail opens the full-featured inspector popup:
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Layout**: Horizontal `PanedWindow` — left is zoomable frame canvas, right is context pane with `ttk.Notebook` (overview tab + revisit stubs) and metrics panel.
+**Layout**: Horizontal `PanedWindow` — left is zoomable frame canvas, right is context pane with `ttk.Notebook` (overview tab + revisit mag tabs when available) and metrics panel.
 
 **Keyboard shortcuts**:
 | Key | Action |
@@ -125,6 +125,8 @@ Clicking a detection thumbnail opens the full-featured inspector popup:
 | Escape | Close inspector |
 
 **Overview locator**: Loads `overview_*_stitch.jpg` + `*_stitch_meta.json` once per run, downscales to ≤400px thumbnail. Red dot shows detection's stage position mapped from stage coordinates to pixel coordinates using `stage_bounds_um` and `scale_um_per_px`. Graceful fallback: no stitch meta → overview without dot; no overview → placeholder label.
+
+**Revisit tabs**: At run load, `_build_revisit_lookup()` globs `chip_N/revisit_{mag}x/*.png` to build a `(chip_idx, frame_name, det_idx) → {mag: path}` lookup. When a detection has revisit images, tabs (e.g. "20x", "50x") appear in the notebook. Tabs are dynamically added/removed on navigation; the previously selected tab is preserved when navigating between detections that share the same mag. Click a revisit thumbnail to open a full-resolution `ImagePopup`.
 
 **Metrics panel**: Shows score, tier, R/G/B contrast, size (µm²), cal_dist, perim_ratio, aspect_ratio, entropy, grad_energy, kurtosis, and stage coordinates (or "N/A" if unavailable).
 
@@ -154,6 +156,7 @@ Mousewheel bound once at startup via `bind_all`. A `_scroll_active` boolean flag
 | Overview locator | `overview_*_stitch.jpg` + `*_stitch_meta.json` | `stage_bounds_um`, `scale_um_per_px`, `image_size_px` |
 | Detection data | `chip_N/seg/summary.json` | `detections_by_frame` (includes `stage_x/y`) |
 | Frame images | `chip_N/scan_*/frame_NNNN.jpg` | Raw scan frames |
+| Revisit images | `chip_N/revisit_{mag}x/*.png` | Filename: `rank*_frame_{NNNN}_d{N}_{mag}x.png` |
 | Annotations | `annotations.json` | `{key: "good"|"bad"}` |
 
 ## Filter Slider Ranges
