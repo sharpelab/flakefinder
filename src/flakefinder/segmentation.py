@@ -9,6 +9,7 @@ find_flakes.py.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -71,7 +72,118 @@ class Detection(_DetectionBase, total=False):
 
 
 # ============================================================================
-# Detector configuration (from scripts/detector_config.py)
+# Scoring functions (module-level for ProcessPoolExecutor pickle safety)
+# ============================================================================
+
+
+def _score_hbn_thin(det: Detection) -> tuple[int, float]:
+    """hBN thin: all penalties (G, AR, ge, cal_dist)."""
+    pr = det["perim_ratio"]
+    cd = det["cal_dist"]
+    g = det["contrast_rgb"][1]
+    r = det["contrast_rgb"][0]
+    ent = det.get("entropy", det.get("g_entropy", 99.0))
+    ar = det.get("aspect_ratio", 1.0)
+    size_um2 = det["size_um2"]
+    ge = det.get("grad_energy", 0)
+
+    if pr < 1.50 and cd < 0.3 and g >= 0.0 and g < 1.2 and r < -0.5 and ent < 99.0 and ar < 6.0 and size_um2 >= 0.0:
+        tier = 1
+    elif pr < 1.35 and cd < 0.3 and ent < 4.5:
+        tier = 2
+    else:
+        tier = 3
+
+    ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
+    g_penalty = 1.0 / (1.0 + 2.0 * max(g - 0.5, 0))
+    score = round(
+        float(np.log2(max(size_um2, 1.0)) * np.exp(-cd * 8) * (1.0 / (1.0 + ge)) * ar_penalty * g_penalty),
+        4,
+    )
+    return tier, score
+
+
+def _score_hbn_medium(det: Detection) -> tuple[int, float]:
+    """hBN medium: all penalties, tighter cal_dist gate, min size for T1."""
+    pr = det["perim_ratio"]
+    cd = det["cal_dist"]
+    g = det["contrast_rgb"][1]
+    r = det["contrast_rgb"][0]
+    ent = det.get("entropy", det.get("g_entropy", 99.0))
+    ar = det.get("aspect_ratio", 1.0)
+    size_um2 = det["size_um2"]
+    ge = det.get("grad_energy", 0)
+
+    if pr < 1.50 and cd < 0.15 and g >= 0.0 and g < 3.0 and r < 0.6 and ent < 99.0 and ar < 6.0 and size_um2 >= 500.0:
+        tier = 1
+    elif pr < 1.35 and cd < 0.3 and ent < 4.5:
+        tier = 2
+    else:
+        tier = 3
+
+    ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
+    g_penalty = 1.0 / (1.0 + 2.0 * max(g - 0.5, 0))
+    score = round(
+        float(np.log2(max(size_um2, 1.0)) * np.exp(-cd * 8) * (1.0 / (1.0 + ge)) * ar_penalty * g_penalty),
+        4,
+    )
+    return tier, score
+
+
+def _score_hbn_thick(det: Detection) -> tuple[int, float]:
+    """hBN thick: no G or AR penalties (high G expected, AR varies)."""
+    pr = det["perim_ratio"]
+    cd = det["cal_dist"]
+    g = det["contrast_rgb"][1]
+    size_um2 = det["size_um2"]
+    ge = det.get("grad_energy", 0)
+
+    if pr < 1.50 and cd < 0.3 and g >= 0.8 and size_um2 >= 500.0:
+        tier = 1
+    elif pr < 1.50 and cd < 0.5:
+        tier = 2
+    else:
+        tier = 3
+
+    score = round(
+        float(np.log2(max(size_um2, 1.0)) * np.exp(-cd * 8) * (1.0 / (1.0 + ge))),
+        4,
+    )
+    return tier, score
+
+
+def _score_graphene(det: Detection) -> tuple[int, float]:
+    """Graphene: all penalties, wide tier gates (stub)."""
+    pr = det["perim_ratio"]
+    cd = det["cal_dist"]
+    g = det["contrast_rgb"][1]
+    r = det["contrast_rgb"][0]
+    ent = det.get("entropy", det.get("g_entropy", 99.0))
+    ar = det.get("aspect_ratio", 1.0)
+    size_um2 = det["size_um2"]
+    ge = det.get("grad_energy", 0)
+
+    if pr < 1.20 and cd < 0.3 and g >= -99.0 and g < 4.0 and r < 99.0 and ent < 99.0 and ar < 6.0 and size_um2 >= 0.0:
+        tier = 1
+    elif pr < 1.35 and cd < 0.3 and ent < 99.0:
+        tier = 2
+    else:
+        tier = 3
+
+    ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
+    g_penalty = 1.0 / (1.0 + 2.0 * max(g - 0.5, 0))
+    score = round(
+        float(np.log2(max(size_um2, 1.0)) * np.exp(-cd * 8) * (1.0 / (1.0 + ge)) * ar_penalty * g_penalty),
+        4,
+    )
+    return tier, score
+
+
+ScoreFn = Callable[[Detection], tuple[int, float]]
+
+
+# ============================================================================
+# Detector configuration
 # ============================================================================
 
 
@@ -104,13 +216,17 @@ class DetectorConfig:
     g_medium_max: float  # G <= this -> medium, else thick
     non_match_label: str  # label for detections far from cal curve
 
-    # -- Scoring tier gates --
+    # -- Scoring --
+    score_fn: ScoreFn
+
+    # -- Viewer filter defaults (not used by scoring) --
     tier1_perim_ratio: float
     tier1_cal_dist: float
     tier1_g_min: float
     tier1_g_max: float
     tier1_r_max: float
     tier1_entropy_max: float
+    tier1_min_size_um2: float
     tier2_perim_ratio: float
     tier2_cal_dist: float
     tier2_entropy_max: float
@@ -143,36 +259,8 @@ class DetectorConfig:
         return self.non_match_label
 
     def score_detection(self, det: Detection) -> tuple[int, float]:
-        """Compute (tier, score) for a detection dict."""
-        pr = det["perim_ratio"]
-        cd = det["cal_dist"]
-        g = det["contrast_rgb"][1]
-        ent = det.get("entropy", det.get("g_entropy", 99.0))
-        r = det["contrast_rgb"][0]
-        ar = det.get("aspect_ratio", 1.0)
-        if (
-            pr < self.tier1_perim_ratio
-            and cd < self.tier1_cal_dist
-            and g >= self.tier1_g_min
-            and g < self.tier1_g_max
-            and r < self.tier1_r_max
-            and ent < self.tier1_entropy_max
-            and ar < 6.0
-        ):
-            tier = 1
-        elif pr < self.tier2_perim_ratio and cd < self.tier2_cal_dist and ent < self.tier2_entropy_max:
-            tier = 2
-        else:
-            tier = 3
-        ge = det.get("grad_energy", 0)
-        size_um2 = det.get("size_um2", det["size_px"] * 0.52)
-        ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
-        g_penalty = 1.0 / (1.0 + 2.0 * max(g - 0.5, 0))
-        score = round(
-            np.log2(max(size_um2, 1.0)) * np.exp(-cd * 8) * (1.0 / (1.0 + ge)) * ar_penalty * g_penalty,
-            4,
-        )
-        return tier, score
+        """Compute (tier, score) via preset-specific scoring function."""
+        return self.score_fn(det)
 
     @classmethod
     def hbn(cls) -> DetectorConfig:
@@ -195,12 +283,43 @@ class DetectorConfig:
             g_thin_max=1.0,
             g_medium_max=2.5,
             non_match_label="non-hBN",
+            score_fn=_score_hbn_thin,
             tier1_perim_ratio=1.50,
             tier1_cal_dist=0.3,
             tier1_g_min=0.0,
             tier1_g_max=1.2,
             tier1_r_max=-0.5,
             tier1_entropy_max=99.0,
+            tier1_min_size_um2=0.0,
+            tier2_perim_ratio=1.35,
+            tier2_cal_dist=0.3,
+            tier2_entropy_max=4.5,
+        )
+
+    @classmethod
+    def hbn_medium(cls) -> DetectorConfig:
+        """hBN medium flake detection preset."""
+        return cls(
+            contrast_mode=ContrastMode.ABOVE,
+            contrast_offset=15.0,
+            min_size_um2=400.0,
+            edge_margin_px=50,
+            morph_kernel_size=5,
+            cal_poly=(0.193, -0.217, -0.604),
+            cal_g_range=(-0.5, 6.0),
+            cal_dist_match=0.5,
+            cal_dist_possible=1.0,
+            g_thin_max=1.0,
+            g_medium_max=2.5,
+            non_match_label="non-hBN",
+            score_fn=_score_hbn_medium,
+            tier1_perim_ratio=1.50,
+            tier1_cal_dist=0.15,
+            tier1_g_min=0.0,
+            tier1_g_max=3.0,
+            tier1_r_max=0.6,
+            tier1_entropy_max=99.0,
+            tier1_min_size_um2=500.0,
             tier2_perim_ratio=1.35,
             tier2_cal_dist=0.3,
             tier2_entropy_max=4.5,
@@ -222,15 +341,17 @@ class DetectorConfig:
             g_thin_max=1.0,
             g_medium_max=2.5,
             non_match_label="non-hBN",
-            tier1_perim_ratio=1.20,
+            score_fn=_score_hbn_thick,
+            tier1_perim_ratio=1.50,
             tier1_cal_dist=0.3,
-            tier1_g_min=-99.0,
+            tier1_g_min=0.8,
             tier1_g_max=99.0,
             tier1_r_max=99.0,
-            tier1_entropy_max=4.5,
-            tier2_perim_ratio=1.35,
-            tier2_cal_dist=0.3,
-            tier2_entropy_max=5.5,
+            tier1_entropy_max=99.0,
+            tier1_min_size_um2=500.0,
+            tier2_perim_ratio=1.50,
+            tier2_cal_dist=0.5,
+            tier2_entropy_max=99.0,
         )
 
     @classmethod
@@ -249,12 +370,14 @@ class DetectorConfig:
             g_thin_max=-1.0,
             g_medium_max=-2.5,
             non_match_label="non-graphene",
+            score_fn=_score_graphene,
             tier1_perim_ratio=1.20,
             tier1_cal_dist=0.3,
             tier1_g_min=-99.0,
             tier1_g_max=4.0,
             tier1_r_max=99.0,
             tier1_entropy_max=99.0,
+            tier1_min_size_um2=0.0,
             tier2_perim_ratio=1.35,
             tier2_cal_dist=0.3,
             tier2_entropy_max=99.0,
@@ -263,7 +386,13 @@ class DetectorConfig:
     @classmethod
     def from_material(cls, name: str) -> DetectorConfig:
         """Create config from material name."""
-        presets = {"hbn": cls.hbn, "hbn_thin": cls.hbn_thin, "hbn_thick": cls.hbn_thick, "graphene": cls.graphene}
+        presets = {
+            "hbn": cls.hbn,
+            "hbn_thin": cls.hbn_thin,
+            "hbn_medium": cls.hbn_medium,
+            "hbn_thick": cls.hbn_thick,
+            "graphene": cls.graphene,
+        }
         if name not in presets:
             raise ValueError(f"Unknown material: {name!r}. Choose from: {', '.join(presets)}")
         return presets[name]()
