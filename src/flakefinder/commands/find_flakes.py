@@ -63,7 +63,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, TypedDict
 
 from flakefinder.cli_utils import park_microscope
-from flakefinder.commands import analyze_focus_map, chip_scan, find_chips, focus_map, revisit, scan, stage, stitch
+from flakefinder.commands import (
+    analyze_focus_map,
+    chip_scan,
+    find_chips,
+    focus_map,
+    revisit,
+    scan,
+    stage,
+    stitch,
+    upload,
+)
 from flakefinder.data_utils import add_stage_coords
 from flakefinder.leica import Microscope
 from flakefinder.scan_utils import (
@@ -333,6 +343,8 @@ class _Preflight:
     focus_map_gain: float
     focus_map_exposure_ms: float
     seg: SegConfig
+    upload: bool
+    substrate: str
     args: argparse.Namespace  # raw CLI args for forwarding
 
 
@@ -406,6 +418,12 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         revisit_top=args.revisit_top,
     )
 
+    # Upload config
+    do_upload = args.upload
+    substrate = args.substrate or ""
+    if do_upload and not substrate:
+        raise SystemExit("Error: --substrate is required when using --upload")
+
     return _Preflight(
         run_dir=run_dir,
         overview_dir=overview_dir,
@@ -423,6 +441,8 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         focus_map_gain=preset["focus_map_gain"],
         focus_map_exposure_ms=preset["focus_map_exposure_ms"],
         seg=seg,
+        upload=do_upload,
+        substrate=substrate,
         args=args,
     )
 
@@ -605,6 +625,20 @@ Examples:
         default=None,
         help="Cap revisit to top N tier-1 detections per chip (default: all T1)",
     )
+
+    # Upload (post-processing, after microscope is released)
+    upload_group = parser.add_argument_group("Upload")
+    upload_group.add_argument(
+        "--upload",
+        action="store_true",
+        help="Upload results to flakes.sharpelab.science after pipeline completes",
+    )
+    upload_group.add_argument(
+        "--substrate",
+        type=str,
+        default=None,
+        help="Chip substrate thickness (e.g. 90nm, 285nm). Required with --upload.",
+    )
     return parser
 
 
@@ -640,6 +674,8 @@ def _print_header(p: _Preflight) -> None:
             print(f"Revisit:       {top_str}T1 → {mags} (capture after scans)")
     else:
         print("Segmentation:  disabled")
+    if p.upload:
+        print(f"Upload:        flakes.sharpelab.science (substrate={p.substrate})")
     if args.dry_run:
         print("Mode:          DRY RUN")
     if args.pause:
@@ -1611,6 +1647,8 @@ def main() -> int:
                 f"\n  Per-chip steps: Focus Map -> Analyze -> {p.chip_scan_mag} Scan"
                 f"{seg_str}{revisit_str} (chips not yet detected)"
             )
+        if p.upload:
+            run_in_process(f"Upload to flakes.sharpelab.science (substrate={p.substrate})", lambda: None, dry_run=True)
         return 0
 
     # Create run directory and set up log tee
@@ -1622,9 +1660,10 @@ def main() -> int:
 
     try:
         _print_header(p)
+        rc = 1
         with Microscope() as scope:
             try:
-                return run(scope, p)
+                rc = run(scope, p)
             except KeyboardInterrupt:
                 with _always_console():
                     print("\n[interrupted] Parking microscope...")
@@ -1634,6 +1673,23 @@ def main() -> int:
                 except Exception:
                     print("[park failed]")
                 return 1
+
+        # Upload runs after microscope is released
+        if rc == 0 and p.upload:
+            checkpoint = load_checkpoint(p.run_dir)
+            if not step_done(checkpoint, "upload"):
+                try:
+                    upload.run(
+                        p.run_dir,
+                        material=p.seg.material,
+                        substrate=p.substrate,
+                    )
+                    mark_step(p.run_dir, checkpoint, "upload", 0)
+                except Exception as e:
+                    with _always_console():
+                        print(f"[upload] FAILED: {e}")
+
+        return rc
     finally:
         sys.stdout = sys.__stdout__
         sys.stderr = sys.__stderr__
