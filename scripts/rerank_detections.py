@@ -301,7 +301,7 @@ def main() -> int:
                 contour = full_det.get("contour")
                 if contour and len(contour) >= 3:
                     pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
-                    cv2.polylines(img, [pts], isClosed=True, color=(0, 255, 0), thickness=2)
+                    cv2.polylines(img, [pts], isClosed=True, color=(0, 255, 0), thickness=1)
 
                 # Crop with padding
                 bx, by, bw, bh = full_det["bbox"]
