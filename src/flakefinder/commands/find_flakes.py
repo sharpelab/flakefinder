@@ -74,6 +74,8 @@ from flakefinder.scan_utils import (
 )
 from flakefinder.types import AreaRect, GainRGB
 
+from flakefinder.segmentation import DetectorConfig
+
 if TYPE_CHECKING:
     from flakefinder.segmentation import Detection
 
