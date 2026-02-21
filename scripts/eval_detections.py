@@ -250,7 +250,12 @@ def main():
     )
     parser.add_argument("ref_dir", type=Path, help="Reference directory with Chip_N/Flake_M structure")
     parser.add_argument("--flatfield", type=Path, default=None, help="Flatfield .npy file")
-    parser.add_argument("--material", default="hbn", choices=["hbn", "graphene"], help="Material preset")
+    parser.add_argument(
+        "--material",
+        default="hbn",
+        choices=["hbn", "hbn_thin", "hbn_thick", "graphene"],
+        help="Material preset",
+    )
     parser.add_argument("--pixel-size", type=float, default=0.36, help="µm per pixel (20x bin3)")
     parser.add_argument("--contrast-offset", type=float, default=None, help="Override contrast offset from preset")
     parser.add_argument("--min-size-um", type=float, default=None, help="Override min detection area (µm²)")

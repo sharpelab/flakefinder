@@ -179,7 +179,7 @@ class DetectorConfig:
         return cls(
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=15.0,
-            min_size_um2=130.0,
+            min_size_um2=400.0,
             edge_margin_px=50,
             morph_kernel_size=5,
             cal_poly=(0.193, -0.217, -0.604),
@@ -192,7 +192,7 @@ class DetectorConfig:
             tier1_perim_ratio=1.20,
             tier1_cal_dist=0.3,
             tier1_g_min=0.0,
-            tier1_g_max=0.5,
+            tier1_g_max=0.8,
             tier1_r_max=-0.5,
             tier1_entropy_max=99.0,
             tier2_perim_ratio=1.35,
@@ -347,8 +347,9 @@ def _analyze_component(
     grad_energy = float(grad_mag[component].mean())
 
     # Histogram entropy of per-channel normalized contrast within blob
+    # Fixed range (-1, 1) so homogeneous blobs → low entropy, heterogeneous → high
     def _hist_entropy(vals: np.ndarray) -> float:
-        hist, _ = np.histogram(vals, bins=50)
+        hist, _ = np.histogram(vals, bins=50, range=(-1.0, 1.0))
         hist = hist[hist > 0]
         probs = hist / hist.sum()
         return float(-np.sum(probs * np.log2(probs)))

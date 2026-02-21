@@ -266,7 +266,12 @@ def main() -> int:
     )
     parser.add_argument("scan_dir", type=Path, help="Scan directory containing frame_NNNN.jpg files")
     parser.add_argument("--flatfield", type=Path, default=None, help="Flatfield .npy file")
-    parser.add_argument("--material", default="hbn", choices=["hbn", "graphene"], help="Material preset")
+    parser.add_argument(
+        "--material",
+        default="hbn",
+        choices=["hbn", "hbn_thin", "hbn_thick", "graphene"],
+        help="Material preset",
+    )
     parser.add_argument("--contrast-offset", type=float, default=None, help="Override contrast offset from preset")
     parser.add_argument("--min-size-um", type=float, default=None, help="Override min detection area (µm²)")
     parser.add_argument("--edge-margin", type=int, default=None, help="Override edge margin (px)")

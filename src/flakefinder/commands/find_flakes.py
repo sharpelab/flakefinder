@@ -572,7 +572,7 @@ Examples:
         "--material",
         type=str,
         default="hbn",
-        choices=["hbn", "graphene"],
+        choices=["hbn", "hbn_thin", "hbn_thick", "graphene"],
         help="Material preset for segmentation (default: hbn)",
     )
     seg_group.add_argument(

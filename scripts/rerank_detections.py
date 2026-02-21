@@ -330,7 +330,7 @@ def main() -> int:
                     crop_paths,
                     rows=n_rows,
                     cols=n_cols,
-                    max_dim=5000,
+                    max_dim=8000,
                     margin=4,
                     bg_color=(30, 30, 30),
                     labels=crop_labels,
