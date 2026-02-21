@@ -11,10 +11,9 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import json
-import subprocess
 import sys
-import threading
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
@@ -38,6 +37,7 @@ class RunInfo(NamedTuple):
     n_chips: int
     total_detections: int
     duration_s: float
+    notes: str
 
 
 def _parse_run_timestamp(name: str) -> datetime | None:
@@ -64,6 +64,7 @@ def _load_run_info(run_dir: Path) -> RunInfo | None:
     timestamp = _parse_run_timestamp(name)
     args = cp.get("args", {})
     preset = args.get("preset", "?")
+    notes = cp.get("notes", "") or ""
     n_chips = cp.get("n_chips") or 0
 
     # Sum detections across all chip seg summaries
@@ -90,6 +91,7 @@ def _load_run_info(run_dir: Path) -> RunInfo | None:
         n_chips=n_chips,
         total_detections=total_detections,
         duration_s=duration_s,
+        notes=notes,
     )
 
 
@@ -107,97 +109,50 @@ def _discover_runs(scans_dir: Path) -> list[RunInfo]:
     return runs
 
 
-class ChipInfo(NamedTuple):
-    """Per-chip data for the detail view."""
+def _load_all_detections(run_dir: Path, n_chips: int) -> tuple[list[Detection], dict[int, Path | None], float]:
+    """Load detections from all chips, tag each with chip_idx.
 
-    idx: int
-    has_seg: bool
-    tier_1: int
-    tier_2: int
-    tier_3: int
-    total_detections: int
-    crop_images: list[Path]
-    scatter_path: Path | None  # R-G scatter plot from rerank
-    revisit_images: list[Path]
-    scan_dir: Path | None  # for rerank --scan-dir
-    ranked_detections: list[Detection]  # top detections sorted by tier/score
-    um_per_px: float  # pixel size in µm (from summary.json params)
-
-
-def _load_chip_info(run_dir: Path, chip_idx: int) -> ChipInfo:
-    """Load chip detail data."""
-    chip_dir = run_dir / f"chip_{chip_idx}"
-    seg_dir = chip_dir / "seg"
-
-    has_seg = False
-    tier_1 = tier_2 = tier_3 = total_det = 0
-    crop_images: list[Path] = []
-    revisit_images: list[Path] = []
-    ranked_detections: list[Detection] = []
+    Returns (all_detections sorted by tier/score, chip_scan_dirs, um_per_px).
+    """
+    all_dets: list[Detection] = []
+    scan_dirs: dict[int, Path | None] = {}
     um_per_px = 0.36  # default for 20x
 
-    # Seg summary
-    seg_summary = seg_dir / "summary.json"
-    if seg_summary.exists():
+    for chip_idx in range(n_chips):
+        chip_dir = run_dir / f"chip_{chip_idx}"
+        seg_dir = chip_dir / "seg"
+
+        # Find scan directory
+        scan_dir = None
+        if chip_dir.is_dir():
+            for d in chip_dir.iterdir():
+                if d.is_dir() and d.name.startswith("scan_"):
+                    scan_dir = d
+                    break
+        scan_dirs[chip_idx] = scan_dir
+
+        # Load seg summary
+        seg_summary = seg_dir / "summary.json"
+        if not seg_summary.exists():
+            continue
+
         try:
             with open(seg_summary) as f:
                 ss = json.load(f)
-            stats = ss.get("stats", {})
-            has_seg = True
-            tier_1 = stats.get("tier_1", 0)
-            tier_2 = stats.get("tier_2", 0)
-            tier_3 = stats.get("tier_3", 0)
-            total_det = stats.get("total_detections", 0)
-            um_per_px = ss.get("params", {}).get("pixel_size_um", 0.36)
-
-            # Build ranked detection list from detections_by_frame
-            all_dets = []
-            for frame_name, dets in ss.get("detections_by_frame", {}).items():
-                for idx, d in enumerate(dets):
-                    d.setdefault("frame", frame_name)
-                    d.setdefault("det_idx", idx)
-                all_dets.extend(dets)
-            ranked_detections = sorted(all_dets, key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
         except (json.JSONDecodeError, OSError):
-            pass
+            continue
 
-    # Crop images from seg/crops/
-    crops_dir = seg_dir / "crops"
-    if crops_dir.is_dir():
-        crop_images = sorted(crops_dir.glob("rank*.jpg"))
+        um_per_px = ss.get("params", {}).get("pixel_size_um", um_per_px)
 
-    # R-G scatter plot
-    scatter_path = seg_dir / "rg_scatter.png"
-    if not scatter_path.exists():
-        scatter_path = None
+        for frame_name, dets in ss.get("detections_by_frame", {}).items():
+            for idx, d in enumerate(dets):
+                d.setdefault("frame", frame_name)
+                d.setdefault("det_idx", idx)
+                d["chip_idx"] = chip_idx
+            all_dets.extend(dets)
 
-    # Revisit images — look for revisit_* directories
-    for revisit_dir in sorted(chip_dir.glob("revisit_*")):
-        if revisit_dir.is_dir():
-            for img in sorted(revisit_dir.glob("rank*_*.png")):
-                revisit_images.append(img)
-
-    # Find scan directory for rerank
-    scan_dir = None
-    for d in chip_dir.iterdir():
-        if d.is_dir() and d.name.startswith("scan_"):
-            scan_dir = d
-            break
-
-    return ChipInfo(
-        idx=chip_idx,
-        has_seg=has_seg,
-        tier_1=tier_1,
-        tier_2=tier_2,
-        tier_3=tier_3,
-        total_detections=total_det,
-        crop_images=crop_images,
-        scatter_path=scatter_path,
-        revisit_images=revisit_images,
-        scan_dir=scan_dir,
-        ranked_detections=ranked_detections,
-        um_per_px=um_per_px,
-    )
+    all_dets.sort(key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
+    return all_dets, scan_dirs, um_per_px
 
 
 # ── Formatting helpers ───────────────────────────────────────────────
@@ -213,8 +168,6 @@ def _fmt_duration(seconds: float) -> str:
 
 OVERVIEW_MAX_WIDTH = 600
 CROP_THUMB_SIZE = 440
-REVISIT_THUMB_SIZE = 200
-DEFAULT_RERANK_TOP = 10
 FILTER_DEBOUNCE_MS = 200
 FRAME_CACHE_MAX = 30
 DEFAULT_FILTER_TOP_N = 20
@@ -436,25 +389,28 @@ class RunViewerGUI:
 
         # Image references (prevent GC)
         self._overview_photo: ImageTk.PhotoImage | None = None
-        self._scatter_photo: ImageTk.PhotoImage | None = None
         self._crop_photos: list[ImageTk.PhotoImage] = []
-        self._revisit_photos: list[ImageTk.PhotoImage] = []
 
         # Current state
         self._runs: list[RunInfo] = []
         self._selected_run: RunInfo | None = None
-        self._chip_selector_frame: ttk.LabelFrame | None = None
 
         # Filter state
         self._all_detections: list[Detection] = []
-        self._chip_scan_dir: Path | None = None
-        self._frame_cache: dict[str, Image.Image] = {}
+        self._chip_scan_dirs: dict[int, Path | None] = {}
+        self._frame_cache: dict[tuple[int, str], Image.Image] = {}
         self._filter_debounce_id: str | None = None
         self._filter_val_labels: list[tuple[ttk.Label, tk.DoubleVar, str]] = []
         self._filtered_crops_frame: ttk.LabelFrame | None = None
         self._filtered_table_frame: ttk.LabelFrame | None = None
         self._filter_count_var = tk.StringVar(value="")
         self._filter_preset_config: DetectorConfig | None = None
+        self._um_per_px: float = 0.36
+
+        # Chip toggle state
+        self._active_chips: set[int] = set()  # empty = all shown
+        self._chip_buttons: dict[int, tk.Button] = {}
+        self._n_chips: int = 0
 
         self._build_ui()
         self._refresh_runs()
@@ -465,32 +421,34 @@ class RunViewerGUI:
         self.paned.pack(fill="both", expand=True, padx=4, pady=4)
 
         # ── Left panel: Run list ─────────────────────────────────
-        left_frame = ttk.Frame(self.paned)
-        self.paned.add(left_frame, weight=1)
+        self._left_frame = ttk.Frame(self.paned)
+        self.paned.add(self._left_frame, weight=1)
 
         # Refresh button
-        btn_row = ttk.Frame(left_frame)
+        btn_row = ttk.Frame(self._left_frame)
         btn_row.pack(fill="x", padx=4, pady=(4, 2))
         ttk.Button(btn_row, text="↻ Refresh", command=self._refresh_runs).pack(side="left")
         self._run_count_var = tk.StringVar(value="")
         ttk.Label(btn_row, textvariable=self._run_count_var, foreground="gray").pack(side="right")
 
         # Treeview
-        columns = ("date", "preset", "chips", "detections", "duration")
-        self.tree = ttk.Treeview(left_frame, columns=columns, show="headings", selectmode="browse")
+        columns = ("date", "preset", "chips", "detections", "duration", "notes")
+        self.tree = ttk.Treeview(self._left_frame, columns=columns, show="headings", selectmode="browse")
         self.tree.heading("date", text="Date/Time")
         self.tree.heading("preset", text="Preset")
         self.tree.heading("chips", text="Chips")
-        self.tree.heading("detections", text="Detections")
-        self.tree.heading("duration", text="Duration")
+        self.tree.heading("detections", text="Det")
+        self.tree.heading("duration", text="Dur")
+        self.tree.heading("notes", text="Notes")
 
-        self.tree.column("date", width=130, minwidth=100)
-        self.tree.column("preset", width=70, minwidth=50)
-        self.tree.column("chips", width=45, minwidth=35, anchor="center")
-        self.tree.column("detections", width=75, minwidth=50, anchor="center")
-        self.tree.column("duration", width=65, minwidth=50, anchor="center")
+        self.tree.column("date", width=120, minwidth=90)
+        self.tree.column("preset", width=55, minwidth=40)
+        self.tree.column("chips", width=35, minwidth=30, anchor="center")
+        self.tree.column("detections", width=45, minwidth=35, anchor="center")
+        self.tree.column("duration", width=50, minwidth=40, anchor="center")
+        self.tree.column("notes", width=140, minwidth=80)
 
-        tree_scroll = ttk.Scrollbar(left_frame, orient="vertical", command=self.tree.yview)
+        tree_scroll = ttk.Scrollbar(self._left_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=tree_scroll.set)
         tree_scroll.pack(side="right", fill="y", padx=(0, 4), pady=(0, 4))
         self.tree.pack(fill="both", expand=True, padx=(4, 0), pady=(0, 4))
@@ -514,29 +472,28 @@ class RunViewerGUI:
         self._detail_frame.bind("<Configure>", self._on_detail_configure)
         self._detail_canvas.bind("<Configure>", self._on_canvas_configure)
 
-        # Mouse wheel scrolling
-        self._detail_canvas.bind("<Enter>", self._bind_mousewheel)
-        self._detail_canvas.bind("<Leave>", self._unbind_mousewheel)
+        # Mouse wheel scrolling — bind once, gate with hover flag
+        self._scroll_active = False
+        self._detail_canvas.bind("<Enter>", lambda _: self._set_scroll_active(True))
+        self._detail_canvas.bind("<Leave>", lambda _: self._set_scroll_active(False))
+        self.root.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.root.bind_all("<Button-4>", self._on_mousewheel_linux)
+        self.root.bind_all("<Button-5>", self._on_mousewheel_linux)
 
         # Placeholder
         self._placeholder = ttk.Label(self._detail_frame, text="Select a run to view details", foreground="gray")
         self._placeholder.pack(pady=40)
 
-    def _bind_mousewheel(self, _event):
-        self._detail_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-        # Linux
-        self._detail_canvas.bind_all("<Button-4>", self._on_mousewheel_linux)
-        self._detail_canvas.bind_all("<Button-5>", self._on_mousewheel_linux)
-
-    def _unbind_mousewheel(self, _event):
-        self._detail_canvas.unbind_all("<MouseWheel>")
-        self._detail_canvas.unbind_all("<Button-4>")
-        self._detail_canvas.unbind_all("<Button-5>")
+    def _set_scroll_active(self, active: bool):
+        self._scroll_active = active
 
     def _on_mousewheel(self, event):
-        self._detail_canvas.yview_scroll(-1 * (event.delta // 120), "units")
+        if self._scroll_active:
+            self._detail_canvas.yview_scroll(-1 * (event.delta // 120), "units")
 
     def _on_mousewheel_linux(self, event):
+        if not self._scroll_active:
+            return
         if event.num == 4:
             self._detail_canvas.yview_scroll(-3, "units")
         elif event.num == 5:
@@ -557,7 +514,11 @@ class RunViewerGUI:
             date_str = run.timestamp.strftime("%Y-%m-%d %H:%M") if run.timestamp else run.name
             det_str = str(run.total_detections) if run.total_detections > 0 else "—"
             dur_str = _fmt_duration(run.duration_s) if run.duration_s > 0 else "—"
-            self.tree.insert("", "end", iid=str(i), values=(date_str, run.preset, run.n_chips, det_str, dur_str))
+            # Show first line of notes, truncated
+            notes_short = run.notes.split("\n")[0][:30] if run.notes else ""
+            self.tree.insert(
+                "", "end", iid=str(i), values=(date_str, run.preset, run.n_chips, det_str, dur_str, notes_short)
+            )
         self._run_count_var.set(f"{len(self._runs)} runs")
 
     def _on_run_selected(self, _event):
@@ -569,7 +530,18 @@ class RunViewerGUI:
         if run is self._selected_run:
             return
         self._selected_run = run
+        self._hide_run_list()
         self._show_run_detail(run)
+
+    def _hide_run_list(self):
+        """Hide the left panel to give detail view full width."""
+        with contextlib.suppress(tk.TclError):
+            self.paned.forget(self._left_frame)
+
+    def _show_run_list(self):
+        """Restore the left panel."""
+        with contextlib.suppress(tk.TclError):
+            self.paned.insert(0, self._left_frame, weight=1)
 
     # ── Run detail ───────────────────────────────────────────────
 
@@ -580,31 +552,27 @@ class RunViewerGUI:
         for w in self._detail_frame.winfo_children():
             w.destroy()
         self._overview_photo = None
-        self._scatter_photo = None
         self._crop_photos = []
-        self._revisit_photos = []
         self._all_detections = []
+        self._chip_scan_dirs = {}
         self._frame_cache = {}
         self._filter_val_labels = []
+        self._active_chips = set()
+        self._chip_buttons = {}
 
     def _show_run_detail(self, run: RunInfo):
         self._clear_detail()
         self._detail_canvas.yview_moveto(0)
+        self._n_chips = run.n_chips
 
-        # ── Run header ───────────────────────────────────────────
+        # ── Phase 1: lightweight skeleton (renders immediately) ──
+
+        # Back button
+        ttk.Button(self._detail_frame, text="← Runs", command=self._show_run_list).pack(anchor="w", padx=8, pady=(4, 0))
+
+        # Run header
         header = ttk.LabelFrame(self._detail_frame, text=run.name, padding=8)
         header.pack(fill="x", padx=8, pady=(8, 4))
-
-        # Load checkpoint for notes
-        notes = ""
-        cp_path = run.path / "checkpoint.json"
-        if cp_path.exists():
-            try:
-                with open(cp_path) as f:
-                    cp = json.load(f)
-                notes = cp.get("notes", "")
-            except (json.JSONDecodeError, OSError):
-                pass
 
         info_lines = []
         if run.timestamp:
@@ -612,40 +580,79 @@ class RunViewerGUI:
         info_lines.append(f"Preset: {run.preset}    Chips: {run.n_chips}    Detections: {run.total_detections}")
         if run.duration_s > 0:
             info_lines.append(f"Duration: {_fmt_duration(run.duration_s)}")
-        if notes:
-            info_lines.append(f"Notes: {notes}")
+        if run.notes:
+            info_lines.append(f"Notes: {run.notes}")
         ttk.Label(header, text="\n".join(info_lines), justify="left").pack(anchor="w")
 
-        # ── Overview image ───────────────────────────────────────
+        # Overview placeholder
+        self._overview_container = ttk.LabelFrame(self._detail_frame, text="Overview", padding=4)
         overview_path = self._find_overview_image(run.path)
         if overview_path:
-            overview_frame = ttk.LabelFrame(self._detail_frame, text="Overview", padding=4)
-            overview_frame.pack(fill="x", padx=8, pady=4)
-            self._load_image_into_label(overview_path, overview_frame, OVERVIEW_MAX_WIDTH, "_overview_photo")
+            self._overview_container.pack(fill="x", padx=8, pady=4)
+            ttk.Label(self._overview_container, text="Loading…", foreground="gray").pack()
 
-        # ── Filter panel (persists across chip switches) ─────────
+        # Filter panel (cheap — just slider widgets)
         self._build_filter_panel(run.preset)
 
-        # ── Chip buttons ─────────────────────────────────────────
+        # Chip toggle buttons
         if run.n_chips > 0:
-            self._chip_selector_frame = ttk.LabelFrame(self._detail_frame, text="Chips", padding=4)
-            self._chip_selector_frame.pack(fill="x", padx=8, pady=4)
+            chips_frame = ttk.LabelFrame(self._detail_frame, text="Chips", padding=4)
+            chips_frame.pack(fill="x", padx=8, pady=4)
 
-            btn_row = ttk.Frame(self._chip_selector_frame)
+            btn_row = ttk.Frame(chips_frame)
             btn_row.pack(fill="x")
             for i in range(run.n_chips):
-                ttk.Button(
+                btn = tk.Button(
                     btn_row,
                     text=f"Chip {i}",
-                    command=lambda ci=i: self._show_chip_detail(run, ci),
-                ).pack(side="left", padx=2, pady=2)
+                    relief=tk.RAISED,
+                    command=lambda ci=i: self._toggle_chip(ci),
+                    padx=6,
+                    pady=2,
+                )
+                btn.pack(side="left", padx=2, pady=2)
+                self._chip_buttons[i] = btn
 
-            # Chip detail area (filled when a chip button is clicked)
-            self._chip_detail_frame = ttk.Frame(self._detail_frame)
-            self._chip_detail_frame.pack(fill="x", padx=8, pady=4)
+        # Detection frames with loading indicator
+        self._filtered_crops_frame = ttk.LabelFrame(self._detail_frame, text="Top Detections", padding=4)
+        self._filtered_crops_frame.pack(fill="x", padx=8, pady=4)
+        self._loading_bar = ttk.Progressbar(self._filtered_crops_frame, mode="indeterminate", length=200)
+        self._loading_bar.pack(pady=8)
+        self._loading_bar.start(15)
 
-            # Auto-select chip 0
-            self._show_chip_detail(run, 0)
+        self._filtered_table_frame = ttk.LabelFrame(self._detail_frame, text="Scoring Data", padding=4)
+
+        # ── Phase 2: deferred heavy I/O (chained to let event loop paint) ──
+        self.root.after(1, self._load_overview, run, overview_path)
+
+    def _load_overview(self, run: RunInfo, overview_path: Path | None):
+        """Phase 2a: load overview image, then chain to detection loading."""
+        if self._selected_run is not run:
+            return
+
+        if overview_path and self._overview_container.winfo_exists():
+            for w in self._overview_container.winfo_children():
+                w.destroy()
+            self._load_image_into_label(overview_path, self._overview_container, OVERVIEW_MAX_WIDTH, "_overview_photo")
+
+        self.root.after(1, self._load_detections, run)
+
+    def _load_detections(self, run: RunInfo):
+        """Phase 2b: load detection data and apply filters."""
+        if self._selected_run is not run:
+            return
+
+        self._all_detections, self._chip_scan_dirs, self._um_per_px = _load_all_detections(run.path, run.n_chips)
+
+        # Apply filters (replaces loading bar with thumbnails)
+        if self._all_detections and self._filtered_crops_frame and self._filtered_table_frame:
+            self._filtered_table_frame.pack(fill="x", padx=8, pady=4)
+            self._apply_filters()
+        elif self._filtered_crops_frame:
+            # No detections — replace loading bar with message
+            for w in self._filtered_crops_frame.winfo_children():
+                w.destroy()
+            ttk.Label(self._filtered_crops_frame, text="No detections", foreground="gray").pack(anchor="w")
 
     def _find_overview_image(self, run_dir: Path) -> Path | None:
         """Find the overview detection image."""
@@ -653,102 +660,30 @@ class RunViewerGUI:
             return p
         return None
 
-    def _scroll_to_chip_selector(self):
-        """Scroll the detail canvas so the chip selector is at the top."""
-        if self._chip_selector_frame is None:
-            return
-        self._detail_frame.update_idletasks()
-        self._detail_canvas.configure(scrollregion=self._detail_canvas.bbox("all"))
-        # Get the chip selector's Y position within the detail frame
-        y = self._chip_selector_frame.winfo_y()
-        total_h = self._detail_frame.winfo_reqheight()
-        if total_h > 0:
-            self._detail_canvas.yview_moveto(y / total_h)
+    # ── Chip toggles ─────────────────────────────────────────────
 
-    def _show_chip_detail(self, run: RunInfo, chip_idx: int):
-        """Populate chip detail area for the given chip."""
-        # Clear previous chip detail
-        if self._filter_debounce_id is not None:
-            self.root.after_cancel(self._filter_debounce_id)
-            self._filter_debounce_id = None
-        for w in self._chip_detail_frame.winfo_children():
-            w.destroy()
-        self._scatter_photo = None
-        self._crop_photos = []
-        self._revisit_photos = []
-        self._frame_cache = {}
-
-        chip = _load_chip_info(run.path, chip_idx)
-        self._all_detections = chip.ranked_detections
-        self._chip_scan_dir = chip.scan_dir
-        self._um_per_px = chip.um_per_px
-
-        # ── Seg stats + rerank row ───────────────────────────────
-        stats_frame = ttk.LabelFrame(self._chip_detail_frame, text=f"Chip {chip_idx} — Detections", padding=8)
-        stats_frame.pack(fill="x", pady=(0, 4))
-
-        if chip.has_seg:
-            top_row = ttk.Frame(stats_frame)
-            top_row.pack(fill="x")
-
-            stats_text = (
-                f"Total: {chip.total_detections}    "
-                f"Tier 1: {chip.tier_1}    "
-                f"Tier 2: {chip.tier_2}    "
-                f"Tier 3: {chip.tier_3}"
-            )
-            ttk.Label(top_row, text=stats_text).pack(side="left")
-
-            # Rerank controls
-            rerank_frame = ttk.Frame(top_row)
-            rerank_frame.pack(side="right")
-            ttk.Label(rerank_frame, text="Top N:").pack(side="left", padx=(8, 2))
-            top_n_var = tk.StringVar(value=str(DEFAULT_RERANK_TOP))
-            top_n_entry = ttk.Entry(rerank_frame, textvariable=top_n_var, width=4)
-            top_n_entry.pack(side="left", padx=(0, 4))
-            self._rerank_btn = ttk.Button(
-                rerank_frame,
-                text="Rerank",
-                command=lambda: self._run_rerank(run, chip, top_n_var.get()),
-            )
-            self._rerank_btn.pack(side="left")
+    def _toggle_chip(self, chip_idx: int):
+        """Toggle a chip filter. Empty active set = show all."""
+        if chip_idx in self._active_chips:
+            self._active_chips.discard(chip_idx)
         else:
-            ttk.Label(stats_frame, text="No segmentation results", foreground="gray").pack(anchor="w")
+            self._active_chips.add(chip_idx)
+        self._update_chip_button_visuals()
+        self._on_filter_change()
 
-        # ── Filtered frame thumbnails area ────────────────────────
-        self._filtered_crops_frame = ttk.LabelFrame(
-            self._chip_detail_frame, text=f"Chip {chip_idx} — Top Detections", padding=4
-        )
-        if chip.has_seg:
-            self._filtered_crops_frame.pack(fill="x", pady=4)
+    def _update_chip_button_visuals(self):
+        """Update chip button relief to reflect active state."""
+        for idx, btn in self._chip_buttons.items():
+            if idx in self._active_chips:
+                btn.configure(relief=tk.SUNKEN)
+            else:
+                btn.configure(relief=tk.RAISED)
 
-        # ── Filtered table area ──────────────────────────────────
-        self._filtered_table_frame = ttk.LabelFrame(
-            self._chip_detail_frame, text=f"Chip {chip_idx} — Scoring Data", padding=4
-        )
-        if chip.has_seg:
-            self._filtered_table_frame.pack(fill="x", pady=4)
-
-        # ── R-G scatter plot ──────────────────────────────────────
-        if chip.scatter_path:
-            scatter_frame = ttk.LabelFrame(self._chip_detail_frame, text=f"Chip {chip_idx} — R-G Scatter", padding=4)
-            scatter_frame.pack(fill="x", pady=4)
-            self._load_image_into_label(chip.scatter_path, scatter_frame, OVERVIEW_MAX_WIDTH, "_scatter_photo")
-
-        # ── Revisit images ───────────────────────────────────────
-        if chip.revisit_images:
-            revisit_frame = ttk.LabelFrame(self._chip_detail_frame, text=f"Chip {chip_idx} — Revisit Images", padding=4)
-            revisit_frame.pack(fill="x", pady=4)
-            self._populate_image_grid(
-                revisit_frame, chip.revisit_images, self._revisit_photos, REVISIT_THUMB_SIZE, cols=4
-            )
-
-        # Apply current filters (populates frame thumbnails + table)
-        if self._all_detections:
-            self._apply_filters()
-
-        # Scroll to chip selector after layout settles
-        self.root.after_idle(self._scroll_to_chip_selector)
+    def _get_visible_chips(self) -> set[int] | None:
+        """Return set of visible chip indices, or None for 'show all'."""
+        if not self._active_chips:
+            return None  # empty = all
+        return self._active_chips
 
     # ── Filter panel ─────────────────────────────────────────────
 
@@ -772,7 +707,7 @@ class RunViewerGUI:
         self._fv_entropy = tk.DoubleVar(value=min(config.tier1_entropy_max, 8.0))
         self._fv_min_size = tk.DoubleVar(value=0)
         self._fv_grad_energy = tk.DoubleVar(value=50.0)
-        self._fv_aspect_ratio = tk.DoubleVar(value=20.0)
+        self._fv_aspect_ratio = tk.DoubleVar(value=6.0)
         self._fv_kurtosis = tk.DoubleVar(value=50.0)
         self._fv_top_n = tk.IntVar(value=DEFAULT_FILTER_TOP_N)
 
@@ -786,7 +721,7 @@ class RunViewerGUI:
             (1, 2, "R max \u2264", self._fv_r_max, -3.0, 6.0, 0.1, "{:+.1f}"),
             (2, 0, "entropy \u2264", self._fv_entropy, 0.0, 8.0, 0.1, "{:.1f}"),
             (2, 1, "grad_energy \u2264", self._fv_grad_energy, 0.0, 50.0, 0.5, "{:.1f}"),
-            (2, 2, "aspect_ratio \u2264", self._fv_aspect_ratio, 1.0, 20.0, 0.5, "{:.1f}"),
+            (2, 2, "aspect_ratio \u2264", self._fv_aspect_ratio, 1.0, 6.0, 0.5, "{:.1f}"),
             (3, 0, "kurtosis \u2264", self._fv_kurtosis, -2.0, 50.0, 1.0, "{:.0f}"),
         ]
 
@@ -852,10 +787,13 @@ class RunViewerGUI:
         self._filter_debounce_id = self.root.after(FILTER_DEBOUNCE_MS, self._apply_filters)
 
     def _apply_filters(self):
-        """Filter all detections by current slider values and update results."""
+        """Filter all detections by chip selection + slider values and update results."""
         self._filter_debounce_id = None
         if not self._all_detections:
             return
+
+        # Chip filter (empty active set = show all)
+        visible_chips = self._get_visible_chips()
 
         # Read filter values once
         pr_max = self._fv_perim_ratio.get()
@@ -871,8 +809,14 @@ class RunViewerGUI:
         kurt_max = self._fv_kurtosis.get()
         top_n = self._fv_top_n.get()
 
+        # Count detections visible (after chip filter, before slider filter)
+        if visible_chips is not None:
+            chip_filtered = [d for d in self._all_detections if d.get("chip_idx") in visible_chips]
+        else:
+            chip_filtered = self._all_detections
+
         passing = []
-        for d in self._all_detections:
+        for d in chip_filtered:
             rgb = d.get("contrast_rgb")
             if not rgb or len(rgb) < 2:
                 continue
@@ -892,14 +836,14 @@ class RunViewerGUI:
                 passing.append(d)
 
         passing.sort(key=lambda d: -d.get("score", 0))
-        self._filter_count_var.set(f"{len(passing)} / {len(self._all_detections)} pass")
+        self._filter_count_var.set(f"{len(passing)} / {len(chip_filtered)} pass")
 
         top = passing[:top_n]
         self._update_filtered_table(top)
         self._update_filtered_frames(top)
 
     def _reset_filters(self):
-        """Reset all filter sliders to preset defaults."""
+        """Reset all filter sliders to preset defaults and clear chip selection."""
         config = self._filter_preset_config
         if config is None:
             return
@@ -911,8 +855,10 @@ class RunViewerGUI:
         self._fv_entropy.set(min(config.tier1_entropy_max, 8.0))
         self._fv_min_size.set(0)
         self._fv_grad_energy.set(50.0)
-        self._fv_aspect_ratio.set(20.0)
+        self._fv_aspect_ratio.set(6.0)
         self._fv_kurtosis.set(50.0)
+        self._active_chips.clear()
+        self._update_chip_button_visuals()
         for lbl, var, fmt in self._filter_val_labels:
             lbl.configure(text=fmt.format(var.get()))
         # Cancel pending debounce and apply immediately
@@ -943,11 +889,6 @@ class RunViewerGUI:
         if not top:
             ttk.Label(self._filtered_crops_frame, text="No detections pass filters", foreground="gray").pack(anchor="w")
             return
-        if not self._chip_scan_dir:
-            ttk.Label(self._filtered_crops_frame, text="No scan dir — cannot show frames", foreground="gray").pack(
-                anchor="w"
-            )
-            return
 
         grid_frame = ttk.Frame(self._filtered_crops_frame)
         grid_frame.pack(fill="x")
@@ -955,6 +896,7 @@ class RunViewerGUI:
 
         for i, d in enumerate(top):
             frame_name = d.get("frame", "")
+            chip_idx = d.get("chip_idx", 0)
             if not frame_name:
                 continue
 
@@ -963,7 +905,7 @@ class RunViewerGUI:
             cell.grid(row=row * 2, column=col, sticky="nw")
 
             try:
-                frame_img = self._load_frame_cached(frame_name)
+                frame_img = self._load_frame_cached(chip_idx, frame_name)
                 if frame_img is None:
                     ttk.Label(cell, text="[no frame]", foreground="gray").pack()
                     continue
@@ -984,7 +926,10 @@ class RunViewerGUI:
                 self._crop_photos.append(photo)
                 lbl = ttk.Label(cell, image=photo, cursor="hand2")
                 lbl.pack()
-                lbl.bind("<Button-1>", lambda _e, fn=frame_name, det=d: self._show_frame_popup(fn, det))
+                lbl.bind(
+                    "<Button-1>",
+                    lambda _e, ci=chip_idx, fn=frame_name, det=d: self._show_frame_popup(ci, fn, det),
+                )
             except Exception:
                 ttk.Label(cell, text="[load error]", foreground="red").pack()
 
@@ -994,19 +939,22 @@ class RunViewerGUI:
             ent = d.get("entropy", d.get("g_entropy", 0))
             ge = d.get("grad_energy", 0)
             kurt = max(d.get("r_kurt", 0), d.get("g_kurt", 0), d.get("b_kurt", 0))
-            line1 = f"#{i + 1} R={r_val:+.2f} G={g_val:+.2f} {size_um2:.0f}\u00b5m\u00b2"
+            line1 = f"#{i + 1} C{chip_idx} R={r_val:+.2f} G={g_val:+.2f} {size_um2:.0f}\u00b5m\u00b2"
             line2 = f"e={ent:.1f} g={ge:.1f} k={kurt:.0f}"
             name_lbl = ttk.Label(cell, text=f"{line1}\n{line2}", font=("TkDefaultFont", 7), justify="left")
             name_lbl.pack(anchor="w")
 
-    def _load_frame_cached(self, frame_name: str) -> Image.Image | None:
-        """Load a frame image with caching."""
-        if frame_name in self._frame_cache:
-            return self._frame_cache[frame_name]
-        if not self._chip_scan_dir:
+    def _load_frame_cached(self, chip_idx: int, frame_name: str) -> Image.Image | None:
+        """Load a frame image with caching, keyed by (chip_idx, frame_name)."""
+        key = (chip_idx, frame_name)
+        if key in self._frame_cache:
+            return self._frame_cache[key]
+
+        scan_dir = self._chip_scan_dirs.get(chip_idx)
+        if not scan_dir:
             return None
 
-        frame_path = self._chip_scan_dir / f"{frame_name}.jpg"
+        frame_path = scan_dir / f"{frame_name}.jpg"
         if not frame_path.exists():
             return None
 
@@ -1021,47 +969,15 @@ class RunViewerGUI:
             oldest_key = next(iter(self._frame_cache))
             del self._frame_cache[oldest_key]
 
-        self._frame_cache[frame_name] = img
+        self._frame_cache[key] = img
         return img
 
-    def _show_frame_popup(self, frame_name: str, det: Detection):
+    def _show_frame_popup(self, chip_idx: int, frame_name: str, det: Detection):
         """Show a zoomable frame view with detection highlighted. Scroll to zoom, drag to pan."""
-        frame_img = self._load_frame_cached(frame_name)
+        frame_img = self._load_frame_cached(chip_idx, frame_name)
         if frame_img is None:
             return
-        ZoomableFramePopup(self.root, frame_img, det, title=f"{frame_name} det#{det.get('det_idx', '?')}")
-
-    def _populate_image_grid(
-        self,
-        parent: ttk.Widget,
-        images: list[Path],
-        photo_refs: list[ImageTk.PhotoImage],
-        thumb_size: int,
-        cols: int,
-    ):
-        """Create a grid of clickable thumbnail images."""
-        grid_frame = ttk.Frame(parent)
-        grid_frame.pack(fill="x")
-
-        for i, img_path in enumerate(images):
-            row, col = divmod(i, cols)
-            cell = ttk.Frame(grid_frame, padding=2)
-            cell.grid(row=row * 2, column=col, sticky="nw")
-
-            try:
-                img = Image.open(img_path)
-                img.thumbnail((thumb_size, thumb_size), Image.Resampling.LANCZOS)
-                photo = ImageTk.PhotoImage(img)
-                photo_refs.append(photo)
-                lbl = ttk.Label(cell, image=photo, cursor="hand2")
-                lbl.pack()
-                lbl.bind("<Button-1>", lambda _e, p=img_path: ImagePopup(self.root, p))
-            except Exception:
-                ttk.Label(cell, text="[load error]", foreground="red").pack()
-
-            # Label with rank from filename
-            name_lbl = ttk.Label(cell, text=img_path.stem, font=("TkDefaultFont", 7))
-            name_lbl.pack()
+        ZoomableFramePopup(self.root, frame_img, det, title=f"C{chip_idx} {frame_name} det#{det.get('det_idx', '?')}")
 
     def _populate_detection_table(self, parent: ttk.Widget, ranked: list[Detection]):
         """Show a sortable treeview table of top detection scoring data. Click headers to sort."""
@@ -1070,6 +986,7 @@ class RunViewerGUI:
 
         cols = (
             "rank",
+            "chip",
             "tier",
             "frame",
             "det",
@@ -1088,6 +1005,7 @@ class RunViewerGUI:
 
         col_spec = {
             "rank": ("#", 30),
+            "chip": ("Chip", 35),
             "tier": ("T", 25),
             "frame": ("Frame", 110),
             "det": ("Det", 30),
@@ -1140,6 +1058,7 @@ class RunViewerGUI:
                 "end",
                 values=(
                     i + 1,
+                    d.get("chip_idx", "?"),
                     d.get("tier", "?"),
                     d.get("frame", "?"),
                     d.get("det_idx", "?"),
@@ -1160,46 +1079,6 @@ class RunViewerGUI:
         table.configure(yscrollcommand=scroll.set)
         table.pack(side="left", fill="x", expand=True)
         scroll.pack(side="right", fill="y")
-
-    # ── Rerank ───────────────────────────────────────────────────
-
-    def _run_rerank(self, run: RunInfo, chip: ChipInfo, top_n_str: str):
-        """Run rerank_detections.py in a background thread."""
-        try:
-            top_n = int(top_n_str)
-        except ValueError:
-            top_n = DEFAULT_RERANK_TOP
-
-        seg_dir = run.path / f"chip_{chip.idx}" / "seg"
-        if not (seg_dir / "summary.json").exists():
-            return
-
-        cmd = ["uv", "run", "python", "scripts/rerank_detections.py", str(seg_dir), "--top", str(top_n)]
-        if chip.scan_dir:
-            cmd += ["--scan-dir", str(chip.scan_dir)]
-
-        self._rerank_btn.configure(state="disabled", text="Reranking...")
-
-        def _worker():
-            try:
-                subprocess.run(cmd, capture_output=True, text=True, check=True)
-                self.root.after(0, self._on_rerank_done, run, chip.idx, True, "")
-            except subprocess.CalledProcessError as e:
-                self.root.after(0, self._on_rerank_done, run, chip.idx, False, e.stderr[:200])
-            except Exception as e:
-                self.root.after(0, self._on_rerank_done, run, chip.idx, False, str(e)[:200])
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _on_rerank_done(self, run: RunInfo, chip_idx: int, success: bool, error: str):
-        """Called on the main thread when rerank completes."""
-        self._rerank_btn.configure(state="normal", text="Rerank")
-        if success:
-            self._show_chip_detail(run, chip_idx)
-        else:
-            from tkinter import messagebox
-
-            messagebox.showerror("Rerank failed", f"Error:\n{error}")
 
     # ── Image helpers ────────────────────────────────────────────
 
