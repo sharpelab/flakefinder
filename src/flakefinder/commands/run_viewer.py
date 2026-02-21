@@ -1208,7 +1208,7 @@ class RunViewerGUI:
             "g_max": min(config.tier1_g_max, 6.0),
             "r_max": max(config.tier1_r_max, -3.0),
             "entropy": min(config.tier1_entropy_max, 8.0),
-            "min_size": 0.0,
+            "min_size": config.tier1_min_size_um2,
             "grad_energy": 50.0,
             "aspect_ratio": 6.0,
             "kurtosis": 50.0,
@@ -1237,7 +1237,7 @@ class RunViewerGUI:
             (1, 1, "G max \u2264", self._fv_g_max, -2.0, 6.0, 0.1, "{:+.1f}"),
             (1, 2, "R max \u2264", self._fv_r_max, -3.0, 6.0, 0.1, "{:+.1f}"),
             (2, 0, "entropy \u2264", self._fv_entropy, 0.0, 8.0, 0.1, "{:.1f}"),
-            (2, 1, "grad_energy \u2264", self._fv_grad_energy, 0.0, 50.0, 0.5, "{:.1f}"),
+            (2, 1, "grad_energy \u2264", self._fv_grad_energy, 0.0, 120.0, 0.5, "{:.1f}"),
             (2, 2, "aspect_ratio \u2264", self._fv_aspect_ratio, 1.0, 6.0, 0.5, "{:.1f}"),
             (3, 0, "kurtosis \u2264", self._fv_kurtosis, -2.0, 50.0, 1.0, "{:.0f}"),
         ]
