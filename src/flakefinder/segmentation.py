@@ -49,6 +49,7 @@ class _DetectionBase(TypedDict):
     g_entropy: float
     b_entropy: float
     entropy: float
+    size_um2: float
     hull: PixelPolygon
     contour: PixelPolygon
 
@@ -148,6 +149,7 @@ class DetectorConfig:
         g = det["contrast_rgb"][1]
         ent = det.get("entropy", det.get("g_entropy", 99.0))
         r = det["contrast_rgb"][0]
+        ar = det.get("aspect_ratio", 1.0)
         if (
             pr < self.tier1_perim_ratio
             and cd < self.tier1_cal_dist
@@ -155,6 +157,7 @@ class DetectorConfig:
             and g < self.tier1_g_max
             and r < self.tier1_r_max
             and ent < self.tier1_entropy_max
+            and ar < 6.0
         ):
             tier = 1
         elif pr < self.tier2_perim_ratio and cd < self.tier2_cal_dist and ent < self.tier2_entropy_max:
@@ -162,8 +165,11 @@ class DetectorConfig:
         else:
             tier = 3
         ge = det.get("grad_energy", 0)
+        size_um2 = det.get("size_um2", det["size_px"] * 0.52)
+        ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
+        g_penalty = 1.0 / (1.0 + 2.0 * max(g - 0.5, 0))
         score = round(
-            np.sqrt(det["size_px"]) * (1.0 / (1.0 + cd)) * (1.0 / (1.0 + ge)) ** 2,
+            np.log2(max(size_um2, 1.0)) * np.exp(-cd * 8) * (1.0 / (1.0 + ge)) * ar_penalty * g_penalty,
             4,
         )
         return tier, score
@@ -189,10 +195,10 @@ class DetectorConfig:
             g_thin_max=1.0,
             g_medium_max=2.5,
             non_match_label="non-hBN",
-            tier1_perim_ratio=1.20,
+            tier1_perim_ratio=1.30,
             tier1_cal_dist=0.3,
             tier1_g_min=0.0,
-            tier1_g_max=0.8,
+            tier1_g_max=1.2,
             tier1_r_max=-0.5,
             tier1_entropy_max=99.0,
             tier2_perim_ratio=1.35,
@@ -206,7 +212,7 @@ class DetectorConfig:
         return cls(
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=15.0,
-            min_size_um2=130.0,
+            min_size_um2=400.0,
             edge_margin_px=50,
             morph_kernel_size=5,
             cal_poly=(0.193, -0.217, -0.604),
@@ -292,6 +298,7 @@ def _analyze_component(
     norm_contrast: np.ndarray,
     grad_mag: np.ndarray,
     config: DetectorConfig,
+    um_per_px: float = 1.0,
 ) -> Detection:
     """Analyze a binary component mask and return detection metrics."""
     rows = np.any(component, axis=1)
@@ -366,6 +373,7 @@ def _analyze_component(
         bbox=XYWHRect(x_min, y_min, x_max - x_min, y_max - y_min),
         center=Point2F(round((x_min + x_max) / 2, 1), round((y_min + y_max) / 2, 1)),
         size_px=int(component.sum()),
+        size_um2=round(int(component.sum()) * um_per_px**2, 1),
         mean_contrast=round(mean_contrast, 1),
         contrast_rgb=ContrastRGB(r_contrast, g_contrast, b_contrast),
         cal_dist=round(config.cal_distance(r_contrast, g_contrast), 4),
@@ -542,7 +550,7 @@ def segment_frame(
         sub_components = _subsegment_by_contrast(image, component, bg_modes, min_size_px, norm_contrast)
 
         for sub_comp in sub_components:
-            det = _analyze_component(image, sub_comp, bg_modes, norm_contrast, grad_mag, config)
+            det = _analyze_component(image, sub_comp, bg_modes, norm_contrast, grad_mag, config, um_per_px)
             # Re-check edge margin for sub-components
             scx, scy = det["center"]
             if scx < config.edge_margin_px or scx > w - config.edge_margin_px:

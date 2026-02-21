@@ -18,7 +18,10 @@ import tkinter as tk
 from datetime import datetime
 from pathlib import Path
 from tkinter import ttk
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from PIL import Image, ImageDraw, ImageTk
 
@@ -251,6 +254,7 @@ class ZoomableFramePopup(tk.Toplevel):
         det: Detection,
         title: str = "",
         contour: list[list[int]] | None = None,
+        on_navigate: Callable[[int], tuple[Image.Image, Detection, str, list[list[int]] | None] | None] | None = None,
     ):
         super().__init__(parent)
         self.withdraw()  # hide until fully rendered
@@ -259,6 +263,7 @@ class ZoomableFramePopup(tk.Toplevel):
         self._src = src_image
         self._det = det
         self._contour = contour
+        self._on_navigate = on_navigate
         self._photo: ImageTk.PhotoImage | None = None
 
         # Zoom state: center in source image coords
@@ -289,11 +294,31 @@ class ZoomableFramePopup(tk.Toplevel):
         self._canvas.bind("<B1-Motion>", self._on_drag)
         self.bind("<Escape>", lambda _: self.destroy())
         self.bind("<Configure>", self._on_configure)
+        if on_navigate:
+            self.bind("<Left>", lambda _: self._navigate(-1))
+            self.bind("<Right>", lambda _: self._navigate(1))
 
         # Render synchronously, then show
         self._render()
         self.deiconify()
         self.focus_set()
+
+    def _navigate(self, delta: int):
+        if not self._on_navigate:
+            return
+        result = self._on_navigate(delta)
+        if result is None:
+            return
+        src_image, det, title, contour = result
+        self._src = src_image
+        self._det = det
+        self._contour = contour
+        self.title(title)
+        # Re-center on new detection
+        bx, by, bw, bh = det["bbox"]
+        self._cx = bx + bw / 2.0
+        self._cy = by + bh / 2.0
+        self._render()
 
     def _on_configure(self, event):
         if event.widget is not self:
@@ -378,10 +403,11 @@ class ZoomableFramePopup(tk.Toplevel):
             pts = [(int((x - crop_x0) * z), int((y - crop_y0) * z)) for x, y in self._contour]
             draw.polygon(pts, outline="cyan")
         bx, by, bw, bh = self._det["bbox"]
-        rx0 = int((bx - crop_x0) * z)
-        ry0 = int((by - crop_y0) * z)
-        rx1 = int((bx + bw - crop_x0) * z)
-        ry1 = int((by + bh - crop_y0) * z)
+        pad = 5  # px padding around bbox
+        rx0 = int((bx - pad - crop_x0) * z)
+        ry0 = int((by - pad - crop_y0) * z)
+        rx1 = int((bx + bw + pad - crop_x0) * z)
+        ry1 = int((by + bh + pad - crop_y0) * z)
         draw.rectangle([rx0, ry0, rx1, ry1], outline="lime", width=2)
 
         self._photo = ImageTk.PhotoImage(display)
@@ -945,11 +971,12 @@ class RunViewerGUI:
                 thumb = frame_img.resize((int(fw * scale), int(fh * scale)), Image.Resampling.LANCZOS)
                 draw = ImageDraw.Draw(thumb)
                 bx, by, bw, bh = d["bbox"]
-                draw.rectangle(
-                    [int(bx * scale), int(by * scale), int((bx + bw) * scale), int((by + bh) * scale)],
-                    outline="lime",
-                    width=2,
-                )
+                pad = 5
+                x0 = int((bx - pad) * scale)
+                y0 = int((by - pad) * scale)
+                x1 = int((bx + bw + pad) * scale)
+                y1 = int((by + bh + pad) * scale)
+                draw.rectangle([x0, y0, x1, y1], outline="lime", width=2)
 
                 photo = ImageTk.PhotoImage(thumb)
                 self._crop_photos.append(photo)
@@ -957,7 +984,7 @@ class RunViewerGUI:
                 lbl.pack()
                 lbl.bind(
                     "<Button-1>",
-                    lambda _e, ci=chip_idx, fn=frame_name, det=d: self._show_frame_popup(ci, fn, det),
+                    lambda _e, idx=i: self._show_frame_popup_at(idx),
                 )
             except Exception:
                 ttk.Label(cell, text="[load error]", foreground="red").pack()
@@ -1019,14 +1046,41 @@ class RunViewerGUI:
             pass
         return None
 
-    def _show_frame_popup(self, chip_idx: int, frame_name: str, det: Detection):
-        """Show a zoomable frame view with detection highlighted. Scroll to zoom, drag to pan."""
+    def _get_popup_data(self, grid_idx: int) -> tuple[Image.Image, Detection, str, list[list[int]] | None] | None:
+        """Load image/detection/contour for a grid index. Returns None if invalid."""
+        if not self._last_top or grid_idx < 0 or grid_idx >= len(self._last_top):
+            return None
+        d = self._last_top[grid_idx]
+        chip_idx = d.get("chip_idx", 0)
+        frame_name = d.get("frame", "")
+        if not frame_name:
+            return None
         frame_img = self._load_frame_cached(chip_idx, frame_name)
         if frame_img is None:
-            return
-        det_idx = det.get("det_idx", -1)
+            return None
+        det_idx = d.get("det_idx", -1)
         contour = self._load_frame_contour(chip_idx, frame_name, det_idx) if det_idx >= 0 else None
-        ZoomableFramePopup(self.root, frame_img, det, title=f"C{chip_idx} {frame_name} det#{det_idx}", contour=contour)
+        title = f"#{grid_idx + 1} C{chip_idx} {frame_name} det#{det_idx}"
+        return frame_img, d, title, contour
+
+    def _show_frame_popup_at(self, grid_idx: int):
+        """Open a ZoomableFramePopup for the detection at grid_idx in _last_top."""
+        data = self._get_popup_data(grid_idx)
+        if data is None:
+            return
+        frame_img, d, title, contour = data
+
+        # Mutable cell so the closure tracks current index
+        idx_cell = [grid_idx]
+
+        def on_navigate(delta: int):
+            new_idx = idx_cell[0] + delta
+            result = self._get_popup_data(new_idx)
+            if result is not None:
+                idx_cell[0] = new_idx
+            return result
+
+        ZoomableFramePopup(self.root, frame_img, d, title=title, contour=contour, on_navigate=on_navigate)
 
     def _populate_detection_table(self, parent: ttk.Widget, ranked: list[Detection]):
         """Show a sortable treeview table of top detection scoring data. Click headers to sort."""

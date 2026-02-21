@@ -273,12 +273,17 @@ def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
                 continue
             h, w = img.shape[:2]
 
-            contour = full_det.get("contour")
-            if contour and len(contour) >= 3:
-                pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
-                cv2.polylines(img, [pts], isClosed=True, color=(0, 255, 0), thickness=1)
-
             bx, by, bw, bh = full_det["bbox"]
+
+            if args.overlay == "contour":
+                contour = full_det.get("contour")
+                if contour and len(contour) >= 3:
+                    pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
+                    cv2.polylines(img, [pts], isClosed=True, color=(0, 255, 0), thickness=1)
+            elif args.overlay == "bbox":
+                bp = 4
+                cv2.rectangle(img, (bx - bp, by - bp), (bx + bw + bp, by + bh + bp), (0, 255, 0), 1)
+
             x0 = max(0, bx - pad)
             y0 = max(0, by - pad)
             x1 = min(w, bx + bw + pad)
@@ -444,6 +449,12 @@ def main() -> int:
         type=Path,
         default=None,
         help="Directory with raw frame_NNNN.jpg files (default: <seg_dir>/../scan_20x)",
+    )
+    parser.add_argument(
+        "--overlay",
+        choices=["contour", "bbox", "none"],
+        default="contour",
+        help="What to draw on crops: contour outline, bounding box, or nothing",
     )
     parser.add_argument("--no-mosaic", action="store_true", help="Skip crop and mosaic generation")
     parser.add_argument("--no-scatter", action="store_true", help="Skip R-G scatter plot generation")
@@ -620,14 +631,17 @@ def main() -> int:
                     continue
                 h, w = img.shape[:2]
 
-                # Draw contour
-                contour = full_det.get("contour")
-                if contour and len(contour) >= 3:
-                    pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
-                    cv2.polylines(img, [pts], isClosed=True, color=(0, 255, 0), thickness=1)
-
-                # Crop with padding
                 bx, by, bw, bh = full_det["bbox"]
+
+                if args.overlay == "contour":
+                    contour = full_det.get("contour")
+                    if contour and len(contour) >= 3:
+                        pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
+                        cv2.polylines(img, [pts], isClosed=True, color=(0, 255, 0), thickness=1)
+                elif args.overlay == "bbox":
+                    bp = 4
+                    cv2.rectangle(img, (bx - bp, by - bp), (bx + bw + bp, by + bh + bp), (0, 255, 0), 1)
+
                 x0 = max(0, bx - pad)
                 y0 = max(0, by - pad)
                 x1 = min(w, bx + bw + pad)
