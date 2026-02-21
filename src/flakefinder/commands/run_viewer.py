@@ -22,7 +22,7 @@ from typing import NamedTuple
 
 from PIL import Image, ImageDraw, ImageTk
 
-from flakefinder.segmentation import Detection, DetectorConfig
+from flakefinder.segmentation import Detection, DetectorConfig, dedup_detections
 
 # ── Data loading ─────────────────────────────────────────────────────
 
@@ -170,7 +170,7 @@ OVERVIEW_MAX_WIDTH = 600
 CROP_THUMB_SIZE = 440
 FILTER_DEBOUNCE_MS = 200
 FRAME_CACHE_MAX = 30
-DEFAULT_FILTER_TOP_N = 20
+DEFAULT_FILTER_TOP_N = 100
 
 
 # ── Image popup viewer ──────────────────────────────────────────────
@@ -181,6 +181,7 @@ class ImagePopup(tk.Toplevel):
 
     def __init__(self, parent: tk.Tk, img_path: Path):
         super().__init__(parent)
+        self.withdraw()  # hide until fully rendered
         self.title(img_path.name)
 
         self._src_image = Image.open(img_path)
@@ -209,6 +210,7 @@ class ImagePopup(tk.Toplevel):
         # Dismiss on click, Escape
         self.bind("<Escape>", lambda _: self.destroy())
         self._label.bind("<Button-1>", lambda _: self.destroy())
+        self.deiconify()
         self.focus_set()
 
     def _on_resize(self, event):
@@ -244,6 +246,7 @@ class ZoomableFramePopup(tk.Toplevel):
 
     def __init__(self, parent: tk.Tk, src_image: Image.Image, det: Detection, title: str = ""):
         super().__init__(parent)
+        self.withdraw()  # hide until fully rendered
         self.title(title)
 
         self._src = src_image
@@ -279,8 +282,10 @@ class ZoomableFramePopup(tk.Toplevel):
         self.bind("<Escape>", lambda _: self.destroy())
         self.bind("<Configure>", self._on_configure)
 
+        # Render synchronously, then show
+        self._render()
+        self.deiconify()
         self.focus_set()
-        self.after(10, self._render)
 
     def _on_configure(self, event):
         if event.widget is not self:
@@ -503,7 +508,9 @@ class RunViewerGUI:
         self._detail_canvas.configure(scrollregion=self._detail_canvas.bbox("all"))
 
     def _on_canvas_configure(self, event):
-        self._detail_canvas.itemconfig(self._detail_window, width=event.width)
+        if event.width != getattr(self, "_last_canvas_w", 0):
+            self._last_canvas_w = event.width
+            self._detail_canvas.itemconfig(self._detail_window, width=event.width)
 
     # ── Run list ─────────────────────────────────────────────────
 
@@ -836,9 +843,10 @@ class RunViewerGUI:
                 passing.append(d)
 
         passing.sort(key=lambda d: -d.get("score", 0))
-        self._filter_count_var.set(f"{len(passing)} / {len(chip_filtered)} pass")
+        deduped = dedup_detections(passing)
+        self._filter_count_var.set(f"{len(deduped)} / {len(chip_filtered)} pass ({len(passing) - len(deduped)} dupes)")
 
-        top = passing[:top_n]
+        top = deduped[:top_n]
         self._update_filtered_table(top)
         self._update_filtered_frames(top)
 
