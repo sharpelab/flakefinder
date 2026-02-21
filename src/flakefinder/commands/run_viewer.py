@@ -175,6 +175,8 @@ FILTER_DEBOUNCE_MS = 200
 FRAME_CACHE_MAX = 30
 DEFAULT_FILTER_TOP_N = 100
 BBOX_PAD_PX = 5
+CONTEXT_PANE_WIDTH = 350
+OVERVIEW_THUMB_MAX = 400
 
 
 # ── Image popup viewer ──────────────────────────────────────────────
@@ -241,8 +243,21 @@ class ImagePopup(tk.Toplevel):
         self._label.configure(image=self._photo)
 
 
-class ZoomableFramePopup(tk.Toplevel):
-    """Zoomable image popup centered on a detection. Scroll to zoom, drag to pan, Escape to close."""
+class FlakeInspectorContext(NamedTuple):
+    """Shared context passed from RunViewerGUI to FlakeInspector."""
+
+    overview_thumb: Image.Image | None
+    overview_size_px: tuple[int, int] | None
+    stitch_meta: dict | None
+    run_dir: Path
+    annotations: dict[str, str]
+    on_annotation_change: Callable[[str, str | None], None]
+    um_per_px: float
+    total_count: int
+
+
+class FlakeInspector(tk.Toplevel):
+    """Full-featured flake inspection popup with zoomable frame, overview locator, metrics, and annotations."""
 
     ZOOM_FACTOR = 1.3
     MIN_ZOOM = 0.05
@@ -256,53 +271,265 @@ class ZoomableFramePopup(tk.Toplevel):
         title: str = "",
         contour: list[list[int]] | None = None,
         on_navigate: Callable[[int], tuple[Image.Image, Detection, str, list[list[int]] | None] | None] | None = None,
+        context: FlakeInspectorContext | None = None,
+        grid_idx: int = 0,
     ):
         super().__init__(parent)
-        self.withdraw()  # hide until fully rendered
-        self.title(title)
+        self.withdraw()
 
         self._src = src_image
         self._det = det
         self._contour = contour
         self._on_navigate = on_navigate
+        self._ctx = context
+        self._grid_idx = grid_idx
         self._photo: ImageTk.PhotoImage | None = None
+        self._overview_photo: ImageTk.PhotoImage | None = None
 
         # Zoom state: center in source image coords
         bx, by, bw, bh = det["bbox"]
         self._cx = bx + bw / 2.0
         self._cy = by + bh / 2.0
 
-        # Initial zoom: fit whole image, capped to reasonable window size
+        # Window sizing
         sw, sh = src_image.size
-        max_w, max_h = min(1200, int(self.winfo_screenwidth() * 0.5)), min(900, int(self.winfo_screenheight() * 0.7))
-        self._zoom = min(max_w / sw, max_h / sh)
-        self._win_w = max(400, int(sw * self._zoom))
-        self._win_h = max(300, int(sh * self._zoom))
-        self.geometry(f"{self._win_w}x{self._win_h}")
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        max_w = min(1400, int(screen_w * 0.7))
+        max_h = min(1000, int(screen_h * 0.8))
+        self._zoom = min((max_w - CONTEXT_PANE_WIDTH) / sw, max_h / sh)
+        frame_w = max(400, int(sw * self._zoom))
+        frame_h = max(300, int(sh * self._zoom))
+        total_w = frame_w + CONTEXT_PANE_WIDTH
+        self._win_w = frame_w
+        self._win_h = frame_h
+        self.geometry(f"{total_w}x{frame_h + 60}")
 
-        self._canvas = tk.Canvas(self, highlightthickness=0, bg="black")
-        self._canvas.pack(fill="both", expand=True)
+        self._build_layout()
+        self._update_title_bar()
+        self._update_annotation_buttons()
+        self._update_overview_dot()
+        self._update_metrics()
+
+        # Bindings
+        self._frame_canvas.bind("<MouseWheel>", self._on_scroll)
+        self._frame_canvas.bind("<Button-4>", self._on_scroll_linux)
+        self._frame_canvas.bind("<Button-5>", self._on_scroll_linux)
+        self._frame_canvas.bind("<ButtonPress-1>", self._on_drag_start)
+        self._frame_canvas.bind("<B1-Motion>", self._on_drag)
+        self.bind("<Escape>", lambda _: self.destroy())
+        self.bind("<Configure>", self._on_configure)
+        self.bind("<Left>", lambda _: self._navigate(-1))
+        self.bind("<Right>", lambda _: self._navigate(1))
+        self.bind("<g>", lambda _: self._mark("good"))
+        self.bind("<b>", lambda _: self._mark("bad"))
+        self.bind("<u>", lambda _: self._mark(None))
+
+        self._render_frame()
+        self.deiconify()
+        self.focus_set()
+
+    def _build_layout(self):
+        """Build the inspector layout: top bar, paned center, bottom bar."""
+        # ── Top bar ──
+        top_bar = ttk.Frame(self)
+        top_bar.pack(fill="x", padx=4, pady=(4, 0))
+
+        self._title_label = ttk.Label(top_bar, text="", font=("TkDefaultFont", 10, "bold"))
+        self._title_label.pack(side="left", padx=4)
+
+        self._btn_bad = tk.Button(top_bar, text="✗ Bad", command=lambda: self._mark("bad"), padx=8, pady=2)
+        self._btn_bad.pack(side="right", padx=2)
+
+        self._btn_good = tk.Button(top_bar, text="✓ Good", command=lambda: self._mark("good"), padx=8, pady=2)
+        self._btn_good.pack(side="right", padx=2)
+
+        # ── Center: horizontal PanedWindow ──
+        self._paned = ttk.PanedWindow(self, orient="horizontal")
+        self._paned.pack(fill="both", expand=True, padx=4, pady=2)
+
+        # Left: zoomable frame canvas
+        self._frame_canvas = tk.Canvas(self._paned, highlightthickness=0, bg="black")
+        self._paned.add(self._frame_canvas, weight=3)
+
+        # Right: context pane
+        right_pane = ttk.Frame(self._paned, width=CONTEXT_PANE_WIDTH)
+        self._paned.add(right_pane, weight=0)
+
+        # Notebook for overview (+ future revisit tabs)
+        self._notebook = ttk.Notebook(right_pane)
+        self._notebook.pack(fill="both", expand=True, padx=2, pady=2)
+
+        # Overview tab
+        overview_frame = ttk.Frame(self._notebook)
+        self._notebook.add(overview_frame, text="Overview")
+
+        self._overview_canvas = tk.Canvas(overview_frame, highlightthickness=0, bg="#333333")
+        self._overview_canvas.pack(fill="both", expand=True)
+
+        if self._ctx and self._ctx.overview_thumb is None:
+            ttk.Label(overview_frame, text="No overview image", foreground="gray").pack(pady=10)
+
+        # Revisit tab stubs
+        if self._ctx:
+            self._add_revisit_stubs()
+
+        # Metrics panel (below notebook)
+        metrics_frame = ttk.LabelFrame(right_pane, text="Metrics", padding=4)
+        metrics_frame.pack(fill="x", padx=2, pady=(2, 4))
+
+        self._metrics_labels: dict[str, ttk.Label] = {}
+        metric_rows = [
+            ("Score", "score"),
+            ("Tier", "tier"),
+            ("R", "r_val"),
+            ("G", "g_val"),
+            ("B", "b_val"),
+            ("Size", "size"),
+            ("CalDist", "cal_dist"),
+            ("PerimRatio", "perim_ratio"),
+            ("AspectRatio", "aspect_ratio"),
+            ("Entropy", "entropy"),
+            ("GradEnergy", "grad_energy"),
+            ("Kurtosis", "kurtosis"),
+            ("Stage", "stage"),
+        ]
+        for label_text, key in metric_rows:
+            row_frame = ttk.Frame(metrics_frame)
+            row_frame.pack(fill="x", pady=1)
+            ttk.Label(row_frame, text=f"{label_text}:", width=11, anchor="e").pack(side="left")
+            val_label = ttk.Label(row_frame, text="—", anchor="w")
+            val_label.pack(side="left", padx=(4, 0))
+            self._metrics_labels[key] = val_label
+
+        # ── Bottom bar ──
+        bottom_bar = ttk.Frame(self)
+        bottom_bar.pack(fill="x", padx=4, pady=(0, 4))
+        ttk.Label(
+            bottom_bar,
+            text="← / → navigate    G good    B bad    U unmark    Scroll zoom    Drag pan    Esc close",
+            foreground="gray",
+            font=("TkDefaultFont", 8),
+        ).pack(side="left")
 
         # Pan state
         self._drag_x = 0
         self._drag_y = 0
 
-        # Bindings
-        self._canvas.bind("<MouseWheel>", self._on_scroll)
-        self._canvas.bind("<Button-4>", self._on_scroll_linux)
-        self._canvas.bind("<Button-5>", self._on_scroll_linux)
-        self._canvas.bind("<ButtonPress-1>", self._on_drag_start)
-        self._canvas.bind("<B1-Motion>", self._on_drag)
-        self.bind("<Escape>", lambda _: self.destroy())
-        self.bind("<Configure>", self._on_configure)
-        if on_navigate:
-            self.bind("<Left>", lambda _: self._navigate(-1))
-            self.bind("<Right>", lambda _: self._navigate(1))
+    def _add_revisit_stubs(self):
+        """Add stub tabs for any revisit directories found."""
+        if not self._ctx:
+            return
+        chip_idx = self._det.get("chip_idx", 0)
+        chip_dir = self._ctx.run_dir / f"chip_{chip_idx}"
+        if not chip_dir.is_dir():
+            return
+        for d in sorted(chip_dir.iterdir()):
+            if d.is_dir() and d.name.startswith("revisit_"):
+                mag = d.name.replace("revisit_", "")
+                tab = ttk.Frame(self._notebook)
+                self._notebook.add(tab, text=mag)
+                ttk.Label(tab, text="No revisit image", foreground="gray").pack(pady=20)
 
-        # Render synchronously, then show
-        self._render()
-        self.deiconify()
-        self.focus_set()
+    def _annotation_key(self) -> str:
+        """Generate annotation key for the current detection."""
+        chip_idx = self._det.get("chip_idx", 0)
+        frame = self._det.get("frame", "")
+        det_idx = self._det.get("det_idx", 0)
+        return f"chip{chip_idx}_{frame}:{det_idx}"
+
+    def _update_title_bar(self):
+        """Update the title label with current position info."""
+        total = self._ctx.total_count if self._ctx else 0
+        chip_idx = self._det.get("chip_idx", 0)
+        frame = self._det.get("frame", "")
+        det_idx = self._det.get("det_idx", 0)
+        text = f"#{self._grid_idx + 1}/{total}  C{chip_idx} {frame} det#{det_idx}"
+        self._title_label.configure(text=text)
+        self.title(f"Inspector — {text}")
+
+    def _update_annotation_buttons(self):
+        """Update Good/Bad button relief to reflect current annotation."""
+        key = self._annotation_key()
+        annotation = self._ctx.annotations.get(key) if self._ctx else None
+        self._btn_good.configure(relief=tk.SUNKEN if annotation == "good" else tk.RAISED)
+        self._btn_bad.configure(relief=tk.SUNKEN if annotation == "bad" else tk.RAISED)
+
+    def _mark(self, label: str | None):
+        """Mark the current detection as good/bad/unmarked."""
+        if not self._ctx:
+            return
+        key = self._annotation_key()
+        current = self._ctx.annotations.get(key)
+        if label is not None and current == label:
+            label = None  # toggle off if already set
+        self._ctx.on_annotation_change(key, label)
+        self._update_annotation_buttons()
+
+    def _update_overview_dot(self):
+        """Draw overview thumbnail with red dot at detection's stage position."""
+        if not self._ctx or not self._ctx.overview_thumb:
+            return
+        thumb = self._ctx.overview_thumb.copy()
+        meta = self._ctx.stitch_meta
+
+        stage_x = self._det.get("stage_x")
+        stage_y = self._det.get("stage_y")
+
+        if meta and stage_x is not None and stage_y is not None:
+            bounds = meta.get("stage_bounds_um", {})
+            scale = meta.get("scale_um_per_px", 1.0)
+            full_w, full_h = self._ctx.overview_size_px or thumb.size
+
+            # Stage → full overview pixel coords
+            px_x = (stage_x - bounds.get("x_min", 0)) / scale
+            px_y = (stage_y - bounds.get("y_min", 0)) / scale
+
+            # Full overview → thumbnail coords
+            thumb_w, thumb_h = thumb.size
+            tx = px_x * thumb_w / full_w
+            ty = px_y * thumb_h / full_h
+
+            draw = ImageDraw.Draw(thumb)
+            r = 5
+            draw.ellipse([tx - r, ty - r, tx + r, ty + r], fill="red", outline="white")
+
+        self._overview_photo = ImageTk.PhotoImage(thumb)
+        self._overview_canvas.delete("all")
+        self._overview_canvas.create_image(0, 0, anchor="nw", image=self._overview_photo)
+
+    def _update_metrics(self):
+        """Update the metrics panel labels with current detection values."""
+        d = self._det
+        um2 = self._ctx.um_per_px if self._ctx else 0.36
+
+        rgb = d.get("contrast_rgb", (0, 0, 0))
+        r_val = rgb[0] if len(rgb) > 0 else 0
+        g_val = rgb[1] if len(rgb) > 1 else 0
+        b_val = rgb[2] if len(rgb) > 2 else 0
+
+        vals = {
+            "score": f"{d.get('score', 0):.2f}",
+            "tier": f"T{d.get('tier', '?')}",
+            "r_val": f"{r_val:+.3f}",
+            "g_val": f"{g_val:+.3f}",
+            "b_val": f"{b_val:+.3f}",
+            "size": f"{d.get('size_px', 0) * um2**2:.0f} µm²",
+            "cal_dist": f"{d.get('cal_dist', 0):.3f}",
+            "perim_ratio": f"{d.get('perim_ratio', 0):.2f}",
+            "aspect_ratio": f"{d.get('aspect_ratio', 1.0):.2f}",
+            "entropy": f"{d.get('entropy', d.get('g_entropy', 0)):.2f}",
+            "grad_energy": f"{d.get('grad_energy', 0):.1f}",
+            "kurtosis": f"{max(d.get('r_kurt', 0), d.get('g_kurt', 0), d.get('b_kurt', 0)):.1f}",
+        }
+
+        sx = d.get("stage_x")
+        sy = d.get("stage_y")
+        vals["stage"] = f"({sx:.0f}, {sy:.0f}) µm" if sx is not None and sy is not None else "N/A"
+
+        for key, text in vals.items():
+            if key in self._metrics_labels:
+                self._metrics_labels[key].configure(text=text)
 
     def _navigate(self, delta: int):
         if not self._on_navigate:
@@ -314,19 +541,25 @@ class ZoomableFramePopup(tk.Toplevel):
         self._src = src_image
         self._det = det
         self._contour = contour
-        self.title(title)
+        self._grid_idx += delta
+
         # Re-center on new detection
         bx, by, bw, bh = det["bbox"]
         self._cx = bx + bw / 2.0
         self._cy = by + bh / 2.0
-        self._render()
+
+        self._update_title_bar()
+        self._update_annotation_buttons()
+        self._update_overview_dot()
+        self._update_metrics()
+        self._render_frame()
 
     def _on_configure(self, event):
-        if event.widget is not self:
+        if event.widget is not self._frame_canvas:
             return
         self._win_w = event.width
         self._win_h = event.height
-        self._render()
+        self._render_frame()
 
     def _on_scroll(self, event):
         if event.delta > 0:
@@ -341,19 +574,14 @@ class ZoomableFramePopup(tk.Toplevel):
             self._zoom_at(event.x, event.y, 1.0 / self.ZOOM_FACTOR)
 
     def _zoom_at(self, mx: int, my: int, factor: float):
-        """Zoom centered on mouse position."""
-        # Convert mouse pos to source coords (use _win_w/h, reliable before mapping)
         cw, ch = self._win_w, self._win_h
         src_x = self._cx + (mx - cw / 2.0) / self._zoom
         src_y = self._cy + (my - ch / 2.0) / self._zoom
-
         new_zoom = max(self.MIN_ZOOM, min(self.MAX_ZOOM, self._zoom * factor))
-
-        # Adjust center so the point under the mouse stays fixed
         self._cx = src_x - (mx - cw / 2.0) / new_zoom
         self._cy = src_y - (my - ch / 2.0) / new_zoom
         self._zoom = new_zoom
-        self._render()
+        self._render_frame()
 
     def _on_drag_start(self, event):
         self._drag_x = event.x
@@ -366,16 +594,15 @@ class ZoomableFramePopup(tk.Toplevel):
         self._drag_y = event.y
         self._cx -= dx / self._zoom
         self._cy -= dy / self._zoom
-        self._render()
+        self._render_frame()
 
-    def _render(self):
+    def _render_frame(self):
         cw, ch = self._win_w, self._win_h
         if cw < 2 or ch < 2:
             return
         sw, sh = self._src.size
         z = self._zoom
 
-        # Source region visible in the canvas
         half_w = cw / (2.0 * z)
         half_h = ch / (2.0 * z)
         src_x0 = self._cx - half_w
@@ -383,7 +610,6 @@ class ZoomableFramePopup(tk.Toplevel):
         src_x1 = self._cx + half_w
         src_y1 = self._cy + half_h
 
-        # Clamp to source bounds and compute canvas offsets for black borders
         crop_x0 = max(0.0, src_x0)
         crop_y0 = max(0.0, src_y0)
         crop_x1 = min(float(sw), src_x1)
@@ -398,7 +624,6 @@ class ZoomableFramePopup(tk.Toplevel):
         resample = Image.Resampling.LANCZOS if z < 1.0 else Image.Resampling.NEAREST
         display = crop.resize((disp_w, disp_h), resample)
 
-        # Draw contour and bbox on display
         draw = ImageDraw.Draw(display)
         if self._contour and len(self._contour) >= 3:
             pts = [(int((x - crop_x0) * z), int((y - crop_y0) * z)) for x, y in self._contour]
@@ -411,11 +636,10 @@ class ZoomableFramePopup(tk.Toplevel):
         draw.rectangle([rx0, ry0, rx1, ry1], outline="lime", width=2)
 
         self._photo = ImageTk.PhotoImage(display)
-        # Position so the cropped region aligns correctly
         canvas_x = int((crop_x0 - src_x0) * z)
         canvas_y = int((crop_y0 - src_y0) * z)
-        self._canvas.delete("all")
-        self._canvas.create_image(canvas_x, canvas_y, anchor="nw", image=self._photo)
+        self._frame_canvas.delete("all")
+        self._frame_canvas.create_image(canvas_x, canvas_y, anchor="nw", image=self._photo)
 
 
 # ── GUI ──────────────────────────────────────────────────────────────
@@ -455,6 +679,15 @@ class RunViewerGUI:
         self._last_top: list[Detection] = []
         self._last_thumb_cols: int = 0
         self._last_canvas_w: int = 0
+
+        # Overview stitch for inspector locator
+        self._overview_stitch_thumb: Image.Image | None = None
+        self._overview_stitch_size_px: tuple[int, int] | None = None
+        self._overview_stitch_meta: dict | None = None
+
+        # Annotations
+        self._annotations: dict[str, str] = {}
+        self._thumb_borders: dict[str, tk.Frame] = {}
 
         self._build_ui()
         self._refresh_runs()
@@ -612,6 +845,11 @@ class RunViewerGUI:
         self._chip_buttons = {}
         self._last_top = []
         self._last_thumb_cols = 0
+        self._overview_stitch_thumb = None
+        self._overview_stitch_size_px = None
+        self._overview_stitch_meta = None
+        self._annotations = {}
+        self._thumb_borders = {}
 
     def _show_run_detail(self, run: RunInfo):
         self._clear_detail()
@@ -691,11 +929,13 @@ class RunViewerGUI:
         self.root.after(1, self._load_detections, run)
 
     def _load_detections(self, run: RunInfo):
-        """Phase 2b: load detection data and apply filters."""
+        """Phase 2b: load detection data, overview stitch, annotations, and apply filters."""
         if self._selected_run is not run:
             return
 
         self._all_detections, self._chip_scan_dirs, self._um_per_px = _load_all_detections(run.path, run.n_chips)
+        self._load_overview_stitch(run.path)
+        self._load_annotations(run.path)
 
         # Apply filters (replaces loading bar with thumbnails)
         if self._all_detections and self._filtered_crops_frame and self._filtered_table_frame:
@@ -712,6 +952,98 @@ class RunViewerGUI:
         for p in run_dir.glob("overview_*_stitch_chips_detected.png"):
             return p
         return None
+
+    # ── Overview stitch + annotations ────────────────────────────
+
+    def _load_overview_stitch(self, run_dir: Path):
+        """Load overview stitch image + meta for the inspector's locator dot."""
+        self._overview_stitch_thumb = None
+        self._overview_stitch_size_px = None
+        self._overview_stitch_meta = None
+
+        # Find stitch image (prefer the plain stitch, not _chips_detected)
+        stitch_path = None
+        for p in run_dir.glob("overview_*_stitch.jpg"):
+            stitch_path = p
+            break
+        if stitch_path is None:
+            return
+
+        # Load companion meta
+        meta_name = stitch_path.stem + "_meta.json"
+        meta_path = run_dir / meta_name
+        if meta_path.exists():
+            try:
+                with open(meta_path) as f:
+                    self._overview_stitch_meta = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        try:
+            img = Image.open(stitch_path)
+            img.load()
+            self._overview_stitch_size_px = img.size
+            # Downscale to thumbnail
+            w, h = img.size
+            scale = min(OVERVIEW_THUMB_MAX / w, OVERVIEW_THUMB_MAX / h)
+            if scale < 1.0:
+                thumb = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+            else:
+                thumb = img
+            self._overview_stitch_thumb = thumb
+        except Exception:
+            pass
+
+    def _load_annotations(self, run_dir: Path):
+        """Load annotations from annotations.json in the run directory."""
+        self._annotations = {}
+        ann_path = run_dir / "annotations.json"
+        if ann_path.exists():
+            try:
+                with open(ann_path) as f:
+                    self._annotations = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    def _save_annotations(self):
+        """Save annotations to annotations.json in the current run directory."""
+        if not self._selected_run:
+            return
+        ann_path = self._selected_run.path / "annotations.json"
+        try:
+            with open(ann_path, "w") as f:
+                json.dump(self._annotations, f, indent=2)
+        except OSError:
+            pass
+
+    def _on_annotation_change(self, key: str, label: str | None):
+        """Handle annotation change from FlakeInspector."""
+        if label is None:
+            self._annotations.pop(key, None)
+        else:
+            self._annotations[key] = label
+        self._save_annotations()
+        self._update_thumb_border(key)
+
+    def _update_thumb_border(self, key: str):
+        """Update a single thumbnail's border color based on annotation."""
+        border_frame = self._thumb_borders.get(key)
+        if border_frame is None:
+            return
+        annotation = self._annotations.get(key)
+        if annotation == "good":
+            border_frame.configure(highlightbackground="green", highlightthickness=3)
+        elif annotation == "bad":
+            border_frame.configure(highlightbackground="red", highlightthickness=3)
+        else:
+            border_frame.configure(highlightthickness=0)
+
+    def _detection_annotation_key(self, d: Detection) -> str:
+        """Generate annotation key for a detection dict."""
+        chip_idx = d.get("chip_idx", 0)
+        frame = d.get("frame", "")
+        det_idx = d.get("det_idx", 0)
+        return f"chip{chip_idx}_{frame}:{det_idx}"
 
     # ── Chip toggles ─────────────────────────────────────────────
 
@@ -953,6 +1285,7 @@ class RunViewerGUI:
         for w in self._filtered_crops_frame.winfo_children():
             w.destroy()
         self._crop_photos = []
+        self._thumb_borders = {}
 
         if not top:
             ttk.Label(self._filtered_crops_frame, text="No detections pass filters", foreground="gray").pack(anchor="w")
@@ -976,10 +1309,23 @@ class RunViewerGUI:
         if not frame_name:
             return
 
+        # Annotation border frame
+        ann_key = self._detection_annotation_key(d)
+        border_frame = tk.Frame(cell, highlightthickness=0)
+        border_frame.pack()
+        self._thumb_borders[ann_key] = border_frame
+
+        # Apply existing annotation border
+        annotation = self._annotations.get(ann_key)
+        if annotation == "good":
+            border_frame.configure(highlightbackground="green", highlightthickness=3)
+        elif annotation == "bad":
+            border_frame.configure(highlightbackground="red", highlightthickness=3)
+
         try:
             frame_img = self._load_frame_cached(chip_idx, frame_name)
             if frame_img is None:
-                ttk.Label(cell, text="[no frame]", foreground="gray").pack()
+                ttk.Label(border_frame, text="[no frame]", foreground="gray").pack()
                 return
 
             fw, fh = frame_img.size
@@ -1000,11 +1346,11 @@ class RunViewerGUI:
 
             photo = ImageTk.PhotoImage(thumb)
             self._crop_photos.append(photo)
-            lbl = ttk.Label(cell, image=photo, cursor="hand2")
+            lbl = ttk.Label(border_frame, image=photo, cursor="hand2")
             lbl.pack()
             lbl.bind("<Button-1>", lambda _e, idx=grid_idx: self._show_frame_popup_at(idx))
         except Exception:
-            ttk.Label(cell, text="[load error]", foreground="red").pack()
+            ttk.Label(border_frame, text="[load error]", foreground="red").pack()
 
         rgb = d.get("contrast_rgb", (0, 0, 0))
         r_val, g_val = rgb[0], rgb[1]
@@ -1080,7 +1426,7 @@ class RunViewerGUI:
         return frame_img, d, title, contour
 
     def _show_frame_popup_at(self, grid_idx: int):
-        """Open a ZoomableFramePopup for the detection at grid_idx in _last_top."""
+        """Open a FlakeInspector for the detection at grid_idx in _last_top."""
         data = self._get_popup_data(grid_idx)
         if data is None:
             return
@@ -1096,7 +1442,27 @@ class RunViewerGUI:
                 idx_cell[0] = new_idx
             return result
 
-        ZoomableFramePopup(self.root, frame_img, d, title=title, contour=contour, on_navigate=on_navigate)
+        ctx = FlakeInspectorContext(
+            overview_thumb=self._overview_stitch_thumb,
+            overview_size_px=self._overview_stitch_size_px,
+            stitch_meta=self._overview_stitch_meta,
+            run_dir=self._selected_run.path if self._selected_run else Path(),
+            annotations=self._annotations,
+            on_annotation_change=self._on_annotation_change,
+            um_per_px=self._um_per_px,
+            total_count=len(self._last_top),
+        )
+
+        FlakeInspector(
+            self.root,
+            frame_img,
+            d,
+            title=title,
+            contour=contour,
+            on_navigate=on_navigate,
+            context=ctx,
+            grid_idx=grid_idx,
+        )
 
     def _populate_detection_table(self, parent: ttk.Widget, ranked: list[Detection]):
         """Show a sortable treeview table of top detection scoring data. Click headers to sort."""

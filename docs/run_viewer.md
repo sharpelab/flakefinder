@@ -88,9 +88,56 @@ Slider defaults come from `DetectorConfig.from_material(preset)` tier1 gates. Re
 
 `_frame_cache: dict[tuple[int, str], Image.Image]` keyed by `(chip_idx, frame_name)` since frame names (e.g. `frame_0001`) can collide across chips. Each chip's frames live in its own `chip_N/scan_*/` directory, mapped by `_chip_scan_dirs: dict[int, Path | None]`. LRU eviction at 30 entries.
 
-### Image popups
+### Flake Inspector (`FlakeInspector`)
 
-- **Thumbnail click** → `ZoomableFramePopup`: full frame with detection bbox. Scroll to zoom (centered on mouse), drag to pan. Initial view shows whole frame, centered on detection. Dismiss with Escape.
+Clicking a detection thumbnail opens the full-featured inspector popup:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  #14/87  C2 frame_0403 det#3         [✗ Bad] [✓ Good]  │
+├──────────────────────────────────┬──────────────────────┤
+│                                  │ [Overview|50x|150x]  │
+│    Frame view (zoomable)         │  ┌────────────────┐  │
+│    with contour + bbox           │  │  overview thumb │  │
+│                                  │  │    ● ← you     │  │
+│                                  │  └────────────────┘  │
+│                                  │                      │
+│                                  │  Score: 12.3  T1     │
+│                                  │  R: +0.04  G: +0.03  │
+│                                  │  Size: 580 µm²       │
+│                                  │  CalD: 0.12  PR: 1.3 │
+├──────────────────────────────────┴──────────────────────┤
+│  ← / → navigate    G good  B bad  U unmark    Esc close │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Layout**: Horizontal `PanedWindow` — left is zoomable frame canvas, right is context pane with `ttk.Notebook` (overview tab + revisit stubs) and metrics panel.
+
+**Keyboard shortcuts**:
+| Key | Action |
+|-----|--------|
+| ← / → | Navigate to previous/next detection |
+| G | Mark as "good" (toggle) |
+| B | Mark as "bad" (toggle) |
+| U | Unmark (clear annotation) |
+| Scroll | Zoom in/out (centered on mouse) |
+| Drag | Pan the frame view |
+| Escape | Close inspector |
+
+**Overview locator**: Loads `overview_*_stitch.jpg` + `*_stitch_meta.json` once per run, downscales to ≤400px thumbnail. Red dot shows detection's stage position mapped from stage coordinates to pixel coordinates using `stage_bounds_um` and `scale_um_per_px`. Graceful fallback: no stitch meta → overview without dot; no overview → placeholder label.
+
+**Metrics panel**: Shows score, tier, R/G/B contrast, size (µm²), cal_dist, perim_ratio, aspect_ratio, entropy, grad_energy, kurtosis, and stage coordinates (or "N/A" if unavailable).
+
+### Annotations
+
+Annotations are stored in `{run_dir}/annotations.json`:
+- **Key format**: `chip{chip_idx}_{frame}:{det_idx}` (e.g. `chip2_frame_0403:3`)
+- **Values**: `"good"` or `"bad"`
+- **Gallery feedback**: thumbnails get colored borders (green = good, red = bad)
+- Annotations persist across sessions and update immediately in both the gallery and inspector
+
+### Image popups (overview)
+
 - **Overview/image click** → `ImagePopup`: resizable contain-scaled view. Dismiss with Escape or click.
 
 ### Mousewheel scrolling
@@ -104,8 +151,10 @@ Mousewheel bound once at startup via `bind_all`. A `_scroll_active` boolean flag
 | Run list | `checkpoint.json` | `args.preset`, `n_chips`, `step_timing`, `notes` |
 | Run list detections | `chip_N/seg/summary.json` | `stats.total_detections` |
 | Overview image | `overview_*_stitch_chips_detected.png` | — |
+| Overview locator | `overview_*_stitch.jpg` + `*_stitch_meta.json` | `stage_bounds_um`, `scale_um_per_px`, `image_size_px` |
 | Detection data | `chip_N/seg/summary.json` | `detections_by_frame` (includes `stage_x/y`) |
 | Frame images | `chip_N/scan_*/frame_NNNN.jpg` | Raw scan frames |
+| Annotations | `annotations.json` | `{key: "good"|"bad"}` |
 
 ## Filter Slider Ranges
 
