@@ -322,8 +322,8 @@ def _analyze_component(
         perim_ratio = perim / max(hull_perim, 1.0)
         hull_pts = hull.reshape(-1, 2).tolist()
         contour_pts = cnt.reshape(-1, 2).tolist()
-        _, _, bw, bh = cv2.boundingRect(cnt)
-        aspect_ratio = max(bw, bh) / max(min(bw, bh), 1)
+        _, (bw, bh), _ = cv2.minAreaRect(cnt)
+        aspect_ratio = max(bw, bh) / max(min(bw, bh), 1e-6)
     else:
         solidity = 0.0
         circularity = 0.0
