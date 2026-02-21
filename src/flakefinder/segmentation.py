@@ -333,14 +333,23 @@ class DetectorConfig:
         )
 
     @classmethod
-    def from_material(cls, name: str) -> DetectorConfig:
-        """Create config from material name."""
-        presets = {
+    def _presets(cls) -> dict[str, Callable[[], DetectorConfig]]:
+        return {
             "hbn": cls.hbn,
             "hbn_thin": cls.hbn_thin,
             "hbn_medium": cls.hbn_medium,
             "graphene": cls.graphene,
         }
+
+    @classmethod
+    def material_names(cls) -> list[str]:
+        """Available material preset names."""
+        return list(cls._presets())
+
+    @classmethod
+    def from_material(cls, name: str) -> DetectorConfig:
+        """Create config from material name."""
+        presets = cls._presets()
         if name not in presets:
             raise ValueError(f"Unknown material: {name!r}. Choose from: {', '.join(presets)}")
         return presets[name]()

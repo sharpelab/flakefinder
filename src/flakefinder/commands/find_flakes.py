@@ -572,7 +572,7 @@ Examples:
         "--material",
         type=str,
         default="hbn",
-        choices=["hbn", "hbn_thin", "hbn_medium", "graphene"],
+        choices=DetectorConfig.material_names(),
         help="Material preset for segmentation (default: hbn)",
     )
     seg_group.add_argument(

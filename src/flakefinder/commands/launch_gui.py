@@ -22,13 +22,14 @@ from tkinter import messagebox, ttk
 from PIL import Image, ImageTk
 
 from flakefinder.commands.find_flakes import PRESETS
+from flakefinder.segmentation import DetectorConfig
 
 # gui_state.json lives next to the script's working directory (repo root)
 GUI_STATE_PATH = Path("gui_state.json")
 MAX_RECENT_OPERATORS = 10
 
 DEFAULT_PRESET = "2.5_10"
-MATERIALS = ("hbn", "graphene")
+MATERIALS = DetectorConfig.material_names()
 DEFAULT_INITIAL_Z = "24690"
 DEFAULT_AREA_RECT = "8000,95000,0,78000"
 
