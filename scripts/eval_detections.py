@@ -113,7 +113,7 @@ def draw_eval_frame(
     for i, (det, (cls_label, color)) in enumerate(zip(detections, classifications, strict=True)):
         bx, by, bw, bh = det["bbox"]
         r_contrast, g_contrast, _ = det["contrast_rgb"]
-        d = config.cal_distance(r_contrast, g_contrast)
+        d = config.cal_curve(r_contrast, g_contrast).dist
 
         # Draw filled bbox
         thickness = 2

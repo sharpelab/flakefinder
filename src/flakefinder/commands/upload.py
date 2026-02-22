@@ -317,6 +317,7 @@ def build_flake_meta(
             "score": det["score"],
             "classification": det.get("classification"),
             "cal_dist": det["cal_dist"],
+            "thickness_nm": det.get("thickness_nm"),
             "size_um2": round(size_um2, 1),
             "contrast_rgb": [round(c, 4) for c in contrast],
             "std_rgb": [round(det["r_std"], 4), round(det["g_std"], 4), round(det["b_std"], 4)],

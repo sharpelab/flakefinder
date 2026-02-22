@@ -31,6 +31,30 @@ from flakefinder.types import ContrastRGB, PixelPolygon, Point2F, XYWHRect
 # ============================================================================
 
 
+class CalProjection(NamedTuple):
+    """Result of projecting an (R, G) point onto the calibration curve."""
+
+    dist: float
+    thickness_nm: float | None
+
+
+# AFM-verified hBN calibration data on 90nm SiO₂ (50x, Leica DM6M).
+# Source: docs/bn_thickness_calibration.md
+HBN_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
+    (-0.600, 0.286, 4.6),
+    (-0.671, 0.079, 5.6),
+    (-0.597, 0.219, 6.3),
+    (-0.645, 0.313, 7.0),
+    (-0.649, 0.376, 8.1),
+    (-0.670, 0.409, 8.6),
+    (-0.673, 0.526, 10.2),
+    (-0.692, 0.948, 14.1),
+    (-0.481, 1.613, 18.0),
+    (0.421, 2.907, 26.0),
+    (2.520, 4.636, 46.0),
+)
+
+
 class _DetectionBase(TypedDict):
     bbox: XYWHRect
     center: Point2F
@@ -38,6 +62,7 @@ class _DetectionBase(TypedDict):
     mean_contrast: float
     contrast_rgb: ContrastRGB
     cal_dist: float
+    thickness_nm: float | None
     solidity: float
     circularity: float
     perim_ratio: float
@@ -195,8 +220,8 @@ class DetectorConfig:
     morph_kernel_size: int
     entropy_threshold: float  # percentile of local-std within component for uniform region metric
 
-    # -- Calibration curve: R = poly(G) --
-    cal_poly: tuple[float, ...]
+    # -- Calibration curve: (R, G, thickness_nm) anchor points --
+    cal_points: tuple[tuple[float, float, float], ...] | None
     cal_g_range: tuple[float, float]
 
     # -- Classification thresholds --
@@ -221,30 +246,57 @@ class DetectorConfig:
     tier2_cal_dist: float
     tier2_entropy_max: float
 
-    # Precomputed calibration curve
+    # Precomputed calibration curve (derived from cal_points or cal_g_range)
     _cal_g_curve: np.ndarray = field(init=False, repr=False, compare=False)
     _cal_r_curve: np.ndarray = field(init=False, repr=False, compare=False)
+    _cal_thickness_curve: np.ndarray | None = field(init=False, repr=False, compare=False)
+    cal_poly: tuple[float, ...] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        g = np.linspace(self.cal_g_range[0], self.cal_g_range[1], 500)
-        self._cal_g_curve = g
-        self._cal_r_curve = np.polyval(self.cal_poly, g)
+        g_grid = np.linspace(self.cal_g_range[0], self.cal_g_range[1], 500)
+        self._cal_g_curve = g_grid
 
-    def cal_distance(self, r: float, g: float) -> float:
-        """Minimum distance from (g, r) to the calibration curve."""
-        return float(np.sqrt((self._cal_g_curve - g) ** 2 + (self._cal_r_curve - r) ** 2).min())
+        if self.cal_points is not None:
+            rs = np.array([p[0] for p in self.cal_points])
+            gs = np.array([p[1] for p in self.cal_points])
+            nms = np.array([p[2] for p in self.cal_points])
+
+            # Fit R = poly(G) from anchor points
+            self.cal_poly = tuple(float(c) for c in np.polyfit(gs, rs, 2))
+            self._cal_r_curve = np.polyval(self.cal_poly, g_grid)
+
+            # Interpolate thickness onto the same G grid
+            order = np.argsort(gs)
+            self._cal_thickness_curve = np.interp(g_grid, gs[order], nms[order])
+        else:
+            self.cal_poly = (0.0, 0.0, 0.0)
+            self._cal_r_curve = np.polyval(self.cal_poly, g_grid)
+            self._cal_thickness_curve = None
+
+    def cal_curve(self, r: float, g: float) -> CalProjection:
+        """Project (R, G) onto the calibration curve.
+
+        Returns distance to curve and estimated thickness in nm.
+        """
+        dists = np.sqrt((self._cal_g_curve - g) ** 2 + (self._cal_r_curve - r) ** 2)
+        idx = int(dists.argmin())
+        dist = float(dists[idx])
+        thickness_nm: float | None = None
+        if self._cal_thickness_curve is not None:
+            thickness_nm = round(float(self._cal_thickness_curve[idx]), 1)
+        return CalProjection(round(dist, 4), thickness_nm)
 
     def classify(self, r: float, g: float) -> str:
         """Classify by R-G calibration distance and G contrast."""
-        d = self.cal_distance(r, g)
-        if d < self.cal_dist_match:
+        proj = self.cal_curve(r, g)
+        if proj.dist < self.cal_dist_match:
             if g < self.g_thin_max:
                 return "thin"
             elif g <= self.g_medium_max:
                 return "medium"
             else:
                 return "thick"
-        elif d < self.cal_dist_possible:
+        elif proj.dist < self.cal_dist_possible:
             return "possible"
         return self.non_match_label
 
@@ -267,7 +319,7 @@ class DetectorConfig:
             edge_margin_px=50,
             morph_kernel_size=5,
             entropy_threshold=0.4,
-            cal_poly=(0.193, -0.217, -0.604),
+            cal_points=HBN_CAL_POINTS,
             cal_g_range=(-0.5, 6.0),
             cal_dist_match=0.5,
             cal_dist_possible=1.0,
@@ -297,7 +349,7 @@ class DetectorConfig:
             edge_margin_px=50,
             morph_kernel_size=5,
             entropy_threshold=0.4,
-            cal_poly=(0.193, -0.217, -0.604),
+            cal_points=HBN_CAL_POINTS,
             cal_g_range=(-0.5, 6.0),
             cal_dist_match=0.5,
             cal_dist_possible=1.0,
@@ -327,7 +379,7 @@ class DetectorConfig:
             edge_margin_px=50,
             morph_kernel_size=5,
             entropy_threshold=0.4,
-            cal_poly=(0.0, 0.0, 0.0),
+            cal_points=None,
             cal_g_range=(-6.0, 0.5),
             cal_dist_match=0.5,
             cal_dist_possible=1.0,
@@ -523,6 +575,8 @@ def _analyze_component(
     g_contrast = round(float(norm_contrast_bgr[1]), 4)
     b_contrast = round(float(norm_contrast_bgr[0]), 4)
 
+    proj = config.cal_curve(r_contrast, g_contrast)
+
     return Detection(
         bbox=XYWHRect(x_min, y_min, x_max - x_min, y_max - y_min),
         center=Point2F(round((x_min + x_max) / 2, 1), round((y_min + y_max) / 2, 1)),
@@ -530,7 +584,8 @@ def _analyze_component(
         size_um2=round(int(component.sum()) * um_per_px**2, 1),
         mean_contrast=round(mean_contrast, 1),
         contrast_rgb=ContrastRGB(r_contrast, g_contrast, b_contrast),
-        cal_dist=round(config.cal_distance(r_contrast, g_contrast), 4),
+        cal_dist=proj.dist,
+        thickness_nm=proj.thickness_nm,
         solidity=round(solidity, 4),
         circularity=round(circularity, 4),
         perim_ratio=round(perim_ratio, 4),
