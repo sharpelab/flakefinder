@@ -82,6 +82,9 @@ class FindFlakesGUI:
         self.root = root
         self.root.title("FlakeFinder")
         self.root.minsize(600, 500)
+        icon_path = Path(__file__).resolve().parent.parent / "assets" / "icon.ico"
+        if icon_path.exists():
+            self.root.iconbitmap(str(icon_path))
 
         self.process: subprocess.Popen | None = None
         self.start_time: float | None = None
