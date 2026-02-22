@@ -3,6 +3,7 @@
 import argparse
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from flakefinder.flakes_api import BASE_URL, api_get, download_image
@@ -10,6 +11,38 @@ from flakefinder.flakes_api import BASE_URL, api_get, download_image
 # Images to attempt downloading for each flake
 FLAKE_IMAGES = ["eval_img.jpg", "raw_img.png", "flake_mask.png", "overview_marked.jpg"]
 # Magnification images use the pattern {mag}x.png — derived from flake metadata
+
+
+def _download_flake(flake: dict, target: Path) -> tuple[int, int]:
+    """Download all images for a single flake. Returns (files, bytes)."""
+    flake_path = flake["flake_path"]
+    flake_dir = target / flake_path
+
+    flake_dir.mkdir(parents=True, exist_ok=True)
+    (flake_dir / "meta.json").write_text(json.dumps(flake, indent=2))
+
+    total_files = 0
+    total_bytes = 0
+
+    for filename in FLAKE_IMAGES:
+        url = f"{BASE_URL}/images/{flake_path}/{filename}"
+        dest = flake_dir / filename
+        size = download_image(url, dest)
+        if size is not None:
+            total_bytes += size
+            total_files += 1
+
+    for mag in flake.get("flake_available_magnifications", []):
+        mag_str = f"{mag:g}x"
+        filename = f"{mag_str}.png"
+        url = f"{BASE_URL}/images/{flake_path}/{filename}"
+        dest = flake_dir / filename
+        size = download_image(url, dest)
+        if size is not None:
+            total_bytes += size
+            total_files += 1
+
+    return total_files, total_bytes
 
 
 def main():
@@ -25,6 +58,13 @@ def main():
         "--all",
         action="store_true",
         help="Download all flakes, not just favorites",
+    )
+    parser.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=8,
+        help="Parallel download workers (default: 8)",
     )
     args = parser.parse_args()
 
@@ -64,51 +104,39 @@ def main():
     meta_path.write_text(json.dumps({"scan": scan_meta, "flakes": flakes}, indent=2))
     print(f"  Wrote {meta_path}")
 
-    # Download images
-    total_bytes = 0
-    total_files = 0
-
+    # Filter out already-downloaded flakes
+    todo = []
     skipped = 0
-
-    for i, flake in enumerate(flakes):
-        flake_path = flake["flake_path"]  # e.g. "SF118_ABCD_E13-16/Chip_4/Flake_7"
-        flake_dir = target / flake_path
-        flake_id = flake["flake_id"]
-
-        # Skip if already downloaded (meta.json exists)
+    for flake in flakes:
+        flake_dir = target / flake["flake_path"]
         if (flake_dir / "meta.json").exists():
             skipped += 1
-            continue
-
-        fav_marker = " *" if flake.get("flake_favorite") else ""
-        print(f"  [{i + 1}/{len(flakes)}] Flake {flake_id} ({flake_path}){fav_marker}")
-
-        # Save per-flake metadata
-        flake_dir.mkdir(parents=True, exist_ok=True)
-        (flake_dir / "meta.json").write_text(json.dumps(flake, indent=2))
-
-        # Standard images
-        for filename in FLAKE_IMAGES:
-            url = f"{BASE_URL}/images/{flake_path}/{filename}"
-            dest = flake_dir / filename
-            size = download_image(url, dest)
-            if size is not None:
-                total_bytes += size
-                total_files += 1
-
-        # Magnification images
-        for mag in flake.get("flake_available_magnifications", []):
-            mag_str = f"{mag:g}x"  # e.g. "10x", "50x"
-            filename = f"{mag_str}.png"
-            url = f"{BASE_URL}/images/{flake_path}/{filename}"
-            dest = flake_dir / filename
-            size = download_image(url, dest)
-            if size is not None:
-                total_bytes += size
-                total_files += 1
+        else:
+            todo.append(flake)
 
     if skipped:
-        print(f"  ({skipped} flakes already downloaded, skipped)")
+        print(f"  ({skipped} flakes already downloaded, skipping)")
+
+    if not todo:
+        print("Nothing to download.")
+        return
+
+    # Download in parallel
+    total_bytes = 0
+    total_files = 0
+    done = 0
+
+    with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        futures = {pool.submit(_download_flake, f, target): f for f in todo}
+        for future in as_completed(futures):
+            flake = futures[future]
+            files, nbytes = future.result()
+            total_files += files
+            total_bytes += nbytes
+            done += 1
+            fav = " *" if flake.get("flake_favorite") else ""
+            print(f"  [{done}/{len(todo)}] {flake['flake_path']}{fav}")
+
     print(f"\nDone: {total_files} files, {total_bytes / 1024 / 1024:.1f} MB total")
 
 

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import requests
+from dotenv import load_dotenv
 
 BASE_URL = "https://flakes.sharpelab.science"
 
@@ -26,6 +27,7 @@ def get_auth() -> FlakesAuth:
     Reads FLAKES_USER and FLAKES_PASSWORD. Raises RuntimeError if either
     is missing — set them in .env or your shell environment.
     """
+    load_dotenv()
     user = os.environ.get("FLAKES_USER")
     password = os.environ.get("FLAKES_PASSWORD")
     if not user or not password:
