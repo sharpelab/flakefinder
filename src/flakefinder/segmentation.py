@@ -227,8 +227,8 @@ class DetectorConfig:
     # -- Classification thresholds --
     cal_dist_match: float  # max distance for thin/medium/thick
     cal_dist_possible: float  # max distance for "possible"
-    g_thin_max: float  # G < this -> thin
-    g_medium_max: float  # G <= this -> medium, else thick
+    thin_max_nm: float  # thickness < this -> thin
+    medium_max_nm: float  # thickness <= this -> medium, else thick
     non_match_label: str  # label for detections far from cal curve
 
     # -- Scoring --
@@ -287,12 +287,12 @@ class DetectorConfig:
         return CalProjection(round(dist, 4), thickness_nm)
 
     def classify(self, r: float, g: float) -> str:
-        """Classify by R-G calibration distance and G contrast."""
+        """Classify by R-G calibration distance and projected thickness."""
         proj = self.cal_curve(r, g)
-        if proj.dist < self.cal_dist_match:
-            if g < self.g_thin_max:
+        if proj.dist < self.cal_dist_match and proj.thickness_nm is not None:
+            if proj.thickness_nm < self.thin_max_nm:
                 return "thin"
-            elif g <= self.g_medium_max:
+            elif proj.thickness_nm <= self.medium_max_nm:
                 return "medium"
             else:
                 return "thick"
@@ -323,8 +323,8 @@ class DetectorConfig:
             cal_g_range=(-0.5, 6.0),
             cal_dist_match=0.5,
             cal_dist_possible=1.0,
-            g_thin_max=1.0,
-            g_medium_max=2.5,
+            thin_max_nm=15.0,
+            medium_max_nm=24.0,
             non_match_label="non-hBN",
             score_fn=_score_hbn_thin,
             tier1_perim_ratio=1.50,
@@ -353,8 +353,8 @@ class DetectorConfig:
             cal_g_range=(-0.5, 6.0),
             cal_dist_match=0.5,
             cal_dist_possible=1.0,
-            g_thin_max=1.0,
-            g_medium_max=2.5,
+            thin_max_nm=15.0,
+            medium_max_nm=24.0,
             non_match_label="non-hBN",
             score_fn=_score_hbn_medium,
             tier1_perim_ratio=1.50,
@@ -383,8 +383,8 @@ class DetectorConfig:
             cal_g_range=(-6.0, 0.5),
             cal_dist_match=0.5,
             cal_dist_possible=1.0,
-            g_thin_max=-1.0,
-            g_medium_max=-2.5,
+            thin_max_nm=15.0,
+            medium_max_nm=24.0,
             non_match_label="non-graphene",
             score_fn=_score_graphene,
             tier1_perim_ratio=1.20,
