@@ -75,13 +75,13 @@ def load_frame_geometry(seg_dir: Path, frame_name: str, det_idx: int) -> dict | 
 
 def select_flakes(
     summary: dict,
-    max_tier: int,
+    tier: int,
     top_n: int | None,
 ) -> list[Detection]:
     """Select and rank flakes from summary detections.
 
     Returns flat list of detection dicts with frame/det_id, sorted by
-    (tier asc, score desc), filtered by tier, deduped.
+    (tier asc, score desc), filtered to exact tier match, deduped.
     """
     all_dets: list[Detection] = []
     for frame_name, dets in summary.get("detections_by_frame", {}).items():
@@ -89,8 +89,8 @@ def select_flakes(
             d.setdefault("frame", frame_name)
             all_dets.append(d)
 
-    # Filter by tier
-    filtered = [d for d in all_dets if d.get("tier", 3) <= max_tier]
+    # Filter by exact tier match
+    filtered = [d for d in all_dets if d.get("tier", 3) == tier]
 
     # Sort by (tier asc, score desc)
     filtered.sort(key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
@@ -425,7 +425,7 @@ def run(
         user: Scan user name (resolved from checkpoint if None).
         material: Exfoliated material label.
         substrate: Chip thickness / substrate label.
-        tier: Max tier to include.
+        tier: Tier to select (exact match).
         top: Max flakes per chip (None = all passing tier filter).
         dry_run: Build ZIP but don't upload.
         jobs: Parallel workers for eval_img rendering.
@@ -664,7 +664,7 @@ Examples:
     parser.add_argument("--user", default=None, help="Scan user (default: from checkpoint notes or 'FlakeFinder')")
     parser.add_argument("--material", default="hBN", help="Exfoliated material (default: hBN)")
     parser.add_argument("--substrate", default="285nm", help="Chip thickness / substrate (default: 285nm)")
-    parser.add_argument("--tier", type=int, default=1, help="Max tier to include (default: 1)")
+    parser.add_argument("--tier", type=int, default=1, help="Tier to select, exact match (default: 1)")
     parser.add_argument("--top", type=int, default=None, help="Max flakes per chip (default: all passing tier filter)")
     parser.add_argument("--dry-run", action="store_true", help="Build ZIP but don't upload")
     parser.add_argument("-j", "--jobs", type=int, default=4, help="Parallel workers for eval_img rendering")

@@ -22,6 +22,7 @@ import json
 import math
 import os
 import queue
+import re
 import shutil
 import sys
 import threading
@@ -266,6 +267,24 @@ def _print_route_table(route: list[RouteStep], mag_str: str | None = None) -> No
     print(f"{'':38} Total travel: {total_dist:.2f} mm, ~{total_time:.1f}s (XY only)")
 
 
+def _per_chip_path(output: str, label: str | None, filename: str) -> str | None:
+    """Compute per-chip output path from label's chip index.
+
+    Parses chip index from label format ``rank{NN}_c{N}_{frame}_d{det}``.
+    Returns ``{output_parent}/chip_{N}/{output_basename}/{filename}``
+    or None if the label doesn't contain a chip index.
+    """
+    if label is None:
+        return None
+    m = re.search(r"_c(\d+)_", label)
+    if m is None:
+        return None
+    chip_idx = int(m.group(1))
+    base_dir = os.path.dirname(output)
+    revisit_subdir = os.path.basename(output)
+    return os.path.join(base_dir, f"chip_{chip_idx}", revisit_subdir, filename)
+
+
 def run(
     scope: Microscope,
     *,
@@ -280,6 +299,7 @@ def run(
     white_balance: GainRGB = DEFAULT_WB,
     quiet: bool = False,
     or_opt: bool = False,
+    per_chip: bool = False,
 ) -> None:
     """Run revisit loop: move, focus-scan, save best frame at each point."""
 
@@ -370,7 +390,13 @@ def run(
 
         # Phase 3: Enqueue save (runs in background, overlaps with next move)
         filename = _output_filename(i, p.label, mag_str)
-        filepath = os.path.join(output, filename)
+        if per_chip:
+            filepath = _per_chip_path(output, p.label, filename)
+            if filepath is None:
+                filepath = os.path.join(output, filename)
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        else:
+            filepath = os.path.join(output, filename)
         save_q.put((filepath, fc.image))
 
         t_point_end = time.perf_counter()
@@ -538,6 +564,11 @@ Examples:
     out_group.add_argument("--dry-run", action="store_true", help="Print route plan and exit (no hardware)")
     out_group.add_argument("--clean", action="store_true", help="Remove output directory before starting")
     out_group.add_argument("-q", "--quiet", action="store_true", help="Reduced output")
+    out_group.add_argument(
+        "--per-chip",
+        action="store_true",
+        help="Distribute images into per-chip directories (parse chip index from label _c{N}_ pattern)",
+    )
 
     # Route optimization
     route_group = parser.add_argument_group("Route optimization")
@@ -583,8 +614,8 @@ def main() -> int:
         print("(dry run -- exiting)")
         return 0
 
-    # Validate/clean output directory
-    if os.path.exists(args.output):
+    # Validate/clean output directory (skip exists check in per-chip mode)
+    if not args.per_chip and os.path.exists(args.output):
         if args.clean:
             shutil.rmtree(args.output)
             print(f"Removed existing: {args.output}")
@@ -608,6 +639,7 @@ def main() -> int:
                 white_balance=args.white_balance,
                 quiet=args.quiet,
                 or_opt=args.or_opt,
+                per_chip=args.per_chip,
             )
     except (ValueError, FileNotFoundError) as e:
         print(f"Error: {e}")
