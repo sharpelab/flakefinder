@@ -1,6 +1,7 @@
 """Generate FlakeFinder icon: hexagonal flake on dark background."""
 
 import math
+from pathlib import Path
 
 from PIL import Image, ImageDraw
 
@@ -56,16 +57,11 @@ draw.rounded_rectangle(
 
 draw_flake(draw, CENTER, CENTER, SIZE * 0.42)
 
-# Save as .ico with multiple sizes
-sizes = [16, 24, 32, 48, 64, 128, 256]
-icons = []
-for s in sizes:
-    resized = img.resize((s, s), Image.Resampling.LANCZOS)
-    icons.append(resized)
-
-out = "/home/zack/sharpelab/flakefinder/.worktrees/upload-fixes/src/flakefinder/assets/icon.ico"
-icons[0].save(out, format="ICO", sizes=[(s, s) for s in sizes], append_images=icons[1:])
-print(f"Saved {out}")
+# Save as .ico with multiple sizes — pass the 256px image and let PIL downsample
+out = Path(__file__).resolve().parent.parent / "src" / "flakefinder" / "assets" / "icon.ico"
+ico_sizes = [(s, s) for s in (16, 24, 32, 48, 64, 128, 256)]
+img.save(out, format="ICO", sizes=ico_sizes)
+print(f"Saved {out} ({out.stat().st_size:,} bytes)")
 
 # Also save a PNG for preview
 png_out = "/tmp/flakefinder_icon_preview.png"
