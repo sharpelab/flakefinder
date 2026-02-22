@@ -18,6 +18,7 @@ import re
 import sys
 import tkinter as tk
 import tkinter.font as tkfont
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from tkinter import ttk
@@ -226,6 +227,7 @@ SLIDER_MAX_ENTROPY = 8.0
 SLIDER_MAX_GRAD_ENERGY = 120.0
 SLIDER_MAX_ASPECT_RATIO = 6.0
 SLIDER_MAX_KURTOSIS = 50.0
+CROP_THUMB_HEIGHT = int(CROP_THUMB_SIZE * 2 / 3)  # 3:2 camera aspect ratio
 
 
 # ── Image popup viewer ──────────────────────────────────────────────
@@ -761,6 +763,12 @@ class RunViewerGUI:
         self._filter_count_var = tk.StringVar(value="")
         self._filter_preset_config: DetectorConfig | None = None
         self._um_per_px: float = 0.36
+        self._filter_gen: int = 0  # generation counter for worker thread staleness
+        self._thumb_pool = ThreadPoolExecutor(max_workers=4)
+        self._thumb_cell_refs: list[tk.Frame] = []  # border frames indexed by grid_idx
+        self._det_table: ttk.Treeview | None = None  # persistent treeview widget
+        self._grid_frame: ttk.Frame | None = None  # persistent grid container
+        self._grid_cells: list[dict] = []  # reusable cell widgets
 
         # Chip toggle state
         self._active_chips: set[int] = set()  # empty = all shown
@@ -909,7 +917,7 @@ class RunViewerGUI:
             new_cols = max(1, (event.width - 32) // (CROP_THUMB_SIZE + 16))
             if new_cols != self._last_thumb_cols and self._last_top:
                 self._last_thumb_cols = new_cols
-                self._update_filtered_frames(self._last_top)
+                self._apply_filters()
 
     # ── Run list ─────────────────────────────────────────────────
 
@@ -973,6 +981,11 @@ class RunViewerGUI:
         self._revisit_lookup = {}
         self._annotations = {}
         self._thumb_borders = {}
+        self._thumb_cell_refs = []
+        self._det_table = None
+        self._grid_frame = None
+        self._grid_cells = []
+        self._filter_gen += 1  # invalidate any in-flight worker
 
     def _show_run_detail(self, run: RunInfo):
         self._clear_detail()
@@ -1311,15 +1324,17 @@ class RunViewerGUI:
         self._filter_debounce_id = self.root.after(FILTER_DEBOUNCE_MS, self._apply_filters)
 
     def _apply_filters(self):
-        """Filter all detections by chip selection + slider values and update results."""
+        """Kick off phase-1 worker: filter + dedup off the main thread."""
         self._filter_debounce_id = None
         if not self._all_detections:
             return
 
-        # Chip filter (empty active set = show all)
-        visible_chips = self._get_visible_chips()
+        # Bump generation to invalidate any in-flight workers
+        self._filter_gen += 1
+        gen = self._filter_gen
 
-        # Read filter values once
+        # Snapshot all filter state on the main thread (Tk vars aren't thread-safe)
+        visible_chips = self._get_visible_chips()
         pr_max = self._fv_perim_ratio.get()
         cd_max = self._fv_cal_dist.get()
         g_min = self._fv_g_min.get()
@@ -1332,41 +1347,120 @@ class RunViewerGUI:
         ar_max = self._fv_aspect_ratio.get()
         kurt_max = self._fv_kurtosis.get()
         top_n = self._fv_top_n.get()
+        all_dets = self._all_detections
 
-        # Count detections visible (after chip filter, before slider filter)
-        if visible_chips is not None:
-            chip_filtered = [d for d in self._all_detections if d.get("chip_idx") in visible_chips]
-        else:
-            chip_filtered = self._all_detections
+        def phase1_worker():
+            if visible_chips is not None:
+                chip_filtered = [d for d in all_dets if d.get("chip_idx") in visible_chips]
+            else:
+                chip_filtered = all_dets
 
-        passing = []
-        for d in chip_filtered:
-            rgb = d.get("contrast_rgb")
-            if not rgb or len(rgb) < 2:
-                continue
-            r, g = rgb[0], rgb[1]
-            if (
-                d.get("perim_ratio", 0) <= pr_max
-                and d.get("cal_dist", 0) <= cd_max
-                and g >= g_min
-                and g <= g_max
-                and r <= r_max
-                and d.get("entropy", d.get("g_entropy", 0)) <= ent_max
-                and d.get("size_px", 0) >= min_size_px
-                and d.get("grad_energy", 0) <= ge_max
-                and d.get("aspect_ratio", 1.0) <= ar_max
-                and max(d.get("r_kurt", 0), d.get("g_kurt", 0), d.get("b_kurt", 0)) <= kurt_max
-            ):
-                passing.append(d)
+            passing = []
+            for d in chip_filtered:
+                rgb = d.get("contrast_rgb")
+                if not rgb or len(rgb) < 2:
+                    continue
+                r, g = rgb[0], rgb[1]
+                if (
+                    d.get("perim_ratio", 0) <= pr_max
+                    and d.get("cal_dist", 0) <= cd_max
+                    and g >= g_min
+                    and g <= g_max
+                    and r <= r_max
+                    and d.get("entropy", d.get("g_entropy", 0)) <= ent_max
+                    and d.get("size_px", 0) >= min_size_px
+                    and d.get("grad_energy", 0) <= ge_max
+                    and d.get("aspect_ratio", 1.0) <= ar_max
+                    and max(d.get("r_kurt", 0), d.get("g_kurt", 0), d.get("b_kurt", 0)) <= kurt_max
+                ):
+                    passing.append(d)
 
-        passing.sort(key=lambda d: -d.get("score", 0))
-        deduped = dedup_detections(passing)
-        self._filter_count_var.set(f"{len(deduped)} / {len(chip_filtered)} pass ({len(passing) - len(deduped)} dupes)")
+            if self._filter_gen != gen:
+                return
 
-        top = deduped[:top_n]
+            passing.sort(key=lambda d: -d.get("score", 0))
+            deduped = dedup_detections(passing)
+            count_text = f"{len(deduped)} / {len(chip_filtered)} pass ({len(passing) - len(deduped)} dupes)"
+            top = deduped[:top_n]
+
+            if self._filter_gen != gen:
+                return
+
+            self.root.after(0, self._on_filter_phase1, gen, top, count_text)
+
+        self._thumb_pool.submit(phase1_worker)
+
+    def _on_filter_phase1(self, gen: int, top: list[Detection], count_text: str):
+        """Main-thread: build grid skeleton with placeholders, fan out image loading."""
+        if self._filter_gen != gen:
+            return
+
+        self._filter_count_var.set(count_text)
         self._last_top = top
         self._update_filtered_table(top)
-        self._update_filtered_frames(top)
+        self._update_grid(top)
+
+        # Fan out thumbnail loading to the pool
+        for grid_idx, d in enumerate(top):
+            frame_name = d.get("frame", "")
+            chip_idx = d.get("chip_idx", 0)
+            if not frame_name:
+                continue
+            self._thumb_pool.submit(self._thumb_worker, gen, grid_idx, chip_idx, frame_name, d)
+
+    def _thumb_worker(self, gen: int, grid_idx: int, chip_idx: int, frame_name: str, d: Detection):
+        """Pool worker: load frame, resize, draw bbox → post PIL image to main thread."""
+        if self._filter_gen != gen:
+            return
+
+        frame_img = self._load_frame_cached(chip_idx, frame_name)
+        if frame_img is None:
+            return
+
+        if self._filter_gen != gen:
+            return
+
+        fw, fh = frame_img.size
+        scale = min(CROP_THUMB_SIZE / fw, CROP_THUMB_SIZE / fh)
+        thumb = frame_img.resize((int(fw * scale), int(fh * scale)), Image.Resampling.LANCZOS)
+        draw = ImageDraw.Draw(thumb)
+        bx, by, bw, bh = d["bbox"]
+        draw.rectangle(
+            [
+                int((bx - BBOX_PAD_PX) * scale),
+                int((by - BBOX_PAD_PX) * scale),
+                int((bx + bw + BBOX_PAD_PX) * scale),
+                int((by + bh + BBOX_PAD_PX) * scale),
+            ],
+            outline="lime",
+            width=2,
+        )
+
+        if self._filter_gen != gen:
+            return
+
+        self.root.after(0, self._on_thumb_ready, gen, grid_idx, thumb)
+
+    def _on_thumb_ready(self, gen: int, grid_idx: int, pil_thumb: Image.Image):
+        """Main-thread: insert a loaded thumbnail into its placeholder cell."""
+        if self._filter_gen != gen:
+            return
+        if grid_idx >= len(self._thumb_cell_refs):
+            return
+
+        border_frame = self._thumb_cell_refs[grid_idx]
+        if not border_frame.winfo_exists():
+            return
+
+        # Replace placeholder with image (frame stays fixed size)
+        for w in border_frame.winfo_children():
+            w.destroy()
+
+        photo = ImageTk.PhotoImage(pil_thumb)
+        self._crop_photos.append(photo)
+        lbl = ttk.Label(border_frame, image=photo, cursor="hand2")
+        lbl.place(relx=0.5, rely=0.5, anchor="center")
+        lbl.bind("<Button-1>", lambda _e, idx=grid_idx: self._show_frame_popup_at(idx))
 
     def _reset_filters(self):
         """Reset all filter sliders to preset defaults and clear chip selection."""
@@ -1392,99 +1486,139 @@ class RunViewerGUI:
         self._apply_filters()
 
     def _update_filtered_table(self, top: list[Detection]):
-        """Rebuild the detection table with filtered results."""
+        """Repopulate the detection table rows (no widget destroy/rebuild)."""
         if self._filtered_table_frame is None:
             return
-        for w in self._filtered_table_frame.winfo_children():
-            w.destroy()
-        if not top:
-            ttk.Label(self._filtered_table_frame, text="No detections pass filters", foreground="gray").pack(anchor="w")
-            return
-        self._populate_detection_table(self._filtered_table_frame, top)
 
-    def _update_filtered_frames(self, top: list[Detection]):
-        """Show full-frame thumbnails with detection bbox for filtered top detections."""
-        if self._filtered_crops_frame is None:
-            return
-        for w in self._filtered_crops_frame.winfo_children():
-            w.destroy()
-        self._crop_photos = []
-        self._thumb_borders = {}
+        # Create treeview once, reuse thereafter
+        if self._det_table is None:
+            self._create_detection_table(self._filtered_table_frame)
 
-        if not top:
-            ttk.Label(self._filtered_crops_frame, text="No detections pass filters", foreground="gray").pack(anchor="w")
-            return
+        table = self._det_table
+        assert table is not None
+        table.delete(*table.get_children())
 
-        grid_frame = ttk.Frame(self._filtered_crops_frame)
-        grid_frame.pack(fill="x")
-        avail_w = self._detail_canvas.winfo_width() - 32  # padding
-        cols = max(1, avail_w // (CROP_THUMB_SIZE + 16))
-
-        for i, d in enumerate(top):
-            row, col = divmod(i, cols)
-            cell = ttk.Frame(grid_frame, padding=2)
-            cell.grid(row=row * 2, column=col, sticky="nw")
-            self._build_thumbnail_cell(cell, d, i)
-
-    def _build_thumbnail_cell(self, cell: ttk.Frame, d: Detection, grid_idx: int):
-        """Build a single thumbnail cell with image, bbox overlay, and metric label."""
-        frame_name = d.get("frame", "")
-        chip_idx = d.get("chip_idx", 0)
-        if not frame_name:
-            return
-
-        # Annotation border frame
-        ann_key = self._detection_annotation_key(d)
-        border_frame = tk.Frame(cell, highlightthickness=0)
-        border_frame.pack()
-        self._thumb_borders[ann_key] = border_frame
-
-        # Apply existing annotation border
-        annotation = self._annotations.get(ann_key)
-        if annotation == "good":
-            border_frame.configure(highlightbackground="green", highlightthickness=3)
-        elif annotation == "bad":
-            border_frame.configure(highlightbackground="red", highlightthickness=3)
-
-        try:
-            frame_img = self._load_frame_cached(chip_idx, frame_name)
-            if frame_img is None:
-                ttk.Label(border_frame, text="[no frame]", foreground="gray").pack()
-                return
-
-            fw, fh = frame_img.size
-            scale = min(CROP_THUMB_SIZE / fw, CROP_THUMB_SIZE / fh)
-            thumb = frame_img.resize((int(fw * scale), int(fh * scale)), Image.Resampling.LANCZOS)
-            draw = ImageDraw.Draw(thumb)
-            bx, by, bw, bh = d["bbox"]
-            draw.rectangle(
-                [
-                    int((bx - BBOX_PAD_PX) * scale),
-                    int((by - BBOX_PAD_PX) * scale),
-                    int((bx + bw + BBOX_PAD_PX) * scale),
-                    int((by + bh + BBOX_PAD_PX) * scale),
-                ],
-                outline="lime",
-                width=2,
+        n_show = min(len(top), 50)
+        for i, d in enumerate(top[:n_show]):
+            r_val, g_val = 0.0, 0.0
+            rgb = d.get("contrast_rgb")
+            if rgb and len(rgb) >= 2:
+                r_val, g_val = rgb[0], rgb[1]
+            table.insert(
+                "",
+                "end",
+                values=(
+                    i + 1,
+                    d.get("chip_idx", "?"),
+                    d.get("tier", "?"),
+                    d.get("frame", "?"),
+                    d["det_id"],
+                    d.get("size_px", 0),
+                    f"{r_val:+.3f}",
+                    f"{g_val:+.3f}",
+                    f"{d.get('score', 0):.3f}",
+                    f"{d.get('cal_dist', 0):.3f}",
+                    f"{d.get('grad_energy', 0):.1f}",
+                    f"{d.get('entropy', d.get('g_entropy', 0)):.2f}",
+                    f"{max(d.get('r_kurt', 0), d.get('g_kurt', 0), d.get('b_kurt', 0)):.1f}",
+                    f"{d.get('perim_ratio', 0):.2f}",
+                    f"{d.get('aspect_ratio', 1.0):.1f}",
+                ),
             )
 
-            photo = ImageTk.PhotoImage(thumb)
-            self._crop_photos.append(photo)
-            lbl = ttk.Label(border_frame, image=photo, cursor="hand2")
-            lbl.pack()
-            lbl.bind("<Button-1>", lambda _e, idx=grid_idx: self._show_frame_popup_at(idx))
-        except Exception:
-            ttk.Label(border_frame, text="[load error]", foreground="red").pack()
+    def _ensure_grid_cells(self, n: int):
+        """Ensure at least *n* grid cells exist. Create the grid on first call."""
+        if self._grid_frame is None:
+            # Remove loading bar on first grid creation
+            if self._loading_bar is not None:
+                self._loading_bar.stop()
+                self._loading_bar.destroy()
+                self._loading_bar = None
+            self._grid_frame = ttk.Frame(self._filtered_crops_frame)
+            self._grid_frame.pack(fill="x")
 
-        rgb = d.get("contrast_rgb", (0, 0, 0))
-        r_val, g_val = rgb[0], rgb[1]
-        size_um2 = d.get("size_px", 0) * self._um_per_px**2
-        ent = d.get("entropy", d.get("g_entropy", 0))
-        ge = d.get("grad_energy", 0)
-        kurt = max(d.get("r_kurt", 0), d.get("g_kurt", 0), d.get("b_kurt", 0))
-        line1 = f"#{grid_idx + 1} C{chip_idx} R={r_val:+.2f} G={g_val:+.2f} {size_um2:.0f}\u00b5m\u00b2"
-        line2 = f"e={ent:.1f} g={ge:.1f} k={kurt:.0f}"
-        ttk.Label(cell, text=f"{line1}\n{line2}", font=("TkDefaultFont", 7), justify="left").pack(anchor="w")
+        while len(self._grid_cells) < n:
+            idx = len(self._grid_cells)
+            cell = ttk.Frame(self._grid_frame, padding=2)
+
+            border_frame = tk.Frame(cell, highlightthickness=0, width=CROP_THUMB_SIZE, height=CROP_THUMB_HEIGHT)
+            border_frame.pack()
+            border_frame.pack_propagate(False)
+
+            # Placeholder
+            placeholder = ttk.Label(border_frame, text="loading…", foreground="gray")
+            placeholder.place(relx=0.5, rely=0.5, anchor="center")
+
+            metric_label = ttk.Label(cell, text="", font=("TkDefaultFont", 7), justify="left")
+            metric_label.pack(anchor="w")
+
+            self._grid_cells.append(
+                {
+                    "cell": cell,
+                    "border_frame": border_frame,
+                    "metric_label": metric_label,
+                    "grid_idx": idx,
+                }
+            )
+
+    def _update_grid(self, top: list[Detection]):
+        """Update the persistent grid cells with new detection data (main thread)."""
+        if self._filtered_crops_frame is None:
+            return
+
+        self._crop_photos = []
+        self._thumb_borders = {}
+        self._thumb_cell_refs = []
+
+        n = len(top)
+        self._ensure_grid_cells(n)
+
+        avail_w = self._detail_canvas.winfo_width() - 32
+        cols = max(1, avail_w // (CROP_THUMB_SIZE + 16))
+
+        # Update visible cells
+        for grid_idx, d in enumerate(top):
+            gc = self._grid_cells[grid_idx]
+            cell = gc["cell"]
+            border_frame = gc["border_frame"]
+            metric_label = gc["metric_label"]
+
+            # Position in grid
+            row, col = divmod(grid_idx, cols)
+            cell.grid(row=row * 2, column=col, sticky="nw")
+
+            # Reset border frame: clear children, set annotation border
+            for w in border_frame.winfo_children():
+                w.destroy()
+            ttk.Label(border_frame, text="loading…", foreground="gray").place(relx=0.5, rely=0.5, anchor="center")
+
+            ann_key = self._detection_annotation_key(d)
+            self._thumb_borders[ann_key] = border_frame
+            self._thumb_cell_refs.append(border_frame)
+
+            annotation = self._annotations.get(ann_key)
+            if annotation == "good":
+                border_frame.configure(highlightbackground="green", highlightthickness=3)
+            elif annotation == "bad":
+                border_frame.configure(highlightbackground="red", highlightthickness=3)
+            else:
+                border_frame.configure(highlightthickness=0)
+
+            # Update metric label
+            chip_idx = d.get("chip_idx", 0)
+            rgb = d.get("contrast_rgb", (0, 0, 0))
+            r_val, g_val = rgb[0], rgb[1]
+            size_um2 = d.get("size_px", 0) * self._um_per_px**2
+            ent = d.get("entropy", d.get("g_entropy", 0))
+            ge = d.get("grad_energy", 0)
+            kurt = max(d.get("r_kurt", 0), d.get("g_kurt", 0), d.get("b_kurt", 0))
+            line1 = f"#{grid_idx + 1} C{chip_idx} R={r_val:+.2f} G={g_val:+.2f} {size_um2:.0f}\u00b5m\u00b2"
+            line2 = f"e={ent:.1f} g={ge:.1f} k={kurt:.0f}"
+            metric_label.configure(text=f"{line1}\n{line2}")
+
+        # Hide unused cells
+        for grid_idx in range(n, len(self._grid_cells)):
+            self._grid_cells[grid_idx]["cell"].grid_remove()
 
     def _load_frame_cached(self, chip_idx: int, frame_name: str) -> Image.Image | None:
         """Load a frame image with caching, keyed by (chip_idx, frame_name)."""
@@ -1589,11 +1723,8 @@ class RunViewerGUI:
             grid_idx=grid_idx,
         )
 
-    def _populate_detection_table(self, parent: ttk.Widget, ranked: list[Detection]):
-        """Show a sortable treeview table of top detection scoring data. Click headers to sort."""
-        n_show = min(len(ranked), 50)
-        top = ranked[:n_show]
-
+    def _create_detection_table(self, parent: ttk.Widget):
+        """Create the persistent treeview table widget (once per run)."""
         cols = (
             "rank",
             "chip",
@@ -1611,7 +1742,7 @@ class RunViewerGUI:
             "pr",
             "ar",
         )
-        table = ttk.Treeview(parent, columns=cols, show="headings", height=min(n_show, 15), selectmode="none")
+        table = ttk.Treeview(parent, columns=cols, show="headings", height=15, selectmode="none")
 
         col_spec = {
             "rank": ("#", 30),
@@ -1630,7 +1761,6 @@ class RunViewerGUI:
             "pr": ("PR", 45),
             "ar": ("AR", 40),
         }
-        # Sort state per table: {col_id: reverse}
         sort_state: dict[str, bool] = {}
 
         def _sort_column(col_id: str):
@@ -1638,7 +1768,6 @@ class RunViewerGUI:
             sort_state[col_id] = reverse
 
             items = [(table.set(iid, col_id), iid) for iid in table.get_children()]
-            # Try numeric sort, fall back to string
             try:
                 items.sort(key=lambda t: float(t[0]), reverse=reverse)
             except ValueError:
@@ -1647,7 +1776,6 @@ class RunViewerGUI:
             for idx, (_val, iid) in enumerate(items):
                 table.move(iid, "", idx)
 
-            # Update header with sort indicator
             arrow = " \u25bc" if reverse else " \u25b2"
             for cid, (heading, _w) in col_spec.items():
                 text = heading + arrow if cid == col_id else heading
@@ -1658,37 +1786,12 @@ class RunViewerGUI:
             anchor = "w" if col_id == "frame" else "center"
             table.column(col_id, width=width, minwidth=width, anchor=anchor)
 
-        for i, d in enumerate(top):
-            r_val, g_val = 0.0, 0.0
-            rgb = d.get("contrast_rgb")
-            if rgb and len(rgb) >= 2:
-                r_val, g_val = rgb[0], rgb[1]
-            table.insert(
-                "",
-                "end",
-                values=(
-                    i + 1,
-                    d.get("chip_idx", "?"),
-                    d.get("tier", "?"),
-                    d.get("frame", "?"),
-                    d["det_id"],
-                    d.get("size_px", 0),
-                    f"{r_val:+.3f}",
-                    f"{g_val:+.3f}",
-                    f"{d.get('score', 0):.3f}",
-                    f"{d.get('cal_dist', 0):.3f}",
-                    f"{d.get('grad_energy', 0):.1f}",
-                    f"{d.get('entropy', d.get('g_entropy', 0)):.2f}",
-                    f"{max(d.get('r_kurt', 0), d.get('g_kurt', 0), d.get('b_kurt', 0)):.1f}",
-                    f"{d.get('perim_ratio', 0):.2f}",
-                    f"{d.get('aspect_ratio', 1.0):.1f}",
-                ),
-            )
-
         scroll = ttk.Scrollbar(parent, orient="vertical", command=table.yview)
         table.configure(yscrollcommand=scroll.set)
         table.pack(side="left", fill="x", expand=True)
         scroll.pack(side="right", fill="y")
+
+        self._det_table = table
 
     # ── Image helpers ────────────────────────────────────────────
 
