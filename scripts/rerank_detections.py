@@ -66,7 +66,7 @@ def plot_rg_scatter(
 
     rs = np.array([d["contrast_rgb"][0] for d in detections])
     gs = np.array([d["contrast_rgb"][1] for d in detections])
-    cal_dists = np.array([d.get("cal_dist", 0.0) for d in detections])
+    cal_dists = np.array([d["cal_dist"] for d in detections])
 
     # Regular points (not in top-N)
     mask_reg = np.array([i not in top_indices for i in range(len(detections))])

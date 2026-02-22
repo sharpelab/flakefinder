@@ -541,10 +541,7 @@ class FlakeInspector(tk.Toplevel):
         d = self._det
         um2 = self._ctx.um_per_px if self._ctx else 0.36
 
-        rgb = d.get("contrast_rgb", (0, 0, 0))
-        r_val = rgb[0] if len(rgb) > 0 else 0
-        g_val = rgb[1] if len(rgb) > 1 else 0
-        b_val = rgb[2] if len(rgb) > 2 else 0
+        r_val, g_val, b_val = d["contrast_rgb"]
 
         vals = {
             "score": f"{d.get('score', 0):.2f}",
@@ -552,13 +549,13 @@ class FlakeInspector(tk.Toplevel):
             "r_val": f"{r_val:+.3f}",
             "g_val": f"{g_val:+.3f}",
             "b_val": f"{b_val:+.3f}",
-            "size": f"{d.get('size_px', 0) * um2**2:.0f} µm²",
-            "cal_dist": f"{d.get('cal_dist', 0):.3f}",
-            "perim_ratio": f"{d.get('perim_ratio', 0):.2f}",
-            "aspect_ratio": f"{d.get('aspect_ratio', 1.0):.2f}",
+            "size": f"{d['size_px'] * um2**2:.0f} µm²",
+            "cal_dist": f"{d['cal_dist']:.3f}",
+            "perim_ratio": f"{d['perim_ratio']:.2f}",
+            "aspect_ratio": f"{d['aspect_ratio']:.2f}",
             "entropy": f"{d.get('entropy', d.get('g_entropy', 0)):.2f}",
-            "grad_energy": f"{d.get('grad_energy', 0):.1f}",
-            "kurtosis": f"{max(d.get('r_kurt', 0), d.get('g_kurt', 0), d.get('b_kurt', 0)):.1f}",
+            "grad_energy": f"{d['grad_energy']:.1f}",
+            "kurtosis": f"{max(d['r_kurt'], d['g_kurt'], d['b_kurt']):.1f}",
         }
 
         sx = d.get("stage_x")
@@ -1425,22 +1422,19 @@ class RunViewerGUI:
 
             passing = []
             for d in chip_filtered:
-                rgb = d.get("contrast_rgb")
-                if not rgb or len(rgb) < 2:
-                    continue
                 if sliders_on:
-                    r, g = rgb[0], rgb[1]
+                    r, g = d["contrast_rgb"][0], d["contrast_rgb"][1]
                     if not (
-                        d.get("perim_ratio", 0) <= pr_max
-                        and d.get("cal_dist", 0) <= cd_max
+                        d["perim_ratio"] <= pr_max
+                        and d["cal_dist"] <= cd_max
                         and g >= g_min
                         and g <= g_max
                         and r <= r_max
                         and d.get("entropy", d.get("g_entropy", 0)) <= ent_max
-                        and d.get("size_px", 0) >= min_size_px
-                        and d.get("grad_energy", 0) <= ge_max
-                        and d.get("aspect_ratio", 1.0) <= ar_max
-                        and max(d.get("r_kurt", 0), d.get("g_kurt", 0), d.get("b_kurt", 0)) <= kurt_max
+                        and d["size_px"] >= min_size_px
+                        and d["grad_energy"] <= ge_max
+                        and d["aspect_ratio"] <= ar_max
+                        and max(d["r_kurt"], d["g_kurt"], d["b_kurt"]) <= kurt_max
                     ):
                         continue
                 passing.append(d)
@@ -1572,10 +1566,7 @@ class RunViewerGUI:
 
         n_show = min(len(top), 50)
         for i, d in enumerate(top[:n_show]):
-            r_val, g_val = 0.0, 0.0
-            rgb = d.get("contrast_rgb")
-            if rgb and len(rgb) >= 2:
-                r_val, g_val = rgb[0], rgb[1]
+            r_val, g_val = d["contrast_rgb"][0], d["contrast_rgb"][1]
             table.insert(
                 "",
                 "end",
@@ -1585,16 +1576,16 @@ class RunViewerGUI:
                     d.get("tier", "?"),
                     d.get("frame", "?"),
                     d["det_id"],
-                    d.get("size_px", 0),
+                    d["size_px"],
                     f"{r_val:+.3f}",
                     f"{g_val:+.3f}",
                     f"{d.get('score', 0):.3f}",
-                    f"{d.get('cal_dist', 0):.3f}",
-                    f"{d.get('grad_energy', 0):.1f}",
+                    f"{d['cal_dist']:.3f}",
+                    f"{d['grad_energy']:.1f}",
                     f"{d.get('entropy', d.get('g_entropy', 0)):.2f}",
-                    f"{max(d.get('r_kurt', 0), d.get('g_kurt', 0), d.get('b_kurt', 0)):.1f}",
-                    f"{d.get('perim_ratio', 0):.2f}",
-                    f"{d.get('aspect_ratio', 1.0):.1f}",
+                    f"{max(d['r_kurt'], d['g_kurt'], d['b_kurt']):.1f}",
+                    f"{d['perim_ratio']:.2f}",
+                    f"{d['aspect_ratio']:.1f}",
                 ),
             )
 
@@ -1678,12 +1669,11 @@ class RunViewerGUI:
 
             # Update metric label
             chip_idx = d.get("chip_idx", 0)
-            rgb = d.get("contrast_rgb", (0, 0, 0))
-            r_val, g_val = rgb[0], rgb[1]
-            size_um2 = d.get("size_px", 0) * self._um_per_px**2
+            r_val, g_val = d["contrast_rgb"][0], d["contrast_rgb"][1]
+            size_um2 = d["size_px"] * self._um_per_px**2
             ent = d.get("entropy", d.get("g_entropy", 0))
-            ge = d.get("grad_energy", 0)
-            kurt = max(d.get("r_kurt", 0), d.get("g_kurt", 0), d.get("b_kurt", 0))
+            ge = d["grad_energy"]
+            kurt = max(d["r_kurt"], d["g_kurt"], d["b_kurt"])
             line1 = f"#{grid_idx + 1} C{chip_idx} R={r_val:+.2f} G={g_val:+.2f} {size_um2:.0f}\u00b5m\u00b2"
             line2 = f"e={ent:.1f} g={ge:.1f} k={kurt:.0f}"
             metric_label.configure(text=f"{line1}\n{line2}")

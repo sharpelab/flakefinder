@@ -801,7 +801,7 @@ def classify_detections(
 
     # Tape classification
     for det in detections:
-        if perim_ratio_thresh > 0 and det.get("perim_ratio", 0) >= perim_ratio_thresh:
+        if perim_ratio_thresh > 0 and det["perim_ratio"] >= perim_ratio_thresh:
             det["classification"] = "tape"
         else:
             det["classification"] = None
@@ -850,7 +850,7 @@ def draw_detections(
     vis = image.copy()
     for i, d in enumerate(detections):
         s = d["size_px"]
-        c = d.get("mean_contrast", 0)
+        c = d["mean_contrast"]
         is_tape = d.get("classification") == "tape"
         if is_tape:
             color = (128, 128, 128)
@@ -863,12 +863,12 @@ def draw_detections(
         if draw_bbox:
             cv2.rectangle(vis, (bx, by), (bx + bw, by + bh), color, thickness)
 
-        hull = d.get("hull")
+        hull = d["hull"]
         if draw_hull and hull and len(hull) >= 3:
             pts = np.array(hull, dtype=np.int32).reshape(-1, 1, 2)
             cv2.polylines(vis, [pts], isClosed=True, color=color, thickness=thickness)
 
-        contour = d.get("contour")
+        contour = d["contour"]
         if draw_contour and contour and len(contour) >= 3:
             pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
             cv2.polylines(vis, [pts], isClosed=True, color=color, thickness=thickness)
