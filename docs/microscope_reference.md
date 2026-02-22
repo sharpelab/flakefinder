@@ -31,6 +31,22 @@ Parfocal offsets are sample-dependent. 2.5x is a notable outlier (~87 µm below 
 
 **SDK parfocal correction is unreliable.** The Leica SDK adjusts Z on objective swap, but the delta is not a fixed offset — it varies with starting Z. Tested 2.5x→5x: -225 µm from Z=24483, -10.3 from Z=24670. Always supply explicit `--z`.
 
+### Parcentric Offsets (relative to 10x)
+
+Measured 2026-02-21 on SF119 A-H sample (chip 6, rank01_frame_0327_d0). Eyeballed from crosshair-annotated captures at same stage XY. Apply these deltas when switching from 10x to center the same feature.
+
+| Mag | ΔX (µm) | ΔY (µm) |
+|-----|---------|---------|
+| 2.5x | -25 | 0 |
+| 5x | +5 | +20 |
+| 10x | 0 | 0 |
+| 20x | +30 | +25 |
+| 50x | +17 | +30 |
+
+Accuracy ~±5 µm. +X = move stage right, +Y = move stage down (toward higher Y).
+
+**SDK parcentric correction exists but is redundant.** The SDK applies its own XY correction on objective swap (e.g. 2.5x: ΔX=-36, ΔY=+167 from 10x). Using `capture --objective-mag` with explicit `--x/--y` overrides this — the move happens after the swap. Use our measured offsets instead.
+
 ### Focus-and-Capture Parameters by Objective
 
 Single-pass Z scan, best frame saved. Validated 2026-02-14 at chip 2 rank 18.
