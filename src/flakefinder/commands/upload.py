@@ -14,6 +14,7 @@ import argparse
 import contextlib
 import json
 import math
+import re
 import shutil
 import sys
 import tempfile
@@ -202,12 +203,13 @@ def make_overview_marked(
 def build_scan_meta(
     run_dir: Path,
     user: str,
+    scan_name: str,
     material: str,
     substrate: str,
+    checkpoint: dict,
 ) -> dict:
     """Build scan-level meta.json for upload."""
     scan_time = time.time()
-    checkpoint_path = run_dir / "checkpoint.json"
 
     # Try to get timestamp from stitch meta
     for meta_file in run_dir.glob("overview_*_stitch_meta.json"):
@@ -222,29 +224,36 @@ def build_scan_meta(
                 pass
         break
 
-    comment = ""
-    if checkpoint_path.exists():
-        with open(checkpoint_path) as f:
-            cp = json.load(f)
-        notes = cp.get("notes", "")
-        args = cp.get("args", {})
-        preset = args.get("preset", "")
-        mag = args.get("chip_scan_mag", "")
-        parts = []
-        if notes:
-            parts.append(notes)
-        if preset:
-            parts.append(f"preset={preset}")
-        if mag:
-            parts.append(f"scan_mag={mag}")
-        comment = " | ".join(parts)
+    # Build comment from checkpoint metadata
+    cp_args = checkpoint.get("args", {})
+    parts = []
+    cp_name = checkpoint.get("name", "")
+    if cp_name:
+        parts.append(cp_name)
+    preset = cp_args.get("preset", "")
+    if preset:
+        parts.append(f"preset={preset}")
+    mag = cp_args.get("chip_scan_mag", "")
+    if mag:
+        parts.append(f"scan_mag={mag}")
+    cp_notes = checkpoint.get("notes", "")
+    if cp_notes:
+        parts.append(cp_notes)
+    comment = " | ".join(parts) or "FlakeFinder upload"
 
     return {
         "scan_user": user,
         "scan_time": scan_time,
         "chip_thickness": substrate,
         "scan_exfoliated_material": material,
-        "comment": comment or "FlakeFinder upload",
+        "comment": comment,
+        "flakefinder": {
+            "operator": checkpoint.get("operator", user),
+            "name": checkpoint.get("name", ""),
+            "notes": checkpoint.get("notes"),
+            "run_dir": run_dir.name,
+            "scan_name": scan_name,
+        },
     }
 
 
@@ -264,6 +273,7 @@ def classify_thickness(det: dict, material: str) -> str:
 def build_flake_meta(
     det: dict,
     material: str,
+    chip_idx: int,
 ) -> dict:
     """Build per-flake meta.json for upload."""
     # Position: µm → mm
@@ -286,7 +296,7 @@ def build_flake_meta(
 
     contrast = det["contrast_rgb"]
 
-    flake_meta = {
+    return {
         "flake": {
             "position_x": round(pos_x, 4),
             "position_y": round(pos_y, 4),
@@ -296,35 +306,28 @@ def build_flake_meta(
             "max_sidelength": round(max_side, 1),
             "min_sidelength": round(min_side, 1),
             "false_positive_probability": 0.0,
-            # Extra FlakeFinder fields (informational, not in DB schema)
-            "mean_contrast_r": round(contrast[0], 4),
-            "mean_contrast_g": round(contrast[1], 4),
-            "mean_contrast_b": round(contrast[2], 4),
-            "flakefinder_tier": det["tier"],
-            "flakefinder_score": det["score"],
-            "flakefinder_classification": det.get("classification"),
-            "flakefinder_cal_dist": det["cal_dist"],
-            "flakefinder_grad_energy": round(det["grad_energy"], 2),
-            "flakefinder_perim_ratio": round(det["perim_ratio"], 4),
-            "flakefinder_entropy": round(det["entropy"], 4),
-            "flakefinder_solidity": round(det["solidity"], 4),
-            "flakefinder_aspect_ratio": round(det["aspect_ratio"], 4),
-            "flakefinder_circularity": round(det["circularity"], 4),
-            "flakefinder_size_um2": round(det["size_um2"], 1),
-            "flakefinder_contrast_r": round(contrast[0], 4),
-            "flakefinder_contrast_g": round(contrast[1], 4),
-            "flakefinder_contrast_b": round(contrast[2], 4),
-            "flakefinder_r_std": round(det["r_std"], 4),
-            "flakefinder_g_std": round(det["g_std"], 4),
-            "flakefinder_b_std": round(det["b_std"], 4),
-            "flakefinder_r_kurt": round(det["r_kurt"], 4),
-            "flakefinder_g_kurt": round(det["g_kurt"], 4),
-            "flakefinder_b_kurt": round(det["b_kurt"], 4),
         },
         "images": {},
+        "flakefinder": {
+            "chip_idx": chip_idx,
+            "frame": det["frame"],
+            "det_id": det["det_id"],
+            "tier": det["tier"],
+            "score": det["score"],
+            "classification": det.get("classification"),
+            "cal_dist": det["cal_dist"],
+            "size_um2": round(size_um2, 1),
+            "contrast_rgb": [round(c, 4) for c in contrast],
+            "std_rgb": [round(det["r_std"], 4), round(det["g_std"], 4), round(det["b_std"], 4)],
+            "kurt_rgb": [round(det["r_kurt"], 4), round(det["g_kurt"], 4), round(det["b_kurt"], 4)],
+            "grad_energy": round(det["grad_energy"], 2),
+            "perim_ratio": round(det["perim_ratio"], 4),
+            "solidity": round(det["solidity"], 4),
+            "aspect_ratio": round(aspect_ratio, 4),
+            "circularity": round(det["circularity"], 4),
+            "entropy": round(entropy, 4),
+        },
     }
-
-    return flake_meta
 
 
 def discover_chips(run_dir: Path) -> list[int]:
@@ -391,19 +394,39 @@ def find_scan_dir(chip_dir: Path) -> Path | None:
     return None
 
 
-def _resolve_user(run_dir: Path, user: str | None) -> str:
-    """Resolve upload user from explicit value, checkpoint notes, or default."""
-    if user is not None:
-        return user
+def _load_checkpoint(run_dir: Path) -> dict:
+    """Load checkpoint.json from run directory, or empty dict."""
     cp_path = run_dir / "checkpoint.json"
     if cp_path.exists():
         with open(cp_path) as f:
-            cp = json.load(f)
-        notes = cp.get("notes", "")
-        for line in notes.split("\n"):
-            if line.lower().startswith("operator:"):
-                return line.split(":", 1)[1].strip()
-    return "FlakeFinder"
+            return json.load(f)
+    return {}
+
+
+def _resolve_user(run_dir: Path, user: str | None, checkpoint: dict) -> str:
+    """Resolve upload user from explicit value or checkpoint operator field."""
+    if user is not None:
+        return user
+    return checkpoint.get("operator", "FlakeFinder")
+
+
+def _resolve_scan_name(run_dir: Path, name: str | None, checkpoint: dict) -> str:
+    """Resolve scan name from explicit value or checkpoint name field.
+
+    Uses checkpoint["name"] with a timestamp suffix for uniqueness.
+    Falls back to run_dir.name.
+    """
+    if name is not None:
+        return name
+    desc = checkpoint.get("name", "")
+    if desc:
+        # Sanitize for filesystem: keep alphanumeric, dash, underscore, period
+        safe = re.sub(r"[^a-zA-Z0-9_.\-]", "_", desc)
+        # Extract timestamp from run dir name (e.g., "20260221_1651")
+        m = re.search(r"(\d{8}_\d{4})", run_dir.name)
+        suffix = f"_{m.group(1)}" if m else ""
+        return f"{safe}{suffix}"
+    return run_dir.name
 
 
 def run(
@@ -444,8 +467,9 @@ def run(
     if not run_dir.exists():
         raise FileNotFoundError(f"Run directory does not exist: {run_dir}")
 
-    scan_name = name or run_dir.name
-    resolved_user = _resolve_user(run_dir, user)
+    checkpoint = _load_checkpoint(run_dir)
+    scan_name = _resolve_scan_name(run_dir, name, checkpoint)
+    resolved_user = _resolve_user(run_dir, user, checkpoint)
 
     # Discover chips
     chip_indices = discover_chips(run_dir)
@@ -474,7 +498,7 @@ def run(
         upload_dir.mkdir()
 
         # Scan-level meta.json
-        scan_meta = build_scan_meta(run_dir, resolved_user, material, substrate)
+        scan_meta = build_scan_meta(run_dir, resolved_user, scan_name, material, substrate, checkpoint)
         with open(upload_dir / "meta.json", "w") as f:
             json.dump(scan_meta, f, indent=2)
         print(f"[upload] {scan_name} (user={resolved_user}, material={material}, substrate={substrate})")
@@ -539,7 +563,7 @@ def run(
                 flake_dir.mkdir(parents=True, exist_ok=True)
 
                 # Flake meta.json
-                flake_meta = build_flake_meta(det, seg_material)
+                flake_meta = build_flake_meta(det, seg_material, chip_idx)
 
                 # Add revisit mag entries to images dict
                 for mag in revisit_mags:

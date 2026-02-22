@@ -60,15 +60,28 @@ The website accepts a ZIP file via `POST /upload`. The ZIP contains a single top
 
 **Scan name** is derived from the directory name, not from any JSON field.
 
+### FlakeFinder Extension (`flakefinder` object)
+
+Both scan-level and flake-level meta.json include a `flakefinder` object with FlakeFinder pipeline metadata. These fields are archived with the upload ZIP but not stored in the website's database (the DB schema is fixed — see below). The `flakefinder` namespace keeps our data cleanly separated from the website's expected fields.
+
+At scan level: operator, scan name, notes, and run provenance. At flake level: detection traceability (chip/frame/det_id), tier/score, and segmentation features (contrast, morphology metrics). See `build_scan_meta()` and `build_flake_meta()` in `upload.py` for the full field list.
+
 ### Example
 
 ```json
 {
-  "scan_user": "Zack",
+  "scan_user": "Sandesh",
   "scan_time": 1738800000.0,
   "chip_thickness": "285nm",
-  "scan_exfoliated_material": "graphene",
-  "comment": "FlakeFinder continuous scan test"
+  "scan_exfoliated_material": "hBN",
+  "comment": "SF119 A-H | preset=5_20 | scan_mag=20x",
+  "flakefinder": {
+    "operator": "Sandesh",
+    "name": "SF119 A-H",
+    "notes": null,
+    "run_dir": "run_20260221_1651",
+    "scan_name": "SF119_A-H_20260221_1651"
+  }
 }
 ```
 
@@ -91,16 +104,7 @@ Two top-level keys: `flake` (properties) and `images` (per-magnification camera 
 | `min_sidelength` | `float` | Yes | nm | Shorter side of rotated bounding box |
 | `false_positive_probability` | `float` | No | 0–1 | Classifier confidence. Defaults to `0.0` |
 
-**Not stored in DB** but present in existing output (informational):
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `chip_id` | `int` | Internal chip number |
-| `path` | `str` | Relative path like `"ScanName/Chip_1/Flake_1"` (recalculated on upload) |
-| `aspect_ratio` | `float` | `max_sidelength / min_sidelength` |
-| `mean_contrast_r` | `float` | Mean R contrast in flake region |
-| `mean_contrast_g` | `float` | Mean G contrast |
-| `mean_contrast_b` | `float` | Mean B contrast |
+Flake-level meta.json also includes a `flakefinder` object — see scan-level note above.
 
 ### Images Object
 

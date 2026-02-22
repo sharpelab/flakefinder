@@ -134,11 +134,21 @@ class FindFlakesGUI:
         # Show/hide indicator on startup
         self.root.after(10, self._on_operator_changed)
 
-        # Notes
+        # Scan name
+        row = ttk.Frame(form_frame)
+        row.pack(fill="x", pady=2)
+        self.scan_name_label = ttk.Label(row, text="Scan name: *", width=18, anchor="w", foreground="red")
+        self.scan_name_label.pack(side="left")
+        self.scan_name_var = tk.StringVar()
+        self.scan_name_var.trace_add("write", self._on_scan_name_changed)
+        ttk.Entry(row, textvariable=self.scan_name_var).pack(side="left", fill="x", expand=True)
+        self.root.after(10, self._on_scan_name_changed)
+
+        # Notes (optional)
         row = ttk.Frame(form_frame)
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="Notes:", width=18, anchor="nw").pack(side="left", anchor="n")
-        self.notes_text = tk.Text(row, height=3, width=40)
+        self.notes_text = tk.Text(row, height=2, width=40)
         self.notes_text.pack(side="left", fill="x", expand=True)
 
         # Preset — dropdown shows human-readable names, maps back to keys
@@ -259,6 +269,12 @@ class FindFlakesGUI:
         else:
             self.operator_label.configure(text="Operator name: *", foreground="red")
 
+    def _on_scan_name_changed(self, *_args):
+        if self.scan_name_var.get().strip():
+            self.scan_name_label.configure(text="Scan name:", foreground="")
+        else:
+            self.scan_name_label.configure(text="Scan name: *", foreground="red")
+
     def _selected_preset_key(self) -> str:
         """Get preset key from the human-readable dropdown selection."""
         return self._preset_key_by_name.get(self.preset_var.get(), DEFAULT_PRESET)
@@ -335,13 +351,15 @@ class FindFlakesGUI:
         material = self.material_var.get()
         cmd += ["--material", material]
 
-        # Combine operator name + notes into --notes
         operator = self.operator_var.get().strip()
+        cmd += ["--operator", operator]
+
+        scan_name = self.scan_name_var.get().strip()
+        cmd += ["--name", scan_name]
+
         notes_body = self.notes_text.get("1.0", "end").strip()
-        notes_parts = [f"Operator: {operator}"]
         if notes_body:
-            notes_parts.append(notes_body)
-        cmd += ["--notes", "\n".join(notes_parts)]
+            cmd += ["--notes", notes_body]
 
         # Advanced options
         initial_z = self.initial_z_var.get().strip()
@@ -377,6 +395,11 @@ class FindFlakesGUI:
         if not operator:
             messagebox.showwarning("Missing field", "Operator name is required.")
             self.operator_combo.focus_set()
+            return
+
+        scan_name = self.scan_name_var.get().strip()
+        if not scan_name:
+            messagebox.showwarning("Missing field", "Scan name is required.")
             return
 
         # Save operator to recent list

@@ -177,6 +177,8 @@ _RESUME_FORBIDDEN_FLAGS = frozenset(
         "--area-rect",
         "--initial-z",
         "--white-balance",
+        "--operator",
+        "--name",
         "--notes",
     }
 )
@@ -553,10 +555,22 @@ Examples:
         help="White balance as B,G,R gains, passed to all capture scripts (default: 2.51,1.02,1.41)",
     )
     parser.add_argument(
+        "--operator",
+        type=str,
+        default=None,
+        help="Operator name (who is running the scan). Required for new runs.",
+    )
+    parser.add_argument(
+        "--name",
+        type=str,
+        default=None,
+        help="Scan name / description (e.g. 'SF119 A-H'). Required for new runs.",
+    )
+    parser.add_argument(
         "--notes",
         type=str,
         default=None,
-        help="Free-text notes stored in checkpoint.json",
+        help="Optional free-text notes stored in checkpoint.json",
     )
     parser.add_argument(
         "--dry-run",
@@ -646,6 +660,8 @@ def _print_header(p: _Preflight) -> None:
     args = p.args
     print("FlakeFinder Pipeline")
     print("=" * 70)
+    print(f"Operator:      {args.operator}")
+    print(f"Scan name:     {args.name}")
     print(f"Run directory: {p.run_dir}")
     print(f"Preset:        {p.preset_name}")
     print(f"Overview:      {p.overview_mag}")
@@ -1149,9 +1165,15 @@ def run(scope: Microscope, p: _Preflight) -> int:
     with _always_console():
         print(f"[run] {run_dir}/")
 
+    checkpoint["operator"] = args.operator or checkpoint.get("operator", "")
+    checkpoint["name"] = args.name or checkpoint.get("name", "")
     notes = args.notes or checkpoint.get("notes")
     if notes:
         checkpoint["notes"] = notes
+
+    print(f"Operator:      {checkpoint['operator']}")
+    print(f"Scan name:     {checkpoint['name']}")
+    if notes:
         print(f"Notes:         {notes}")
 
     if checkpoint["completed_steps"]:
@@ -1588,6 +1610,9 @@ def _apply_resume(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
         parser.error(f"checkpoint.json in {resume_dir} has no saved args (old format?)")
 
     args.output = str(resume_dir)
+    args.operator = cp.get("operator", "")
+    args.name = cp.get("name", "")
+    args.notes = cp.get("notes")
     args.preset = saved.get("preset", DEFAULT_PRESET)
     args.area_rect = saved["area_rect"]
     args.initial_z = saved["initial_z"]
@@ -1611,6 +1636,12 @@ def main() -> int:
 
     if args.resume:
         _apply_resume(args, parser)
+
+    # --operator and --name are required for new runs, loaded from checkpoint on --resume
+    if not args.operator:
+        parser.error("--operator is required")
+    if not args.name:
+        parser.error("--name is required")
 
     p = _plan(args)
 
