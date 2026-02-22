@@ -442,6 +442,7 @@ def run(
     quiet: bool = False,
     jobs: int = 4,
     name: str | None = None,
+    base_url: str = BASE_URL,
 ) -> UploadResult:
     """Package and upload a find-flakes run.
 
@@ -660,7 +661,7 @@ def run(
         t0 = time.monotonic()
         with open(zip_file, "rb") as f:
             resp = requests.post(
-                f"{BASE_URL}/api/upload",
+                f"{base_url}/api/upload",
                 files={"zip": (f"{scan_name}.zip", f, "application/zip")},
                 auth=get_auth().as_tuple(),
                 timeout=600,
@@ -669,7 +670,7 @@ def run(
 
         if resp.status_code == 200:
             print(f"[upload] Complete ({elapsed:.1f}s, {zip_size_mb / max(elapsed, 0.001):.1f} MB/s)")
-            print(f"[upload] View at: {BASE_URL}")
+            print(f"[upload] View at: {base_url}")
             return UploadResult(total_flakes=total_flakes, zip_size_mb=zip_size_mb, uploaded=True)
         else:
             msg = f"Upload failed: {resp.status_code} {resp.reason}"
@@ -699,6 +700,7 @@ Examples:
     parser.add_argument("--dry-run", action="store_true", help="Build ZIP but don't upload")
     parser.add_argument("-j", "--jobs", type=int, default=4, help="Parallel workers for eval_img rendering")
     parser.add_argument("--name", default=None, help="Scan name override (default: run directory name)")
+    parser.add_argument("--url", default=BASE_URL, help=f"Target server URL (default: {BASE_URL})")
     args = parser.parse_args()
 
     try:
@@ -712,6 +714,7 @@ Examples:
             dry_run=args.dry_run,
             jobs=args.jobs,
             name=args.name,
+            base_url=args.url,
         )
         return 0
     except (FileNotFoundError, RuntimeError) as e:

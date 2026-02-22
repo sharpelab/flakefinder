@@ -37,10 +37,10 @@ def get_auth() -> FlakesAuth:
     return FlakesAuth(user=user, password=password)
 
 
-def api_get(path: str, params: dict | None = None) -> list | dict:
+def api_get(path: str, params: dict | None = None, base_url: str = BASE_URL) -> list | dict:
     """GET from the API, handling gzip-compressed JSON responses."""
     auth = get_auth().as_tuple()
-    r = requests.get(f"{BASE_URL}/api/{path}", params=params, auth=auth)
+    r = requests.get(f"{base_url}/api/{path}", params=params, auth=auth)
     r.raise_for_status()
     try:
         data = gzip.decompress(r.content)
