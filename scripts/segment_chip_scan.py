@@ -187,9 +187,9 @@ def run(
         if r.detections:
             frames_with_dets += 1
             stripped = [strip_geometry(d) for d in r.detections]
-            # Tag each detection with its frame name
-            for d in stripped:
+            for i, d in enumerate(stripped):
                 d["frame"] = name
+                d["det_id"] = i
             all_detections[name] = stripped
             for d in r.detections:
                 tier = d.get("tier", 3)

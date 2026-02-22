@@ -184,7 +184,7 @@ def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
             else:
                 score_detections(dets, config)
             for idx, d in enumerate(dets):
-                d["det_idx"] = idx
+                d["det_id"] = idx
                 d.setdefault("frame", frame_name)
                 d["chip_idx"] = chip_idx
             for d in dets:
@@ -244,7 +244,7 @@ def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
             r, g, _ = d["contrast_rgb"]
             chip_str = f"c{d.get('chip_idx', '?')}"
             print(
-                f"{i + 1:>3}  {chip_str:>6} {d['frame']:<16} {d.get('det_idx', '-'):>3} {d['size_px']:>7} "
+                f"{i + 1:>3}  {chip_str:>6} {d['frame']:<16} {d['det_id']:>3} {d['size_px']:>7} "
                 f"{r:>+7.3f} {g:>+7.3f} {d.get('score', 0):>7.3f} "
                 f"{d.get('cal_dist', 0):>7.3f} {d.get('grad_energy', 0):>7.1f}"
                 f" {d.get('entropy', d.get('g_entropy', 0)):>6.2f}"
@@ -269,7 +269,7 @@ def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
         for i, d in enumerate(top_dets):
             chip_idx = d.get("chip_idx", 0)
             frame_name = d["frame"]
-            det_idx = d.get("det_idx", 0)
+            det_id = d["det_id"]
 
             scan_dir = scan_dirs.get(chip_idx)
             if scan_dir is None or not scan_dir.is_dir():
@@ -286,7 +286,7 @@ def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
                 print(f"  Warning: {frame_json_path} not found, skipping crop")
                 continue
             with open(frame_json_path) as f:
-                full_det = json.load(f)["detections"][det_idx]
+                full_det = json.load(f)["detections"][det_id]
 
             img = cv2.imread(str(frame_path))
             if img is None:
@@ -312,7 +312,7 @@ def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
             crop = img[y0:y1, x0:x1]
             draw_scale_bar(crop, um_per_px)
 
-            crop_path = crops_dir / f"rank{i + 1:02d}_c{chip_idx}_{frame_name}_d{det_idx}.jpg"
+            crop_path = crops_dir / f"rank{i + 1:02d}_c{chip_idx}_{frame_name}_d{det_id}.jpg"
             cv2.imwrite(str(crop_path), crop)
             crop_paths.append(str(crop_path))
 
@@ -417,7 +417,7 @@ def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
             z = plane["a"] * sx + plane["b"] * sy + plane["c"]
             if scan_mag is None:
                 scan_mag = pd.get("source", {}).get("objective_mag")
-            label = f"rank{i + 1:02d}_c{chip_idx}_{d['frame']}_d{d.get('det_idx', 0)}"
+            label = f"rank{i + 1:02d}_c{chip_idx}_{d['frame']}_d{d['det_id']}"
             base_points.append({"x": round(sx, 2), "y": round(sy, 2), "z": round(z, 2), "label": label})
 
         plane_source = str(args.plane) if args.plane else "per-chip auto-discovery"
@@ -585,7 +585,7 @@ def main() -> int:
         total_detections += len(dets)
         frames_with_dets += 1
         for idx, d in enumerate(dets):
-            d["det_idx"] = idx
+            d["det_id"] = idx
         for d in dets:
             tier = d.get("tier", 3)
             tier_counts[tier] = tier_counts.get(tier, 0) + 1
@@ -652,7 +652,7 @@ def main() -> int:
         for i, d in enumerate(ranked[: args.top]):
             r, g, _ = d["contrast_rgb"]
             print(
-                f"{i + 1:>3}  {d['frame']:<16} {d.get('det_idx', '-'):>3} {d['size_px']:>7} "
+                f"{i + 1:>3}  {d['frame']:<16} {d['det_id']:>3} {d['size_px']:>7} "
                 f"{r:>+7.3f} {g:>+7.3f} {d.get('score', 0):>7.3f} "
                 f"{d.get('cal_dist', 0):>7.3f} {d.get('grad_energy', 0):>7.1f}"
                 f" {d.get('entropy', d.get('g_entropy', 0)):>6.2f}"
@@ -678,7 +678,7 @@ def main() -> int:
 
             for i, d in enumerate(top_dets):
                 frame_name = d["frame"]
-                det_idx = d.get("det_idx", 0)
+                det_id = d["det_id"]
                 frame_path = scan_dir / f"{frame_name}.jpg"
                 if not frame_path.exists():
                     print(f"  Warning: {frame_path} not found, skipping crop")
@@ -690,7 +690,7 @@ def main() -> int:
                     print(f"  Warning: {frame_json_path} not found, skipping crop")
                     continue
                 with open(frame_json_path) as f:
-                    full_det = json.load(f)["detections"][det_idx]
+                    full_det = json.load(f)["detections"][det_id]
 
                 img = cv2.imread(frame_path)
                 if img is None:
@@ -716,7 +716,7 @@ def main() -> int:
                 crop = img[y0:y1, x0:x1]
                 draw_scale_bar(crop, um_per_px)
 
-                crop_path = crops_dir / f"rank{i + 1:02d}_{frame_name}_d{det_idx}.jpg"
+                crop_path = crops_dir / f"rank{i + 1:02d}_{frame_name}_d{det_id}.jpg"
                 cv2.imwrite(crop_path, crop)
                 crop_paths.append(str(crop_path))
 
@@ -797,7 +797,7 @@ def main() -> int:
             if sx is None:
                 continue
             z = a * sx + b * sy + c
-            label = f"rank{i + 1:02d}_{d['frame']}_d{d.get('det_idx', 0)}"
+            label = f"rank{i + 1:02d}_{d['frame']}_d{d['det_id']}"
             base_points.append({"x": round(sx, 2), "y": round(sy, 2), "z": round(z, 2), "label": label})
 
         if args.revisit_mags:

@@ -55,11 +55,11 @@ def load_summary(seg_dir: Path) -> dict:
         return json.load(f)
 
 
-def load_frame_geometry(seg_dir: Path, frame_name: str, det_idx: int) -> dict | None:
+def load_frame_geometry(seg_dir: Path, frame_name: str, det_id: int) -> dict | None:
     """Load contour/hull from per-frame JSON for a specific detection.
 
     Per-frame detections are in the same order as summary detections,
-    so det_idx indexes directly into the list.
+    so det_id indexes directly into the list.
     """
     path = seg_dir / f"{frame_name}.json"
     if not path.exists():
@@ -67,8 +67,8 @@ def load_frame_geometry(seg_dir: Path, frame_name: str, det_idx: int) -> dict | 
     with open(path) as f:
         frame_data = json.load(f)
     dets = frame_data.get("detections", [])
-    if det_idx < len(dets):
-        return dets[det_idx]
+    if det_id < len(dets):
+        return dets[det_id]
     return None
 
 

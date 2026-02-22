@@ -40,7 +40,7 @@ class MetricResult(NamedTuple):
 class DetectionResult(NamedTuple):
     rank: int
     frame: str
-    det_idx: int
+    det_id: int
     score: float
     size_um2: float
     tile: MetricResult
@@ -367,7 +367,7 @@ def metric_subseg(
 class _WorkerInput(NamedTuple):
     rank: int
     frame: str
-    det_idx: int
+    det_id: int
     score: float
     size_um2: float
     contour: list[list[int]]
@@ -381,7 +381,7 @@ def _process_detection(inp: _WorkerInput) -> DetectionResult:
     img = cv2.imread(inp.frame_path)
     if img is None:
         empty = MetricResult(0.0, 0.0, np.array([]))
-        return DetectionResult(inp.rank, inp.frame, inp.det_idx, inp.score, inp.size_um2, empty, empty, empty, empty)
+        return DetectionResult(inp.rank, inp.frame, inp.det_id, inp.score, inp.size_um2, empty, empty, empty, empty)
 
     h, w = img.shape[:2]
 
@@ -410,7 +410,7 @@ def _process_detection(inp: _WorkerInput) -> DetectionResult:
     return DetectionResult(
         rank=inp.rank,
         frame=inp.frame,
-        det_idx=inp.det_idx,
+        det_id=inp.det_id,
         score=inp.score,
         size_um2=inp.size_um2,
         tile=MetricResult(tile.area_um2, tile.time_ms, _uncrop(tile.mask, h, w, y0, x0)),
@@ -471,7 +471,7 @@ def visualize_detection(
     pts = np.array(contour, dtype=np.int32)
     ax.plot(pts[:, 0] - x0, pts[:, 1] - y0, "g-", linewidth=1, alpha=0.8)
     title = (
-        f"Detection #{result.rank}\n{result.frame} d{result.det_idx}\n"
+        f"Detection #{result.rank}\n{result.frame} d{result.det_id}\n"
         f"score={result.score:.3f}  size={result.size_um2:.0f} µm²"
     )
     ax.set_title(title)
@@ -615,7 +615,7 @@ def main() -> int:
     contour_cache: dict[int, list[list[int]]] = {}  # rank -> contour (for viz)
     bbox_cache: dict[int, list[int]] = {}
 
-    for rank, (frame_name, det_idx_in_summary, det_summary) in enumerate(selected, 1):
+    for rank, (frame_name, summary_idx, det_summary) in enumerate(selected, 1):
         # Load per-frame JSON to get contour (stripped from summary)
         frame_json_path = seg_dir / f"{frame_name}.json"
         if not frame_json_path.exists():
@@ -658,7 +658,7 @@ def main() -> int:
             _WorkerInput(
                 rank=rank,
                 frame=frame_name,
-                det_idx=det_id if det_id is not None else det_idx_in_summary,
+                det_id=det_id if det_id is not None else summary_idx,
                 score=det_summary.get("score", 0),
                 size_um2=det_summary.get("size_um2", 0),
                 contour=matched_det["contour"],
@@ -710,7 +710,7 @@ def main() -> int:
             {
                 "rank": r.rank,
                 "frame": r.frame,
-                "det_idx": r.det_idx,
+                "det_id": r.det_id,
                 "score": r.score,
                 "size_um2": r.size_um2,
                 "tile_area_um2": r.tile.area_um2,

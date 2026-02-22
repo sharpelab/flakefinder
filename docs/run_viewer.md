@@ -126,14 +126,14 @@ Clicking a detection thumbnail opens the full-featured inspector popup:
 
 **Overview locator**: Loads `overview_*_stitch.jpg` + `*_stitch_meta.json` once per run, downscales to ≤400px thumbnail. Red dot shows detection's stage position mapped from stage coordinates to pixel coordinates using `stage_bounds_um` and `scale_um_per_px`. Graceful fallback: no stitch meta → overview without dot; no overview → placeholder label.
 
-**Revisit tabs**: At run load, `_build_revisit_lookup()` globs `chip_N/revisit_{mag}x/*.png` to build a `(chip_idx, frame_name, det_idx) → {mag: path}` lookup. When a detection has revisit images, tabs (e.g. "20x", "50x") appear in the notebook. Tabs are dynamically added/removed on navigation; the previously selected tab is preserved when navigating between detections that share the same mag. Click a revisit thumbnail to open a full-resolution `ImagePopup`.
+**Revisit tabs**: At run load, `_build_revisit_lookup()` globs `chip_N/revisit_{mag}x/*.png` to build a `(chip_idx, frame_name, det_id) → {mag: path}` lookup. When a detection has revisit images, tabs (e.g. "20x", "50x") appear in the notebook. Tabs are dynamically added/removed on navigation; the previously selected tab is preserved when navigating between detections that share the same mag. Click a revisit thumbnail to open a full-resolution `ImagePopup`.
 
 **Metrics panel**: Shows score, tier, R/G/B contrast, size (µm²), cal_dist, perim_ratio, aspect_ratio, entropy, grad_energy, kurtosis, and stage coordinates (or "N/A" if unavailable).
 
 ### Annotations
 
 Annotations are stored in `{run_dir}/annotations.json`:
-- **Key format**: `chip{chip_idx}_{frame}:{det_idx}` (e.g. `chip2_frame_0403:3`)
+- **Key format**: `chip{chip_idx}_{frame}:{det_id}` (e.g. `chip2_frame_0403:3`)
 - **Values**: `"good"` or `"bad"`
 - **Gallery feedback**: thumbnails get colored borders (green = good, red = bad)
 - Annotations persist across sessions and update immediately in both the gallery and inspector
