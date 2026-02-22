@@ -304,6 +304,9 @@ def build_flake_meta(
             "max_sidelength": round(max_side, 1),
             "min_sidelength": round(min_side, 1),
             "false_positive_probability": 0.0,
+            "mean_contrast_r": round(contrast[0], 4),
+            "mean_contrast_g": round(contrast[1], 4),
+            "mean_contrast_b": round(contrast[2], 4),
         },
         "images": {},
         "flakefinder": {
