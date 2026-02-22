@@ -1,4 +1,5 @@
 {
+  "format": "correction_factors",
   "objective_mag": 10.0,
   "binning": 3,
   "lamp_pct": 100,

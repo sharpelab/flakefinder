@@ -257,26 +257,21 @@ def parse_area_rect_i(s: str) -> AreaRectI:
 
 
 def apply_flatfield(image: np.ndarray, flatfield: np.ndarray) -> np.ndarray:
-    """Apply flatfield correction using per-channel means (pure vignetting removal).
+    """Apply flatfield correction by multiplying with pre-computed correction factors.
 
-    Corrects spatial non-uniformity (vignetting) without shifting image color.
-    Each channel is independently normalized by its own mean, so the output
-    preserves the original color balance.
-
-    Formula per channel c:
-        corrected[:,:,c] = image[:,:,c] / flatfield[:,:,c] * mean(flatfield[:,:,c])
+    The flatfield array stores per-pixel correction factors centered around 1.0,
+    computed as ``channel_mean / raw_pixel`` during calibration. Multiplying by
+    these factors removes spatial non-uniformity (vignetting) while preserving
+    the original color balance.
 
     Args:
         image: Input image array (H, W, 3), any dtype.
-        flatfield: Flatfield reference array (H, W, 3), float32.
+        flatfield: Correction factor array (H, W, 3), float32, values ~1.0.
 
     Returns:
         Corrected image as uint8, clipped to [0, 255].
     """
-    ff = flatfield.astype(np.float32)
-    ff[ff < 1] = 1
-    ch_means = ff.mean(axis=(0, 1))  # shape (3,)
-    corrected = image.astype(np.float32) / ff * ch_means
+    corrected = image.astype(np.float32) * flatfield
     return np.clip(corrected, 0, 255).astype(np.uint8)
 
 

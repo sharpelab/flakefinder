@@ -242,41 +242,47 @@ def main() -> int:
         return 1
 
     stack = np.stack(good_frames, axis=0)
-    flatfield = np.median(stack, axis=0).astype(np.float32)
+    raw_flatfield = np.median(stack, axis=0).astype(np.float32)
 
-    # Vignetting sanity check
-    h, w = flatfield.shape[:2]
-    center = flatfield[h // 3 : 2 * h // 3, w // 3 : 2 * w // 3].mean()
+    # Vignetting sanity check (on raw values)
+    h, w = raw_flatfield.shape[:2]
+    center = raw_flatfield[h // 3 : 2 * h // 3, w // 3 : 2 * w // 3].mean()
     corners = np.mean(
         [
-            flatfield[:100, :100].mean(),
-            flatfield[:100, -100:].mean(),
-            flatfield[-100:, :100].mean(),
-            flatfield[-100:, -100:].mean(),
+            raw_flatfield[:100, :100].mean(),
+            raw_flatfield[:100, -100:].mean(),
+            raw_flatfield[-100:, :100].mean(),
+            raw_flatfield[-100:, -100:].mean(),
         ]
     )
     vignette_pct = (1 - corners / center) * 100
-    print(f"\nFlatfield: shape={flatfield.shape}, mean={flatfield.mean():.1f}")
+    print(f"\nRaw flatfield: shape={raw_flatfield.shape}, mean={raw_flatfield.mean():.1f}")
     print(f"  Center={center:.1f}, corners={corners:.1f}, vignetting={vignette_pct:.1f}%")
 
     if vignette_pct < -5:
         print("WARNING: corners brighter than center — flatfield may be bad")
 
+    # Convert to correction factors: correction = ch_mean / raw_pixel (~1.0)
+    ch_means = raw_flatfield.mean(axis=(0, 1))  # shape (3,)
+    raw_clamped = np.maximum(raw_flatfield, 1.0)
+    correction = (ch_means / raw_clamped).astype(np.float32)
+    print(f"\nCorrection factors: mean={correction.mean():.3f}, range=[{correction.min():.3f}, {correction.max():.3f}]")
+
     outpath = Path(args.output)
     outpath.parent.mkdir(parents=True, exist_ok=True)
-    np.save(outpath, flatfield)
+    np.save(outpath, correction)
     print(f"Saved to {outpath}")
 
-    # Save .png preview
+    # Save .png preview (of raw flatfield for visual inspection)
     png_path = outpath.with_suffix(".png")
-    ff_uint8 = np.clip(flatfield, 0, 255).astype(np.uint8)
+    ff_uint8 = np.clip(raw_flatfield, 0, 255).astype(np.uint8)
     Image.fromarray(ff_uint8).save(png_path)
     print(f"Saved preview: {png_path}")
 
     # Compute calibration values (mean BGR + reference white balance)
-    mean_b = float(flatfield[:, :, 0].mean())
-    mean_g = float(flatfield[:, :, 1].mean())
-    mean_r = float(flatfield[:, :, 2].mean())
+    mean_b = float(raw_flatfield[:, :, 0].mean())
+    mean_g = float(raw_flatfield[:, :, 1].mean())
+    mean_r = float(raw_flatfield[:, :, 2].mean())
     mean_bgr = [round(mean_b, 2), round(mean_g, 2), round(mean_r, 2)]
 
     wb_b = mean_g / mean_b if mean_b > 0 else 1.0
@@ -295,6 +301,7 @@ def main() -> int:
 
     # Save .json metadata
     meta = {
+        "format": "correction_factors",
         "objective_mag": mag,
         "binning": int(np.array([1, 2, 3])[args.binning]),
         "lamp_pct": args.lamp,
@@ -306,7 +313,7 @@ def main() -> int:
             args.white_balance.blue,
         ],
         "gamma": args.gamma,
-        "frame_size_px": [int(flatfield.shape[1]), int(flatfield.shape[0])],
+        "frame_size_px": [int(raw_flatfield.shape[1]), int(raw_flatfield.shape[0])],
         "z_um": z_um,
         "positions_um": [[round(x, 1), round(y, 1)] for x, y in positions],
         "num_positions": len(positions),
@@ -315,11 +322,13 @@ def main() -> int:
         "mean_bgr": mean_bgr,
         "reference_wb_bgr": reference_wb_bgr,
         "flatfield_stats": {
-            "shape": list(flatfield.shape),
-            "mean": round(float(flatfield.mean()), 1),
+            "shape": list(raw_flatfield.shape),
+            "raw_mean": round(float(raw_flatfield.mean()), 1),
             "center_brightness": round(float(center), 1),
             "corner_brightness": round(float(corners), 1),
             "vignetting_pct": round(float(vignette_pct), 1),
+            "correction_mean": round(float(correction.mean()), 3),
+            "correction_range": [round(float(correction.min()), 3), round(float(correction.max()), 3)],
         },
         "captured_at": datetime.now().isoformat(),
         "notes": args.notes,
