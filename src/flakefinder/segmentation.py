@@ -81,7 +81,7 @@ class Detection(_DetectionBase, total=False):
 
 
 def _score_hbn_thin(det: Detection) -> tuple[int, float]:
-    """hBN thin: all penalties (G, AR, ge, cal_dist)."""
+    """hBN thin: size + cal_dist dominant, light thickness penalty."""
     pr = det["perim_ratio"]
     cd = det["cal_dist"]
     g = det["contrast_rgb"][1]
@@ -89,7 +89,6 @@ def _score_hbn_thin(det: Detection) -> tuple[int, float]:
     ent = det.get("entropy", det.get("g_entropy", 99.0))
     ar = det.get("aspect_ratio", 1.0)
     size_um2 = det["size_um2"]
-    ge = det.get("grad_energy", 0)
 
     if pr < 1.50 and cd < 0.3 and g >= 0.0 and g < 1.2 and r < -0.5 and ent < 99.0 and ar < 6.0 and size_um2 >= 0.0:
         tier = 1
@@ -99,16 +98,17 @@ def _score_hbn_thin(det: Detection) -> tuple[int, float]:
         tier = 3
 
     ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
-    g_penalty = 1.0 / (1.0 + 2.0 * max(g - 0.5, 0))
+    g_penalty = 1.0 / (1.0 + 0.2 * max(g - 1.0, 0))
+    log2_size = float(np.log2(max(size_um2, 1.0)))
     score = round(
-        float(np.log2(max(size_um2, 1.0)) * np.exp(-cd * 8) * (1.0 / (1.0 + ge)) * ar_penalty * g_penalty),
+        log2_size * log2_size * np.exp(-cd * 8) * ar_penalty * g_penalty,
         4,
     )
     return tier, score
 
 
 def _score_hbn_medium(det: Detection) -> tuple[int, float]:
-    """hBN medium: all penalties, tighter cal_dist gate, min size for T1."""
+    """hBN medium: size + cal_dist dominant, light thickness penalty."""
     pr = det["perim_ratio"]
     cd = det["cal_dist"]
     g = det["contrast_rgb"][1]
@@ -116,7 +116,6 @@ def _score_hbn_medium(det: Detection) -> tuple[int, float]:
     ent = det.get("entropy", det.get("g_entropy", 99.0))
     ar = det.get("aspect_ratio", 1.0)
     size_um2 = det["size_um2"]
-    ge = det.get("grad_energy", 0)
 
     b = det["contrast_rgb"][2]
     bg_ratio = b / g if g > 0.01 else 99.0
@@ -132,16 +131,17 @@ def _score_hbn_medium(det: Detection) -> tuple[int, float]:
         tier = 3
 
     ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
-    g_penalty = 1.0 / (1.0 + 2.0 * max(g - 0.5, 0))
+    g_penalty = 1.0 / (1.0 + 0.2 * max(g - 1.0, 0))
+    log2_size = float(np.log2(max(size_um2, 1.0)))
     score = round(
-        float(np.log2(max(size_um2, 1.0)) * np.exp(-cd * 8) * (1.0 / (1.0 + ge)) * ar_penalty * g_penalty),
+        log2_size * log2_size * np.exp(-cd * 8) * ar_penalty * g_penalty,
         4,
     )
     return tier, score
 
 
 def _score_graphene(det: Detection) -> tuple[int, float]:
-    """Graphene: all penalties, wide tier gates (stub)."""
+    """Graphene: size + cal_dist dominant, light thickness penalty (stub)."""
     pr = det["perim_ratio"]
     cd = det["cal_dist"]
     g = det["contrast_rgb"][1]
@@ -149,7 +149,6 @@ def _score_graphene(det: Detection) -> tuple[int, float]:
     ent = det.get("entropy", det.get("g_entropy", 99.0))
     ar = det.get("aspect_ratio", 1.0)
     size_um2 = det["size_um2"]
-    ge = det.get("grad_energy", 0)
 
     if pr < 1.20 and cd < 0.3 and g >= -99.0 and g < 4.0 and r < 99.0 and ent < 99.0 and ar < 6.0 and size_um2 >= 0.0:
         tier = 1
@@ -159,9 +158,10 @@ def _score_graphene(det: Detection) -> tuple[int, float]:
         tier = 3
 
     ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
-    g_penalty = 1.0 / (1.0 + 2.0 * max(g - 0.5, 0))
+    g_penalty = 1.0 / (1.0 + 0.2 * max(g - 1.0, 0))
+    log2_size = float(np.log2(max(size_um2, 1.0)))
     score = round(
-        float(np.log2(max(size_um2, 1.0)) * np.exp(-cd * 8) * (1.0 / (1.0 + ge)) * ar_penalty * g_penalty),
+        log2_size * log2_size * np.exp(-cd * 8) * ar_penalty * g_penalty,
         4,
     )
     return tier, score
