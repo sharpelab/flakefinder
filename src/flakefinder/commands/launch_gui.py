@@ -91,6 +91,8 @@ class FindFlakesGUI:
         self.chip_phase_start: float | None = None  # when chip processing began
         self.chip_pos: int = 0  # 1-based position of current chip
         self.run_dir: Path | None = None
+        self.t1_count: int = 0
+        self.t2_count: int = 0
         self._overview_photo: ImageTk.PhotoImage | None = None  # prevent GC
         self._gui_state = _load_gui_state()
 
@@ -227,6 +229,8 @@ class FindFlakesGUI:
         self.overview_frame = ttk.LabelFrame(self.root, text="Overview", padding=4)
         self.overview_label = ttk.Label(self.overview_frame)
         self.overview_label.pack()
+        self.detection_counts_var = tk.StringVar(value="")
+        ttk.Label(self.overview_frame, textvariable=self.detection_counts_var).pack(pady=(4, 0))
 
         # ── Log area ────────────────────────────────────────────
         self.log_frame = ttk.LabelFrame(self.root, text="Log", padding=4)
@@ -385,6 +389,9 @@ class FindFlakesGUI:
         self.chip_phase_start = None
         self.chip_pos = 0
         self.run_dir = None
+        self.t1_count = 0
+        self.t2_count = 0
+        self.detection_counts_var.set("")
         # Hide overview from previous run
         self.overview_frame.pack_forget()
         self.overview_toggle.pack_forget()
@@ -505,7 +512,15 @@ class FindFlakesGUI:
                 else:
                     self.status_var.set("Finishing scans...")
         elif stripped.startswith("[seg chip"):
-            pass  # seg is pipelined, don't count as progress substep
+            # Don't count as progress substep (seg is pipelined), but track detections
+            m_t1 = re.search(r"T1:(\d+)", stripped)
+            m_t2 = re.search(r"T2:(\d+)", stripped)
+            if m_t1:
+                self.t1_count += int(m_t1.group(1))
+            if m_t2:
+                self.t2_count += int(m_t2.group(1))
+            if m_t1 or m_t2:
+                self.detection_counts_var.set(f"Detections: {self.t1_count} T1, {self.t2_count} T2")
         elif stripped.startswith("[scans done]"):
             self.status_var.set("Finishing segmentation...")
         elif re.match(r"\[revisit\]", stripped):
