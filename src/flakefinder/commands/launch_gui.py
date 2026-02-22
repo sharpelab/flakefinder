@@ -29,7 +29,8 @@ GUI_STATE_PATH = Path("gui_state.json")
 MAX_RECENT_OPERATORS = 10
 
 DEFAULT_PRESET = "2.5_10"
-MATERIALS = DetectorConfig.material_names()
+MATERIAL_DISPLAY = DetectorConfig.display_names()  # key → "hBN (thin) · 90nm SiO₂"
+MATERIAL_KEY_BY_DISPLAY = {v: k for k, v in MATERIAL_DISPLAY.items()}
 DEFAULT_INITIAL_Z = "24690"
 DEFAULT_AREA_RECT = "8000,95000,0,78000"
 
@@ -165,8 +166,10 @@ class FindFlakesGUI:
         row = ttk.Frame(form_frame)
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="Material:", width=18, anchor="w").pack(side="left")
-        self.material_var = tk.StringVar(value="hbn")
-        ttk.OptionMenu(row, self.material_var, "hbn", *MATERIALS).pack(side="left")
+        display_names = list(MATERIAL_DISPLAY.values())
+        default_display = display_names[0]
+        self.material_var = tk.StringVar(value=default_display)
+        ttk.OptionMenu(row, self.material_var, default_display, *display_names).pack(side="left")
 
         # Revisit magnifications
         row = ttk.Frame(form_frame)
@@ -348,7 +351,8 @@ class FindFlakesGUI:
         preset_key = self._selected_preset_key()
         cmd += ["--preset", preset_key]
 
-        material = self.material_var.get()
+        material_display = self.material_var.get()
+        material = MATERIAL_KEY_BY_DISPLAY.get(material_display, material_display)
         cmd += ["--material", material]
 
         operator = self.operator_var.get().strip()

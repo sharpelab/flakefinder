@@ -212,6 +212,8 @@ class ContrastMode(Enum):
 class DetectorConfig:
     """All material-specific parameters for flake detection."""
 
+    name: str  # human-readable display name, e.g. "hBN (thin) · 90nm SiO₂"
+
     # -- Segmentation --
     contrast_mode: ContrastMode
     contrast_offset: float
@@ -313,6 +315,7 @@ class DetectorConfig:
     def hbn_thin(cls) -> DetectorConfig:
         """hBN thin flake detection preset."""
         return cls(
+            name="hBN (thin) · 90nm SiO₂",
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=15.0,
             min_size_um2=400.0,
@@ -343,6 +346,7 @@ class DetectorConfig:
     def hbn_medium(cls) -> DetectorConfig:
         """hBN medium flake detection preset."""
         return cls(
+            name="hBN (medium) · 90nm SiO₂",
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=15.0,
             min_size_um2=400.0,
@@ -373,6 +377,7 @@ class DetectorConfig:
     def graphene(cls) -> DetectorConfig:
         """Graphene detection preset (stub -- no calibration curve yet)."""
         return cls(
+            name="Graphene · 90nm SiO₂",
             contrast_mode=ContrastMode.BELOW,
             contrast_offset=10.0,
             min_size_um2=130.0,
@@ -412,6 +417,11 @@ class DetectorConfig:
     def material_names(cls) -> list[str]:
         """Available material preset names."""
         return list(cls._presets())
+
+    @classmethod
+    def display_names(cls) -> dict[str, str]:
+        """Map of preset key → human-readable display name."""
+        return {key: factory().name for key, factory in cls._presets().items()}
 
     @classmethod
     def from_material(cls, name: str) -> DetectorConfig:
