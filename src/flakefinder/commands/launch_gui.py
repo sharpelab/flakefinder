@@ -562,11 +562,11 @@ class FindFlakesGUI:
             if m_pts:
                 self.revisit_pts_done += int(m_pts.group(1))
                 self._sync_progress_bar()
-        elif stripped.startswith("[done]"):
+        elif stripped.startswith("[scan done]"):
             if self.upload_var.get():
                 self.status_var.set("Preparing upload...")
             else:
-                self.status_var.set(f"Complete! {stripped[6:].strip()}")
+                self.status_var.set(f"Complete! {stripped[11:].strip()}")
             total = self._progress_total()
             if total > 0:
                 self.progress.configure(value=total)
@@ -578,6 +578,8 @@ class FindFlakesGUI:
             self.status_var.set("Upload skipped (dry-run)")
         elif stripped.startswith("[upload] FAILED"):
             self.status_var.set("Upload failed")
+        elif stripped.startswith("[done]"):
+            self.status_var.set(f"Complete! {stripped[6:].strip()}")
 
     def _tick_timer(self):
         if self.start_time is not None and self.process is not None and self.process.poll() is None:

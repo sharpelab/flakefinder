@@ -1497,7 +1497,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
     t = checkpoint["step_timing"]
 
     with _always_console():
-        print(f"[done] {_format_duration_compact(pipeline_duration)} total")
+        print(f"[scan done] {_format_duration_compact(pipeline_duration)} total")
 
     if not quiet:
         print()
@@ -1652,6 +1652,7 @@ def main() -> int:
         return 0
 
     # Create run directory and set up log tee
+    main_start = time.perf_counter()
     p.run_dir.mkdir(parents=True, exist_ok=True)
     log_file = open(p.run_dir / "pipeline.log", "a")  # noqa: SIM115
     quiet = args.quiet
@@ -1679,15 +1680,22 @@ def main() -> int:
             checkpoint = load_checkpoint(p.run_dir)
             if not step_done(checkpoint, "upload"):
                 try:
-                    upload.run(
-                        p.run_dir,
-                        material=p.seg.material,
-                        substrate=p.substrate,
-                    )
-                    mark_step(p.run_dir, checkpoint, "upload", 0)
+                    t_upload = time.perf_counter()
+                    with _always_console():
+                        upload.run(
+                            p.run_dir,
+                            material=p.seg.material,
+                            substrate=p.substrate,
+                        )
+                    upload_duration = time.perf_counter() - t_upload
+                    mark_step(p.run_dir, checkpoint, "upload", upload_duration)
                 except Exception as e:
                     with _always_console():
                         print(f"[upload] FAILED: {e}")
+
+        with _always_console():
+            total_duration = time.perf_counter() - main_start
+            print(f"[done] {_format_duration_compact(total_duration)} total")
 
         return rc
     finally:
