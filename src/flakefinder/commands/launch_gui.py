@@ -96,6 +96,7 @@ class FindFlakesGUI:
         self.run_dir: Path | None = None
         self.t1_count: int = 0
         self.t2_count: int = 0
+        self.revisit_pts_done: int = 0
         self._overview_photo: ImageTk.PhotoImage | None = None  # prevent GC
         self._gui_state = _load_gui_state()
 
@@ -394,6 +395,7 @@ class FindFlakesGUI:
         self.run_dir = None
         self.t1_count = 0
         self.t2_count = 0
+        self.revisit_pts_done = 0
         self.detection_counts_var.set("")
         # Hide overview from previous run
         self.overview_frame.pack_forget()
@@ -445,12 +447,29 @@ class FindFlakesGUI:
         self.process.wait()
         self.root.after(0, self._run_finished)
 
+    def _num_revisit_mags(self) -> int:
+        """Count how many revisit magnifications are enabled."""
+        return sum(v.get() for v in (self.revisit_10x, self.revisit_20x, self.revisit_50x))
+
+    def _progress_total(self) -> int:
+        """Compute dynamic progress total: scan substeps + revisit points."""
+        if not self.total_chips:
+            return 0
+        scan = self.total_chips * SUBSTEPS_PER_CHIP
+        revisit = self.t1_count * self._num_revisit_mags()
+        return scan + revisit
+
+    def _sync_progress_bar(self):
+        """Update progress bar value and maximum from current state."""
+        total = self._progress_total()
+        if total > 0:
+            done = self.substeps_done + self.revisit_pts_done
+            self.progress.configure(maximum=total, value=min(done, total))
+
     def _advance_substep(self):
         """Increment sub-step counter and update progress bar."""
         self.substeps_done += 1
-        if self.total_chips:
-            total = self.total_chips * SUBSTEPS_PER_CHIP
-            self.progress.configure(value=min(self.substeps_done, total))
+        self._sync_progress_bar()
 
     def _compute_eta(self) -> str:
         """Compute ETA string from chip-phase pace, or empty string.
@@ -462,12 +481,13 @@ class FindFlakesGUI:
             return ""
         if self.substeps_done < SUBSTEPS_PER_CHIP:
             return ""
-        total = self.total_chips * SUBSTEPS_PER_CHIP
-        remaining = total - self.substeps_done
+        total = self._progress_total()
+        done = self.substeps_done + self.revisit_pts_done
+        remaining = total - done
         if remaining <= 0:
             return ""
         elapsed_chip = time.monotonic() - self.chip_phase_start
-        pace = elapsed_chip / self.substeps_done
+        pace = elapsed_chip / done
         eta_s = pace * remaining
         return f"~{_fmt_duration(eta_s)} remaining"
 
@@ -493,8 +513,7 @@ class FindFlakesGUI:
                 self.chip_pos = 1
                 self.chip_phase_start = time.monotonic()
                 self.progress.stop()
-                total = self.total_chips * SUBSTEPS_PER_CHIP
-                self.progress.configure(mode="determinate", maximum=total, value=0)
+                self.progress.configure(mode="determinate", maximum=self._progress_total(), value=0)
             n = self.total_chips or "?"
             self.status_var.set(f"Focusing chip 1/{n}...")
             self._show_overview_image()
@@ -516,6 +535,7 @@ class FindFlakesGUI:
                     self.status_var.set("Finishing scans...")
         elif stripped.startswith("[seg chip"):
             # Don't count as progress substep (seg is pipelined), but track detections
+            # and extend progress bar to account for upcoming revisit work
             m_t1 = re.search(r"T1:(\d+)", stripped)
             m_t2 = re.search(r"T2:(\d+)", stripped)
             if m_t1:
@@ -524,6 +544,8 @@ class FindFlakesGUI:
                 self.t2_count += int(m_t2.group(1))
             if m_t1 or m_t2:
                 self.detection_counts_var.set(f"Detections: {self.t1_count} T1, {self.t2_count} T2")
+            if m_t1 and self._num_revisit_mags() > 0:
+                self._sync_progress_bar()
         elif stripped.startswith("[scans done]"):
             self.status_var.set("Finishing segmentation...")
         elif re.match(r"\[revisit\]", stripped):
@@ -536,13 +558,17 @@ class FindFlakesGUI:
             m = re.match(r"\[revisit chip (\d+)\]\s+(\S+):", stripped)
             if m:
                 self.status_var.set(f"Revisiting chip {m.group(1)} at {m.group(2)}...")
+            m_pts = re.search(r"(\d+)\s+pts", stripped)
+            if m_pts:
+                self.revisit_pts_done += int(m_pts.group(1))
+                self._sync_progress_bar()
         elif stripped.startswith("[done]"):
             if self.upload_var.get():
                 self.status_var.set("Preparing upload...")
             else:
                 self.status_var.set(f"Complete! {stripped[6:].strip()}")
-            if self.total_chips:
-                total = self.total_chips * SUBSTEPS_PER_CHIP
+            total = self._progress_total()
+            if total > 0:
                 self.progress.configure(value=total)
         elif stripped.startswith("[upload] Packaging") or stripped.startswith("[upload] Uploading"):
             self.status_var.set("Uploading...")
@@ -577,8 +603,8 @@ class FindFlakesGUI:
             self.elapsed_var.set(f"{_fmt_duration(elapsed)} total")
 
         self.progress.stop()
-        if self.total_chips:
-            total = self.total_chips * SUBSTEPS_PER_CHIP
+        total = self._progress_total()
+        if total > 0:
             self.progress.configure(mode="determinate", value=total, maximum=total)
         else:
             self.progress.configure(mode="determinate", value=0)
