@@ -28,10 +28,8 @@ import cv2
 import numpy as np
 import requests
 
+from flakefinder.flakes_api import BASE_URL, get_auth
 from flakefinder.segmentation import Detection, DetectorConfig, dedup_detections
-
-BASE_URL = "https://flakes.sharpelab.science"
-AUTH = ("dgglab", "***REMOVED***")
 
 # Classification → thickness label for the website
 THICKNESS_MAP = {
@@ -661,7 +659,7 @@ def run(
             resp = requests.post(
                 f"{BASE_URL}/api/upload",
                 files={"zip": (f"{scan_name}.zip", f, "application/zip")},
-                auth=AUTH,
+                auth=get_auth().as_tuple(),
                 timeout=600,
             )
         elapsed = time.monotonic() - t0

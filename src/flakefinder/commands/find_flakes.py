@@ -75,6 +75,7 @@ from flakefinder.commands import (
     upload,
 )
 from flakefinder.data_utils import add_stage_coords
+from flakefinder.flakes_api import get_auth
 from flakefinder.leica import Microscope
 from flakefinder.scan_utils import (
     CALIBRATION_DIR,
@@ -426,6 +427,8 @@ def _plan(args: argparse.Namespace) -> _Preflight:
     substrate = args.substrate or ""
     if do_upload and not substrate:
         raise SystemExit("Error: --substrate is required when using --upload")
+    if do_upload:
+        get_auth()  # fail fast if credentials are missing
 
     return _Preflight(
         run_dir=run_dir,

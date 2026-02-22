@@ -1,44 +1,15 @@
 """Download flakes (images + metadata) from flakes.sharpelab.science."""
 
 import argparse
-import gzip
 import json
 import sys
 from pathlib import Path
 
-import requests
-
-BASE_URL = "https://flakes.sharpelab.science"
-AUTH = ("dgglab", "***REMOVED***")
+from flakefinder.flakes_api import BASE_URL, api_get, download_image
 
 # Images to attempt downloading for each flake
 FLAKE_IMAGES = ["eval_img.jpg", "raw_img.png", "flake_mask.png", "overview_marked.jpg"]
 # Magnification images use the pattern {mag}x.png — derived from flake metadata
-
-
-def api_get(path: str, params: dict | None = None) -> list | dict:
-    """GET from the API, handling gzip-compressed JSON responses."""
-    r = requests.get(f"{BASE_URL}/api/{path}", params=params, auth=AUTH)
-    r.raise_for_status()
-    # Backend returns gzip-compressed JSON
-    try:
-        data = gzip.decompress(r.content)
-        return json.loads(data)
-    except gzip.BadGzipFile:
-        return r.json()
-
-
-def download_image(url: str, dest: Path) -> int | None:
-    """Download a single image. Returns size in bytes, or None if 404."""
-    r = requests.get(url, auth=AUTH, stream=True)
-    if r.status_code == 404:
-        return None
-    r.raise_for_status()
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with open(dest, "wb") as f:
-        for chunk in r.iter_content(chunk_size=8192):
-            f.write(chunk)
-    return dest.stat().st_size
 
 
 def main():

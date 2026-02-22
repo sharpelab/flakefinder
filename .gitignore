@@ -50,6 +50,9 @@ src/flakefinder/dlls/*.xml
 !src/flakefinder/dlls/ahmconfig.xml
 leica_sdk/
 
+# Environment (credentials)
+.env
+
 # OS
 .DS_Store
 Thumbs.db
