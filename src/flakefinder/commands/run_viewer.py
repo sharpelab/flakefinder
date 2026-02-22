@@ -773,6 +773,12 @@ class RunViewerGUI:
         # Chip toggle state
         self._active_chips: set[int] = set()  # empty = all shown
         self._chip_buttons: dict[int, tk.Button] = {}
+
+        # Tier toggle state
+        self._active_tiers: set[int] = set()  # empty = all shown
+        self._tier_buttons: dict[int, tk.Button] = {}
+        self._fv_sliders_enabled = tk.BooleanVar(value=True)
+        self._sliders_frame: ttk.Frame | None = None
         self._n_chips: int = 0
         self._last_top: list[Detection] = []
         self._last_thumb_cols: int = 0
@@ -973,6 +979,8 @@ class RunViewerGUI:
         self._filter_val_labels = []
         self._active_chips = set()
         self._chip_buttons = {}
+        self._active_tiers = set()
+        self._tier_buttons = {}
         self._last_top = []
         self._last_thumb_cols = 0
         self._overview_stitch_thumb = None
@@ -1207,6 +1215,37 @@ class RunViewerGUI:
             return None  # empty = all
         return self._active_chips
 
+    # ── Tier toggles ─────────────────────────────────────────────
+
+    def _toggle_tier(self, tier: int):
+        """Toggle a tier filter. Exclusive: only one tier active at a time."""
+        if tier in self._active_tiers:
+            self._active_tiers.discard(tier)
+        else:
+            self._active_tiers = {tier}
+            # Auto-disable sliders when a tier is selected
+            if self._fv_sliders_enabled.get():
+                self._fv_sliders_enabled.set(False)
+                self._on_sliders_toggle()
+        self._update_tier_button_visuals()
+        self._on_filter_change()
+
+    def _update_tier_button_visuals(self):
+        """Update tier button relief to reflect active state."""
+        for tier, btn in self._tier_buttons.items():
+            btn.configure(relief=tk.SUNKEN if tier in self._active_tiers else tk.RAISED)
+
+    def _on_sliders_toggle(self):
+        """Enable/disable slider filtering and dim the slider widgets."""
+        enabled = self._fv_sliders_enabled.get()
+        if self._sliders_frame:
+            state = "normal" if enabled else "disabled"
+            for child in self._sliders_frame.winfo_children():
+                for widget in child.winfo_children():
+                    with contextlib.suppress(tk.TclError):
+                        widget.configure({"state": state})
+        self._on_filter_change()
+
     # ── Filter panel ─────────────────────────────────────────────
 
     def _build_filter_panel(self, preset: str):
@@ -1219,6 +1258,30 @@ class RunViewerGUI:
 
         filter_frame = ttk.LabelFrame(self._detail_frame, text="Filters", padding=6)
         filter_frame.pack(fill="x", padx=8, pady=4)
+
+        # Tier toggle buttons + slider enable checkbox
+        tier_row = ttk.Frame(filter_frame)
+        tier_row.pack(fill="x", pady=(0, 4))
+        ttk.Label(tier_row, text="Tier:").pack(side="left", padx=(0, 4))
+        for tier in (1, 2):
+            btn = tk.Button(
+                tier_row,
+                text=f"T{tier}",
+                relief=tk.RAISED,
+                command=lambda t=tier: self._toggle_tier(t),
+                padx=8,
+                pady=2,
+            )
+            btn.pack(side="left", padx=2)
+            self._tier_buttons[tier] = btn
+
+        self._fv_sliders_enabled.set(True)
+        ttk.Checkbutton(
+            tier_row,
+            text="Sliders",
+            variable=self._fv_sliders_enabled,
+            command=self._on_sliders_toggle,
+        ).pack(side="left", padx=(12, 0))
 
         # Compute clamped defaults from preset (reused by _reset_filters)
         self._filter_defaults = {
@@ -1264,6 +1327,7 @@ class RunViewerGUI:
 
         sliders_frame = ttk.Frame(filter_frame)
         sliders_frame.pack(fill="x")
+        self._sliders_frame = sliders_frame
         for col in range(3):
             sliders_frame.columnconfigure(col, weight=1)
 
@@ -1335,6 +1399,8 @@ class RunViewerGUI:
 
         # Snapshot all filter state on the main thread (Tk vars aren't thread-safe)
         visible_chips = self._get_visible_chips()
+        active_tiers = self._active_tiers.copy() or None
+        sliders_on = self._fv_sliders_enabled.get()
         pr_max = self._fv_perim_ratio.get()
         cd_max = self._fv_cal_dist.get()
         g_min = self._fv_g_min.get()
@@ -1354,26 +1420,30 @@ class RunViewerGUI:
                 chip_filtered = [d for d in all_dets if d.get("chip_idx") in visible_chips]
             else:
                 chip_filtered = all_dets
+            if active_tiers is not None:
+                chip_filtered = [d for d in chip_filtered if d.get("tier") in active_tiers]
 
             passing = []
             for d in chip_filtered:
                 rgb = d.get("contrast_rgb")
                 if not rgb or len(rgb) < 2:
                     continue
-                r, g = rgb[0], rgb[1]
-                if (
-                    d.get("perim_ratio", 0) <= pr_max
-                    and d.get("cal_dist", 0) <= cd_max
-                    and g >= g_min
-                    and g <= g_max
-                    and r <= r_max
-                    and d.get("entropy", d.get("g_entropy", 0)) <= ent_max
-                    and d.get("size_px", 0) >= min_size_px
-                    and d.get("grad_energy", 0) <= ge_max
-                    and d.get("aspect_ratio", 1.0) <= ar_max
-                    and max(d.get("r_kurt", 0), d.get("g_kurt", 0), d.get("b_kurt", 0)) <= kurt_max
-                ):
-                    passing.append(d)
+                if sliders_on:
+                    r, g = rgb[0], rgb[1]
+                    if not (
+                        d.get("perim_ratio", 0) <= pr_max
+                        and d.get("cal_dist", 0) <= cd_max
+                        and g >= g_min
+                        and g <= g_max
+                        and r <= r_max
+                        and d.get("entropy", d.get("g_entropy", 0)) <= ent_max
+                        and d.get("size_px", 0) >= min_size_px
+                        and d.get("grad_energy", 0) <= ge_max
+                        and d.get("aspect_ratio", 1.0) <= ar_max
+                        and max(d.get("r_kurt", 0), d.get("g_kurt", 0), d.get("b_kurt", 0)) <= kurt_max
+                    ):
+                        continue
+                passing.append(d)
 
             if self._filter_gen != gen:
                 return
@@ -1477,6 +1547,8 @@ class RunViewerGUI:
         self._fv_kurtosis.set(d["kurtosis"])
         self._active_chips.clear()
         self._update_chip_button_visuals()
+        self._active_tiers.clear()
+        self._update_tier_button_visuals()
         for lbl, var, fmt in self._filter_val_labels:
             lbl.configure(text=fmt.format(var.get()))
         # Cancel pending debounce and apply immediately
