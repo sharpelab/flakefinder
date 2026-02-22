@@ -509,7 +509,7 @@ def _run_z_scan(
 
     # Capture frames during move, using position to detect arrival
     # (avoids calling GetState on the same axis as polling — see
-    # docs/poll_throttling_plan.md for starvation background)
+    # docs/sdk_threading_investigation.md for starvation background)
     _STOP_MARGIN_UM = 0.1
     scan_range_um = z_start - z_end
     scan_speed = z_axis.velocity_um_s or 1000

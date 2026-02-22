@@ -1,7 +1,6 @@
 """Multi-row snake scan with parallel position reading and image capture.
 
-Supports both 5x overview scanning and 20x detection scanning for MaskTerial.
-See docs/maskterial_integration.md for 20x scanning context.
+Supports both 5x overview scanning and 20x detection scanning.
 
 Usage:
     uv run python commands/scan.py -o scan_5x --objective-mag 5
@@ -511,7 +510,7 @@ def run(
 
         # Capture frames during move, using position to detect arrival
         # (avoids calling GetState on the same axis as polling — see
-        # docs/poll_throttling_plan.md for starvation background)
+        # docs/sdk_threading_investigation.md for starvation background)
         while True:
             t_start = time.perf_counter()
             current_image[0] = None
@@ -688,7 +687,7 @@ Examples:
   # 5x overview scan of full stage area (default)
   uv run python commands/scan.py -o scan_5x --objective-mag 5
 
-  # 20x detection scan for MaskTerial over specific area
+  # 20x detection scan over specific area
   uv run python commands/scan.py -o scan_20x --objective-mag 20x --z 24699 --area-rect 10000,60000,15000,55000
 """,
     )

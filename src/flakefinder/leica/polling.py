@@ -6,7 +6,7 @@ transport (~4.8 ms/call, ~206 Hz unthrottled).  At the older 16 ms VCP
 transport the call itself exceeds the target period, so no sleep occurs
 and the natural ~63 Hz rate is preserved.
 
-See docs/poll_throttling_plan.md for background.
+See docs/sdk_threading_investigation.md for background.
 """
 
 from __future__ import annotations

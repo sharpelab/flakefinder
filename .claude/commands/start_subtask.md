@@ -57,7 +57,6 @@ Pick from this menu based on relevance to the task (flakefinder repo). For other
 | `docs/architecture.md` | System overview, stage speeds, design |
 | `docs/scan_metadata.md` | Scan data format reference |
 | `docs/microscope_reference.md` | Reference Z values, hardware specs |
-| `docs/maskterial_api.md` | MaskTerial API endpoints and models |
 | `scans/*_stitch_chips_detected.png` | Chip detection results (1500px thumbnail with boxes) |
 
 Also include any files the user specifically mentions, plus files you know are relevant from the current session.

@@ -123,7 +123,6 @@ scp 'sharpelab-microscope:flakefinder/scans/chips_5x.zip' scans/
 |-----|---------|
 | `docs/architecture.md` | System overview, stage speeds |
 | `docs/scan_metadata.md` | Scan output format reference |
-| `docs/maskterial_integration.md` | MaskTerial deep learning detector integration |
 
 ## Subtask Context Files
 
