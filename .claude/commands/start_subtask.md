@@ -29,7 +29,7 @@ Parse what the user wants. Identify:
 
 ### 3. Select context files
 
-Pick from this menu based on relevance to the task. The subtask will read these before starting.
+Pick from this menu based on relevance to the task (flakefinder repo). For other repos, skip this step — the subtask will find its own context files.
 
 **Do NOT read these files yourself.** The subtask reads them — you're just picking which ones to list. Only read a file if YOU need information from it that isn't already in your session context (notebook, previous findings, etc.).
 
@@ -51,7 +51,7 @@ Pick from this menu based on relevance to the task. The subtask will read these 
 | `docs/continuous_autofocus_plan.md` | Focus system design |
 | `docs/scan_metadata.md` | Scan data format reference |
 | `docs/microscope_reference.md` | Reference Z values, hardware specs |
-| `scans/*_stitch_chips_detected.png` | Chip detection results (1500px thumbnail with boxes) — use instead of raw stitch JPGs |
+| `scans/*_stitch_chips_detected.png` | Chip detection results (1500px thumbnail with boxes) |
 
 Also include any files the user specifically mentions, plus files you know are relevant from the current session.
 
@@ -88,8 +88,14 @@ Include session-specific values when relevant (Z positions, file paths, measurem
 ### 5. Spawn
 
 ```bash
+# flakefinder subtask (default)
 tools/subtask-launch <slug> -f /tmp/subtask_<slug>.prompt.md
+
+# other repo subtask
+tools/subtask-launch <slug> -f /tmp/subtask_<slug>.prompt.md --repo ~/sharpelab/flakes-website
 ```
+
+Use `--repo` when the task targets a different codebase (e.g. flakes-website). The subtask launches in that repo's worktree with its own CLAUDE.md context.
 
 Tell the user: the subtask is running in a new terminal. It will propose its plan before writing any code, and write a summary to `/tmp/<name>_summary.md` when done.
 

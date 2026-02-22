@@ -1,7 +1,7 @@
 #!/bin/bash
 # Launch a subtask agent in an isolated git worktree.
 #
-# Usage: subtask-launch <slug> [-f <prompt-file>]
+# Usage: subtask-launch <slug> [-f <prompt-file>] [--repo <path>]
 #
 # Creates .worktrees/<slug> worktree on branch subtask/<slug>,
 # prunes stale worktrees first, then launches newclaude.
@@ -9,18 +9,36 @@
 
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+DEFAULT_REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 
 if [[ $# -lt 1 ]]; then
-    echo "Usage: subtask-launch <slug> [-f <prompt-file>]" >&2
+    echo "Usage: subtask-launch <slug> [-f <prompt-file>] [--repo <path>]" >&2
     exit 1
 fi
 
 slug="$1"
 shift
 
+# Parse --repo from remaining args, pass the rest through to newclaude
+REPO_DIR="$DEFAULT_REPO"
+passthrough=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --repo)
+            REPO_DIR="$(cd "$2" && pwd)"
+            shift 2
+            ;;
+        *)
+            passthrough+=("$1")
+            shift
+            ;;
+    esac
+done
+
 worktree="${REPO_DIR}/.worktrees/${slug}"
 branch="subtask/${slug}"
+
+echo "Preparing worktree (new branch '${branch}')"
 
 # Prune stale worktrees
 git -C "${REPO_DIR}" worktree prune 2>/dev/null
@@ -40,4 +58,4 @@ git -C "${REPO_DIR}" worktree add "${worktree}" -b "${branch}" HEAD
 echo "Worktree: ${worktree} (branch: ${branch})"
 
 # Launch subtask
-newclaude "${worktree}" --agent subtask_agent "$@"
+newclaude "${worktree}" --agent subtask_agent "${passthrough[@]}"
