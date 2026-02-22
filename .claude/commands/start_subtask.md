@@ -39,18 +39,25 @@ Pick from this menu based on relevance to the task (flakefinder repo). For other
 | `src/flakefinder/leica/camera.py` | Camera capture, image acquisition |
 | `src/flakefinder/leica/core.py` | Connection management, LeicaConnection |
 | `src/flakefinder/leica/enums.py` | SDK constants, interface IDs |
-| `src/flakefinder/commands/autofocus.py` | Autofocus logic, Z scanning patterns |
+| `src/flakefinder/leica/microscope.py` | Microscope facade, subsystem init |
+| `src/flakefinder/leica/autofocus.py` | Autofocus library (continuous Z-scan) |
+| `src/flakefinder/commands/find_flakes.py` | Pipeline orchestrator (overview → chips → focus → scan) |
+| `src/flakefinder/commands/autofocus.py` | Autofocus CLI with debug output |
 | `src/flakefinder/commands/scan.py` | Scanning patterns, position polling, frame capture |
 | `src/flakefinder/commands/focus_map.py` | Focus map grid autofocus |
 | `src/flakefinder/commands/stitch.py` | Image stitching |
 | `src/flakefinder/commands/find_chips.py` | Chip detection |
 | `src/flakefinder/commands/chip_scan.py` | Chip scan with Z tracking |
 | `src/flakefinder/commands/stage.py` | Stage/objective control |
+| `src/flakefinder/commands/capture.py` | Single image capture |
+| `src/flakefinder/commands/revisit.py` | Multi-mag flake revisit |
+| `src/flakefinder/commands/upload.py` | Website upload packaging |
 | `src/flakefinder/commands/analyze_focus_map.py` | Focus map analysis, plane fitting |
+| `src/flakefinder/segmentation.py` | Flake detection and segmentation |
 | `docs/architecture.md` | System overview, stage speeds, design |
-| `docs/continuous_autofocus_plan.md` | Focus system design |
 | `docs/scan_metadata.md` | Scan data format reference |
 | `docs/microscope_reference.md` | Reference Z values, hardware specs |
+| `docs/maskterial_api.md` | MaskTerial API endpoints and models |
 | `scans/*_stitch_chips_detected.png` | Chip detection results (1500px thumbnail with boxes) |
 
 Also include any files the user specifically mentions, plus files you know are relevant from the current session.

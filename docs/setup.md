@@ -16,7 +16,7 @@ git clone git@github.com:sharpelab/flakefinder.git
 cd flakefinder
 ```
 
-### 2. Install Python Dependencies
+### 2. Install Dependencies
 
 ```bash
 uv sync
@@ -24,45 +24,62 @@ uv sync
 
 ### 3. Install Leica SDK DLLs
 
-Copy the required DLLs to the shared DLLs directory. On the microscope PC, they're already in place. For a fresh setup, copy from the Leica SDK installation:
+Copy the required DLLs to `src/flakefinder/dlls/`. On the microscope PC they're
+already in place. See `src/flakefinder/dlls/README.md` for the full list.
+
+### 4. Pre-commit Hooks
 
 ```bash
-# Copy DLLs to the shared location
-cp /path/to/leica-sdk-dlls/* src/flakefinder/dlls/
+git config core.hooksPath hooks/
 ```
 
-See `src/flakefinder/dlls/README.md` for the full list of required files.
+### 5. Verify
 
-### 4. Verify Installation
+There is no offline verify command — the SDK requires a live microscope connection.
+On the microscope PC, test with:
 
 ```bash
-uv run flakefinder connect
+uv run stage
 ```
 
-If successful, you should see output like:
+This should print the current stage position, objective, and lamp state.
 
+## Running Commands
+
+Commands are registered as `[project.scripts]` entry points. On the microscope PC,
+run directly with `uv run`:
+
+```bash
+uv run find-flakes --dry-run
+uv run stage
+uv run capture -o test.jpg
 ```
-FlakeFinder - Microscope Connection Test
-========================================
-Config directory: ./
-Attempting to initialize microscope...
-Connected successfully!
 
-Subsystems:
-  Stage: Name: 'SCAN 100x100', Type ID (TID): ...
-  Lamp: Name: 'LED', Type ID (TID): ...
-  ...
+From a dev machine, use `sls` to run commands remotely via SSH:
+
+```bash
+sls find-flakes --dry-run
+sls stage
+sls capture -o test.jpg
+```
+
+See CLAUDE.md for the full command table.
+
+## Development
+
+Install with dev dependencies:
+
+```bash
+uv sync --dev
+```
+
+### Linting & Type Checking
+
+```bash
+uv run ruff check --fix . && uv run ruff format . && uv run ty check
 ```
 
 ## Troubleshooting
-
-### "Import error: No module named 'clr'"
-
-pythonnet is not installed or not compatible with your Python version. Try:
-
-```bash
-uv pip install pythonnet --force-reinstall
-```
 
 ### "Failed to load hwmodel2.dll"
 
@@ -70,36 +87,6 @@ The Leica DLLs are missing. Copy them to `src/flakefinder/dlls/`.
 
 ### "Connection failed: ..."
 
-The microscope is not connected or powered on. Check:
-- USB/serial connection
-- Microscope power
-- Any other software using the microscope (close LAS X, etc.)
-
-## Development Setup
-
-For development, install with dev dependencies:
-
-```bash
-uv sync --dev
-```
-
-This adds:
-- `ruff` - Linter and formatter
-- `ty` - Type checker
-- `pytest` - Test runner
-
-### Running Checks
-
-```bash
-# Lint
-uv run ruff check src/
-
-# Format
-uv run ruff format src/
-
-# Type check
-uv run ty check src/flakefinder/
-
-# Tests
-uv run pytest
-```
+- Microscope not connected or powered on
+- Another application holding the connection (close LAS X)
+- USB/serial cable issue

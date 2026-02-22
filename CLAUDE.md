@@ -124,29 +124,7 @@ scp 'sharpelab-microscope:flakefinder/scans/chips_5x.zip' scans/
 | `docs/architecture.md` | System overview, stage speeds |
 | `docs/scan_metadata.md` | Scan output format reference |
 | `docs/maskterial_integration.md` | MaskTerial deep learning detector integration |
-| `docs/continuous_autofocus_plan.md` | Z-scan autofocus design |
-| `docs/chip_detection_plan.md` | Chip finding algorithm |
 
 ## Subtask Context Files
 
-When spawning subtasks, pick from this menu for the "Read these files first" section:
-
-| File | When to include |
-|------|----------------|
-| `src/flakefinder/leica/units.py` | Hardware control, axis/stage/Z classes, SDK interfaces |
-| `src/flakefinder/leica/camera.py` | Camera capture, image acquisition |
-| `src/flakefinder/leica/core.py` | Connection management, LeicaConnection |
-| `src/flakefinder/leica/enums.py` | SDK constants, interface IDs |
-| `src/flakefinder/commands/autofocus.py` | Autofocus logic, Z scanning patterns |
-| `src/flakefinder/commands/scan.py` | Scanning patterns, position polling, frame capture |
-| `src/flakefinder/commands/focus_map.py` | Focus map grid autofocus |
-| `src/flakefinder/commands/stitch.py` | Image stitching |
-| `src/flakefinder/commands/find_chips.py` | Chip detection |
-| `src/flakefinder/commands/chip_scan.py` | Chip scan with Z tracking |
-| `src/flakefinder/commands/stage.py` | Stage/objective control |
-| `src/flakefinder/commands/analyze_focus_map.py` | Focus map analysis, plane fitting |
-| `docs/architecture.md` | System overview, stage speeds, design |
-| `docs/continuous_autofocus_plan.md` | Focus system design |
-| `docs/scan_metadata.md` | Scan data format reference |
-| `docs/microscope_reference.md` | Reference Z values, hardware specs |
-| `scans/*_stitch_chips_detected.png` | Chip detection results (1500px thumbnail with boxes) |
+See `.claude/commands/start_subtask.md` for the context file menu used when spawning subtasks.

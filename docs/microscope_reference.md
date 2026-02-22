@@ -4,14 +4,16 @@ Empirical measurements and reference data for the Sharpe Lab Leica DM6M.
 
 ## Objectives
 
-| Pos | Mag | Name | Working Dist (µm) | Autofocus Range (µm) |
-|-----|-----|------|-------------------|----------------------|
-| 6 | 2.5x | 2.5x | 15,000 | 500 (auto) |
-| 1 | 5x | 5x N PLAN | 12,700 | 500 (auto) |
-| 2 | 10x | 10x | 11,000 | 500 (auto) |
-| 3 | 20x | 20x | 1,900 | 500 (auto) |
-| 4 | 50x | 50x | 380 | 127 (auto) |
-| 5 | 150x | 150x | 210 | 70 (auto) |
+| Pos | Mag | Name | NA | DOF (µm) | Working Dist (µm) | AF Range (µm) |
+|-----|-----|------|----|----------|-------------------|----------------|
+| 6 | 2.5x | 2.5x | 0.07 | 153 | 15,000 | 500 (auto) |
+| 1 | 5x | 5x N PLAN | 0.12 | 50 | 12,700 | 500 (auto) |
+| 2 | 10x | 10x | 0.25 | 12 | 11,000 | 500 (auto) |
+| 3 | 20x | 20x | 0.40 | 4.3 | 1,900 | 500 (auto) |
+| 4 | 50x | 50x | 0.75 | 1.2 | 380 | 127 (auto) |
+| 5 | 150x | 150x | 0.90 | 0.7 | 210 | 70 (auto) |
+
+DOF = λ/NA² + pixel/(M·NA) with λ=0.55 µm, 3×3 binning (effective pixel 7.2 µm). 20x and 50x validated empirically.
 
 Autofocus auto range = min(working_distance / 3, 500).
 
