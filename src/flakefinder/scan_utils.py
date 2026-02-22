@@ -91,6 +91,57 @@ PARFOCAL_Z_UM: dict[float, float] = {
     50: 24685.1,
 }
 
+# Parcentric XY offsets (µm) per objective magnification, relative to 10x.
+# Offset = optical_center(this_obj) - optical_center(10x).
+# Measured 2026-02-21 on SF119 A-H (chip 6, rank01_frame_0327_d0).
+# Accuracy ~±5 µm. +X = stage right, +Y = stage down (toward higher Y).
+PARCENTRIC_XY_UM: dict[float, Point2F] = {
+    2.5: Point2F(-25, 0),
+    5: Point2F(5, 20),
+    10: Point2F(0, 0),
+    20: Point2F(30, 25),
+    50: Point2F(17, 30),
+}
+
+
+def build_revisit_json(
+    base_points: list[dict],
+    scan_mag: float,
+    target_mag: float,
+) -> dict:
+    """Build a revisit JSON dict with parfocal Z + parcentric XY offsets applied.
+
+    Args:
+        base_points: Points at scan magnification [{x, y, z, label}, ...].
+        scan_mag: Magnification the points were detected at.
+        target_mag: Magnification for revisit capture.
+
+    Returns:
+        Dict ready for JSON serialization with adjusted points and metadata.
+    """
+    z_delta = PARFOCAL_Z_UM[target_mag] - PARFOCAL_Z_UM[scan_mag]
+    xy_scan = PARCENTRIC_XY_UM.get(scan_mag, Point2F(0, 0))
+    xy_target = PARCENTRIC_XY_UM.get(target_mag, Point2F(0, 0))
+    dx = xy_target.x - xy_scan.x
+    dy = xy_target.y - xy_scan.y
+
+    adjusted = [
+        {
+            **pt,
+            "x": round(pt["x"] + dx, 2),
+            "y": round(pt["y"] + dy, 2),
+            "z": round(pt["z"] + z_delta, 2),
+        }
+        for pt in base_points
+    ]
+    return {
+        "objective_mag": target_mag,
+        "scan_mag": scan_mag,
+        "applied_parfocal_delta_um": round(z_delta, 1),
+        "applied_parcentric_delta_xy_um": [round(dx, 1), round(dy, 1)],
+        "points": adjusted,
+    }
+
 
 def parse_position(s: str) -> Point2F:
     """Parse 'X,Y' position string into Point2F.

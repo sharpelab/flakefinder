@@ -79,6 +79,7 @@ from flakefinder.leica import Microscope
 from flakefinder.scan_utils import (
     CALIBRATION_DIR,
     PARFOCAL_Z_UM,
+    build_revisit_json,
     get_git_version,
     parse_area_rect,
     parse_white_balance,
@@ -844,20 +845,13 @@ def _generate_revisits(
     if not base_points:
         return ""
 
-    # Write parfocal-adjusted revisit JSONs
+    # Write parfocal + parcentric adjusted revisit JSONs
     written = []
     for target_mag in revisit_mags:
         if target_mag not in PARFOCAL_Z_UM:
             continue
-        delta = PARFOCAL_Z_UM[target_mag] - PARFOCAL_Z_UM[scan_mag]
-        adjusted = [{**pt, "z": round(pt["z"] + delta, 2)} for pt in base_points]
-        revisit_obj = {
-            "objective_mag": target_mag,
-            "scan_mag": scan_mag,
-            "applied_parfocal_delta_um": round(delta, 1),
-            "plane_source": str(job.plane_path),
-            "points": adjusted,
-        }
+        revisit_obj = build_revisit_json(base_points, scan_mag, target_mag)
+        revisit_obj["plane_source"] = str(job.plane_path)
         mag_label = f"{target_mag:g}"
         revisit_path = job.seg_dir / f"revisit_{mag_label}x.json"
         with open(revisit_path, "w") as f:

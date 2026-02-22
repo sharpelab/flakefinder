@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from mosaic_util import make_mosaic
 
-from flakefinder.scan_utils import PARFOCAL_Z_UM
+from flakefinder.scan_utils import PARFOCAL_Z_UM, build_revisit_json
 from flakefinder.segmentation import (
     Detection,
     DetectorConfig,
@@ -434,32 +434,25 @@ def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
                 if target_mag not in PARFOCAL_Z_UM:
                     print(f"Error: revisit mag {target_mag}x not in PARFOCAL_Z_UM")
                     return 1
-                delta = PARFOCAL_Z_UM[target_mag] - PARFOCAL_Z_UM[scan_mag]
+                revisit_obj = build_revisit_json(base_points, scan_mag, target_mag)
+                revisit_obj["plane_source"] = plane_source
                 mag_label = f"{target_mag:g}"
-                adjusted = [{**pt, "z": round(pt["z"] + delta, 2)} for pt in base_points]
-                revisit_obj = {
-                    "objective_mag": target_mag,
-                    "scan_mag": scan_mag,
-                    "applied_parfocal_delta_um": round(delta, 1),
-                    "plane_source": plane_source,
-                    "points": adjusted,
-                }
                 name_base = args._name_base
                 revisit_name = f"revisit_{name_base}_{mag_label}x.json"
                 revisit_path = output_dir / revisit_name
                 with open(revisit_path, "w") as f:
                     json.dump(revisit_obj, f, indent=2)
+                n_pts = len(revisit_obj["points"])
+                delta = revisit_obj["applied_parfocal_delta_um"]
+                xy = revisit_obj["applied_parcentric_delta_xy_um"]
                 print(
-                    f"\nSaved revisit JSON ({len(adjusted)} pts, {mag_label}x, delta={delta:+.1f} um): {revisit_path}"
+                    f"\nSaved revisit JSON ({n_pts} pts, {mag_label}x, "
+                    f"Zdelta={delta:+.1f} um, XYdelta={xy}): {revisit_path}"
                 )
         else:
-            revisit_obj = {
-                "objective_mag": scan_mag,
-                "scan_mag": scan_mag,
-                "applied_parfocal_delta_um": 0,
-                "plane_source": plane_source,
-                "points": base_points,
-            }
+            assert scan_mag is not None
+            revisit_obj = build_revisit_json(base_points, scan_mag, scan_mag)
+            revisit_obj["plane_source"] = plane_source
             revisit_name = f"revisit_{args._name_base}.json"
             revisit_path = output_dir / revisit_name
             with open(revisit_path, "w") as f:
@@ -808,7 +801,6 @@ def main() -> int:
             base_points.append({"x": round(sx, 2), "y": round(sy, 2), "z": round(z, 2), "label": label})
 
         if args.revisit_mags:
-            # Parfocal-adjusted revisit JSONs
             scan_mag = plane_data.get("source", {}).get("objective_mag")
             if scan_mag is None:
                 print("Error: plane JSON missing source.objective_mag (re-export with updated analyze_focus_map)")
@@ -822,34 +814,26 @@ def main() -> int:
                 if target_mag not in PARFOCAL_Z_UM:
                     print(f"Error: revisit mag {target_mag}x not in PARFOCAL_Z_UM")
                     return 1
-                delta = PARFOCAL_Z_UM[target_mag] - PARFOCAL_Z_UM[scan_mag]
+                revisit_obj = build_revisit_json(base_points, scan_mag, target_mag)
+                revisit_obj["plane_source"] = str(args.plane)
                 mag_label = f"{target_mag:g}"
-                adjusted = [{**pt, "z": round(pt["z"] + delta, 2)} for pt in base_points]
-                revisit_obj = {
-                    "objective_mag": target_mag,
-                    "scan_mag": scan_mag,
-                    "applied_parfocal_delta_um": round(delta, 1),
-                    "plane_source": str(args.plane),
-                    "points": adjusted,
-                }
                 name_base = args._name_base
                 revisit_name = f"revisit_{name_base}_{mag_label}x.json"
                 revisit_path = args.seg_dir / revisit_name
                 with open(revisit_path, "w") as f:
                     json.dump(revisit_obj, f, indent=2)
+                n_pts = len(revisit_obj["points"])
+                delta = revisit_obj["applied_parfocal_delta_um"]
+                xy = revisit_obj["applied_parcentric_delta_xy_um"]
                 print(
-                    f"\nSaved revisit JSON ({len(adjusted)} pts, {mag_label}x, delta={delta:+.1f} µm): {revisit_path}"
+                    f"\nSaved revisit JSON ({n_pts} pts, {mag_label}x, "
+                    f"Zdelta={delta:+.1f} µm, XYdelta={xy}): {revisit_path}"
                 )
         else:
-            # Un-adjusted revisit JSON
             scan_mag = plane_data.get("source", {}).get("objective_mag")
-            revisit_obj = {
-                "objective_mag": scan_mag,
-                "scan_mag": scan_mag,
-                "applied_parfocal_delta_um": 0,
-                "plane_source": str(args.plane),
-                "points": base_points,
-            }
+            assert scan_mag is not None
+            revisit_obj = build_revisit_json(base_points, scan_mag, scan_mag)
+            revisit_obj["plane_source"] = str(args.plane)
             revisit_name = f"revisit_{args._name_base}.json"
             revisit_path = args.seg_dir / revisit_name
             with open(revisit_path, "w") as f:
