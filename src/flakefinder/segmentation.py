@@ -53,6 +53,7 @@ class _DetectionBase(TypedDict):
     g_entropy: float
     b_entropy: float
     entropy: float
+    uniform_region_ent_um2: float
     size_um2: float
     hull: PixelPolygon
     contour: PixelPolygon
@@ -387,12 +388,57 @@ def compute_dark_frac(image: np.ndarray, threshold: float = 30.0) -> float:
     return float((image.mean(axis=2) < threshold).mean())
 
 
+def _compute_local_std(channel: np.ndarray, radius: int = 5) -> np.ndarray:
+    """Local standard deviation via box filter: sqrt(E[X²] - E[X]²)."""
+    ch = channel.astype(np.float32)
+    ksize = 2 * radius + 1
+    mean = cv2.blur(ch, (ksize, ksize))
+    mean_sq = cv2.blur(ch * ch, (ksize, ksize))
+    return np.sqrt(np.maximum(mean_sq - mean * mean, 0))
+
+
+def _uniform_region_area_um2(
+    local_std: np.ndarray,
+    component: np.ndarray,
+    um_per_px: float,
+    bbox: tuple[int, int, int, int],
+) -> float:
+    """Area (µm²) of the largest contiguous low-local-std region within a component.
+
+    bbox is (y_min, y_max, x_min, x_max) used to crop to the component's
+    bounding box for efficiency (avoids full-frame ops on 17k+ detections).
+    """
+    y0, y1, x0, x1 = bbox
+    roi_std = local_std[y0 : y1 + 1, x0 : x1 + 1]
+    roi_comp = component[y0 : y1 + 1, x0 : x1 + 1]
+
+    flake_stds = roi_std[roi_comp]
+    if flake_stds.size < 10:
+        return 0.0
+
+    threshold = float(np.percentile(flake_stds, 40))
+    uniform = roi_comp & (roi_std <= threshold)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    uniform_clean = cv2.morphologyEx(uniform.astype(np.uint8), cv2.MORPH_OPEN, kernel)
+
+    labeled, n_labels = ndimage.label(uniform_clean)
+    if n_labels == 0:
+        return 0.0
+
+    sizes = ndimage.sum(uniform_clean, labeled, range(1, n_labels + 1))
+    best_label = int(np.argmax(sizes)) + 1
+    area_px = int((labeled == best_label).sum())
+    return round(area_px * um_per_px**2, 1)
+
+
 def _analyze_component(
     image: np.ndarray,
     component: np.ndarray,
     bg_modes: np.ndarray,
     norm_contrast: np.ndarray,
     grad_mag: np.ndarray,
+    local_std: np.ndarray,
     config: DetectorConfig,
     um_per_px: float = 1.0,
 ) -> Detection:
@@ -449,6 +495,9 @@ def _analyze_component(
     # Internal gradient energy (Sobel on G channel, masked to blob)
     grad_energy = float(grad_mag[component].mean())
 
+    # Largest contiguous uniform region (low local std)
+    uniform_region = _uniform_region_area_um2(local_std, component, um_per_px, (y_min, y_max, x_min, x_max))
+
     # Histogram entropy of per-channel normalized contrast within blob
     # Fixed range (-1, 1) so homogeneous blobs → low entropy, heterogeneous → high
     def _hist_entropy(vals: np.ndarray) -> float:
@@ -488,6 +537,7 @@ def _analyze_component(
         g_entropy=round(g_entropy, 4),
         b_entropy=round(b_entropy, 4),
         entropy=round(max(r_entropy, g_entropy, b_entropy), 4),
+        uniform_region_ent_um2=uniform_region,
         hull=hull_pts,
         contour=contour_pts,
     )
@@ -615,6 +665,9 @@ def segment_frame(
     sy = cv2.Sobel(gray_g, cv2.CV_32F, 0, 1, ksize=3)
     grad_mag = np.sqrt(sx * sx + sy * sy)
 
+    # Precompute local std on G channel (used by uniform region metric)
+    local_std = _compute_local_std(image[:, :, 1])
+
     ks = config.morph_kernel_size
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks, ks))
     mask_clean = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
@@ -646,7 +699,7 @@ def segment_frame(
         sub_components = _subsegment_by_contrast(image, component, bg_modes, min_size_px, norm_contrast)
 
         for sub_comp in sub_components:
-            det = _analyze_component(image, sub_comp, bg_modes, norm_contrast, grad_mag, config, um_per_px)
+            det = _analyze_component(image, sub_comp, bg_modes, norm_contrast, grad_mag, local_std, config, um_per_px)
             # Re-check edge margin for sub-components
             scx, scy = det["center"]
             if scx < config.edge_margin_px or scx > w - config.edge_margin_px:
