@@ -415,6 +415,7 @@ def run(
     tier: int = 1,
     top: int | None = None,
     dry_run: bool = False,
+    quiet: bool = False,
     jobs: int = 4,
     name: str | None = None,
 ) -> UploadResult:
@@ -428,6 +429,7 @@ def run(
         tier: Tier to select (exact match).
         top: Max flakes per chip (None = all passing tier filter).
         dry_run: Build ZIP but don't upload.
+        quiet: Only print [upload] status lines, suppress detail.
         jobs: Parallel workers for eval_img rendering.
         name: Scan name override (default: run directory name).
 
@@ -501,7 +503,8 @@ def run(
             # Find scan directory for frame paths and camera meta
             scan_dir = find_scan_dir(chip_dir)
             if scan_dir is None:
-                print(f"  Chip {chip_idx}: no scan directory found, skipping")
+                if not quiet:
+                    print(f"  Chip {chip_idx}: no scan directory found, skipping")
                 continue
 
             scan_meta_path = scan_dir / "scan_meta.json"
@@ -519,7 +522,8 @@ def run(
 
             n_t1 = sum(1 for d in flakes if d.get("tier") == 1)
             n_t2 = sum(1 for d in flakes if d.get("tier") == 2)
-            print(f"  Chip {chip_idx}: {len(flakes)} flakes (T1:{n_t1}, T2:{n_t2})")
+            if not quiet:
+                print(f"  Chip {chip_idx}: {len(flakes)} flakes (T1:{n_t1}, T2:{n_t2})")
 
             # Discover available revisit magnifications
             revisit_mags = discover_revisit_mags(chip_dir)
@@ -593,7 +597,8 @@ def run(
                 else:
                     failed += 1
         elapsed = time.monotonic() - t0
-        print(f"  Rendered {rendered} eval images in {elapsed:.1f}s")
+        if not quiet:
+            print(f"  Rendered {rendered} eval images in {elapsed:.1f}s")
         if failed:
             print(f"  WARNING: {failed} eval images failed to render")
 

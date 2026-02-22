@@ -1686,6 +1686,7 @@ def main() -> int:
                             p.run_dir,
                             material=p.seg.material,
                             substrate=p.substrate,
+                            quiet=quiet,
                         )
                     upload_duration = time.perf_counter() - t_upload
                     mark_step(p.run_dir, checkpoint, "upload", upload_duration)
