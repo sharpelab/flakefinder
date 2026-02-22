@@ -53,6 +53,7 @@ def run(
     contrast_offset: float | None = None,
     min_size_um: float | None = None,
     edge_margin: int | None = None,
+    entropy_threshold: float | None = None,
     dark_frac_cutoff: float = 0.05,
     jobs: int = 16,
     viz: bool = False,
@@ -118,6 +119,8 @@ def run(
         overrides["min_size_um2"] = min_size_um
     if edge_margin is not None:
         overrides["edge_margin_px"] = edge_margin
+    if entropy_threshold is not None:
+        overrides["entropy_threshold"] = entropy_threshold
     if overrides:
         config = replace(config, **overrides)
 
@@ -281,6 +284,9 @@ def main() -> int:
     parser.add_argument("--min-size-um", type=float, default=None, help="Override min detection area (µm²)")
     parser.add_argument("--edge-margin", type=int, default=None, help="Override edge margin (px)")
     parser.add_argument(
+        "--entropy-threshold", type=float, default=None, help="Override uniform-region percentile (0-1, default: 0.4)"
+    )
+    parser.add_argument(
         "--dark-frac-cutoff", type=float, default=0.05, help="Skip frame if dark pixel fraction exceeds this"
     )
     parser.add_argument("-j", "--jobs", type=int, default=16, help="Worker count")
@@ -297,6 +303,7 @@ def main() -> int:
             contrast_offset=args.contrast_offset,
             min_size_um=args.min_size_um,
             edge_margin=args.edge_margin,
+            entropy_threshold=args.entropy_threshold,
             dark_frac_cutoff=args.dark_frac_cutoff,
             jobs=args.jobs,
             viz=args.viz,

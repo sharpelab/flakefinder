@@ -42,6 +42,9 @@ def main():
     parser.add_argument("--min-size-um", type=float, default=None, help="Override min detection area (µm²)")
     parser.add_argument("--edge-margin", type=int, default=None, help="Override edge margin (px)")
     parser.add_argument(
+        "--entropy-threshold", type=float, default=None, help="Override uniform-region percentile (0-1, default: 0.4)"
+    )
+    parser.add_argument(
         "--dark-frac-cutoff",
         type=float,
         default=0.05,
@@ -77,6 +80,8 @@ def main():
         overrides["min_size_um2"] = args.min_size_um
     if args.edge_margin is not None:
         overrides["edge_margin_px"] = args.edge_margin
+    if args.entropy_threshold is not None:
+        overrides["entropy_threshold"] = args.entropy_threshold
     if overrides:
         config = replace(config, **overrides)
 

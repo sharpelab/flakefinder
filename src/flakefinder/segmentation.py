@@ -193,6 +193,7 @@ class DetectorConfig:
     min_size_um2: float
     edge_margin_px: int
     morph_kernel_size: int
+    entropy_threshold: float  # percentile of local-std within component for uniform region metric
 
     # -- Calibration curve: R = poly(G) --
     cal_poly: tuple[float, ...]
@@ -265,6 +266,7 @@ class DetectorConfig:
             min_size_um2=400.0,
             edge_margin_px=50,
             morph_kernel_size=5,
+            entropy_threshold=0.4,
             cal_poly=(0.193, -0.217, -0.604),
             cal_g_range=(-0.5, 6.0),
             cal_dist_match=0.5,
@@ -294,6 +296,7 @@ class DetectorConfig:
             min_size_um2=400.0,
             edge_margin_px=50,
             morph_kernel_size=5,
+            entropy_threshold=0.4,
             cal_poly=(0.193, -0.217, -0.604),
             cal_g_range=(-0.5, 6.0),
             cal_dist_match=0.5,
@@ -323,6 +326,7 @@ class DetectorConfig:
             min_size_um2=130.0,
             edge_margin_px=50,
             morph_kernel_size=5,
+            entropy_threshold=0.4,
             cal_poly=(0.0, 0.0, 0.0),
             cal_g_range=(-6.0, 0.5),
             cal_dist_match=0.5,
@@ -402,11 +406,14 @@ def _uniform_region_area_um2(
     component: np.ndarray,
     um_per_px: float,
     bbox: tuple[int, int, int, int],
+    entropy_threshold: float,
 ) -> float:
     """Area (µm²) of the largest contiguous low-local-std region within a component.
 
     bbox is (y_min, y_max, x_min, x_max) used to crop to the component's
     bounding box for efficiency (avoids full-frame ops on 17k+ detections).
+    entropy_threshold is the fraction (0–1) used as a percentile cutoff on
+    within-component local-std values.
     """
     y0, y1, x0, x1 = bbox
     roi_std = local_std[y0 : y1 + 1, x0 : x1 + 1]
@@ -416,7 +423,7 @@ def _uniform_region_area_um2(
     if flake_stds.size < 10:
         return 0.0
 
-    threshold = float(np.percentile(flake_stds, 40))
+    threshold = float(np.percentile(flake_stds, entropy_threshold * 100))
     uniform = roi_comp & (roi_std <= threshold)
 
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
@@ -496,7 +503,9 @@ def _analyze_component(
     grad_energy = float(grad_mag[component].mean())
 
     # Largest contiguous uniform region (low local std)
-    uniform_region = _uniform_region_area_um2(local_std, component, um_per_px, (y_min, y_max, x_min, x_max))
+    uniform_region = _uniform_region_area_um2(
+        local_std, component, um_per_px, (y_min, y_max, x_min, x_max), config.entropy_threshold
+    )
 
     # Histogram entropy of per-channel normalized contrast within blob
     # Fixed range (-1, 1) so homogeneous blobs → low entropy, heterogeneous → high
