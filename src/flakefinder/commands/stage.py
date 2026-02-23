@@ -27,25 +27,6 @@ from flakefinder.leica import Microscope, wait_all
 #         To approach: INCREASE Z
 # =============================================================================
 
-# =============================================================================
-# Objective Safety Configuration
-# =============================================================================
-
-# Working distances in µm (conservative estimates for Sharpe Lab DM6M)
-# These are approximate - actual values depend on specific objective models.
-# Position -> working distance mapping (1-indexed positions)
-WORKING_DISTANCES_UM: dict[int, float] = {
-    1: 12700,  # 5x N PLAN - 12.7mm working distance
-    2: 11000,  # 10x - ~11mm (typical)
-    3: 1900,  # 20x - ~1.9mm (typical)
-    4: 380,  # 50x - ~0.38mm (typical long WD)
-    5: 210,  # 150x - ~0.21mm (short WD, highest risk)
-    6: 15000,  # 2.5x - ~15mm (very safe)
-}
-
-# Safety margin added to Z retraction (µm)
-Z_SAFETY_MARGIN_UM = 500
-
 
 def change_objective_mag(scope: Microscope, mag: str) -> None:
     """Change objective by magnification string with verbose logging.
