@@ -540,7 +540,7 @@ def run(
             camera_meta = chip_scan_meta["camera"]
 
             # Material preset used for segmentation (for thickness classification)
-            seg_material = summary.get("params", {}).get("material", "hbn")
+            seg_material = summary.get("params", {}).get("material", "hbn_medium")
 
             # Select flakes
             flakes = select_flakes(summary, tier, top)

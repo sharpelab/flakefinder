@@ -472,7 +472,7 @@ def main() -> int:
     parser.add_argument("seg_dir", type=Path, help="Segmentation output dir (single chip) or run dir (scan-wide)")
     parser.add_argument(
         "--material",
-        default="hbn",
+        default="hbn_medium",
         choices=DetectorConfig.material_names(),
         help="Material preset",
     )

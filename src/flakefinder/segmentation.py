@@ -307,11 +307,6 @@ class DetectorConfig:
         return self.score_fn(det)
 
     @classmethod
-    def hbn(cls) -> DetectorConfig:
-        """hBN detection preset (alias for hbn_thin)."""
-        return cls.hbn_thin()
-
-    @classmethod
     def hbn_thin(cls) -> DetectorConfig:
         """hBN thin flake detection preset."""
         return cls(
@@ -407,7 +402,6 @@ class DetectorConfig:
     @classmethod
     def _presets(cls) -> dict[str, Callable[[], DetectorConfig]]:
         return {
-            "hbn": cls.hbn,
             "hbn_thin": cls.hbn_thin,
             "hbn_medium": cls.hbn_medium,
             "graphene": cls.graphene,

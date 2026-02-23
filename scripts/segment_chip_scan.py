@@ -49,7 +49,7 @@ def run(
     output: Path,
     *,
     flatfield: Path | None = None,
-    material: str = "hbn",
+    material: str = "hbn_medium",
     contrast_offset: float | None = None,
     min_size_um: float | None = None,
     edge_margin: int | None = None,
@@ -276,7 +276,7 @@ def main() -> int:
     parser.add_argument("--flatfield", type=Path, default=None, help="Flatfield .npy file")
     parser.add_argument(
         "--material",
-        default="hbn",
+        default="hbn_medium",
         choices=DetectorConfig.material_names(),
         help="Material preset",
     )

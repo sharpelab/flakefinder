@@ -619,9 +619,9 @@ Examples:
     seg_group.add_argument(
         "--material",
         type=str,
-        default="hbn",
+        default="hbn_medium",
         choices=DetectorConfig.material_names(),
-        help="Material preset for segmentation (default: hbn)",
+        help="Material preset for segmentation (default: hbn_medium)",
     )
     seg_group.add_argument(
         "--seg-jobs",

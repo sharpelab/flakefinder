@@ -252,7 +252,7 @@ def main():
     parser.add_argument("--flatfield", type=Path, default=None, help="Flatfield .npy file")
     parser.add_argument(
         "--material",
-        default="hbn",
+        default="hbn_medium",
         choices=DetectorConfig.material_names(),
         help="Material preset",
     )
