@@ -347,7 +347,6 @@ class AutofocusResult:
     peak_near_edge: bool = False  # True if coarse best Z is within 10% of scan boundary
     monotonicity: float = 0.0  # AF curve monotonicity (coarse pass)
     best_sharpness_laplacian: float = 0.0  # Laplacian variance of final image
-    focus_quality: FocusQuality = FocusQuality.OK  # Three-tier classification
     sharpness_curve: list[SharpnessSample] = field(default_factory=list)  # [{z_um, sharpness}, ...] coarse only
     frames: list[AutofocusFrame] | None = None  # Coarse frames only (if store_frames=True)
     fine_sharpness_curve: list[SharpnessSample] = field(default_factory=list)  # Fine pass only
@@ -368,7 +367,6 @@ class AutofocusResult:
             "mean_intensity": self.mean_intensity,
             "monotonicity": self.monotonicity,
             "best_sharpness_laplacian": self.best_sharpness_laplacian,
-            "focus_quality": self.focus_quality.value,
             "peak_near_edge": self.peak_near_edge,
             "position_um": list(self.position_um),
             "scan": {
@@ -1040,8 +1038,6 @@ def continuous_autofocus(
         img_sharp_lap = 0.0
         stored_final_image = None
 
-    fq = classify_focus_quality(img_sharp_lap, mono)
-
     return AutofocusResult(
         selected_z_um=best_z,
         selected_sharpness=best_sharpness,
@@ -1069,7 +1065,6 @@ def continuous_autofocus(
         peak_near_edge=peak_near_edge,
         monotonicity=mono,
         best_sharpness_laplacian=img_sharp_lap,
-        focus_quality=fq,
         sharpness_curve=sharpness_curve,
         frames=frames if store_frames else None,
         fine_sharpness_curve=fine_curve,
