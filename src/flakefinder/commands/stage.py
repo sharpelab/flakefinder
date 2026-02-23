@@ -43,19 +43,6 @@ WORKING_DISTANCES_UM: dict[int, float] = {
     6: 15000,  # 2.5x - ~15mm (very safe)
 }
 
-# Parfocal offsets in µm (to be calibrated)
-# Offset = Z_focused(this_obj) - Z_focused(reference_obj)
-# Positive means this objective focuses at higher Z than reference.
-# All zeros until calibrated - set reference objective to position 1 (5x).
-PARFOCAL_OFFSETS_UM: dict[int, float] = {
-    1: 0,  # 5x - reference
-    2: 0,  # 10x
-    3: 0,  # 20x
-    4: 0,  # 50x
-    5: 0,  # 150x
-    6: 0,  # 2.5x
-}
-
 # Safety margin added to Z retraction (µm)
 Z_SAFETY_MARGIN_UM = 500
 
@@ -104,11 +91,6 @@ def _change_objective_pos(scope: Microscope, target_pos: int) -> None:
     z_after = scope.z.position_um
     print(f"Objective: switched to {target_mag}x (pos {target_pos})")
     print(f"  Z after: {z_after:.1f} µm")
-
-    # Future: parfocal compensation would go here once calibrated
-    # current_offset = PARFOCAL_OFFSETS_UM.get(current_position, 0)
-    # target_offset = PARFOCAL_OFFSETS_UM.get(target_position, 0)
-    # ...
 
 
 def run(

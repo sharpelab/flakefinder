@@ -57,6 +57,7 @@ def main() -> int:
     parser.add_argument("--x", type=float, default=None, help="Move to X position in µm before capture")
     parser.add_argument("--y", type=float, default=None, help="Move to Y position in µm before capture")
     parser.add_argument("--z", type=float, help="Move to Z position in µm before capture")
+    parser.add_argument("--aperture", type=int, metavar="VALUE", help="Set aperture diaphragm value")
     parser.add_argument("--objective-mag", type=str, help="Switch objective magnification (e.g. '20x', '5', '2.5x')")
     parser.add_argument("--focus", action="store_true", help="Autofocus: scan Z range and capture sharpest frame")
     parser.add_argument(
@@ -77,6 +78,10 @@ def main() -> int:
 
         # Set lamp and open shutter
         scope.light_on(args.lamp)
+
+        # Set aperture if specified
+        if args.aperture is not None:
+            scope.aperture.value = args.aperture
 
         # Move to XY position if specified
         if args.x is not None or args.y is not None:
