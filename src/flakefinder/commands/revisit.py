@@ -411,7 +411,8 @@ def run(
         vprint(
             f"  Move: {move_s * 1000:.0f}ms | AF: {af_s * 1000:.0f}ms ({fc.frame_count} frames) | Total: {total_s:.1f}s"
         )
-        vprint(f"  Z: {p.z:.1f} -> {fc.z_um:.1f} ({z_adj:+.1f}), sharpness={fc.sharpness:.1f}")
+        fq_str = f" [{fc.focus_quality.value}]" if fc.focus_quality.value != "ok" else ""
+        vprint(f"  Z: {p.z:.1f} -> {fc.z_um:.1f} ({z_adj:+.1f}), sharpness={fc.sharpness:.1f}{fq_str}")
         vprint(f"  Saving: {filename}")
 
         results.append(
@@ -425,6 +426,9 @@ def run(
                 "z_focused_um": fc.z_um,
                 "z_adjustment_um": round(z_adj, 2),
                 "sharpness": fc.sharpness,
+                "best_sharpness_laplacian": fc.best_sharpness_laplacian,
+                "monotonicity": fc.monotonicity,
+                "focus_quality": fc.focus_quality.value,
                 "frame_count": fc.frame_count,
                 "timing_s": {
                     "move": round(move_s, 3),
@@ -479,8 +483,10 @@ def run(
 
     # Summary (always printed)
     n = len(route)
+    n_bad = sum(1 for r in results if r["focus_quality"] != "ok")
     if quiet:
-        print(f"Revisited {n} points in {total_elapsed:.1f}s -> {output}/")
+        fq_str = f", {n_bad} bad/borderline" if n_bad else ""
+        print(f"Revisited {n} points in {total_elapsed:.1f}s{fq_str} -> {output}/")
     else:
         print()
         print("=" * 50)

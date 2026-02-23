@@ -9,6 +9,7 @@ working distance if not specified.
 """
 
 import bisect
+import enum
 import queue
 import threading
 import time
@@ -169,6 +170,40 @@ def sharpness(image: RGBImage, method: str = "tenengrad") -> float:
     return float(fn(image))
 
 
+class FocusQuality(enum.StrEnum):
+    """Three-tier focus quality classification."""
+
+    OK = "ok"
+    BORDERLINE = "borderline"
+    BAD = "bad"
+
+
+def af_curve_monotonicity(sharpness_values: list[float]) -> float:
+    """Fraction of adjacent diffs that are negative after 5-frame rolling mean smoothing.
+
+    A well-shaped AF curve (rising then falling) has low monotonicity (~0.4-0.5).
+    A monotonically decreasing curve (missed focus) has monotonicity ~1.0.
+
+    Returns 0.0 if fewer than 5 frames.
+    """
+    if len(sharpness_values) < 5:
+        return 0.0
+    smoothed = np.convolve(sharpness_values, np.ones(5) / 5, mode="valid")
+    return float((np.diff(smoothed) < 0).mean())
+
+
+def classify_focus_quality(best_sharpness_laplacian: float, monotonicity: float) -> FocusQuality:
+    """Classify focus quality from image sharpness (Laplacian variance) and AF curve monotonicity.
+
+    Thresholds validated on 608 50x revisit captures across 3 independent runs.
+    """
+    if best_sharpness_laplacian <= 2.4 and monotonicity > 0.89:
+        return FocusQuality.BAD
+    if best_sharpness_laplacian <= 2.7 and monotonicity > 0.85:
+        return FocusQuality.BORDERLINE
+    return FocusQuality.OK
+
+
 def interpolate_position(t: float, samples: list[PositionSample]) -> float | None:
     """Interpolate position at time t from polled position samples.
 
@@ -276,6 +311,9 @@ class FocusCaptureResult:
     objective_position: int
     sharpness_curve: list[SharpnessSample]
     timing: FocusCaptureTiming
+    monotonicity: float = 0.0
+    best_sharpness_laplacian: float = 0.0
+    focus_quality: FocusQuality = FocusQuality.OK
 
 
 @dataclass
@@ -307,6 +345,9 @@ class AutofocusResult:
     super_fine_z_start_um: float | None = None  # None if no super fine pass
     super_fine_z_end_um: float | None = None
     peak_near_edge: bool = False  # True if coarse best Z is within 10% of scan boundary
+    monotonicity: float = 0.0  # AF curve monotonicity (coarse pass)
+    best_sharpness_laplacian: float = 0.0  # Laplacian variance of final image
+    focus_quality: FocusQuality = FocusQuality.OK  # Three-tier classification
     sharpness_curve: list[SharpnessSample] = field(default_factory=list)  # [{z_um, sharpness}, ...] coarse only
     frames: list[AutofocusFrame] | None = None  # Coarse frames only (if store_frames=True)
     fine_sharpness_curve: list[SharpnessSample] = field(default_factory=list)  # Fine pass only
@@ -325,6 +366,9 @@ class AutofocusResult:
             "final_sharpness": self.final_sharpness,
             "dynamic_range": self.dynamic_range,
             "mean_intensity": self.mean_intensity,
+            "monotonicity": self.monotonicity,
+            "best_sharpness_laplacian": self.best_sharpness_laplacian,
+            "focus_quality": self.focus_quality.value,
             "peak_near_edge": self.peak_near_edge,
             "position_um": list(self.position_um),
             "scan": {
@@ -697,6 +741,11 @@ def _focus_and_capture_impl(
 
     best = max(zsr.frames, key=lambda f: f.sharpness)
 
+    # Focus quality metrics
+    mono = af_curve_monotonicity([s["sharpness"] for s in zsr.sharpness_curve])
+    img_sharp_lap = sharpness_laplacian(best.image)
+    fq = classify_focus_quality(img_sharp_lap, mono)
+
     return FocusCaptureResult(
         image=best.image,
         z_um=best.z_um,
@@ -715,6 +764,9 @@ def _focus_and_capture_impl(
             restore_speed_s=t_end - t_restore_start,
             total_s=t_end - t_start,
         ),
+        monotonicity=mono,
+        best_sharpness_laplacian=img_sharp_lap,
+        focus_quality=fq,
     )
 
 
@@ -969,6 +1021,9 @@ def continuous_autofocus(
     # Restore original Z speed
     z_axis.set_velocity_um_s(original_speed)
 
+    # Focus quality metrics (monotonicity from coarse curve only)
+    mono = af_curve_monotonicity(sharpness_values)
+
     if move_to_best_z:
         # Move to best Z position
         z_axis.move_to_corrected(best_z)
@@ -978,10 +1033,14 @@ def continuous_autofocus(
         camera.capture()
         final_image = camera.capture()
         final_sharpness = sharpness(final_image, method=sharpness_method)
+        img_sharp_lap = sharpness_laplacian(final_image)
         stored_final_image = final_image if store_frames else None
     else:
         final_sharpness = best_sharpness
+        img_sharp_lap = 0.0
         stored_final_image = None
+
+    fq = classify_focus_quality(img_sharp_lap, mono)
 
     return AutofocusResult(
         selected_z_um=best_z,
@@ -1008,6 +1067,9 @@ def continuous_autofocus(
         super_fine_z_start_um=actual_super_fine_z_start,
         super_fine_z_end_um=actual_super_fine_z_end,
         peak_near_edge=peak_near_edge,
+        monotonicity=mono,
+        best_sharpness_laplacian=img_sharp_lap,
+        focus_quality=fq,
         sharpness_curve=sharpness_curve,
         frames=frames if store_frames else None,
         fine_sharpness_curve=fine_curve,

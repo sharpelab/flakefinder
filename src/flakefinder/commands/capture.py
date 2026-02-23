@@ -161,6 +161,11 @@ def main() -> int:
                 print(f"Best Z: {result.z_um:.1f} µm (sharpness: {result.sharpness:.1f})")
                 print(f"Frames: {result.frame_count}, scan: {result.scan_duration_s:.2f}s")
                 print(f"Z range: {result.z_range_um:.0f} µm")
+                print(f"Focus quality: {result.focus_quality.value}")
+            else:
+                fq = result.focus_quality.value
+                if fq != "ok":
+                    print(f"focus_quality={fq}")
         else:
             if not args.quiet:
                 print("Capturing...")
