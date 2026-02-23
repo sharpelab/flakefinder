@@ -950,7 +950,6 @@ def plot_curves_mosaic(
     data: dict,
     output_path: Path,
     *,
-    cf_threshold: float = 20.0,
     min_sharpness: float = 20.0,
     quiet: bool = False,
 ) -> None:
@@ -967,7 +966,7 @@ def plot_curves_mosaic(
 
     # Get drop reasons from robust plane fit
     try:
-        result = compute_robust_plane_fit(data, cf_threshold=cf_threshold, min_sharpness=min_sharpness)
+        result = compute_robust_plane_fit(data, min_sharpness=min_sharpness)
         dropped_map: dict[tuple[str, int], str] = {
             (d["type"], d["index"]): d["reason"] for d in result["points_dropped"]
         }
@@ -1053,7 +1052,6 @@ def plot_curves_mosaic(
 
 def compute_robust_plane_fit(
     data: dict,
-    cf_threshold: float = 20.0,
     corner_margin_um: float = 5000.0,
     min_sharpness: float = 0.0,
     reject_sharpness: float = 10.0,
@@ -1067,7 +1065,8 @@ def compute_robust_plane_fit(
 
     Two-stage filtering:
       Stage 1 (pre-filter): Hard-reject points with sharpness below noise floor
-        (< reject_sharpness) or flat AF curves (DR < min_dynamic_range).
+        (< reject_sharpness), flat AF curves (DR < min_dynamic_range), black frames,
+        or zero refinement delta (fine/super_fine didn't improve on coarse).
       Stage 2 (post-fit): MAD-based residual rejection. Fit initial plane,
         compute MAD of residuals, reject points > mad_sigma_threshold * robust_sigma.
 
@@ -1077,7 +1076,6 @@ def compute_robust_plane_fit(
 
     Args:
         data: Focus map data dict.
-        cf_threshold: Unused, kept for API compatibility.
         corner_margin_um: Distance from edge to consider "corner" region.
         min_sharpness: Sharpness warning threshold (points below flagged, not rejected).
         reject_sharpness: Hard reject threshold (below = noise floor, Z meaningless).
@@ -1105,7 +1103,7 @@ def compute_robust_plane_fit(
     # Compute quality metrics
     drift_pct = np.clip((sel_sharpness - final_sharpness) / sel_sharpness * 100, 0, 100)
     coarse_best_z = np.array([p.get("coarse", {}).get("best_z_um", p["selected"]["z_um"]) for p in points])
-    coarse_fine_diff = np.abs(coarse_best_z - z)
+    refinement_delta = np.abs(coarse_best_z - z)
     dynamic_range = np.array([p.get("dynamic_range", 0) for p in points])
     peak_near_edge = np.array([p.get("peak_near_edge", False) for p in points])
     mean_intensity = np.array([p.get("mean_intensity", float("inf")) for p in points])
@@ -1115,11 +1113,13 @@ def compute_robust_plane_fit(
     # - sharpness below reject threshold (noise floor, Z is meaningless)
     # - dynamic range near zero (flat curve, no focus signal)
     # - black frame (mean intensity near zero — missed chip or light off)
+    # - zero refinement delta (fine/super_fine didn't improve on coarse — false peak)
     BLACK_FRAME_THRESHOLD = 5.0
     prefilter_mask = (
         (sel_sharpness >= reject_sharpness)
         & (dynamic_range >= min_dynamic_range)
         & (mean_intensity >= BLACK_FRAME_THRESHOLD)
+        & (refinement_delta > 0)
     )
 
     if prefilter_mask.sum() < 3:
@@ -1135,6 +1135,10 @@ def compute_robust_plane_fit(
                 prefilter_reasons[i] = "black_frame"
             elif sel_sharpness[i] < reject_sharpness:
                 prefilter_reasons[i] = "low_sharpness"
+            elif dynamic_range[i] < min_dynamic_range:
+                prefilter_reasons[i] = "flat_curve"
+            elif refinement_delta[i] == 0:
+                prefilter_reasons[i] = "no_refinement"
             else:
                 prefilter_reasons[i] = "flat_curve"
 
@@ -1338,7 +1342,7 @@ def compute_robust_plane_fit(
                 "x_um": float(x[i]),
                 "y_um": float(y[i]),
                 "z_um": float(z[i]),
-                "coarse_fine_diff_um": float(coarse_fine_diff[i]),
+                "refinement_delta_um": float(refinement_delta[i]),
                 "drift_pct": float(drift_pct[i]),
                 "dynamic_range": float(dynamic_range[i]),
                 "peak_near_edge": bool(peak_near_edge[i]),
@@ -1471,19 +1475,18 @@ def plot_contour_map(result: dict, output_path: Path, quiet: bool = False) -> No
         print(f"Contour map saved to {output_path}")
 
 
-def export_plane(data: dict, output_path: Path, cf_threshold: float = 20.0, min_sharpness: float = 0.0) -> dict:
+def export_plane(data: dict, output_path: Path, min_sharpness: float = 0.0) -> dict:
     """Export robust plane fit to JSON file.
 
     Args:
         data: Focus map data dict.
         output_path: Output JSON path.
-        cf_threshold: Max coarse-fine disagreement for high-confidence points.
         min_sharpness: Minimum selected_sharpness to include a point.
 
     Returns:
         The plane fit result dict.
     """
-    result = compute_robust_plane_fit(data, cf_threshold=cf_threshold, min_sharpness=min_sharpness)
+    result = compute_robust_plane_fit(data, min_sharpness=min_sharpness)
 
     # Add metadata
     result["source"] = {
@@ -1511,7 +1514,6 @@ def run(
     mosaic: bool = False,
     curves: bool = False,
     export_plane_path: Path | None = None,
-    cf_threshold: float = 20.0,
     min_sharpness: float = 20.0,
     quiet: bool = False,
 ) -> None:
@@ -1526,7 +1528,6 @@ def run(
         mosaic: Generate mosaic image.
         curves: Generate per-point sharpness curve mosaic.
         export_plane_path: Export robust plane fit to this JSON path.
-        cf_threshold: Coarse-fine disagreement threshold (µm).
         min_sharpness: Minimum sharpness to include in plane fit.
         quiet: Suppress verbose output.
 
@@ -1564,11 +1565,11 @@ def run(
     # Generate curves mosaic
     if curves:
         curves_path = focus_map_path.with_name(focus_map_path.stem + "_curves.png")
-        plot_curves_mosaic(data, curves_path, cf_threshold=cf_threshold, min_sharpness=min_sharpness, quiet=quiet)
+        plot_curves_mosaic(data, curves_path, min_sharpness=min_sharpness, quiet=quiet)
 
     # Export plane fit
     if export_plane_path:
-        result = export_plane(data, export_plane_path, cf_threshold=cf_threshold, min_sharpness=min_sharpness)
+        result = export_plane(data, export_plane_path, min_sharpness=min_sharpness)
 
         q = result["quality"]
         t = result["tilt"]
@@ -1632,7 +1633,6 @@ def _build_parser():
     parser.add_argument("--no-mosaic", action="store_true", help="Skip generating mosaic image")
     parser.add_argument("--curves", action="store_true", help="Generate per-point sharpness curve mosaic")
     parser.add_argument("--export-plane", type=Path, default=None, help="Export plane fit to JSON")
-    parser.add_argument("--cf-threshold", type=float, default=20.0, help="Coarse-fine disagreement threshold (um)")
     parser.add_argument("--min-sharpness", type=float, default=20.0, help="Min sharpness for plane fit")
     parser.add_argument("--quiet", "-q", action="store_true", help="Suppress verbose output")
     return parser
@@ -1651,7 +1651,6 @@ def main() -> int:
             mosaic=not args.no_mosaic,
             curves=args.curves,
             export_plane_path=args.export_plane,
-            cf_threshold=args.cf_threshold,
             min_sharpness=args.min_sharpness,
             quiet=args.quiet,
         )
