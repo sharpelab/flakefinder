@@ -1056,6 +1056,7 @@ def compute_robust_plane_fit(
     min_sharpness: float = 0.0,
     reject_sharpness: float = 10.0,
     min_dynamic_range: float = 0.05,
+    edge_peak_max_dr: float = 0.10,
     mad_sigma_threshold: float = 3.0,
     max_reject_frac: float = 0.3,
     min_points_after_reject: int = 4,
@@ -1066,7 +1067,8 @@ def compute_robust_plane_fit(
     Two-stage filtering:
       Stage 1 (pre-filter): Hard-reject points with sharpness below noise floor
         (< reject_sharpness), flat AF curves (DR < min_dynamic_range), black frames,
-        or zero refinement delta (fine/super_fine didn't improve on coarse).
+        zero refinement delta (fine/super_fine didn't improve on coarse), or
+        edge peaks with low DR (peak_near_edge AND DR < edge_peak_max_dr).
       Stage 2 (post-fit): MAD-based residual rejection. Fit initial plane,
         compute MAD of residuals, reject points > mad_sigma_threshold * robust_sigma.
 
@@ -1080,6 +1082,7 @@ def compute_robust_plane_fit(
         min_sharpness: Sharpness warning threshold (points below flagged, not rejected).
         reject_sharpness: Hard reject threshold (below = noise floor, Z meaningless).
         min_dynamic_range: Hard reject threshold for DR (below = flat curve).
+        edge_peak_max_dr: Reject edge peaks (peak_near_edge=True) with DR below this.
         mad_sigma_threshold: Reject residuals beyond this many robust-sigma (MAD * 1.4826).
         max_reject_frac: Never reject more than this fraction of pre-filtered points.
         min_points_after_reject: Require at least this many points after rejection.
@@ -1120,6 +1123,7 @@ def compute_robust_plane_fit(
         & (dynamic_range >= min_dynamic_range)
         & (mean_intensity >= BLACK_FRAME_THRESHOLD)
         & (refinement_delta > 0)
+        & ~(peak_near_edge & (dynamic_range < edge_peak_max_dr))
     )
 
     if prefilter_mask.sum() < 3:
@@ -1139,6 +1143,8 @@ def compute_robust_plane_fit(
                 prefilter_reasons[i] = "flat_curve"
             elif refinement_delta[i] == 0:
                 prefilter_reasons[i] = "no_refinement"
+            elif peak_near_edge[i] and dynamic_range[i] < edge_peak_max_dr:
+                prefilter_reasons[i] = "edge_peak_low_dr"
             else:
                 prefilter_reasons[i] = "flat_curve"
 
