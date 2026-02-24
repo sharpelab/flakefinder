@@ -275,7 +275,7 @@ Example: --where "G > 1.5" --where "entropy < 4.4"
             label_color=(255, 255, 255),
             label_bg=(0, 0, 0, 180),
         )
-        mosaic_path = output_dir / "mosaic.jpg"
+        mosaic_path = output_dir / f"{output_dir.name}.jpg"
         mosaic.save(str(mosaic_path), quality=95)
         print(f"Saved mosaic: {mosaic_path}")
         subprocess.Popen(
