@@ -1148,16 +1148,65 @@ def compute_robust_plane_fit(
             else:
                 prefilter_reasons[i] = "flat_curve"
 
-    # --- Stage 2: MAD-based residual rejection ---
-    # Initial plane fit on pre-filtered points
-    x_pf = x[prefilter_mask]
-    y_pf = y[prefilter_mask]
-    z_pf = z[prefilter_mask]
+    # --- Stage 2: Iterative LOO (leave-one-out) rejection ---
+    # For each surviving point, fit plane to N-1 others and compute LOO residual.
+    # Reject the single worst outlier per iteration, refit, repeat.
+    # This avoids the problem where one bad point warps the plane enough to
+    # make good neighbors look like outliers in a bulk MAD pass.
+    loo_reject_reasons: dict[int, float] = {}  # original index -> LOO residual
+    loo_mask = prefilter_mask.copy()
+
+    while True:
+        loo_indices = np.where(loo_mask)[0]
+        n_loo = len(loo_indices)
+        if n_loo <= min_points_after_reject:
+            break
+
+        x_loo = x[loo_indices]
+        y_loo = y[loo_indices]
+        z_loo = z[loo_indices]
+
+        # Compute LOO residuals: for each point, fit plane to N-1 others
+        loo_residuals = np.zeros(n_loo)
+        for j in range(n_loo):
+            mask_j = np.ones(n_loo, dtype=bool)
+            mask_j[j] = False
+            A_j = np.column_stack([x_loo[mask_j], y_loo[mask_j], np.ones(n_loo - 1)])
+            coeffs_j, _, _, _ = np.linalg.lstsq(A_j, z_loo[mask_j], rcond=None)
+            z_pred_j = coeffs_j[0] * x_loo[j] + coeffs_j[1] * y_loo[j] + coeffs_j[2]
+            loo_residuals[j] = z_loo[j] - z_pred_j
+
+        # MAD threshold from the N-1 in-plane residuals
+        # Use the MAD of the LOO residuals themselves as the robust scale
+        loo_mad = float(np.median(np.abs(loo_residuals)))
+        loo_robust_sigma = loo_mad * 1.4826
+        loo_threshold = mad_sigma_threshold * loo_robust_sigma if loo_robust_sigma > 0 else float("inf")
+
+        # Find the worst outlier
+        worst_j = int(np.argmax(np.abs(loo_residuals)))
+        if abs(loo_residuals[worst_j]) <= loo_threshold:
+            break  # No outliers remain
+
+        # Safety: don't drop below min_points
+        if n_loo - 1 < min_points_after_reject:
+            break
+
+        # Reject the worst point
+        orig_idx = loo_indices[worst_j]
+        loo_mask[orig_idx] = False
+        loo_reject_reasons[orig_idx] = float(loo_residuals[worst_j])
+
+    # --- Stage 3: MAD-based residual rejection (defense in depth) ---
+    # Initial plane fit on LOO-surviving points
+    pf_indices_for_mad = np.where(loo_mask)[0]
+    x_pf = x[loo_mask]
+    y_pf = y[loo_mask]
+    z_pf = z[loo_mask]
 
     A_pf = np.column_stack([x_pf, y_pf, np.ones_like(x_pf)])
     coeffs_pf, _, _, _ = np.linalg.lstsq(A_pf, z_pf, rcond=None)
 
-    # Compute residuals for all pre-filtered points
+    # Compute residuals for all LOO-surviving points
     z_pred_pf = coeffs_pf[0] * x_pf + coeffs_pf[1] * y_pf + coeffs_pf[2]
     residuals_pf = z_pf - z_pred_pf
 
@@ -1166,12 +1215,12 @@ def compute_robust_plane_fit(
     robust_sigma = mad * 1.4826  # Scale to match Gaussian sigma
     mad_threshold_um = mad_sigma_threshold * robust_sigma if robust_sigma > 0 else float("inf")
 
-    # Identify outliers among pre-filtered points
-    pf_indices = np.where(prefilter_mask)[0]
+    # Identify outliers among LOO-surviving points
+    pf_indices = pf_indices_for_mad
     mad_reject_mask = np.abs(residuals_pf) > mad_threshold_um
 
     # Safety: don't reject too many points
-    n_prefiltered = int(prefilter_mask.sum())
+    n_prefiltered = int(loo_mask.sum())
     n_would_reject = int(mad_reject_mask.sum())
     n_remaining = n_prefiltered - n_would_reject
 
@@ -1185,8 +1234,8 @@ def compute_robust_plane_fit(
         )
         mad_reject_mask = np.zeros_like(mad_reject_mask, dtype=bool)
 
-    # Build final mask: pre-filtered minus MAD-rejected
-    high_conf_mask = prefilter_mask.copy()
+    # Build final mask: LOO-surviving minus MAD-rejected
+    high_conf_mask = loo_mask.copy()
     mad_reject_reasons: dict[int, float] = {}  # index -> residual
     for j, pf_idx in enumerate(pf_indices):
         if mad_reject_mask[j]:
@@ -1296,7 +1345,10 @@ def compute_robust_plane_fit(
             "peak_near_edge": bool(peak_near_edge[i]),
             "mean_intensity": float(mean_intensity[i]),
         }
-        if i in mad_reject_reasons:
+        if i in loo_reject_reasons:
+            entry["reason"] = "loo_outlier"
+            entry["residual_um"] = loo_reject_reasons[i]
+        elif i in mad_reject_reasons:
             entry["reason"] = "residual_outlier"
             entry["residual_um"] = mad_reject_reasons[i]
         elif i in prefilter_reasons:
@@ -1321,6 +1373,7 @@ def compute_robust_plane_fit(
             "points_total": len(points),
             "points_used": int(high_conf_mask.sum()),
             "points_prefiltered": n_prefiltered,
+            "loo_outliers_rejected": len(loo_reject_reasons),
             "residual_outliers_rejected": int(mad_reject_mask.sum()),
             "mad_threshold_um": float(mad_threshold_um),
             "reject_sharpness": reject_sharpness,
