@@ -37,6 +37,9 @@ DEFAULT_AREA_RECT = "8000,95000,0,78000"
 # Sub-steps per chip for progress tracking: focus_map, scan (seg is pipelined/free)
 SUBSTEPS_PER_CHIP = 2
 
+# Rough per-point revisit time estimate (used during chip phase before real data)
+REVISIT_SECONDS_PER_POINT = 3.0
+
 # Overview image display width
 OVERVIEW_MAX_WIDTH = 500
 
@@ -93,11 +96,13 @@ class FindFlakesGUI:
         self.total_chips: int | None = None
         self.substeps_done: int = 0
         self.chip_phase_start: float | None = None  # when chip processing began
+        self.chips_completed: int = 0  # fully-processed chips (focus_map + scan)
         self.chip_pos: int = 0  # 1-based position of current chip
         self.run_dir: Path | None = None
         self.t1_count: int = 0
         self.t2_count: int = 0
         self.revisit_pts_done: int = 0
+        self.revisit_phase_start: float | None = None  # when revisit began
         self._overview_photo: ImageTk.PhotoImage | None = None  # prevent GC
         self._gui_state = _load_gui_state()
 
@@ -418,11 +423,13 @@ class FindFlakesGUI:
         self.total_chips = None
         self.substeps_done = 0
         self.chip_phase_start = None
+        self.chips_completed = 0
         self.chip_pos = 0
         self.run_dir = None
         self.t1_count = 0
         self.t2_count = 0
         self.revisit_pts_done = 0
+        self.revisit_phase_start = None
         self.detection_counts_var.set("")
         # Hide overview from previous run
         self.overview_frame.pack_forget()
@@ -499,23 +506,44 @@ class FindFlakesGUI:
         self._sync_progress_bar()
 
     def _compute_eta(self) -> str:
-        """Compute ETA string from chip-phase pace, or empty string.
+        """Compute ETA string using phase-aware pace calculation.
 
-        Only shows ETA after at least one full chip is complete to avoid
-        misleading estimates during the first chip's long sub-steps.
+        During chip processing: per-chip pace from completed chips.
+        During revisit: per-point pace from observed revisit completions.
         """
         if not self.chip_phase_start or not self.total_chips:
             return ""
-        if self.substeps_done < SUBSTEPS_PER_CHIP:
+
+        now = time.monotonic()
+
+        # Revisit phase: pace from observed revisit completions
+        if self.revisit_phase_start:
+            if self.revisit_pts_done <= 0:
+                return ""
+            total_revisit = self.t1_count * self._num_revisit_mags()
+            remaining = total_revisit - self.revisit_pts_done
+            if remaining <= 0:
+                return ""
+            pace = (now - self.revisit_phase_start) / self.revisit_pts_done
+            return f"~{_fmt_duration(pace * remaining)} remaining"
+
+        # Chip processing phase: per-chip pace
+        if self.chips_completed < 1:
             return ""
-        total = self._progress_total()
-        done = self.substeps_done + self.revisit_pts_done
-        remaining = total - done
-        if remaining <= 0:
+
+        elapsed = now - self.chip_phase_start
+        per_chip = elapsed / self.chips_completed
+        remaining_chips = self.total_chips - self.chips_completed
+        chip_eta = per_chip * remaining_chips
+
+        # Add rough revisit estimate if configured
+        revisit_eta = 0.0
+        if self._num_revisit_mags() > 0 and self.t1_count > 0:
+            revisit_eta = self.t1_count * self._num_revisit_mags() * REVISIT_SECONDS_PER_POINT
+
+        eta_s = chip_eta + revisit_eta
+        if eta_s <= 0:
             return ""
-        elapsed_chip = time.monotonic() - self.chip_phase_start
-        pace = elapsed_chip / done
-        eta_s = pace * remaining
         return f"~{_fmt_duration(eta_s)} remaining"
 
     def _process_line(self, line: str):
@@ -554,6 +582,7 @@ class FindFlakesGUI:
             m = re.match(r"\[chip (\d+)\]", stripped)
             if m:
                 self._advance_substep()
+                self.chips_completed += 1
                 n = self.total_chips or "?"
                 if self.chip_pos < (self.total_chips or 0):
                     self.chip_pos += 1
@@ -580,6 +609,8 @@ class FindFlakesGUI:
             m = re.match(r"\[revisit\]\s+(\S+):", stripped)
             mag = m.group(1) if m else ""
             self.status_var.set(f"Revisiting {mag}...")
+            if self.revisit_phase_start is None:
+                self.revisit_phase_start = time.monotonic()
         elif re.match(r"\[revisit chip", stripped):
             # [revisit chip 0] 20x: 5 pts, 15s
             m = re.match(r"\[revisit chip (\d+)\]\s+(\S+):", stripped)
