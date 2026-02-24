@@ -415,19 +415,13 @@ def _resolve_user(run_dir: Path, user: str | None, checkpoint: dict) -> str:
 def _resolve_scan_name(run_dir: Path, name: str | None, checkpoint: dict) -> str:
     """Resolve scan name from explicit value or checkpoint name field.
 
-    Uses checkpoint["name"] with a timestamp suffix for uniqueness.
-    Falls back to run_dir.name.
+    Uses checkpoint["name"] if present, falls back to run_dir.name.
     """
     if name is not None:
         return name
     desc = checkpoint.get("name", "")
     if desc:
-        # Sanitize for filesystem: keep alphanumeric, dash, underscore, period
-        safe = re.sub(r"[^a-zA-Z0-9_.\-]", "_", desc)
-        # Extract timestamp from run dir name (e.g., "20260221_1651")
-        m = re.search(r"(\d{8}_\d{4})", run_dir.name)
-        suffix = f"_{m.group(1)}" if m else ""
-        return f"{safe}{suffix}"
+        return re.sub(r"[^a-zA-Z0-9_.\-]", "_", desc)
     return run_dir.name
 
 
