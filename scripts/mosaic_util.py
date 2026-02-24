@@ -187,6 +187,9 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("images", nargs="*", help="Input image files")
+    parser.add_argument(
+        "--from-file", type=str, default=None, help="Read image paths from file (one per line, '-' for stdin)"
+    )
     parser.add_argument("-o", "--output", required=True, help="Output file path")
     parser.add_argument("--glob", type=str, default=None, help="Glob pattern for input images")
     parser.add_argument("--max-dim", type=int, default=5000, help="Maximum canvas dimension in pixels")
@@ -215,6 +218,13 @@ def main():
     if args.glob:
         for expanded in _expand_braces(args.glob):
             paths.extend(sorted(glob.glob(expanded)))
+    if args.from_file:
+        if args.from_file == "-":
+            lines = sys.stdin.read().splitlines()
+        else:
+            with open(args.from_file) as f:
+                lines = f.read().splitlines()
+        paths.extend(line.strip() for line in lines if line.strip())
     if not paths:
         parser.error("No input images. Provide files as arguments or use --glob.")
 

@@ -28,6 +28,7 @@ from pathlib import Path
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+from crop_util import crop_detection
 from mosaic_util import make_mosaic
 
 from flakefinder.scan_utils import PARFOCAL_Z_UM, build_revisit_json
@@ -36,7 +37,6 @@ from flakefinder.segmentation import (
     DetectorConfig,
     classify_detections,
     dedup_detections,
-    draw_scale_bar,
     score_detections,
 )
 
@@ -277,40 +277,10 @@ def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
                 continue
 
             frame_path = scan_dir / f"{frame_name}.jpg"
-            if not frame_path.exists():
-                print(f"  Warning: {frame_path} not found, skipping crop")
-                continue
-
             frame_json_path = seg_dirs[chip_idx] / f"{frame_name}.json"
-            if not frame_json_path.exists():
-                print(f"  Warning: {frame_json_path} not found, skipping crop")
+            crop = crop_detection(frame_path, frame_json_path, det_id, um_per_px, pad, args.overlay)
+            if crop is None:
                 continue
-            with open(frame_json_path) as f:
-                full_det = json.load(f)["detections"][det_id]
-
-            img = cv2.imread(str(frame_path))
-            if img is None:
-                print(f"  Warning: failed to read {frame_path}, skipping crop")
-                continue
-            h, w = img.shape[:2]
-
-            bx, by, bw, bh = full_det["bbox"]
-
-            if args.overlay == "contour":
-                contour = full_det.get("contour")
-                if contour and len(contour) >= 3:
-                    pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
-                    cv2.polylines(img, [pts], isClosed=True, color=(0, 255, 0), thickness=1)
-            elif args.overlay == "bbox":
-                bp = 4
-                cv2.rectangle(img, (bx - bp, by - bp), (bx + bw + bp, by + bh + bp), (0, 255, 0), 1)
-
-            x0 = max(0, bx - pad)
-            y0 = max(0, by - pad)
-            x1 = min(w, bx + bw + pad)
-            y1 = min(h, by + bh + pad)
-            crop = img[y0:y1, x0:x1]
-            draw_scale_bar(crop, um_per_px)
 
             crop_path = crops_dir / f"rank{i + 1:02d}_c{chip_idx}_{frame_name}_d{det_id}.jpg"
             cv2.imwrite(str(crop_path), crop)
@@ -680,41 +650,10 @@ def main() -> int:
                 frame_name = d["frame"]
                 det_id = d["det_id"]
                 frame_path = scan_dir / f"{frame_name}.jpg"
-                if not frame_path.exists():
-                    print(f"  Warning: {frame_path} not found, skipping crop")
-                    continue
-
-                # Load per-frame JSON for contour geometry
                 frame_json_path = args.seg_dir / f"{frame_name}.json"
-                if not frame_json_path.exists():
-                    print(f"  Warning: {frame_json_path} not found, skipping crop")
+                crop = crop_detection(frame_path, frame_json_path, det_id, um_per_px, pad, args.overlay)
+                if crop is None:
                     continue
-                with open(frame_json_path) as f:
-                    full_det = json.load(f)["detections"][det_id]
-
-                img = cv2.imread(frame_path)
-                if img is None:
-                    print(f"  Warning: failed to read {frame_path}, skipping crop")
-                    continue
-                h, w = img.shape[:2]
-
-                bx, by, bw, bh = full_det["bbox"]
-
-                if args.overlay == "contour":
-                    contour = full_det.get("contour")
-                    if contour and len(contour) >= 3:
-                        pts = np.array(contour, dtype=np.int32).reshape(-1, 1, 2)
-                        cv2.polylines(img, [pts], isClosed=True, color=(0, 255, 0), thickness=1)
-                elif args.overlay == "bbox":
-                    bp = 4
-                    cv2.rectangle(img, (bx - bp, by - bp), (bx + bw + bp, by + bh + bp), (0, 255, 0), 1)
-
-                x0 = max(0, bx - pad)
-                y0 = max(0, by - pad)
-                x1 = min(w, bx + bw + pad)
-                y1 = min(h, by + bh + pad)
-                crop = img[y0:y1, x0:x1]
-                draw_scale_bar(crop, um_per_px)
 
                 crop_path = crops_dir / f"rank{i + 1:02d}_{frame_name}_d{det_id}.jpg"
                 cv2.imwrite(crop_path, crop)
