@@ -172,7 +172,7 @@ class FindFlakesGUI:
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="Material:", width=18, anchor="w").pack(side="left")
         display_names = list(MATERIAL_DISPLAY.values())
-        default_display = display_names[0]
+        default_display = MATERIAL_DISPLAY.get("hbn_medium", display_names[0])
         self.material_var = tk.StringVar(value=default_display)
         ttk.OptionMenu(row, self.material_var, default_display, *display_names).pack(side="left")
 
@@ -182,7 +182,7 @@ class FindFlakesGUI:
         ttk.Label(row, text="Revisit mags:", width=18, anchor="w").pack(side="left")
         self.revisit_10x = tk.BooleanVar(value=False)
         self.revisit_20x = tk.BooleanVar(value=True)
-        self.revisit_50x = tk.BooleanVar(value=False)
+        self.revisit_50x = tk.BooleanVar(value=True)
         ttk.Checkbutton(row, text="10x", variable=self.revisit_10x).pack(side="left", padx=(0, 8))
         ttk.Checkbutton(row, text="20x", variable=self.revisit_20x).pack(side="left", padx=(0, 8))
         ttk.Checkbutton(row, text="50x", variable=self.revisit_50x).pack(side="left")
