@@ -152,6 +152,12 @@ def main():
     if re.match(r"\*\*\d{2}-\d{2}\s+\d{2}:\d{2}\*\*", text):
         die("entry starts with a timestamp — scan-nb adds these automatically, remove it")
 
+    # Strip trailing --- (scan-nb adds separators automatically)
+    stripped = re.sub(r"\n---\s*$", "", text)
+    if stripped != text:
+        print("Note: stripped trailing '---' — scan-nb adds separators automatically", file=sys.stderr)
+        text = stripped
+
     # --- All validation passed, now write ---
 
     # Copy attachments
