@@ -193,6 +193,11 @@ def _score_graphene(det: Detection) -> tuple[int, float]:
     return tier, score
 
 
+def _score_wse2(det: Detection) -> tuple[int, float]:
+    """WSe2: stub scorer, same as graphene for now."""
+    return _score_graphene(det)
+
+
 ScoreFn = Callable[[Detection], tuple[int, float]]
 
 
@@ -400,11 +405,43 @@ class DetectorConfig:
         )
 
     @classmethod
+    def wse2(cls) -> DetectorConfig:
+        """WSe2 detection preset (stub -- no calibration curve yet)."""
+        return cls(
+            name="WSe₂ · 90nm SiO₂",
+            contrast_mode=ContrastMode.BELOW,
+            contrast_offset=10.0,
+            min_size_um2=130.0,
+            edge_margin_px=50,
+            morph_kernel_size=5,
+            entropy_threshold=0.4,
+            cal_points=None,
+            cal_g_range=(-6.0, 0.5),
+            cal_dist_match=0.5,
+            cal_dist_possible=1.0,
+            thin_max_nm=15.0,
+            medium_max_nm=24.0,
+            non_match_label="non-WSe2",
+            score_fn=_score_wse2,
+            tier1_perim_ratio=1.20,
+            tier1_cal_dist=0.3,
+            tier1_g_min=-99.0,
+            tier1_g_max=4.0,
+            tier1_r_max=99.0,
+            tier1_entropy_max=99.0,
+            tier1_min_size_um2=0.0,
+            tier2_perim_ratio=1.35,
+            tier2_cal_dist=0.3,
+            tier2_entropy_max=99.0,
+        )
+
+    @classmethod
     def _presets(cls) -> dict[str, Callable[[], DetectorConfig]]:
         return {
             "hbn_thin": cls.hbn_thin,
             "hbn_medium": cls.hbn_medium,
             "graphene": cls.graphene,
+            "wse2": cls.wse2,
         }
 
     @classmethod
