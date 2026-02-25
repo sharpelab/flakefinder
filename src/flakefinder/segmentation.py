@@ -24,7 +24,7 @@ from scipy.spatial import KDTree
 from scipy.stats import kurtosis as scipy_kurtosis
 
 from flakefinder.scan_utils import apply_flatfield
-from flakefinder.types import ContrastRGB, PixelPolygon, Point2F, XYWHRect
+from flakefinder.types import ContrastRGB, GainRGB, PixelPolygon, Point2F, XYWHRect
 
 # ============================================================================
 # Detection types
@@ -238,6 +238,9 @@ class DetectorConfig:
     medium_max_nm: float  # thickness <= this -> medium, else thick
     non_match_label: str  # label for detections far from cal curve
 
+    # -- Capture --
+    white_balance: GainRGB
+
     # -- Scoring --
     score_fn: ScoreFn
 
@@ -329,6 +332,7 @@ class DetectorConfig:
             thin_max_nm=15.0,
             medium_max_nm=24.0,
             non_match_label="non-hBN",
+            white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
             score_fn=_score_hbn_thin,
             tier1_perim_ratio=1.50,
             tier1_cal_dist=0.3,
@@ -360,6 +364,7 @@ class DetectorConfig:
             thin_max_nm=15.0,
             medium_max_nm=24.0,
             non_match_label="non-hBN",
+            white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
             score_fn=_score_hbn_medium,
             tier1_perim_ratio=1.50,
             tier1_cal_dist=0.15,
@@ -391,6 +396,7 @@ class DetectorConfig:
             thin_max_nm=15.0,
             medium_max_nm=24.0,
             non_match_label="non-graphene",
+            white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
             score_fn=_score_graphene,
             tier1_perim_ratio=1.20,
             tier1_cal_dist=0.3,
@@ -422,6 +428,7 @@ class DetectorConfig:
             thin_max_nm=15.0,
             medium_max_nm=24.0,
             non_match_label="non-WSe2",
+            white_balance=GainRGB(red=1.41, green=1.02, blue=1.70),
             score_fn=_score_wse2,
             tier1_perim_ratio=1.20,
             tier1_cal_dist=0.3,

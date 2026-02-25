@@ -368,7 +368,10 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         _Preflight with resolved paths and parsed values.
     """
 
-    wb = parse_white_balance(args.white_balance)
+    if args.white_balance is not None:
+        wb = parse_white_balance(args.white_balance)
+    else:
+        wb = DetectorConfig.from_material(args.material).white_balance
     area = parse_area_rect(args.area_rect)
 
     # Resolve preset
@@ -555,8 +558,8 @@ Examples:
     parser.add_argument(
         "--white-balance",
         type=str,
-        default="2.51,1.02,1.41",
-        help="White balance as B,G,R gains, passed to all capture scripts (default: 2.51,1.02,1.41)",
+        default=None,
+        help="White balance as B,G,R gains (default: from material preset)",
     )
     parser.add_argument(
         "--operator",
@@ -675,7 +678,9 @@ def _print_header(p: _Preflight) -> None:
     print(f"Scan speed:    {p.scan_speed} mm/s")
     print(f"Chip camera:   gain={p.chip_scan_gain}, exposure={p.chip_scan_exposure_ms}ms")
     print(f"AF camera:     gain={p.focus_map_gain}, exposure={p.focus_map_exposure_ms}ms")
-    print(f"White balance: {args.white_balance} (B,G,R)")
+    wb_str = f"{p.wb.blue},{p.wb.green},{p.wb.red}"
+    wb_source = "preset" if args.white_balance is None else "CLI"
+    print(f"White balance: {wb_str} (B,G,R) [{wb_source}]")
     if p.chip_filter:
         print(f"Chips:         {p.chip_filter}")
     if args.after is not None:
@@ -1572,7 +1577,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
         "chip_scan_exposure_ms": p.chip_scan_exposure_ms,
         "focus_map_gain": p.focus_map_gain,
         "focus_map_exposure_ms": p.focus_map_exposure_ms,
-        "white_balance": args.white_balance,
+        "white_balance": f"{p.wb.blue},{p.wb.green},{p.wb.red}",
         "chips": args.chips,
         "after": args.after,
         "limit": args.limit,
