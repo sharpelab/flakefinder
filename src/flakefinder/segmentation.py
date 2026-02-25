@@ -194,8 +194,21 @@ def _score_graphene(det: Detection) -> tuple[int, float]:
 
 
 def _score_wse2(det: Detection) -> tuple[int, float]:
-    """WSe2: stub scorer, same as graphene for now."""
-    return _score_graphene(det)
+    """WSe2: size-based scoring with blue contrast gate."""
+    b = det["contrast_rgb"][2]
+    ar = det.get("aspect_ratio", 1.0)
+    size_um2 = det["size_um2"]
+
+    # Blue contrast gate: reject non-blue smudges
+    if b >= -0.1:
+        tier = 3
+    else:
+        tier = 1
+
+    ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
+    log2_size = float(np.log2(max(size_um2, 1.0)))
+    score = round(log2_size * log2_size * ar_penalty, 4)
+    return tier, score
 
 
 ScoreFn = Callable[[Detection], tuple[int, float]]
@@ -226,6 +239,7 @@ class DetectorConfig:
     edge_margin_px: int
     morph_kernel_size: int
     entropy_threshold: float  # percentile of local-std within component for uniform region metric
+    subseg_min_std: float  # min within-blob std to attempt Otsu subsegmentation
 
     # -- Calibration curve: (R, G, thickness_nm) anchor points --
     cal_points: tuple[tuple[float, float, float], ...] | None
@@ -325,6 +339,7 @@ class DetectorConfig:
             edge_margin_px=50,
             morph_kernel_size=5,
             entropy_threshold=0.4,
+            subseg_min_std=0.8,
             cal_points=HBN_CAL_POINTS,
             cal_g_range=(-0.5, 6.0),
             cal_dist_match=0.5,
@@ -357,6 +372,7 @@ class DetectorConfig:
             edge_margin_px=50,
             morph_kernel_size=5,
             entropy_threshold=0.4,
+            subseg_min_std=0.8,
             cal_points=HBN_CAL_POINTS,
             cal_g_range=(-0.5, 6.0),
             cal_dist_match=0.5,
@@ -389,6 +405,7 @@ class DetectorConfig:
             edge_margin_px=50,
             morph_kernel_size=5,
             entropy_threshold=0.4,
+            subseg_min_std=0.8,
             cal_points=None,
             cal_g_range=(-6.0, 0.5),
             cal_dist_match=0.5,
@@ -416,11 +433,12 @@ class DetectorConfig:
         return cls(
             name="WSe₂ · 90nm SiO₂",
             contrast_mode=ContrastMode.BELOW,
-            contrast_offset=10.0,
+            contrast_offset=35.0,
             min_size_um2=130.0,
             edge_margin_px=50,
             morph_kernel_size=5,
             entropy_threshold=0.4,
+            subseg_min_std=0.12,
             cal_points=None,
             cal_g_range=(-6.0, 0.5),
             cal_dist_match=0.5,
@@ -659,6 +677,7 @@ def _otsu_split(
     contrast_channels: np.ndarray,
     component: np.ndarray,
     min_size_px: int,
+    min_std: float = 0.8,
 ) -> list[np.ndarray] | None:
     """Try one Otsu split on the highest-variance channel. Returns sub-components or None."""
     # Crop to component bounding box -- all ops run on the small ROI
@@ -676,7 +695,7 @@ def _otsu_split(
     roi_ch = roi_cc[:, :, best_ch]
     blob_vals = roi_ch[roi_comp]
 
-    if blob_vals.std() < 0.8:
+    if blob_vals.std() < min_std:
         return None
 
     v_min, v_max = blob_vals.min(), blob_vals.max()
@@ -719,6 +738,7 @@ def _subsegment_by_contrast(
     min_size_px: int,
     norm_contrast: np.ndarray,
     max_depth: int = 3,
+    min_std: float = 0.8,
 ) -> list[np.ndarray]:
     """Iteratively split a blob using Otsu on the highest-variance color channel.
 
@@ -736,7 +756,7 @@ def _subsegment_by_contrast(
             final.append(comp)
             continue
 
-        pieces = _otsu_split(norm_contrast, comp, min_size_px)
+        pieces = _otsu_split(norm_contrast, comp, min_size_px, min_std=min_std)
         if pieces is None:
             final.append(comp)
         else:
@@ -808,7 +828,14 @@ def segment_frame(
         component = labels == (i + 1)
 
         # Try contrast-based sub-segmentation for large blobs
-        sub_components = _subsegment_by_contrast(image, component, bg_modes, min_size_px, norm_contrast)
+        sub_components = _subsegment_by_contrast(
+            image,
+            component,
+            bg_modes,
+            min_size_px,
+            norm_contrast,
+            min_std=config.subseg_min_std,
+        )
 
         for sub_comp in sub_components:
             det = _analyze_component(image, sub_comp, bg_modes, norm_contrast, grad_mag, local_std, config, um_per_px)
