@@ -174,7 +174,9 @@ def run(
         sz = scope.z.position_um
         mag = scope.nosepiece.magnification
         obj_str = f" ({mag}x)" if mag else ""
-        print(f"X={sx:.1f} Y={sy:.1f} Z={sz:.1f} µm{obj_str}")
+        shutter_str = "open" if scope.shutter.is_open else "closed"
+        lamp_pct = scope.lamp.intensity_pct
+        print(f"X={sx:.1f} Y={sy:.1f} Z={sz:.1f} µm{obj_str} shutter={shutter_str} lamp={lamp_pct:.0f}%")
     else:
         print()
         report_status(scope, verbose=verbose)
