@@ -33,8 +33,9 @@ def main() -> int:
     parser.add_argument(
         "--binning",
         type=int,
-        choices=[0, 1, 2],
-        help="Binning level: 0=1x1, 1=2x2, 2=3x3 (default: 2)",
+        default=3,
+        choices=[1, 2, 3],
+        help="Camera binning NxN (1=full res, 2=2x2, 3=3x3, default: 3)",
     )
     parser.add_argument("--downsample", type=int, default=1, help="Downsample factor after capture (default: 1)")
     parser.add_argument(
@@ -103,8 +104,7 @@ def main() -> int:
         # Configure camera
         camera = scope.camera
 
-        if args.binning is not None:
-            camera.binning = args.binning
+        camera.binning = args.binning - 1
 
         # In --focus mode, focus_and_capture handles exposure from objective defaults.
         # In regular mode, apply explicit value or fallback to 1.0 ms.
