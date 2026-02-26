@@ -434,7 +434,7 @@ class DetectorConfig:
             name="WSe₂ · 90nm SiO₂",
             contrast_mode=ContrastMode.BELOW,
             contrast_offset=35.0,
-            min_size_um2=130.0,
+            min_size_um2=100.0,
             edge_margin_px=50,
             morph_kernel_size=5,
             entropy_threshold=0.4,
