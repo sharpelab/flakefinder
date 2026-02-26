@@ -47,6 +47,7 @@ class FMAfDefaults(NamedTuple):
 # 10x: 250 µm at 1250 µm/s gives ~3.5 µm/frame spacing (was 500/2500 → ~7 µm/frame).
 FM_AF_DEFAULTS: dict[int, FMAfDefaults] = {
     2: FMAfDefaults(z_range_um=250, z_speed_um_s=1250),  # 10x
+    3: FMAfDefaults(z_range_um=500, z_speed_um_s=1250),  # 20x
 }
 
 
