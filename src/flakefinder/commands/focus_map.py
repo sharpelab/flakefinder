@@ -59,6 +59,16 @@ class SamplePoint(NamedTuple):
 
 
 @dataclass
+class FocusMapImageConfig:
+    """Controls which images are saved during focus map."""
+
+    output_dir: Path
+    save_best: bool = False  # save best AF frame per point (free)
+    save_debug: bool = False  # save all AF frames + extra capture after settle
+    debug_dir: Path | None = None  # override debug output dir (default: output_dir/debug)
+
+
+@dataclass
 class FocusMapSample:
     point: SamplePoint
     af_result: AutofocusResult | None = None  # None on error
@@ -246,8 +256,7 @@ def run_focus_map(
     move_settle_s: float = 0,
     af_settle_s: float = 0,
     move_to_best_z: bool = True,
-    images_dir: Path | None = None,
-    debug_dir: Path | None = None,
+    image_config: FocusMapImageConfig | None = None,
     save_executor: ThreadPoolExecutor | None = None,
     quiet: bool = False,
 ) -> list[FocusMapSample]:
@@ -265,11 +274,10 @@ def run_focus_map(
         sharpness_method: Sharpness metric name.
         all_metrics: Compute all sharpness metrics per frame.
         move_settle_s: Settle time after XY move.
-        af_settle_s: Settle time after autofocus (before image capture).
+        af_settle_s: Settle time after autofocus (before debug image capture).
         move_to_best_z: Move Z back to best position and verify sharpness.
             False skips the return move, settle, and final capture.
-        images_dir: Directory for after-images, or None.
-        debug_dir: Directory for AF debug frames, or None.
+        image_config: Image saving configuration, or None to skip all image saving.
         save_executor: ThreadPoolExecutor for background disk writes, or None.
         quiet: Suppress per-point progress output.
 
@@ -277,6 +285,20 @@ def run_focus_map(
         List of FocusMapSample (one per point).
     """
     stage = scope.stage
+
+    save_best = False
+    save_debug = False
+    images_dir = None
+    debug_dir = None
+    if image_config is not None:
+        save_best = image_config.save_best
+        save_debug = image_config.save_debug
+        if save_best:
+            images_dir = image_config.output_dir
+            images_dir.mkdir(parents=True, exist_ok=True)
+        if save_debug:
+            debug_dir = image_config.debug_dir or image_config.output_dir / "debug"
+            debug_dir.mkdir(parents=True, exist_ok=True)
 
     sample_results = []
     save_futures = []
@@ -314,7 +336,8 @@ def run_focus_map(
                 fine_range_um=fine_range_um,
                 super_fine_pass=super_fine_pass,
                 sharpness_method=sharpness_method,
-                store_frames=bool(debug_dir),
+                store_frames=save_debug,
+                save_best_frame=save_best,
                 compute_all_metrics=all_metrics,
                 move_to_best_z=move_to_best_z,
             )
@@ -327,36 +350,47 @@ def run_focus_map(
                     end="",
                 )
 
-            # Capture after image while still at this position (needs camera)
-            after_img = None
-            if images_dir is not None:
+            # Get image to save: best frame from AF (free), or fresh capture in debug mode
+            save_img = None
+            if images_dir is not None and af_result.best_frame is not None:
+                fname = f"{pt.type}_{pt.index:02d}.jpg"
+                image_path = images_dir / fname
+                save_img = af_result.best_frame.image
+                if not quiet:
+                    print(f" -> {fname}", end="")
+
+            # Debug mode: also capture a fresh image after settling at best Z
+            debug_after_img = None
+            if save_debug and move_to_best_z:
                 if af_settle_s > 0:
                     time.sleep(af_settle_s)
-                after_img = scope.camera.capture()
-                if after_img is not None:
-                    fname = f"{pt.type}_{pt.index:02d}.jpg"
-                    image_path = images_dir / fname
-                    if not quiet:
-                        print(f" -> {fname}", end="")
+                debug_after_img = scope.camera.capture()
 
             # Queue all disk writes to background thread
-            if save_executor and (af_result.frames is not None or after_img is not None):
+            if save_executor and (af_result.frames is not None or save_img is not None or debug_after_img is not None):
                 _af = af_result
-                _after = after_img
+                _save_img = save_img
+                _debug_after = debug_after_img
                 _label = label
                 _image_path = image_path
                 _debug_dir = debug_dir
 
-                def _save(af=_af, after=_after, lbl=_label, img_path=_image_path, dbg=_debug_dir):
+                def _save(
+                    af=_af,
+                    img=_save_img,
+                    debug_after=_debug_after,
+                    lbl=_label,
+                    img_path=_image_path,
+                    dbg=_debug_dir,
+                ):
                     if dbg and af.frames:
                         save_debug_frames(af, dbg / lbl)
-                    if after is not None:
-                        if img_path:
-                            PILImage.fromarray(after).save(img_path, quality=95)
-                        if dbg:
-                            point_dir = dbg / lbl
-                            point_dir.mkdir(parents=True, exist_ok=True)
-                            PILImage.fromarray(after).save(point_dir / "after.png")
+                    if img is not None and img_path is not None:
+                        PILImage.fromarray(img).save(img_path, quality=95)
+                    if debug_after is not None and dbg:
+                        point_dir = dbg / lbl
+                        point_dir.mkdir(parents=True, exist_ok=True)
+                        PILImage.fromarray(debug_after).save(point_dir / "after.png")
 
                 save_futures.append(save_executor.submit(_save))
 
@@ -486,7 +520,7 @@ def run(
     super_fine_pass: bool = True,
     all_metrics: bool = False,
     output_dir: Path | None = None,
-    save_images: bool = False,
+    save_best_image: bool = False,
     debug_dir: Path | None = None,
     sharpness_method: str = "tenengrad",
     z: float | None = None,
@@ -590,15 +624,19 @@ def run(
         if not quiet:
             print(f"  Centroid AF: Z={reference_z_um:.1f} µm, sharpness={sharpness:.1f}")
 
-    # Create images directory if saving images
-    images_dir = None
-    if save_images:
-        images_dir = output_dir / f"{stem}_images"
-        images_dir.mkdir(parents=True, exist_ok=True)
+    # Build image config
+    image_config = None
+    if save_best_image or debug_dir:
+        image_config = FocusMapImageConfig(
+            output_dir=output_dir / f"{stem}_images",
+            save_best=save_best_image,
+            save_debug=bool(debug_dir),
+            debug_dir=debug_dir,
+        )
         if not quiet:
-            print(f"Saving images to {images_dir}")
+            print(f"Saving images to {image_config.output_dir}")
 
-    save_executor = ThreadPoolExecutor(max_workers=1) if (debug_dir or save_images) else None
+    save_executor = ThreadPoolExecutor(max_workers=1) if image_config else None
 
     sample_results = run_focus_map(
         all_points=all_points,
@@ -614,8 +652,7 @@ def run(
         move_settle_s=move_settle,
         af_settle_s=af_settle,
         move_to_best_z=move_to_best_z,
-        images_dir=images_dir,
-        debug_dir=debug_dir,
+        image_config=image_config,
         save_executor=save_executor,
         quiet=quiet,
     )
@@ -649,7 +686,7 @@ def run(
             "sharpness_method": sharpness_method,
             "move_settle_s": move_settle,
             "af_settle_s": af_settle,
-            "save_images": save_images,
+            "save_best_image": save_best_image,
             "debug_dir": str(debug_dir) if debug_dir else None,
         },
         "sample_points": [s.to_dict() for s in sample_results],
@@ -759,7 +796,7 @@ def _build_parser():
     parser.add_argument(
         "--save-images",
         action="store_true",
-        help="Save 'after' image at each focus point",
+        help="Save best AF frame at each focus point",
     )
     parser.add_argument(
         "--debug-dir",
@@ -877,7 +914,7 @@ def main() -> int:
                 super_fine_pass=not args.no_super_fine,
                 all_metrics=args.all_metrics,
                 output_dir=args.output_dir,
-                save_images=args.save_images,
+                save_best_image=args.save_images,
                 debug_dir=args.debug_dir,
                 sharpness_method=args.sharpness_method,
                 z=args.z,

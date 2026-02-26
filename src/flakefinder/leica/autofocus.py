@@ -248,7 +248,7 @@ class AutofocusFrame:
 
     z_um: float
     sharpness: float
-    image: np.ndarray | None = None  # Only populated if store_frames=True
+    image: np.ndarray
 
 
 class _SharpnessSampleBase(TypedDict):
@@ -286,6 +286,7 @@ class ZScanResult(NamedTuple):
     timing: ZScanTiming
     frame_count: int
     z_sample_count: int
+    best_frame: AutofocusFrame | None = None
 
 
 class FocusCaptureTiming(NamedTuple):
@@ -348,6 +349,7 @@ class AutofocusResult:
     monotonicity: float = 0.0  # AF curve monotonicity (coarse pass)
     best_sharpness_laplacian: float = 0.0  # Laplacian variance of final image
     sharpness_curve: list[SharpnessSample] = field(default_factory=list)  # [{z_um, sharpness}, ...] coarse only
+    best_frame: AutofocusFrame | None = None  # Best frame across all passes (if save_best_frame=True)
     frames: list[AutofocusFrame] | None = None  # Coarse frames only (if store_frames=True)
     fine_sharpness_curve: list[SharpnessSample] = field(default_factory=list)  # Fine pass only
     fine_frames: list[AutofocusFrame] | None = None  # Fine frames only (if store_frames=True)
@@ -458,6 +460,7 @@ def _run_z_scan(
     sharpness_method: str = "tenengrad",
     compute_all_metrics: bool = False,
     pre_positioned: bool = False,
+    save_best_frame: bool = False,
 ) -> ZScanResult:
     """Execute Z scan and capture frames.
 
@@ -471,6 +474,7 @@ def _run_z_scan(
         sharpness_method: "tenengrad" or "laplacian".
         compute_all_metrics: If True, compute all 5 sharpness metrics per frame.
         pre_positioned: If True, skip move to z_start and settle (caller already there).
+        save_best_frame: If True, populate best_frame with the highest-sharpness frame.
 
     Returns:
         ZScanResult with sharpness curve, frames, timing, and counts.
@@ -597,6 +601,8 @@ def _run_z_scan(
     z_samples = z_polling.samples
     sharpness_curve = []
     frames = [] if store_frames else None
+    best_frame: AutofocusFrame | None = None
+    best_sharpness = -1.0
 
     for i, (t_capture, img) in enumerate(frame_data):
         z_interp = interpolate_position(t_capture, z_samples)
@@ -615,6 +621,9 @@ def _run_z_scan(
         if store_frames:
             assert frames is not None
             frames.append(AutofocusFrame(z_um=z_interp, sharpness=s, image=img))
+        if save_best_frame and s > best_sharpness:
+            best_sharpness = s
+            best_frame = AutofocusFrame(z_um=z_interp, sharpness=s, image=img)
 
     t_func_end = time.perf_counter()
 
@@ -629,6 +638,7 @@ def _run_z_scan(
         ),
         frame_count=len(frame_data),
         z_sample_count=len(z_samples),
+        best_frame=best_frame,
     )
 
 
@@ -725,7 +735,8 @@ def _focus_and_capture_impl(
         z_end=z_end,
         acquisition=scope.acquisition,
         context=scope.context,
-        store_frames=True,
+        store_frames=False,
+        save_best_frame=True,
         sharpness_method=sharpness_method,
         pre_positioned=True,
     )
@@ -734,10 +745,8 @@ def _focus_and_capture_impl(
     z_axis.set_velocity_um_s(original_speed)
     t_end = time.perf_counter()
 
-    if not zsr.frames:
-        raise ValueError("No frames captured during focus scan")
-
-    best = max(zsr.frames, key=lambda f: f.sharpness)
+    assert zsr.best_frame is not None, "save_best_frame=True but no frames captured"
+    best = zsr.best_frame
 
     # Focus quality metrics
     mono = af_curve_monotonicity([s["sharpness"] for s in zsr.sharpness_curve])
@@ -783,6 +792,7 @@ def continuous_autofocus(
     super_fine_speed_um_s: float = 20.0,
     sharpness_method: str = "tenengrad",
     store_frames: bool = False,
+    save_best_frame: bool = False,
     compute_all_metrics: bool = False,
     settle_time_s: float = 0.2,
     min_dynamic_range: float = 0.20,
@@ -818,6 +828,8 @@ def continuous_autofocus(
         sharpness_method: "tenengrad" (default) or "laplacian". Laplacian is more
             reliable for low-contrast areas and less fooled by bright blurry blobs.
         store_frames: If True, store images in result.frames for debugging.
+        save_best_frame: If True, populate best_frame with the highest-sharpness
+            frame across all passes.
         compute_all_metrics: If True, compute all 5 sharpness metrics per frame
             (tenengrad, laplacian, brenner, normalized_variance, vollath_f4).
             Results stored in each sharpness_curve entry's "metrics" dict.
@@ -881,9 +893,11 @@ def continuous_autofocus(
         store_frames=store_frames,
         sharpness_method=sharpness_method,
         compute_all_metrics=compute_all_metrics,
+        save_best_frame=save_best_frame,
     )
     sharpness_curve = zsr.sharpness_curve
     frames = zsr.frames
+    overall_best_frame = zsr.best_frame
     scan_duration = zsr.timing.scan_s
     frame_count = zsr.frame_count
     z_sample_count = zsr.z_sample_count
@@ -944,6 +958,7 @@ def continuous_autofocus(
             store_frames=store_frames,
             sharpness_method=sharpness_method,
             compute_all_metrics=compute_all_metrics,
+            save_best_frame=save_best_frame,
         )
         fine_curve = fine_zsr.sharpness_curve
         fine_frames = fine_zsr.frames
@@ -959,6 +974,7 @@ def continuous_autofocus(
             if fine_best["sharpness"] > best_sharpness:
                 best_z = fine_best["z_um"]
                 best_sharpness = fine_best["sharpness"]
+                overall_best_frame = fine_zsr.best_frame
 
             scan_duration += fine_duration
             frame_count += fine_frame_count
@@ -994,6 +1010,7 @@ def continuous_autofocus(
             store_frames=store_frames,
             sharpness_method=sharpness_method,
             compute_all_metrics=compute_all_metrics,
+            save_best_frame=save_best_frame,
         )
         sf_curve = sf_zsr.sharpness_curve
         sf_frames = sf_zsr.frames
@@ -1011,6 +1028,7 @@ def continuous_autofocus(
             if sf_best["sharpness"] > best_sharpness:
                 best_z = sf_best["z_um"]
                 best_sharpness = sf_best["sharpness"]
+                overall_best_frame = sf_zsr.best_frame
 
             scan_duration += sf_duration
             frame_count += sf_frame_count
@@ -1066,6 +1084,7 @@ def continuous_autofocus(
         monotonicity=mono,
         best_sharpness_laplacian=img_sharp_lap,
         sharpness_curve=sharpness_curve,
+        best_frame=overall_best_frame,
         frames=frames if store_frames else None,
         fine_sharpness_curve=fine_curve,
         fine_frames=fine_frames if store_frames else None,

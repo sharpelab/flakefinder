@@ -1343,7 +1343,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
                     gain=p.focus_map_gain,
                     exposure_ms=p.focus_map_exposure_ms,
                     chip=ci,
-                    save_images=args.debug_focus_map,
+                    save_best_image=True,
                     af_settle=0.2 if args.debug_focus_map else 0,
                     move_to_best_z=args.debug_focus_map,
                     white_balance=p.wb,
