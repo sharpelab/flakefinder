@@ -88,6 +88,20 @@ class Camera:
         # Cache property value objects for fast access
         self._prop_cache: dict[int, object] = {}
 
+        self._init_defaults()
+
+    def _init_defaults(self) -> None:
+        """Override SDK defaults for settings that unit.Init() resets.
+
+        unit.Init() resets binning, gamma, saturation, and white balance
+        to SDK defaults (2x2, 0.45, 100, R1.93/G1.00/B1.94).
+        Exposure and gain are NOT reset by the SDK.
+        """
+        self.binning = 2  # 3x3 (SDK default: 1 / 2x2)
+        self.gamma = 1.0  # linear (SDK default: 0.45)
+        self.saturation = 100  # same as SDK, but explicit
+        self.gain_rgb = (1.0, 1.0, 1.0)  # neutral (SDK default: R1.93/G1.00/B1.94)
+
     @classmethod
     def from_connection(cls, conn: LeicaConnection) -> Camera:
         """Create Camera from a LeicaConnection.
