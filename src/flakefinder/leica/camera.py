@@ -88,9 +88,6 @@ class Camera:
         # Cache property value objects for fast access
         self._prop_cache: dict[int, object] = {}
 
-        # Set reasonable defaults
-        self._init_defaults()
-
     @classmethod
     def from_connection(cls, conn: LeicaConnection) -> Camera:
         """Create Camera from a LeicaConnection.
@@ -108,16 +105,6 @@ class Camera:
         if camera_unit is None:
             raise LookupError("Camera unit not found")
         return cls(camera_unit)
-
-    def _init_defaults(self) -> None:
-        """Set default camera settings."""
-        self.auto_brightness = False
-        self.exposure_time = 0.01  # 10ms
-        self.gain = 1.0
-        self.gain_rgb = (1.0, 1.0, 1.0)
-        self.saturation = 100  # int, not float
-        self.gamma = 1.0
-        self.binning = 2  # 0=1x1, 1=2x2, 2=3x3
 
     def _get_property(self, prop_id: int):
         """Get a property value object, with caching."""
