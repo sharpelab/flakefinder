@@ -4,7 +4,7 @@ Orchestrates: overview scan → stitch → chip detection →
 per-chip focus mapping → plane analysis → chip scanning →
 background segmentation.
 
-Overview and chip scan magnifications are configurable (default: 5x
+Overview and chip scan magnifications are configurable (default: 2.5x
 overview, 20x chip scan). Scan speeds scale automatically with
 magnification.
 
@@ -145,9 +145,9 @@ class ScanPreset(TypedDict):
 
 
 PRESETS: dict[str, ScanPreset] = {
-    "5_20": {
-        "name": "5x overview, 20x scan",
-        "overview_mag": "5x",
+    "2.5_20": {
+        "name": "2.5x overview, 20x scan",
+        "overview_mag": "2.5x",
         "chip_scan_mag": "20x",
         "chip_scan_speed_mm": 5.0,
         "chip_scan_gain": 4.0,
@@ -167,7 +167,7 @@ PRESETS: dict[str, ScanPreset] = {
     },
 }
 
-DEFAULT_PRESET = "5_20"
+DEFAULT_PRESET = "2.5_10"
 
 # Config flags that --resume forbids (must come from checkpoint instead)
 _RESUME_FORBIDDEN_FLAGS = frozenset(
