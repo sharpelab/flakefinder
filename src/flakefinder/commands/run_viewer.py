@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import math
 import re
 import sys
 import tkinter as tk
@@ -230,68 +231,232 @@ SLIDER_MAX_KURTOSIS = 50.0
 CROP_THUMB_HEIGHT = int(CROP_THUMB_SIZE * 2 / 3)  # 3:2 camera aspect ratio
 
 
+# ── Zoomable canvas ─────────────────────────────────────────────────
+
+ZOOM_FACTOR = 1.3
+MIN_ZOOM = 0.05
+MAX_ZOOM = 5.0
+
+
+class ZoomableCanvas(tk.Canvas):
+    """Canvas with mouse-wheel zoom, drag-to-pan, and double-click reset.
+
+    Optionally accepts an ``on_overlay`` callback that receives
+    ``(draw, crop_x0, crop_y0, zoom)`` and can draw on the display image
+    before it's blitted to the canvas.
+    """
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        on_overlay: Callable[[ImageDraw.ImageDraw, float, float, float], None] | None = None,
+        **kwargs,
+    ):
+        kwargs.setdefault("highlightthickness", 0)
+        kwargs.setdefault("bg", "black")
+        super().__init__(parent, **kwargs)
+
+        self._src: Image.Image | None = None
+        self._pyramid: list[Image.Image] = []
+        self._photo: ImageTk.PhotoImage | None = None
+        self._on_overlay = on_overlay
+
+        # Zoom/pan state
+        self._zoom = 1.0
+        self._cx = 0.0
+        self._cy = 0.0
+        self._fit_mode = False  # True = re-fit on resize
+        self._drag_x = 0
+        self._drag_y = 0
+
+        # Bindings
+        self.bind("<MouseWheel>", self._on_scroll)
+        self.bind("<Button-4>", self._on_scroll_linux)
+        self.bind("<Button-5>", self._on_scroll_linux)
+        self.bind("<ButtonPress-1>", self._on_drag_start)
+        self.bind("<B1-Motion>", self._on_drag)
+        self.bind("<Double-Button-1>", self._on_reset)
+        self.bind("<Configure>", self._on_configure)
+
+    # ── Public API ──
+
+    def set_image(self, img: Image.Image, center: tuple[float, float] | None = None):
+        """Set or replace the source image. Resets zoom to fit unless *center* is given."""
+        self._src = img
+        self._pyramid = [img]
+        level_img = img
+        while min(level_img.size) > 256:
+            level_img = level_img.reduce(2)
+            self._pyramid.append(level_img)
+        if center is not None:
+            self._fit_mode = False
+            self._cx, self._cy = center
+        else:
+            self._fit_mode = True
+            self._reset_view()
+        self.render()
+
+    @property
+    def zoom(self) -> float:
+        return self._zoom
+
+    @zoom.setter
+    def zoom(self, value: float):
+        self._zoom = max(MIN_ZOOM, min(MAX_ZOOM, value))
+
+    @property
+    def center(self) -> tuple[float, float]:
+        return (self._cx, self._cy)
+
+    @center.setter
+    def center(self, value: tuple[float, float]):
+        self._cx, self._cy = value
+
+    # ── Rendering ──
+
+    def render(self):
+        cw = self.winfo_width()
+        ch = self.winfo_height()
+        if cw < 2 or ch < 2 or self._src is None:
+            return
+        z = self._zoom
+
+        # Pick mipmap level: largest k where z * 2^k >= 1 (never downscale > 2x)
+        level = 0
+        if z < 1.0 and len(self._pyramid) > 1:
+            level = min(int(math.log2(1.0 / z)), len(self._pyramid) - 1)
+        src = self._pyramid[level]
+        f = 2.0**level  # coordinate scale factor (original → this level)
+        lz = z * f  # effective zoom at this level (typically 1–2)
+
+        sw, sh = src.size
+        lcx = self._cx / f
+        lcy = self._cy / f
+        half_w = cw / (2.0 * lz)
+        half_h = ch / (2.0 * lz)
+        src_x0 = lcx - half_w
+        src_y0 = lcy - half_h
+        src_x1 = lcx + half_w
+        src_y1 = lcy + half_h
+
+        crop_x0 = max(0.0, src_x0)
+        crop_y0 = max(0.0, src_y0)
+        crop_x1 = min(float(sw), src_x1)
+        crop_y1 = min(float(sh), src_y1)
+
+        if crop_x1 <= crop_x0 or crop_y1 <= crop_y0:
+            return
+
+        crop = src.crop((int(crop_x0), int(crop_y0), int(crop_x1), int(crop_y1)))
+        disp_w = max(1, int((crop_x1 - crop_x0) * lz))
+        disp_h = max(1, int((crop_y1 - crop_y0) * lz))
+        resample = Image.Resampling.LANCZOS if lz < 1.0 else Image.Resampling.NEAREST
+        display = crop.resize((disp_w, disp_h), resample)
+
+        if self._on_overlay:
+            draw = ImageDraw.Draw(display)
+            # Overlay coords are in original image space
+            self._on_overlay(draw, crop_x0 * f, crop_y0 * f, z)
+
+        self._photo = ImageTk.PhotoImage(display)
+        canvas_x = int((crop_x0 - src_x0) * lz)
+        canvas_y = int((crop_y0 - src_y0) * lz)
+        self.delete("all")
+        self.create_image(canvas_x, canvas_y, anchor="nw", image=self._photo)
+
+    # ── Internal ──
+
+    def _reset_view(self):
+        if self._src is None:
+            return
+        sw, sh = self._src.size
+        cw = max(1, self.winfo_width())
+        ch = max(1, self.winfo_height())
+        self._zoom = min(cw / sw, ch / sh)
+        self._cx = sw / 2.0
+        self._cy = sh / 2.0
+
+    def _on_configure(self, event):
+        if event.widget is self:
+            if self._fit_mode:
+                self._reset_view()
+            self.render()
+
+    def _on_scroll(self, event):
+        factor = ZOOM_FACTOR if event.delta > 0 else 1.0 / ZOOM_FACTOR
+        self._zoom_at(event.x, event.y, factor)
+        return "break"
+
+    def _on_scroll_linux(self, event):
+        factor = ZOOM_FACTOR if event.num == 4 else 1.0 / ZOOM_FACTOR
+        self._zoom_at(event.x, event.y, factor)
+        return "break"
+
+    def _zoom_at(self, mx: int, my: int, factor: float):
+        self._fit_mode = False
+        cw = self.winfo_width()
+        ch = self.winfo_height()
+        src_x = self._cx + (mx - cw / 2.0) / self._zoom
+        src_y = self._cy + (my - ch / 2.0) / self._zoom
+        new_zoom = max(MIN_ZOOM, min(MAX_ZOOM, self._zoom * factor))
+        self._cx = src_x - (mx - cw / 2.0) / new_zoom
+        self._cy = src_y - (my - ch / 2.0) / new_zoom
+        self._zoom = new_zoom
+        self.render()
+
+    def _on_drag_start(self, event):
+        self._drag_x = event.x
+        self._drag_y = event.y
+
+    def _on_drag(self, event):
+        self._fit_mode = False
+        dx = event.x - self._drag_x
+        dy = event.y - self._drag_y
+        self._drag_x = event.x
+        self._drag_y = event.y
+        self._cx -= dx / self._zoom
+        self._cy -= dy / self._zoom
+        self.render()
+
+    def _on_reset(self, _event):
+        self._fit_mode = True
+        self._reset_view()
+        self.render()
+
+
 # ── Image popup viewer ──────────────────────────────────────────────
 
 
 class ImagePopup(tk.Toplevel):
-    """Resizable image popup with contain scaling. Dismiss with Escape or click."""
+    """Resizable image popup with zoom/pan. Dismiss with Escape."""
 
     def __init__(self, parent: tk.Tk | tk.Toplevel, img_path: Path):
         super().__init__(parent)
         self.withdraw()  # hide until fully rendered
         self.title(img_path.name)
 
-        self._src_image = Image.open(img_path)
-        self._photo: ImageTk.PhotoImage | None = None
+        src = Image.open(img_path)
+        src.load()
 
-        self._label = ttk.Label(self, anchor="center")
-        self._label.pack(fill="both", expand=True)
+        self._canvas = ZoomableCanvas(self)
+        self._canvas.pack(fill="both", expand=True)
 
         # Initial size: contain to 80% of screen
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
         max_w = int(screen_w * 0.8)
         max_h = int(screen_h * 0.8)
-        w, h = self._src_image.size
+        w, h = src.size
         scale = min(max_w / w, max_h / h)
         init_w, init_h = int(w * scale), int(h * scale)
         self.geometry(f"{init_w}x{init_h}")
 
-        # Render initial image immediately (can't rely on Configure for first frame)
-        self._render(init_w, init_h)
+        self.update_idletasks()
+        self._canvas.set_image(src)
 
-        # Resize on window change
-        self._resize_pending = False
-        self.bind("<Configure>", self._on_resize)
-
-        # Dismiss on click, Escape
         self.bind("<Escape>", lambda _: self.destroy())
-        self._label.bind("<Button-1>", lambda _: self.destroy())
         self.deiconify()
         self.focus_set()
-
-    def _on_resize(self, event):
-        # Only respond to top-level window resizes, debounce
-        if event.widget is not self:
-            return
-        if not self._resize_pending:
-            self._resize_pending = True
-            self.after(50, self._do_resize)
-
-    def _do_resize(self):
-        self._resize_pending = False
-        self._render(self._label.winfo_width(), self._label.winfo_height())
-
-    def _render(self, win_w: int, win_h: int):
-        if win_w < 2 or win_h < 2:
-            return
-        src_w, src_h = self._src_image.size
-        scale = min(win_w / src_w, win_h / src_h)
-        new_w, new_h = max(1, int(src_w * scale)), max(1, int(src_h * scale))
-        resample = Image.Resampling.LANCZOS if scale < 1.0 else Image.Resampling.NEAREST
-        img = self._src_image.resize((new_w, new_h), resample)
-        self._photo = ImageTk.PhotoImage(img)
-        self._label.configure(image=self._photo)
 
 
 class FlakeInspectorContext(NamedTuple):
@@ -311,10 +476,6 @@ class FlakeInspectorContext(NamedTuple):
 class FlakeInspector(tk.Toplevel):
     """Full-featured flake inspection popup with zoomable frame, overview locator, metrics, and annotations."""
 
-    ZOOM_FACTOR = 1.3
-    MIN_ZOOM = 0.05
-    MAX_ZOOM = 5.0
-
     def __init__(
         self,
         parent: tk.Tk,
@@ -329,21 +490,14 @@ class FlakeInspector(tk.Toplevel):
         super().__init__(parent)
         self.withdraw()
 
-        self._src = src_image
         self._det = det
         self._contour = contour
         self._on_navigate = on_navigate
         self._ctx = context
         self._grid_idx = grid_idx
-        self._photo: ImageTk.PhotoImage | None = None
         self._overview_photo: ImageTk.PhotoImage | None = None
         self._revisit_photos: dict[str, ImageTk.PhotoImage] = {}
         self._revisit_tabs: dict[str, ttk.Frame] = {}  # mag -> tab widget
-
-        # Zoom state: center in source image coords
-        bx, by, bw, bh = det["bbox"]
-        self._cx = bx + bw / 2.0
-        self._cy = by + bh / 2.0
 
         # Window sizing
         sw, sh = src_image.size
@@ -351,12 +505,10 @@ class FlakeInspector(tk.Toplevel):
         screen_h = self.winfo_screenheight()
         max_w = min(1400, int(screen_w * 0.7))
         max_h = min(1000, int(screen_h * 0.8))
-        self._zoom = min((max_w - CONTEXT_PANE_WIDTH) / sw, max_h / sh)
-        frame_w = max(400, int(sw * self._zoom))
-        frame_h = max(300, int(sh * self._zoom))
+        init_zoom = min((max_w - CONTEXT_PANE_WIDTH) / sw, max_h / sh)
+        frame_w = max(400, int(sw * init_zoom))
+        frame_h = max(300, int(sh * init_zoom))
         total_w = frame_w + CONTEXT_PANE_WIDTH
-        self._win_w = frame_w
-        self._win_h = frame_h
         self.geometry(f"{total_w}x{frame_h + 60}")
 
         self._build_layout()
@@ -367,20 +519,18 @@ class FlakeInspector(tk.Toplevel):
         self._update_revisit_tabs()
 
         # Bindings
-        self._frame_canvas.bind("<MouseWheel>", self._on_scroll)
-        self._frame_canvas.bind("<Button-4>", self._on_scroll_linux)
-        self._frame_canvas.bind("<Button-5>", self._on_scroll_linux)
-        self._frame_canvas.bind("<ButtonPress-1>", self._on_drag_start)
-        self._frame_canvas.bind("<B1-Motion>", self._on_drag)
         self.bind("<Escape>", lambda _: self.destroy())
-        self.bind("<Configure>", self._on_configure)
         self.bind("<Left>", lambda _: self._navigate(-1))
         self.bind("<Right>", lambda _: self._navigate(1))
         self.bind("<g>", lambda _: self._mark("good"))
         self.bind("<b>", lambda _: self._mark("bad"))
         self.bind("<u>", lambda _: self._mark(None))
 
-        self._render_frame()
+        # Set image centered on detection bbox
+        bx, by, bw, bh = det["bbox"]
+        self.update_idletasks()
+        self._frame_canvas.zoom = init_zoom
+        self._frame_canvas.set_image(src_image, center=(bx + bw / 2.0, by + bh / 2.0))
         self.deiconify()
         self.focus_set()
 
@@ -404,7 +554,7 @@ class FlakeInspector(tk.Toplevel):
         self._paned.pack(fill="both", expand=True, padx=4, pady=2)
 
         # Left: zoomable frame canvas
-        self._frame_canvas = tk.Canvas(self._paned, highlightthickness=0, bg="black")
+        self._frame_canvas = ZoomableCanvas(self._paned, on_overlay=self._draw_overlay)
         self._paned.add(self._frame_canvas, weight=3)
 
         # Right: context pane
@@ -464,10 +614,6 @@ class FlakeInspector(tk.Toplevel):
             foreground="gray",
             font=("TkDefaultFont", 8),
         ).pack(side="left")
-
-        # Pan state
-        self._drag_x = 0
-        self._drag_y = 0
 
     def _annotation_key(self) -> str:
         """Generate annotation key for the current detection."""
@@ -619,101 +765,8 @@ class FlakeInspector(tk.Toplevel):
         if selected_text and selected_text in self._revisit_tabs:
             self._notebook.select(self._revisit_tabs[selected_text])
 
-    def _navigate(self, delta: int):
-        if not self._on_navigate:
-            return
-        result = self._on_navigate(delta)
-        if result is None:
-            return
-        src_image, det, title, contour = result
-        self._src = src_image
-        self._det = det
-        self._contour = contour
-        self._grid_idx += delta
-
-        # Re-center on new detection
-        bx, by, bw, bh = det["bbox"]
-        self._cx = bx + bw / 2.0
-        self._cy = by + bh / 2.0
-
-        self._update_title_bar()
-        self._update_annotation_buttons()
-        self._update_overview_dot()
-        self._update_metrics()
-        self._update_revisit_tabs()
-        self._render_frame()
-
-    def _on_configure(self, event):
-        if event.widget is not self._frame_canvas:
-            return
-        self._win_w = event.width
-        self._win_h = event.height
-        self._render_frame()
-
-    def _on_scroll(self, event):
-        if event.delta > 0:
-            self._zoom_at(event.x, event.y, self.ZOOM_FACTOR)
-        else:
-            self._zoom_at(event.x, event.y, 1.0 / self.ZOOM_FACTOR)
-
-    def _on_scroll_linux(self, event):
-        if event.num == 4:
-            self._zoom_at(event.x, event.y, self.ZOOM_FACTOR)
-        else:
-            self._zoom_at(event.x, event.y, 1.0 / self.ZOOM_FACTOR)
-
-    def _zoom_at(self, mx: int, my: int, factor: float):
-        cw, ch = self._win_w, self._win_h
-        src_x = self._cx + (mx - cw / 2.0) / self._zoom
-        src_y = self._cy + (my - ch / 2.0) / self._zoom
-        new_zoom = max(self.MIN_ZOOM, min(self.MAX_ZOOM, self._zoom * factor))
-        self._cx = src_x - (mx - cw / 2.0) / new_zoom
-        self._cy = src_y - (my - ch / 2.0) / new_zoom
-        self._zoom = new_zoom
-        self._render_frame()
-
-    def _on_drag_start(self, event):
-        self._drag_x = event.x
-        self._drag_y = event.y
-
-    def _on_drag(self, event):
-        dx = event.x - self._drag_x
-        dy = event.y - self._drag_y
-        self._drag_x = event.x
-        self._drag_y = event.y
-        self._cx -= dx / self._zoom
-        self._cy -= dy / self._zoom
-        self._render_frame()
-
-    def _render_frame(self):
-        cw, ch = self._win_w, self._win_h
-        if cw < 2 or ch < 2:
-            return
-        sw, sh = self._src.size
-        z = self._zoom
-
-        half_w = cw / (2.0 * z)
-        half_h = ch / (2.0 * z)
-        src_x0 = self._cx - half_w
-        src_y0 = self._cy - half_h
-        src_x1 = self._cx + half_w
-        src_y1 = self._cy + half_h
-
-        crop_x0 = max(0.0, src_x0)
-        crop_y0 = max(0.0, src_y0)
-        crop_x1 = min(float(sw), src_x1)
-        crop_y1 = min(float(sh), src_y1)
-
-        if crop_x1 <= crop_x0 or crop_y1 <= crop_y0:
-            return
-
-        crop = self._src.crop((int(crop_x0), int(crop_y0), int(crop_x1), int(crop_y1)))
-        disp_w = max(1, int((crop_x1 - crop_x0) * z))
-        disp_h = max(1, int((crop_y1 - crop_y0) * z))
-        resample = Image.Resampling.LANCZOS if z < 1.0 else Image.Resampling.NEAREST
-        display = crop.resize((disp_w, disp_h), resample)
-
-        draw = ImageDraw.Draw(display)
+    def _draw_overlay(self, draw: ImageDraw.ImageDraw, crop_x0: float, crop_y0: float, z: float):
+        """Overlay callback for ZoomableCanvas: draw contour and bbox."""
         if self._contour and len(self._contour) >= 3:
             pts = [(int((x - crop_x0) * z), int((y - crop_y0) * z)) for x, y in self._contour]
             draw.polygon(pts, outline="cyan")
@@ -724,11 +777,26 @@ class FlakeInspector(tk.Toplevel):
         ry1 = int((by + bh + BBOX_PAD_PX - crop_y0) * z)
         draw.rectangle([rx0, ry0, rx1, ry1], outline="lime", width=2)
 
-        self._photo = ImageTk.PhotoImage(display)
-        canvas_x = int((crop_x0 - src_x0) * z)
-        canvas_y = int((crop_y0 - src_y0) * z)
-        self._frame_canvas.delete("all")
-        self._frame_canvas.create_image(canvas_x, canvas_y, anchor="nw", image=self._photo)
+    def _navigate(self, delta: int):
+        if not self._on_navigate:
+            return
+        result = self._on_navigate(delta)
+        if result is None:
+            return
+        src_image, det, title, contour = result
+        self._det = det
+        self._contour = contour
+        self._grid_idx += delta
+
+        # Re-center on new detection
+        bx, by, bw, bh = det["bbox"]
+        self._frame_canvas.set_image(src_image, center=(bx + bw / 2.0, by + bh / 2.0))
+
+        self._update_title_bar()
+        self._update_annotation_buttons()
+        self._update_overview_dot()
+        self._update_metrics()
+        self._update_revisit_tabs()
 
 
 # ── GUI ──────────────────────────────────────────────────────────────
@@ -1018,7 +1086,7 @@ class RunViewerGUI:
 
         # Overview placeholder
         self._overview_container = ttk.LabelFrame(self._detail_frame, text="Overview", padding=4)
-        overview_path = self._find_overview_image(run.path)
+        overview_path, overview_stitch_path = self._find_overview_image(run.path)
         if overview_path:
             self._overview_container.pack(fill="x", padx=8, pady=4)
             ttk.Label(self._overview_container, text="Loading…", foreground="gray").pack()
@@ -1055,9 +1123,9 @@ class RunViewerGUI:
         self._filtered_table_frame = ttk.LabelFrame(self._detail_frame, text="Scoring Data", padding=4)
 
         # ── Phase 2: deferred heavy I/O (chained to let event loop paint) ──
-        self.root.after(1, self._load_overview, run, overview_path)
+        self.root.after(1, self._load_overview, run, overview_path, overview_stitch_path)
 
-    def _load_overview(self, run: RunInfo, overview_path: Path | None):
+    def _load_overview(self, run: RunInfo, overview_path: Path | None, stitch_path: Path | None = None):
         """Phase 2a: load overview image, then chain to detection loading."""
         if self._selected_run is not run:
             return
@@ -1065,7 +1133,14 @@ class RunViewerGUI:
         if overview_path and self._overview_container.winfo_exists():
             for w in self._overview_container.winfo_children():
                 w.destroy()
-            self._load_image_into_label(overview_path, self._overview_container, OVERVIEW_MAX_WIDTH, "_overview_photo")
+            # Thumbnail shows detected (with chip boxes); popup opens high-res stitch
+            self._load_image_into_label(
+                overview_path,
+                self._overview_container,
+                OVERVIEW_MAX_WIDTH,
+                "_overview_photo",
+                popup_path=stitch_path or overview_path,
+            )
 
         self.root.after(1, self._load_detections, run)
 
@@ -1089,11 +1164,20 @@ class RunViewerGUI:
                 w.destroy()
             ttk.Label(self._filtered_crops_frame, text="No detections", foreground="gray").pack(anchor="w")
 
-    def _find_overview_image(self, run_dir: Path) -> Path | None:
-        """Find the overview detection image."""
+    def _find_overview_image(self, run_dir: Path) -> tuple[Path | None, Path | None]:
+        """Find the overview detection image and high-res stitch.
+
+        Returns (detected_path, stitch_path).
+        """
+        detected = None
         for p in run_dir.glob("overview_*_stitch_chips_detected.png"):
-            return p
-        return None
+            detected = p
+            break
+        stitch = None
+        for p in run_dir.glob("overview_*_stitch.jpg"):
+            stitch = p
+            break
+        return detected, stitch
 
     # ── Overview stitch + annotations ────────────────────────────
 
@@ -1857,7 +1941,9 @@ class RunViewerGUI:
 
     # ── Image helpers ────────────────────────────────────────────
 
-    def _load_image_into_label(self, img_path: Path, parent: ttk.Widget, max_width: int, attr: str):
+    def _load_image_into_label(
+        self, img_path: Path, parent: ttk.Widget, max_width: int, attr: str, popup_path: Path | None = None
+    ):
         """Load an image, scale to max_width, display in a Label inside parent."""
         try:
             img = Image.open(img_path)
@@ -1869,7 +1955,8 @@ class RunViewerGUI:
             setattr(self, attr, photo)
             lbl = ttk.Label(parent, image=photo, cursor="hand2")
             lbl.pack()
-            lbl.bind("<Button-1>", lambda _e, p=img_path: ImagePopup(self.root, p))
+            click_path = popup_path if popup_path is not None else img_path
+            lbl.bind("<Button-1>", lambda _e, p=click_path: ImagePopup(self.root, p))
         except Exception as e:
             ttk.Label(parent, text=f"Could not load image: {e}", foreground="red").pack()
 
