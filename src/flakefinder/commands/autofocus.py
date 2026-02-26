@@ -24,7 +24,7 @@ from flakefinder.leica.autofocus import (
     continuous_autofocus,
     sharpness,
 )
-from flakefinder.scan_utils import get_git_version, parse_white_balance
+from flakefinder.scan_utils import build_microscope_meta, get_git_version, parse_white_balance
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -353,6 +353,7 @@ def main():
             summary["git_version"] = get_git_version()
             summary["timestamp"] = datetime.now().isoformat()
             summary["command"] = sys.argv
+            summary["microscope"] = dict(build_microscope_meta(scope))
             summary["params"] = {
                 "x_um": target_x,
                 "y_um": target_y,
