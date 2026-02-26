@@ -1675,7 +1675,7 @@ def run(
 
         # Generate contour map
         if plot:
-            contour_path = export_plane_path.with_name(export_plane_path.stem.replace("_plane", "") + "_contour.png")
+            contour_path = focus_map_path.with_name(focus_map_path.stem + "_contour.png")
             plot_contour_map(result, contour_path, quiet=quiet)
 
 
