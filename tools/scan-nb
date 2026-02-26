@@ -148,9 +148,11 @@ def main():
         if ref not in pending_names and not (ATTACH_DIR / ref).exists():
             die(f"entry references ![[{ref}]] but no such file in {ATTACH_DIR}")
 
-    # Check for manual timestamps (scan-nb adds these automatically)
-    if re.match(r"\*\*\d{2}-\d{2}\s+\d{2}:\d{2}\*\*", text):
-        die("entry starts with a timestamp — scan-nb adds these automatically, remove it")
+    # Strip leading timestamp (scan-nb adds these automatically)
+    stripped = re.sub(r"^\*\*\d{2}-\d{2}\s+\d{2}:\d{2}\*\*\s*", "", text)
+    if stripped != text:
+        print("Note: stripped leading timestamp — scan-nb adds these automatically", file=sys.stderr)
+        text = stripped
 
     # Strip trailing --- (scan-nb adds separators automatically)
     stripped = re.sub(r"\n---\s*$", "", text)
