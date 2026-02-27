@@ -30,7 +30,13 @@ from PIL import Image as PILImage
 from flakefinder.autofocus_util import save_debug_frames
 from flakefinder.data_utils import load_chip_geometry
 from flakefinder.leica import wait_all
-from flakefinder.leica.autofocus import ALL_SHARPNESS_METRICS, AutofocusResult, continuous_autofocus
+from flakefinder.leica.autofocus import (
+    AF_DEFAULTS,
+    ALL_SHARPNESS_METRICS,
+    AFDefaults,
+    AutofocusResult,
+    continuous_autofocus,
+)
 from flakefinder.leica.microscope import Microscope
 from flakefinder.scan_utils import DEFAULT_WB, build_microscope_meta, get_git_version, parse_white_balance
 from flakefinder.types import ChipGeometry, GainRGB, Point2F
@@ -246,11 +252,7 @@ def run_focus_map(
     reference_z_um: float,
     scope: Microscope,
     *,
-    z_range_um: float | None = None,
-    z_speed_um_s: float | None = None,
-    fine_pass: bool = True,
-    fine_range_um: float = 50.0,
-    super_fine_pass: bool = True,
+    af_defaults: AFDefaults | None = None,
     sharpness_method: str = "tenengrad",
     all_metrics: bool = False,
     move_settle_s: float = 0,
@@ -266,11 +268,7 @@ def run_focus_map(
         all_points: Sample points to autofocus at.
         reference_z_um: Starting Z position for each autofocus sweep.
         scope: Microscope facade instance.
-        z_range_um: Z scan range in µm (None = auto from objective).
-        z_speed_um_s: Z axis speed in µm/s (None = use current).
-        fine_pass: Enable two-pass autofocus (coarse + fine).
-        fine_range_um: Fine pass range in µm.
-        super_fine_pass: Enable super fine third pass.
+        af_defaults: AF pass parameters. None = use AF_DEFAULTS for objective.
         sharpness_method: Sharpness metric name.
         all_metrics: Compute all sharpness metrics per frame.
         move_settle_s: Settle time after XY move.
@@ -329,12 +327,8 @@ def run_focus_map(
         try:
             af_result = continuous_autofocus(
                 scope,
+                af_defaults=af_defaults,
                 z_start_um=reference_z_um,
-                z_range_um=z_range_um,
-                z_speed_um_s=z_speed_um_s,
-                fine_pass=fine_pass,
-                fine_range_um=fine_range_um,
-                super_fine_pass=super_fine_pass,
                 sharpness_method=sharpness_method,
                 store_frames=save_debug,
                 save_best_frame=save_best,
@@ -514,17 +508,13 @@ def run(
     contour_spacing_mm: float = 15.0,
     grid_spacing_um: float = 10000,
     objective_mag: str | None = None,
-    z_range: float | None = None,
-    fine_pass: bool = True,
-    fine_range: float = 50.0,
-    super_fine_pass: bool = True,
+    af_defaults: AFDefaults | None = None,
     all_metrics: bool = False,
     output_dir: Path | None = None,
     save_best_image: bool = False,
     debug_dir: Path | None = None,
     sharpness_method: str = "tenengrad",
     z: float | None = None,
-    z_speed: float | None = None,
     move_settle: float = 0,
     af_settle: float = 0,
     move_to_best_z: bool = True,
@@ -587,22 +577,28 @@ def run(
         print(f"Camera: {camera.name}")
         print(f"Lamp: {scope.lamp.intensity_pct:.0f}% ({scope.lamp.intensity}/{scope.lamp.max_intensity})")
 
-    # Apply focus-map-specific AF defaults if not explicitly set
-    fm_defaults = FM_AF_DEFAULTS.get(scope.nosepiece.position)
-    if fm_defaults is not None:
-        if z_range is None:
-            z_range = fm_defaults.z_range_um
-        if z_speed is None:
-            z_speed = fm_defaults.z_speed_um_s
+    # Apply FM-specific AF overrides on top of per-objective defaults
+    fm_overrides = FM_AF_DEFAULTS.get(scope.nosepiece.position)
+    if af_defaults is None and fm_overrides is not None:
+        base = AF_DEFAULTS.get(scope.nosepiece.position)
+        if base is not None:
+            af_defaults = base.with_overrides(
+                coarse_range_um=fm_overrides.z_range_um,
+                coarse_speed_um_s=fm_overrides.z_speed_um_s,
+            )
 
     # Resolve reference Z
     if z is not None:
         reference_z_um = z
     else:
-        # Centroid AF uses wider range than grid points (2x FM default, cap 500 µm)
+        # Centroid AF uses wider coarse range (2x, cap 500 µm)
         # to tolerate initial Z uncertainty after objective swap.
         CENTROID_RANGE_CAP_UM = 500.0
-        centroid_z_range = min(z_range * 2, CENTROID_RANGE_CAP_UM) if z_range is not None else None
+        if af_defaults is not None:
+            centroid_range = min(af_defaults.coarse_range_um * 2, CENTROID_RANGE_CAP_UM)
+            centroid_af_defs = af_defaults.with_overrides(coarse_range_um=centroid_range)
+        else:
+            centroid_af_defs = None
 
         cx, cy = chip_geo.centroid
         cx_mm, cy_mm = cx / 1000, cy / 1000
@@ -612,11 +608,7 @@ def run(
         wait_all([hx, hy])
         centroid_af = continuous_autofocus(
             scope,
-            z_range_um=centroid_z_range,
-            z_speed_um_s=z_speed,
-            fine_pass=fine_pass,
-            fine_range_um=fine_range,
-            super_fine_pass=super_fine_pass,
+            af_defaults=centroid_af_defs,
             sharpness_method=sharpness_method,
         )
         reference_z_um = centroid_af.selected_z_um
@@ -642,11 +634,7 @@ def run(
         all_points=all_points,
         reference_z_um=reference_z_um,
         scope=scope,
-        z_range_um=z_range,
-        z_speed_um_s=z_speed,
-        fine_pass=fine_pass,
-        fine_range_um=fine_range,
-        super_fine_pass=super_fine_pass,
+        af_defaults=af_defaults,
         sharpness_method=sharpness_method,
         all_metrics=all_metrics,
         move_settle_s=move_settle,
@@ -678,11 +666,7 @@ def run(
             "contour_spacing_mm": contour_spacing_mm,
             "grid_spacing_um": grid_spacing_um,
             "z_start_um": reference_z_um,
-            "z_range_um": z_range,
-            "z_speed_um_s": z_speed,
-            "fine_pass": fine_pass,
-            "fine_range_um": fine_range,
-            "super_fine_pass": super_fine_pass,
+            "af_defaults": af_defaults._asdict() if af_defaults else None,
             "sharpness_method": sharpness_method,
             "move_settle_s": move_settle,
             "af_settle_s": af_settle,
@@ -761,28 +745,6 @@ def _build_parser():
         help="Interior grid spacing in µm",
     )
     parser.add_argument(
-        "--z-range",
-        type=float,
-        default=None,
-        help="Z scan range in µm (default: auto from objective)",
-    )
-    parser.add_argument(
-        "--no-fine-pass",
-        action="store_true",
-        help="Disable two-pass autofocus (use single coarse pass only)",
-    )
-    parser.add_argument(
-        "--fine-range",
-        type=float,
-        default=50.0,
-        help="Fine pass range in µm (default: 50)",
-    )
-    parser.add_argument(
-        "--no-super-fine",
-        action="store_true",
-        help="Disable super fine third pass (10µm range at 20µm/s)",
-    )
-    parser.add_argument(
         "--all-metrics",
         action="store_true",
         help="Compute all 5 sharpness metrics per frame (slow; default: primary only)",
@@ -815,12 +777,6 @@ def _build_parser():
         type=float,
         default=None,
         help="Reference Z position in µm (default: autofocus at chip centroid)",
-    )
-    parser.add_argument(
-        "--z-speed",
-        type=float,
-        default=None,
-        help="Z axis speed in µm/s (default: use current)",
     )
     parser.add_argument(
         "--move-settle",
@@ -908,17 +864,12 @@ def main() -> int:
                 contour_spacing_mm=args.contour_spacing_mm,
                 grid_spacing_um=args.grid_spacing_um,
                 objective_mag=args.objective_mag,
-                z_range=args.z_range,
-                fine_pass=not args.no_fine_pass,
-                fine_range=args.fine_range,
-                super_fine_pass=not args.no_super_fine,
                 all_metrics=args.all_metrics,
                 output_dir=args.output_dir,
                 save_best_image=args.save_images,
                 debug_dir=args.debug_dir,
                 sharpness_method=args.sharpness_method,
                 z=args.z,
-                z_speed=args.z_speed,
                 move_settle=args.move_settle,
                 af_settle=0 if args.no_verify else args.af_settle,
                 move_to_best_z=not args.no_verify,

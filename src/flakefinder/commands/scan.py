@@ -321,11 +321,7 @@ def run(
         wait_all([hx, hy])
 
         try:
-            af_result = continuous_autofocus(
-                scope,
-                fine_pass=True,
-                super_fine_pass=True,
-            )
+            af_result = continuous_autofocus(scope)
             print(f"  Z: {af_result.initial_z_um:.1f} -> {af_result.selected_z_um:.1f} µm")
             print(
                 f"  Range: {af_result.z_range_um:.0f}µm, Sharpness: {af_result.initial_sharpness:.1f} -> {af_result.selected_sharpness:.1f}"  # noqa: E501

@@ -20,6 +20,7 @@ from PIL import Image as PILImage
 from flakefinder.autofocus_util import save_debug_frames
 from flakefinder.leica import Microscope, wait_all
 from flakefinder.leica.autofocus import (
+    AF_DEFAULTS,
     ALL_SHARPNESS_METRICS,
     continuous_autofocus,
     sharpness,
@@ -42,27 +43,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--x", type=float, default=None, help="Stage X position (um), default: current")
     parser.add_argument("--y", type=float, default=None, help="Stage Y position (um), default: current")
     parser.add_argument("--z", type=float, default=None, help="Initial Z position (um), default: current")
-    parser.add_argument("--range", type=float, default=None, help="Z scan range (um), default: auto from objective")
-    parser.add_argument(
-        "--z-speed",
-        type=float,
-        default=None,
-        help="Z axis speed (um/s), default: use current. Slower = more frames.",
-    )
+    parser.add_argument("--range", type=float, default=None, help="Coarse Z scan range (um), default: from AF_DEFAULTS")
     parser.add_argument("--output", "-o", type=str, default=None, help="Output directory for photos (optional)")
     parser.add_argument("--debug-dir", type=str, default=None, help="Save all scan frames to this directory")
-    parser.add_argument("--fine", action="store_true", help="Two-pass: coarse scan then fine 50um scan")
-    parser.add_argument(
-        "--fine-speed-factor",
-        type=float,
-        default=0.25,
-        help="Speed multiplier for fine pass (default: 0.25 = 1/4 speed)",
-    )
-    parser.add_argument(
-        "--super-fine",
-        action="store_true",
-        help="Three-pass (implies --fine): coarse + fine + 10um at 20um/s",
-    )
     parser.add_argument(
         "--sharpness-method",
         choices=list(ALL_SHARPNESS_METRICS.keys()),
@@ -95,12 +78,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="White balance as B,G,R gains (e.g., 2.51,1.02,1.41)",
     )
     parser.add_argument("--gamma", type=float, default=None, help="Gamma correction (default: unchanged)")
-    parser.add_argument(
-        "--min-dynamic-range",
-        type=float,
-        default=0.20,
-        help="Unused, kept for CLI compatibility",
-    )
     parser.add_argument(
         "--quiet",
         "-q",
@@ -222,7 +199,7 @@ def main():
 
         # === Step 2: Move to initial Z ===
         # Set Z speed for positioning (restores sane default if a previous crash left it slow)
-        scope.z.set_velocity_um_s(args.z_speed if args.z_speed else scope.z.max_velocity_um_s)
+        scope.z.set_velocity_um_s(scope.z.max_velocity_um_s)
         vprint(f"Moving Z to {target_z:.1f} um...")
         scope.z.move_to_corrected(target_z)
 
@@ -244,20 +221,20 @@ def main():
         vprint()
         vprint("Starting autofocus scan...")
 
+        # Build AF defaults: optional --range override on top of per-objective table
+        af_defs = AF_DEFAULTS.get(scope.nosepiece.position)
+        if args.range is not None and af_defs is not None:
+            af_defs = af_defs.with_overrides(coarse_range_um=args.range)
+
         try:
             af_result = continuous_autofocus(
                 scope,
-                z_range_um=args.range,
+                af_defaults=af_defs,
                 z_start_um=target_z,
-                z_speed_um_s=args.z_speed,
-                fine_pass=args.fine,
-                fine_speed_factor=args.fine_speed_factor,
-                super_fine_pass=args.super_fine,
                 sharpness_method=args.sharpness_method,
                 store_frames=bool(args.debug_dir or args.output),
                 compute_all_metrics=args.all_metrics,
                 settle_time_s=args.settle_time,
-                min_dynamic_range=args.min_dynamic_range,
             )
         except ValueError as e:
             print(f"Error: {e}")

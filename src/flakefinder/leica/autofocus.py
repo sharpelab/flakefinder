@@ -14,7 +14,7 @@ import queue
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import NamedTuple, TypedDict
+from typing import NamedTuple, Self, TypedDict
 
 import cv2
 import numpy as np
@@ -53,6 +53,71 @@ FC_DEFAULTS: dict[int, FCDefaults] = {
     2: FCDefaults(z_range_um=50, z_speed_um_s=250, exposure_ms=1, gain=1.0),  # 10x
     3: FCDefaults(z_range_um=40, z_speed_um_s=75, exposure_ms=1, gain=1.0),  # 20x
     4: FCDefaults(z_range_um=30, z_speed_um_s=25, exposure_ms=2, gain=1.0),  # 50x
+}
+
+
+class AFDefaults(NamedTuple):
+    """Per-objective multi-pass autofocus defaults.
+
+    Speeds are max safe coarse speeds from systematic AF speed sweep (2026-02-26,
+    90nm substrate). Pass ranges sized so each refinement captures ≥3 points from
+    the coarser pass (at ~60 fps). Final pass gives 2-3 points within DOF.
+    """
+
+    coarse_range_um: float
+    coarse_speed_um_s: float
+    fine_range_um: float
+    fine_speed_um_s: float
+    super_fine_range_um: float | None  # None = skip super-fine pass
+    super_fine_speed_um_s: float | None
+
+    def with_overrides(self, **kwargs) -> Self:
+        """Return a copy with specified fields replaced."""
+        return self._replace(**kwargs)
+
+
+# Keyed by nosepiece position (1-indexed).
+AF_DEFAULTS: dict[int, AFDefaults] = {
+    6: AFDefaults(  # 2.5x — two-pass (coarse → fine)
+        coarse_range_um=2000,
+        coarse_speed_um_s=4000,
+        fine_range_um=200,
+        fine_speed_um_s=1000,
+        super_fine_range_um=None,
+        super_fine_speed_um_s=None,
+    ),
+    1: AFDefaults(  # 5x — two-pass
+        coarse_range_um=1000,
+        coarse_speed_um_s=2000,
+        fine_range_um=100,
+        fine_speed_um_s=500,
+        super_fine_range_um=None,
+        super_fine_speed_um_s=None,
+    ),
+    2: AFDefaults(  # 10x — three-pass
+        coarse_range_um=1000,
+        coarse_speed_um_s=1500,
+        fine_range_um=75,
+        fine_speed_um_s=500,
+        super_fine_range_um=50,
+        super_fine_speed_um_s=250,
+    ),
+    3: AFDefaults(  # 20x — three-pass
+        coarse_range_um=500,
+        coarse_speed_um_s=1250,
+        fine_range_um=65,
+        fine_speed_um_s=250,
+        super_fine_range_um=40,
+        super_fine_speed_um_s=75,
+    ),
+    4: AFDefaults(  # 50x — three-pass
+        coarse_range_um=100,
+        coarse_speed_um_s=400,
+        fine_range_um=20,
+        fine_speed_um_s=100,
+        super_fine_range_um=30,
+        super_fine_speed_um_s=25,
+    ),
 }
 
 
@@ -780,97 +845,84 @@ def _focus_and_capture_impl(
 def continuous_autofocus(
     scope: "Microscope",
     *,
-    z_range_um: float | None = None,
+    af_defaults: AFDefaults | None = None,
     z_start_um: float | None = None,
     z_max_safe_um: float | None = None,
-    z_speed_um_s: float | None = None,
-    fine_pass: bool = False,
-    fine_range_um: float = 50.0,
-    fine_speed_factor: float = 0.25,
-    super_fine_pass: bool = False,
-    super_fine_range_um: float = 10.0,
-    super_fine_speed_um_s: float = 20.0,
     sharpness_method: str = "tenengrad",
     store_frames: bool = False,
     save_best_frame: bool = False,
     compute_all_metrics: bool = False,
     settle_time_s: float = 0.2,
-    min_dynamic_range: float = 0.20,
     move_to_best_z: bool = True,
 ) -> AutofocusResult:
     """Perform continuous Z-scan autofocus.
 
-    Scans the Z axis downward while capturing frames, computes sharpness
-    for each frame, and moves to the Z position with maximum sharpness.
-
-    Safety behavior:
-    - Queries nosepiece directly to get current objective position
-    - Auto-calculates safe range from objective's working distance
-    - Raises ValueError if z_range_um exceeds safe range for objective
-    - Raises ValueError if z_start_um would exceed limits
+    Multi-pass Z scan: coarse pass finds approximate focus, fine pass refines,
+    optional super-fine pass (when defined in defaults) achieves DOF-level
+    precision. Pass structure and speeds are controlled by af_defaults.
 
     Args:
         scope: Microscope facade instance.
-        z_range_um: Z scan range in µm. None = auto from objective
-            (working_distance / 3, max 500µm).
-        z_start_um: Starting Z position in µm. None = current position.
-        z_max_safe_um: Hard upper limit for Z. Raises if z_start > this.
-        z_speed_um_s: Z axis speed in µm/s. None = use current speed.
-            Slower speeds capture more frames for better precision.
-        fine_pass: If True, do a second pass with fine_range_um around best Z.
-        fine_range_um: Range for fine pass (default 50µm).
-        fine_speed_factor: Speed multiplier for fine pass (default 0.25 = 1/4 speed).
-            Slower fine pass improves precision in the critical region.
-        super_fine_pass: If True, do a third pass with super_fine_range_um around
-            best Z at super_fine_speed_um_s. Implies fine_pass=True (three-pass).
-        super_fine_range_um: Range for super fine pass (default 10µm).
-        super_fine_speed_um_s: Absolute Z speed for super fine pass (default 20µm/s).
-        sharpness_method: "tenengrad" (default) or "laplacian". Laplacian is more
-            reliable for low-contrast areas and less fooled by bright blurry blobs.
+        af_defaults: Pass parameters (speeds, ranges). None = look up from
+            AF_DEFAULTS for the current objective. Use
+            ``AF_DEFAULTS[pos].with_overrides(coarse_range_um=...)`` to tweak.
+        z_start_um: Center of coarse scan in µm. None = current Z position.
+        z_max_safe_um: Hard upper Z limit. Raises if z_start exceeds this.
+        sharpness_method: "tenengrad" (default) or "laplacian".
         store_frames: If True, store images in result.frames for debugging.
         save_best_frame: If True, populate best_frame with the highest-sharpness
             frame across all passes.
-        compute_all_metrics: If True, compute all 5 sharpness metrics per frame
-            (tenengrad, laplacian, brenner, normalized_variance, vollath_f4).
-            Results stored in each sharpness_curve entry's "metrics" dict.
-        settle_time_s: Settle time in seconds after final Z move, before
-            capturing final_sharpness (default 0.2s).
-        min_dynamic_range: Unused, kept for API compatibility.
+        compute_all_metrics: If True, compute all 5 sharpness metrics per frame.
+        settle_time_s: Settle time after final Z move (default 0.2s).
+        move_to_best_z: Move to best Z after scan (default True).
 
     Returns:
         AutofocusResult with best Z, sharpness curve, and scan statistics.
-        Always selects the best Z found across all passes. Quality metrics
-        (dynamic_range, peak_near_edge) are reported for downstream filtering.
 
     Raises:
         ValueError: If Z range/position exceeds safety limits.
     """
-    # Super-fine implies fine (three-pass: coarse → fine → super-fine)
-    if super_fine_pass:
-        fine_pass = True
-
-    # Extract subsystems from facade
     z_axis = scope.z
     camera = scope.camera
     acquisition = scope.acquisition
     context = scope.context
 
     current_z = z_axis.position_um
-
-    # Save original speed for restoration after scan
     original_speed = z_axis.velocity_um_s
+    objective_position = scope.nosepiece.position
 
-    # Set Z speed if specified
-    if z_speed_um_s is not None:
-        z_axis.set_velocity_um_s(z_speed_um_s)
+    # Resolve AF defaults: explicit > per-objective table > safety fallback
+    af = af_defaults or AF_DEFAULTS.get(objective_position)
+    if af is None:
+        working_dist = WORKING_DISTANCES_UM.get(objective_position, 1000)
+        safe_range = min(working_dist / 3, 500)
+        af = AFDefaults(
+            coarse_range_um=safe_range,
+            coarse_speed_um_s=original_speed,
+            fine_range_um=50.0,
+            fine_speed_um_s=original_speed * 0.25,
+            super_fine_range_um=None,
+            super_fine_speed_um_s=None,
+        )
 
-    # Get safe range based on objective
-    safe_range, objective_position = _get_safe_range(scope.nosepiece, z_range_um)
+    # Validate coarse range against working distance
+    working_dist = WORKING_DISTANCES_UM.get(objective_position, 1000)
+    if af.coarse_range_um > working_dist / 2:
+        raise ValueError(
+            f"Coarse range {af.coarse_range_um}µm exceeds safe limit for "
+            f"objective position {objective_position} (working distance: {working_dist}µm)"
+        )
+
+    coarse_speed = af.coarse_speed_um_s
+    do_fine = True  # always do fine pass
+    do_super_fine = af.super_fine_speed_um_s is not None
+
+    z_axis.set_velocity_um_s(coarse_speed)
 
     # Calculate scan bounds (centered on current/specified position, scan downward)
     initial_z = z_start_um if z_start_um is not None else current_z
-    z_start = initial_z + safe_range / 2  # Start high
-    z_end = initial_z - safe_range / 2  # End low (away from sample)
+    z_start = initial_z + af.coarse_range_um / 2  # Start high
+    z_end = initial_z - af.coarse_range_um / 2  # End low (away from sample)
 
     # Validate against limits
     _validate_z_limits(z_axis, z_start, z_end, z_max_safe_um)
@@ -924,30 +976,27 @@ def continuous_autofocus(
     actual_fine_z_end = None
 
     # Detect if coarse peak is near scan boundary (truncated curve)
-    edge_margin = safe_range * 0.10
+    edge_margin = af.coarse_range_um * 0.10
     peak_near_edge = (best_z >= z_start - edge_margin) or (best_z <= z_end + edge_margin)
 
-    # Optional fine pass
+    # Fine pass
     fine_curve: list[SharpnessSample] = []
     fine_frames = None
 
-    if fine_pass:
-        fine_z_start = best_z + fine_range_um / 2
-        fine_z_end = best_z - fine_range_um / 2
+    if do_fine:
+        fine_z_start = best_z + af.fine_range_um / 2
+        fine_z_end = best_z - af.fine_range_um / 2
 
         # Clamp to axis limits
         fine_z_start = min(fine_z_start, z_axis.max_um)
         fine_z_end = max(fine_z_end, z_axis.min_um)
 
-        # Record actual fine pass bounds for diagnostics
         actual_fine_z_start = fine_z_start
         actual_fine_z_end = fine_z_end
 
-        # Position at full speed, then set slow scan speed
+        # Position at coarse speed, then set fine scan speed
         z_axis.move_to_corrected(fine_z_start)
-        if fine_speed_factor < 1.0:
-            coarse_speed = z_speed_um_s if z_speed_um_s is not None else original_speed
-            z_axis.set_velocity_um_s(coarse_speed * fine_speed_factor)
+        z_axis.set_velocity_um_s(af.fine_speed_um_s)
 
         fine_zsr = _run_z_scan(
             z_axis=z_axis,
@@ -962,12 +1011,9 @@ def continuous_autofocus(
         )
         fine_curve = fine_zsr.sharpness_curve
         fine_frames = fine_zsr.frames
-        fine_duration = fine_zsr.timing.scan_s
-        fine_frame_count = fine_zsr.frame_count
-        fine_z_count = fine_zsr.z_sample_count
 
-        # Restore speed after fine pass (before final move)
-        z_axis.set_velocity_um_s(z_speed_um_s if z_speed_um_s is not None else original_speed)
+        # Restore coarse speed for positioning
+        z_axis.set_velocity_um_s(coarse_speed)
 
         if fine_curve:
             fine_best = max(fine_curve, key=lambda r: r["sharpness"])
@@ -976,19 +1022,21 @@ def continuous_autofocus(
                 best_sharpness = fine_best["sharpness"]
                 overall_best_frame = fine_zsr.best_frame
 
-            scan_duration += fine_duration
-            frame_count += fine_frame_count
-            z_sample_count += fine_z_count
+            scan_duration += fine_zsr.timing.scan_s
+            frame_count += fine_zsr.frame_count
+            z_sample_count += fine_zsr.z_sample_count
 
-    # Optional super fine pass
-    super_fine_curve = []
+    # Super-fine pass (only for three-pass objectives)
+    super_fine_curve: list[SharpnessSample] = []
     super_fine_frames_result = None
     actual_super_fine_z_start = None
     actual_super_fine_z_end = None
 
-    if super_fine_pass:
-        sf_z_start = best_z + super_fine_range_um / 2
-        sf_z_end = best_z - super_fine_range_um / 2
+    if do_super_fine:
+        assert af.super_fine_range_um is not None
+        assert af.super_fine_speed_um_s is not None
+        sf_z_start = best_z + af.super_fine_range_um / 2
+        sf_z_end = best_z - af.super_fine_range_um / 2
 
         # Clamp to axis limits
         sf_z_start = min(sf_z_start, z_axis.max_um)
@@ -997,9 +1045,9 @@ def continuous_autofocus(
         actual_super_fine_z_start = sf_z_start
         actual_super_fine_z_end = sf_z_end
 
-        # Position at full speed, then set slow scan speed
+        # Position at coarse speed, then set super-fine scan speed
         z_axis.move_to_corrected(sf_z_start)
-        z_axis.set_velocity_um_s(super_fine_speed_um_s)
+        z_axis.set_velocity_um_s(af.super_fine_speed_um_s)
 
         sf_zsr = _run_z_scan(
             z_axis=z_axis,
@@ -1012,27 +1060,19 @@ def continuous_autofocus(
             compute_all_metrics=compute_all_metrics,
             save_best_frame=save_best_frame,
         )
-        sf_curve = sf_zsr.sharpness_curve
-        sf_frames = sf_zsr.frames
-        sf_duration = sf_zsr.timing.scan_s
-        sf_frame_count = sf_zsr.frame_count
-        sf_z_count = sf_zsr.z_sample_count
 
-        # Restore speed after super fine pass
-        z_axis.set_velocity_um_s(z_speed_um_s if z_speed_um_s is not None else original_speed)
-
-        if sf_curve:
-            super_fine_curve = sf_curve
-            super_fine_frames_result = sf_frames
-            sf_best = max(sf_curve, key=lambda r: r["sharpness"])
+        if sf_zsr.sharpness_curve:
+            super_fine_curve = sf_zsr.sharpness_curve
+            super_fine_frames_result = sf_zsr.frames
+            sf_best = max(sf_zsr.sharpness_curve, key=lambda r: r["sharpness"])
             if sf_best["sharpness"] > best_sharpness:
                 best_z = sf_best["z_um"]
                 best_sharpness = sf_best["sharpness"]
                 overall_best_frame = sf_zsr.best_frame
 
-            scan_duration += sf_duration
-            frame_count += sf_frame_count
-            z_sample_count += sf_z_count
+            scan_duration += sf_zsr.timing.scan_s
+            frame_count += sf_zsr.frame_count
+            z_sample_count += sf_zsr.z_sample_count
 
     # Restore original Z speed
     z_axis.set_velocity_um_s(original_speed)
@@ -1066,7 +1106,7 @@ def continuous_autofocus(
         final_sharpness=final_sharpness,
         dynamic_range=dynamic_range,
         mean_intensity=mean_intensity,
-        z_range_um=safe_range,
+        z_range_um=af.coarse_range_um,
         objective_position=objective_position,
         scan_duration_s=scan_duration,
         frame_count=frame_count,

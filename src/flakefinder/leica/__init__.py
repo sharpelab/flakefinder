@@ -56,7 +56,9 @@ with contextlib.suppress(Exception):
     ctypes.windll.winmm.timeBeginPeriod(1)  # type: ignore[attr-defined]
 
 from .autofocus import (
+    AF_DEFAULTS,
     WORKING_DISTANCES_UM,
+    AFDefaults,
     AutofocusFrame,
     AutofocusResult,
     continuous_autofocus,
@@ -147,6 +149,8 @@ __all__ = [
     "start_polling",
     "start_motion_polling",
     # Autofocus
+    "AF_DEFAULTS",
+    "AFDefaults",
     "sharpness",
     "interpolate_position",
     "AutofocusFrame",
