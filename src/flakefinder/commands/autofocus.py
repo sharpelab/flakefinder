@@ -336,8 +336,8 @@ def main():
                 "y_um": target_y,
                 "z_initial_um": target_z,
                 "range_um": af_result.z_range_um,
-                "fine_pass": args.fine,
-                "super_fine_pass": args.super_fine,
+                "fine_pass": False,
+                "super_fine_pass": False,
                 "objective_position": af_result.objective_position,
             }
             summary["before"] = {
