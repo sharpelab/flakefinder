@@ -54,6 +54,27 @@ HBN_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
     (2.520, 4.636, 46.0),
 )
 
+# Starter calibration for hBN on 285nm SiO₂ (10x/20x measurements, no AFM).
+# Source: docs/hbn_285nm_calibration.md
+HBN_285NM_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
+    (-0.29, 0.15, 1.0),  # very thin — clipboard crop, left/right contrast
+    (-0.46, 0.19, 1.5),  # very thin — clipboard crop, top/bottom
+    (-0.70, 0.30, 2.0),  # thin — clipboard crop, top/bottom
+    (-0.63, 0.39, 2.5),  # thin — clipboard crop, 20x top-left/bottom-right
+    (-0.90, 0.42, 3.0),
+    (-0.90, 0.55, 5.0),
+    (-0.82, 0.65, 7.0),
+    (-0.88, 0.79, 8.0),  # clipboard crop, bottom flake
+    (-0.93, 0.83, 8.5),  # clipboard crop, top-left flake
+    (-0.98, 0.83, 9.0),  # clipboard crop, thick per user
+    (-0.88, 1.00, 10.0),  # clipboard crop, bottom flake
+    (-0.81, 1.00, 10.0),  # clipboard crop, top flake
+    (-0.74, 1.13, 12.0),
+    (-0.56, 1.39, 16.0),
+    (-0.43, 1.48, 17.0),  # clipboard crop, bottom-right flake
+    (-0.53, 1.62, 18.0),
+)
+
 
 class _DetectionBase(TypedDict):
     bbox: XYWHRect
@@ -152,6 +173,48 @@ def _score_hbn_medium(det: Detection) -> tuple[int, float]:
         if (g > 0.8 and bg_ratio > 1.2) or ent > 4.65:
             tier = 2
     elif pr < 1.50 and cd < 0.15 and ent < 4.65 and size_um2 >= 500.0:
+        tier = 2
+    else:
+        tier = 3
+
+    ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
+    g_penalty = 1.0 / (1.0 + 0.2 * max(g - 1.0, 0))
+    log2_size = float(np.log2(max(size_um2, 1.0)))
+    score = round(
+        log2_size * log2_size * np.exp(-cd * 8) * ar_penalty * g_penalty,
+        4,
+    )
+    return tier, score
+
+
+def _score_hbn_medium_285nm(det: Detection) -> tuple[int, float]:
+    """hBN medium on 285nm SiO₂: tighter R gate to reject tape residue."""
+    pr = det["perim_ratio"]
+    cd = det["cal_dist"]
+    g = det["contrast_rgb"][1]
+    r = det["contrast_rgb"][0]
+    ent = det.get("entropy", det.get("g_entropy", 99.0))
+    ar = det.get("aspect_ratio", 1.0)
+    size_um2 = det["size_um2"]
+
+    b = det["contrast_rgb"][2]
+    # On 285nm, real hBN has R < -0.7 (thin) to -0.5 (medium).
+    # Tape residue sits at R ~ -0.63. Gate at R < -0.7 rejects most tape.
+    # B < -0.05 separates real thin hBN (B ~ -0.12) from tape (B ~ -0.02).
+    t1 = (
+        pr < 1.50
+        and cd < 0.20
+        and g >= 0.0
+        and g < 3.0
+        and r < -0.70
+        and b < -0.08
+        and ent < 4.5
+        and ar < 6.0
+        and size_um2 >= 400.0
+    )
+    if t1:
+        tier = 1
+    elif pr < 1.50 and cd < 0.25 and r < -0.45 and ent < 4.65 and size_um2 >= 400.0:
         tier = 2
     else:
         tier = 3
@@ -395,6 +458,39 @@ class DetectorConfig:
         )
 
     @classmethod
+    def hbn_medium_285nm(cls) -> DetectorConfig:
+        """hBN medium flake detection on 285nm SiO₂ substrates."""
+        return cls(
+            name="hBN (medium) · 285nm SiO₂",
+            contrast_mode=ContrastMode.ABOVE,
+            contrast_offset=7.0,
+            min_size_um2=400.0,
+            edge_margin_px=50,
+            morph_kernel_size=5,
+            entropy_threshold=0.4,
+            subseg_min_std=0.4,
+            cal_points=HBN_285NM_CAL_POINTS,
+            cal_g_range=(-0.5, 3.0),
+            cal_dist_match=0.5,
+            cal_dist_possible=1.0,
+            thin_max_nm=15.0,
+            medium_max_nm=24.0,
+            non_match_label="non-hBN",
+            white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
+            score_fn=_score_hbn_medium_285nm,
+            tier1_perim_ratio=1.50,
+            tier1_cal_dist=0.20,
+            tier1_g_min=0.0,
+            tier1_g_max=3.0,
+            tier1_r_max=-0.70,
+            tier1_entropy_max=4.5,
+            tier1_min_size_um2=400.0,
+            tier2_perim_ratio=1.50,
+            tier2_cal_dist=0.25,
+            tier2_entropy_max=4.65,
+        )
+
+    @classmethod
     def graphene(cls) -> DetectorConfig:
         """Graphene detection preset (stub -- no calibration curve yet)."""
         return cls(
@@ -465,6 +561,7 @@ class DetectorConfig:
         return {
             "hbn_thin": cls.hbn_thin,
             "hbn_medium": cls.hbn_medium,
+            "hbn_medium_285nm": cls.hbn_medium_285nm,
             "graphene": cls.graphene,
             "wse2": cls.wse2,
         }
