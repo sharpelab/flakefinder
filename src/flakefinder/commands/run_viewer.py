@@ -1365,7 +1365,7 @@ class RunViewerGUI:
         try:
             config = DetectorConfig.from_material(preset)
         except ValueError:
-            config = DetectorConfig.hbn_thin()
+            config = DetectorConfig.hbn_medium()
         self._filter_preset_config = config
 
         filter_frame = ttk.LabelFrame(self._detail_frame, text="Filters", padding=6)

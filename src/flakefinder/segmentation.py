@@ -131,31 +131,31 @@ class Detection(_DetectionBase, total=False):
 # ============================================================================
 
 
-def _score_hbn_thin(det: Detection) -> tuple[int, float]:
-    """hBN thin: size + cal_dist dominant, light thickness penalty."""
-    pr = det["perim_ratio"]
-    cd = det["cal_dist"]
-    g = det["contrast_rgb"][1]
-    r = det["contrast_rgb"][0]
-    ent = det.get("entropy", det.get("g_entropy", 99.0))
-    ar = det.get("aspect_ratio", 1.0)
-    size_um2 = det["size_um2"]
-
-    if pr < 1.50 and cd < 0.3 and g >= 0.0 and g < 1.2 and r < -0.5 and ent < 99.0 and ar < 6.0 and size_um2 >= 0.0:
-        tier = 1
-    elif pr < 1.35 and cd < 0.3 and ent < 4.5:
-        tier = 2
-    else:
-        tier = 3
-
-    ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
-    g_penalty = 1.0 / (1.0 + 0.2 * max(g - 1.0, 0))
-    log2_size = float(np.log2(max(size_um2, 1.0)))
-    score = round(
-        log2_size * log2_size * np.exp(-cd * 8) * ar_penalty * g_penalty,
-        4,
-    )
-    return tier, score
+# def _score_hbn_thin(det: Detection) -> tuple[int, float]:
+#     """hBN thin: size + cal_dist dominant, light thickness penalty."""
+#     pr = det["perim_ratio"]
+#     cd = det["cal_dist"]
+#     g = det["contrast_rgb"][1]
+#     r = det["contrast_rgb"][0]
+#     ent = det.get("entropy", det.get("g_entropy", 99.0))
+#     ar = det.get("aspect_ratio", 1.0)
+#     size_um2 = det["size_um2"]
+#
+#     if pr < 1.50 and cd < 0.3 and g >= 0.0 and g < 1.2 and r < -0.5 and ent < 99.0 and ar < 6.0 and size_um2 >= 0.0:
+#         tier = 1
+#     elif pr < 1.35 and cd < 0.3 and ent < 4.5:
+#         tier = 2
+#     else:
+#         tier = 3
+#
+#     ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
+#     g_penalty = 1.0 / (1.0 + 0.2 * max(g - 1.0, 0))
+#     log2_size = float(np.log2(max(size_um2, 1.0)))
+#     score = round(
+#         log2_size * log2_size * np.exp(-cd * 8) * ar_penalty * g_penalty,
+#         4,
+#     )
+#     return tier, score
 
 
 def _score_hbn_medium(det: Detection) -> tuple[int, float]:
@@ -395,38 +395,38 @@ class DetectorConfig:
         """Compute (tier, score) via preset-specific scoring function."""
         return self.score_fn(det)
 
-    @classmethod
-    def hbn_thin(cls) -> DetectorConfig:
-        """hBN thin flake detection preset."""
-        return cls(
-            name="hBN (thin) · 90nm SiO₂",
-            contrast_mode=ContrastMode.ABOVE,
-            contrast_offset=15.0,
-            min_size_um2=400.0,
-            edge_margin_px=50,
-            morph_kernel_size=5,
-            entropy_threshold=0.4,
-            subseg_min_std=0.8,
-            cal_points=HBN_CAL_POINTS,
-            cal_g_range=(-0.5, 6.0),
-            cal_dist_match=0.5,
-            cal_dist_possible=1.0,
-            thin_max_nm=15.0,
-            medium_max_nm=24.0,
-            non_match_label="non-hBN",
-            white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
-            score_fn=_score_hbn_thin,
-            tier1_perim_ratio=1.50,
-            tier1_cal_dist=0.3,
-            tier1_g_min=0.0,
-            tier1_g_max=1.2,
-            tier1_r_max=-0.5,
-            tier1_entropy_max=99.0,
-            tier1_min_size_um2=0.0,
-            tier2_perim_ratio=1.35,
-            tier2_cal_dist=0.3,
-            tier2_entropy_max=4.5,
-        )
+    # @classmethod
+    # def hbn_thin(cls) -> DetectorConfig:
+    #     """hBN thin flake detection preset."""
+    #     return cls(
+    #         name="hBN (thin) · 90nm SiO₂",
+    #         contrast_mode=ContrastMode.ABOVE,
+    #         contrast_offset=15.0,
+    #         min_size_um2=400.0,
+    #         edge_margin_px=50,
+    #         morph_kernel_size=5,
+    #         entropy_threshold=0.4,
+    #         subseg_min_std=0.8,
+    #         cal_points=HBN_CAL_POINTS,
+    #         cal_g_range=(-0.5, 6.0),
+    #         cal_dist_match=0.5,
+    #         cal_dist_possible=1.0,
+    #         thin_max_nm=15.0,
+    #         medium_max_nm=24.0,
+    #         non_match_label="non-hBN",
+    #         white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
+    #         score_fn=_score_hbn_thin,
+    #         tier1_perim_ratio=1.50,
+    #         tier1_cal_dist=0.3,
+    #         tier1_g_min=0.0,
+    #         tier1_g_max=1.2,
+    #         tier1_r_max=-0.5,
+    #         tier1_entropy_max=99.0,
+    #         tier1_min_size_um2=0.0,
+    #         tier2_perim_ratio=1.35,
+    #         tier2_cal_dist=0.3,
+    #         tier2_entropy_max=4.5,
+    #     )
 
     @classmethod
     def hbn_medium(cls) -> DetectorConfig:
@@ -563,7 +563,7 @@ class DetectorConfig:
     @classmethod
     def _presets(cls) -> dict[str, Callable[[], DetectorConfig]]:
         return {
-            "hbn_thin": cls.hbn_thin,
+            # "hbn_thin": cls.hbn_thin,
             "hbn_medium": cls.hbn_medium,
             "hbn_medium_285nm": cls.hbn_medium_285nm,
             "graphene": cls.graphene,
