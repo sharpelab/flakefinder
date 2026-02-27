@@ -1,0 +1,751 @@
+"""Predict camera-channel contrast for hBN on SiO₂/Si via transfer matrix method.
+
+Uses the propagation matrix approach from Aaron's graphene_optics notebook,
+swapping in hBN optical constants and convolving with the Sony IMX183 (Leica K5C)
+RGB Bayer filter response to predict per-channel contrast.
+
+References:
+  - Transfer matrix: Heavens, "Optical Properties of Thin Solid Films"
+  - Si/SiO₂ index data: refractiveindex.info (Malitson for SiO₂, Aspnes for Si)
+  - hBN index: Lee et al. 2019 (Sellmeier), Zotev et al. 2023 (extraordinary)
+  - IMX183 spectral response: Basler acA5472-5gc documentation
+"""
+
+from __future__ import annotations
+
+import argparse
+import math
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+# ---------------------------------------------------------------------------
+# Material data (Si, SiO₂) — loaded from Aaron's CSV files
+# ---------------------------------------------------------------------------
+_DATA_DIR = Path.home() / "sharpelab" / "graphene_optics"
+
+
+def _load_index_csv(name: str) -> np.ndarray:
+    """Load refractive index CSV, return array with wavelength in nm."""
+    data = np.loadtxt(_DATA_DIR / name, delimiter=",", skiprows=1)
+    data[:, 0] *= 1000  # µm → nm
+    return data
+
+
+_SI_DATA = _load_index_csv("Si_index.csv")
+_SIO2_DATA = _load_index_csv("SiO2_index.csv")
+
+
+def _interp_index(lamb_nm: np.ndarray, data: np.ndarray) -> np.ndarray:
+    """Interpolate complex refractive index n - jk at wavelengths (nm)."""
+    n = np.interp(lamb_nm, data[:, 0], data[:, 1])
+    k = np.interp(lamb_nm, data[:, 0], data[:, 2])
+    return n - 1j * k
+
+
+# ---------------------------------------------------------------------------
+# hBN refractive index models
+# ---------------------------------------------------------------------------
+_HBN_LAYER_THICKNESS_NM = 0.333  # monolayer, nm
+
+
+def n_hbn_lee(lamb_nm: np.ndarray) -> np.ndarray:
+    """Lee et al. 2019 Sellmeier (ordinary / in-plane). ~2.1–2.2 in visible."""
+    lam_um = lamb_nm / 1000
+    n2 = 1 + 3.263 * lam_um**2 / (lam_um**2 - 0.1644**2)
+    return np.sqrt(n2) + 0j
+
+
+_ZOTEV_E_DATA_NM = np.array(
+    [
+        [380, 1.6708],
+        [400, 1.6639],
+        [450, 1.6462],
+        [500, 1.6289],
+        [550, 1.5879],
+        [600, 1.5800],
+        [650, 1.5656],
+        [700, 1.5568],
+        [750, 1.5545],
+        [800, 1.5450],
+    ]
+)
+
+
+def n_hbn_zotev_e(lamb_nm: np.ndarray) -> np.ndarray:
+    """Zotev et al. 2023 extraordinary (out-of-plane). ~1.55–1.67 in visible."""
+    n = np.interp(lamb_nm, _ZOTEV_E_DATA_NM[:, 0], _ZOTEV_E_DATA_NM[:, 1])
+    return n + 0j
+
+
+def n_hbn_constant(value: float):
+    """Return a callable that gives constant (real) n at any wavelength."""
+
+    def _n(lamb_nm: np.ndarray) -> np.ndarray:
+        return np.full_like(lamb_nm, value, dtype=complex)
+
+    return _n
+
+
+_N_MODELS: dict[str, object] = {
+    "lee": n_hbn_lee,
+    "zotev-e": n_hbn_zotev_e,
+    "sqrt3": n_hbn_constant(math.sqrt(3)),
+}
+
+
+# ---------------------------------------------------------------------------
+# Transfer matrix reflectance (vectorised over wavelength)
+# ---------------------------------------------------------------------------
+def _reflectance_at_angle(
+    lamb_nm: np.ndarray,
+    n_film_fn,
+    n_layers: int,
+    t_oxide_nm: float,
+    theta0: float,
+    pol: str,
+) -> np.ndarray:
+    """R(λ) for air/film/SiO₂/Si at incidence angle theta0, single polarisation.
+
+    pol='s': TE (E perpendicular to plane of incidence)
+    pol='p': TM (E in plane of incidence)
+    """
+    n0 = 1.0
+    sin_t0 = np.sin(theta0)
+    cos_t0 = np.cos(theta0)
+
+    if n_layers == 0:
+        n1 = np.ones_like(lamb_nm, dtype=complex)
+        cos_t1 = np.full_like(lamb_nm, cos_t0, dtype=complex)
+        beta1 = np.zeros_like(lamb_nm, dtype=complex)
+    else:
+        n1 = n_film_fn(lamb_nm)
+        cos_t1 = np.sqrt(1 - (n0 * sin_t0 / n1) ** 2)
+        t_film = _HBN_LAYER_THICKNESS_NM * n_layers
+        beta1 = 2 * np.pi * n1 * cos_t1 * t_film / lamb_nm
+
+    n2 = _interp_index(lamb_nm, _SIO2_DATA)
+    cos_t2 = np.sqrt(1 - (n0 * sin_t0 / n2) ** 2)
+    beta2 = 2 * np.pi * n2 * cos_t2 * t_oxide_nm / lamb_nm
+
+    n3 = _interp_index(lamb_nm, _SI_DATA)
+    cos_t3 = np.sqrt(1 - (n0 * sin_t0 / n3) ** 2)
+
+    if pol == "s":
+        r01 = (n0 * cos_t0 - n1 * cos_t1) / (n0 * cos_t0 + n1 * cos_t1)
+        r12 = (n1 * cos_t1 - n2 * cos_t2) / (n1 * cos_t1 + n2 * cos_t2)
+        r23 = (n2 * cos_t2 - n3 * cos_t3) / (n2 * cos_t2 + n3 * cos_t3)
+    else:
+        r01 = (n1 * cos_t0 - n0 * cos_t1) / (n1 * cos_t0 + n0 * cos_t1)
+        r12 = (n2 * cos_t1 - n1 * cos_t2) / (n2 * cos_t1 + n1 * cos_t2)
+        r23 = (n3 * cos_t2 - n2 * cos_t3) / (n3 * cos_t2 + n2 * cos_t3)
+
+    eb1pb2 = np.exp(1j * (beta1 + beta2))
+    eb1mb2 = np.exp(1j * (beta1 - beta2))
+
+    num = r01 * eb1pb2 + r12 * np.conj(eb1mb2) + r23 * np.conj(eb1pb2) + r01 * r12 * r23 * eb1mb2
+    den = eb1pb2 + r01 * r12 * np.conj(eb1mb2) + r01 * r23 * np.conj(eb1pb2) + r12 * r23 * eb1mb2
+
+    r = num / den
+    return (r * r.conjugate()).real
+
+
+def reflectance(
+    lamb_nm: np.ndarray,
+    n_film_fn,
+    n_layers: int,
+    t_oxide_nm: float,
+    na: float = 0.0,
+    n_angles: int = 21,
+) -> np.ndarray:
+    """Reflectance R(λ) for air / film / SiO₂ / Si stack.
+
+    na=0: normal incidence.  na>0: integrate over the objective cone,
+    averaging s- and p-polarisations, weighted by sin(θ)cos(θ).
+    """
+    if na <= 0:
+        return _reflectance_at_angle(lamb_nm, n_film_fn, n_layers, t_oxide_nm, 0.0, "s")
+
+    theta_max = np.arcsin(na)
+    nodes, weights = np.polynomial.legendre.leggauss(n_angles)
+    thetas = 0.5 * theta_max * (nodes + 1)
+    quad_w = 0.5 * theta_max * weights
+
+    R_avg = np.zeros_like(lamb_nm)
+    norm = 0.0
+    for theta, dw in zip(thetas, quad_w, strict=True):
+        w = np.sin(theta) * np.cos(theta) * dw
+        R_s = _reflectance_at_angle(lamb_nm, n_film_fn, n_layers, t_oxide_nm, theta, "s")
+        R_p = _reflectance_at_angle(lamb_nm, n_film_fn, n_layers, t_oxide_nm, theta, "p")
+        R_avg += 0.5 * (R_s + R_p) * w
+        norm += w
+    return R_avg / norm
+
+
+def spectral_contrast(
+    lamb_nm: np.ndarray,
+    n_film_fn,
+    n_layers: int,
+    t_oxide_nm: float,
+    na: float = 0.0,
+) -> np.ndarray:
+    """(R₀ - R) / R₀ at each wavelength."""
+    R = reflectance(lamb_nm, n_film_fn, n_layers, t_oxide_nm, na=na)
+    R0 = reflectance(lamb_nm, n_film_fn, 0, t_oxide_nm, na=na)
+    return (R0 - R) / R0
+
+
+# ---------------------------------------------------------------------------
+# Sony IMX183 (Leica K5C) Bayer filter spectral response
+# ---------------------------------------------------------------------------
+# From Basler acA5472-5gc documentation, 10 nm intervals, relative 0–1.
+_IMX183_WAVELENGTHS = np.arange(400, 710, 10, dtype=float)
+_IMX183_BLUE = np.array(
+    [
+        0.444,
+        0.541,
+        0.615,
+        0.683,
+        0.749,
+        0.787,
+        0.792,
+        0.764,
+        0.700,
+        0.600,
+        0.478,
+        0.341,
+        0.238,
+        0.169,
+        0.124,
+        0.091,
+        0.063,
+        0.047,
+        0.040,
+        0.036,
+        0.031,
+        0.026,
+        0.026,
+        0.030,
+        0.037,
+        0.047,
+        0.057,
+        0.066,
+        0.072,
+        0.076,
+        0.081,
+    ]
+)
+_IMX183_GREEN = np.array(
+    [
+        0.072,
+        0.057,
+        0.045,
+        0.039,
+        0.046,
+        0.060,
+        0.115,
+        0.300,
+        0.562,
+        0.790,
+        0.909,
+        0.967,
+        0.994,
+        0.997,
+        0.990,
+        0.957,
+        0.905,
+        0.839,
+        0.760,
+        0.640,
+        0.493,
+        0.355,
+        0.257,
+        0.201,
+        0.170,
+        0.151,
+        0.147,
+        0.161,
+        0.194,
+        0.234,
+        0.275,
+    ]
+)
+_IMX183_RED = np.array(
+    [
+        0.097,
+        0.070,
+        0.050,
+        0.037,
+        0.028,
+        0.024,
+        0.024,
+        0.028,
+        0.034,
+        0.037,
+        0.043,
+        0.060,
+        0.081,
+        0.082,
+        0.068,
+        0.057,
+        0.062,
+        0.204,
+        0.524,
+        0.820,
+        0.926,
+        0.911,
+        0.880,
+        0.847,
+        0.823,
+        0.789,
+        0.748,
+        0.700,
+        0.657,
+        0.634,
+        0.645,
+    ]
+)
+
+
+def _blackbody(lamb_nm: np.ndarray, T: float = 3200.0) -> np.ndarray:
+    """Planck spectral radiance (arbitrary units), wavelength in nm."""
+    lamb_m = lamb_nm * 1e-9
+    h = 6.626e-34
+    c = 3e8
+    k = 1.381e-23
+    return 2 * h * c**2 / lamb_m**5 / (np.exp(h * c / (lamb_m * k * T)) - 1)
+
+
+def camera_channel_contrast(
+    n_film_fn,
+    n_layers: int,
+    t_oxide_nm: float,
+    illumination: np.ndarray | None = None,
+    na: float = 0.0,
+) -> tuple[float, float, float]:
+    """Camera-channel contrast: (flake - substrate) / substrate per channel.
+
+    Integrates reflectance × sensor response × illumination per channel,
+    then takes the ratio.  Matches empirical: (pixel_flake - pixel_sub) / pixel_sub.
+
+    Returns (red_contrast, green_contrast, blue_contrast).
+    """
+    lamb = _IMX183_WAVELENGTHS
+    R = reflectance(lamb, n_film_fn, n_layers, t_oxide_nm, na=na)
+    R0 = reflectance(lamb, n_film_fn, 0, t_oxide_nm, na=na)
+
+    if illumination is None:
+        illum = np.ones_like(lamb)
+    else:
+        illum = illumination
+
+    contrasts = []
+    for S in (_IMX183_RED, _IMX183_GREEN, _IMX183_BLUE):
+        w = S * illum
+        V_flake = np.trapezoid(R * w, lamb)
+        V_sub = np.trapezoid(R0 * w, lamb)
+        contrasts.append(float((V_flake - V_sub) / V_sub))
+    return contrasts[0], contrasts[1], contrasts[2]
+
+
+# ---------------------------------------------------------------------------
+# Empirical calibration data (90nm SiO₂, 50x, AFM-verified)
+# From docs/bn_thickness_calibration.md
+# ---------------------------------------------------------------------------
+_CAL_DATA = np.array(
+    [
+        # thickness_nm, R_contrast, G_contrast
+        [4.6, -0.600, 0.286],
+        # [5.6,  -0.671, 0.079],  # excluded — anomalously low G
+        [6.3, -0.597, 0.219],
+        [7.0, -0.645, 0.313],
+        [8.1, -0.649, 0.376],
+        [8.6, -0.670, 0.409],
+        [10.2, -0.673, 0.526],
+        [14.1, -0.692, 0.948],
+        [18.0, -0.481, 1.613],
+        [26.0, 0.421, 2.907],
+        [46.0, 2.520, 4.636],
+    ]
+)
+
+# Empirical 285nm data (thickness guessed, R/G from real flakes)
+_CAL_DATA_285 = np.array(
+    [
+        # thickness_nm, R_contrast, G_contrast
+        [1.0, -0.29, 0.15],
+        [1.5, -0.46, 0.19],
+        [2.0, -0.70, 0.30],
+        [2.5, -0.63, 0.39],
+        [3.0, -0.90, 0.42],
+        [5.0, -0.90, 0.55],
+        [7.0, -0.82, 0.65],
+        [8.5, -0.93, 0.83],
+        [9.0, -0.98, 0.83],
+        [10.0, -0.88, 1.00],
+        [10.0, -0.81, 1.00],
+        [12.0, -0.74, 1.13],
+        [16.0, -0.56, 1.39],
+        [17.0, -0.43, 1.48],
+        [18.0, -0.53, 1.62],
+        [22.0, 1.02, 1.70],
+    ]
+)
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--n-hbn",
+        default="sqrt3",
+        help='Refractive index model: "lee", "zotev-e", "sqrt3", or a float (default: sqrt3)',
+    )
+    parser.add_argument(
+        "--max-layers",
+        type=int,
+        default=200,
+        help="Max hBN layers to compute (default: 200, ~67 nm)",
+    )
+    parser.add_argument(
+        "--oxide",
+        default="90,285",
+        help="Comma-separated oxide thicknesses in nm (default: 90,285)",
+    )
+    parser.add_argument(
+        "--na",
+        type=float,
+        default=0.75,
+        help="Objective NA for angle averaging (0 = normal incidence, default: 0.75 for 50x)",
+    )
+    parser.add_argument(
+        "--lamp",
+        type=float,
+        default=None,
+        metavar="TEMP_K",
+        help="Include blackbody illumination at TEMP_K (e.g. 3200 for halogen)",
+    )
+    parser.add_argument(
+        "--wb",
+        type=str,
+        default=None,
+        metavar="R,G,B",
+        help="Derive illumination from WB gains (lamp ∝ 1/gain per channel). E.g. '1.41,1.02,2.51' for hBN WB",
+    )
+    parser.add_argument(
+        "--fit",
+        action="store_true",
+        help="Fit ε_r (and optionally t_oxide) to empirical 90nm data",
+    )
+    parser.add_argument(
+        "--fit-oxide",
+        action="store_true",
+        help="Also fit oxide thickness (default: fix at 90nm)",
+    )
+    parser.add_argument(
+        "--fit-lamp",
+        action="store_true",
+        help="Also fit lamp color temperature as blackbody",
+    )
+    parser.add_argument(
+        "--r-offset",
+        type=float,
+        default=0.0,
+        help="Additive offset applied to empirical R data (for scope calibration)",
+    )
+    parser.add_argument(
+        "--g-offset",
+        type=float,
+        default=0.0,
+        help="Additive offset applied to empirical G data (for scope calibration)",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Save plot to file instead of showing",
+    )
+    args = parser.parse_args()
+
+    # Resolve n model
+    if args.n_hbn in _N_MODELS:
+        n_fn = _N_MODELS[args.n_hbn]
+        model_label = args.n_hbn
+        if args.n_hbn == "sqrt3":
+            model_label = f"√3 ≈ {math.sqrt(3):.4f}"
+    else:
+        try:
+            val = float(args.n_hbn)
+        except ValueError:
+            parser.error(f"Unknown n model: {args.n_hbn!r}")
+        n_fn = n_hbn_constant(val)
+        model_label = f"{val:.4f}"
+
+    oxides = [float(x) for x in args.oxide.split(",")]
+
+    # Illumination spectrum (must be set before fit)
+    illum = None
+    lamp_label = ""
+    if args.wb:
+        wb_vals = [float(x) for x in args.wb.split(",")]
+        if len(wb_vals) != 3:
+            parser.error("--wb requires R,G,B (3 values)")
+        wb_r, wb_g, wb_b = wb_vals
+        illum = _IMX183_RED / wb_r + _IMX183_GREEN / wb_g + _IMX183_BLUE / wb_b
+        illum /= illum.max()
+        lamp_label = f", WB {args.wb}"
+    elif args.lamp:
+        illum = _blackbody(_IMX183_WAVELENGTHS, args.lamp)
+        illum /= illum.max()
+        lamp_label = f", lamp {args.lamp:.0f}K"
+
+    # --- Fit ε_r to empirical data ---
+    if args.fit:
+        from scipy.optimize import minimize
+
+        cal = _CAL_DATA.copy()
+        max_t = cal[:, 0].max()
+        fit_layers = np.arange(0, int(max_t / _HBN_LAYER_THICKNESS_NM) + 2)
+
+        from scipy.interpolate import interp1d
+
+        def _rg_residuals(params):
+            i = 0
+            eps_r = params[i]
+            i += 1
+            t_ox = params[i] if args.fit_oxide else 90.0
+            if args.fit_oxide:
+                i += 1
+            T_lamp = params[i] if args.fit_lamp else None
+            if args.fit_lamp:
+                i += 1
+
+            n_val = np.sqrt(eps_r)
+            n_fn_fit = n_hbn_constant(n_val)
+
+            fit_illum = None
+            if T_lamp is not None:
+                fit_illum = _blackbody(_IMX183_WAVELENGTHS, T_lamp)
+                fit_illum /= fit_illum.max()
+            elif illum is not None:
+                fit_illum = illum
+
+            r_arr, g_arr = [], []
+            for nl in fit_layers:
+                r, g, _b = camera_channel_contrast(n_fn_fit, int(nl), t_ox, fit_illum, na=args.na)
+                r_arr.append(r)
+                g_arr.append(g)
+            r_thy = np.array(r_arr)
+            g_thy = np.array(g_arr)
+            t_thy = fit_layers * _HBN_LAYER_THICKNESS_NM
+
+            r_interp = interp1d(t_thy, r_thy, kind="linear", fill_value="extrapolate")
+            g_interp = interp1d(t_thy, g_thy, kind="linear", fill_value="extrapolate")
+
+            total = 0.0
+            for row in cal:
+                t_emp, r_emp, g_emp = row
+                r_t = float(r_interp(t_emp))
+                g_t = float(g_interp(t_emp))
+                total += (r_emp - r_t) ** 2 + (g_emp - g_t) ** 2
+            return total
+
+        x0, bounds = [3.0], [(1.5, 20.0)]
+        if args.fit_oxide:
+            x0.append(90.0)
+            bounds.append((70.0, 110.0))
+        if args.fit_lamp:
+            x0.append(3200.0)
+            bounds.append((2000.0, 8000.0))
+
+        result = minimize(_rg_residuals, x0, method="L-BFGS-B", bounds=bounds)
+
+        i = 0
+        eps_fit = result.x[i]
+        i += 1
+        n_fit = np.sqrt(eps_fit)
+        t_ox_fit = result.x[i] if args.fit_oxide else 90.0
+        if args.fit_oxide:
+            i += 1
+        T_lamp_fit = result.x[i] if args.fit_lamp else None
+        if args.fit_lamp:
+            i += 1
+
+        print(f"\n{'=' * 50}")
+        print("FIT RESULT:")
+        print(f"  ε_r    = {eps_fit:.4f}")
+        print(f"  n      = √ε_r = {n_fit:.4f}")
+        print(f"  t_ox   = {t_ox_fit:.1f} nm")
+        if T_lamp_fit is not None:
+            print(f"  T_lamp = {T_lamp_fit:.0f} K")
+        print(f"  RSS    = {result.fun:.6f}")
+        print(f"{'=' * 50}\n")
+
+        # Apply fit results
+        n_fn = n_hbn_constant(n_fit)
+        model_label = f"fit: n={n_fit:.3f} (ε_r={eps_fit:.3f})"
+        if args.fit_oxide:
+            model_label += f", t_ox={t_ox_fit:.1f}nm"
+            oxides = [t_ox_fit] + [o for o in oxides if o != 90]
+        if T_lamp_fit is not None:
+            model_label += f", {T_lamp_fit:.0f}K"
+            illum = _blackbody(_IMX183_WAVELENGTHS, T_lamp_fit)
+            illum /= illum.max()
+            lamp_label = f", lamp {T_lamp_fit:.0f}K"
+
+    layers = np.arange(0, args.max_layers + 1)
+    thickness_nm = layers * _HBN_LAYER_THICKNESS_NM
+
+    # Compute per-channel contrast for each oxide thickness
+    results = {}
+    for t_ox in oxides:
+        r_arr, g_arr, b_arr = [], [], []
+        for nl in layers:
+            r, g, b = camera_channel_contrast(n_fn, int(nl), t_ox, illum, na=args.na)
+            r_arr.append(r)
+            g_arr.append(g)
+            b_arr.append(b)
+        results[t_ox] = {
+            "R": np.array(r_arr),
+            "G": np.array(g_arr),
+            "B": np.array(b_arr),
+        }
+
+    # Plot: R/G contrast space, one subplot per oxide
+    n_ox = len(oxides)
+    fig, axes = plt.subplots(1, n_ox, figsize=(7 * n_ox, 6), squeeze=False)
+    na_label = f", NA={args.na}" if args.na > 0 else ", normal inc."
+    fig.suptitle(f"hBN on SiO₂/Si — R/G contrast space (n = {model_label}{lamp_label}{na_label})", fontsize=14)
+
+    # Thickness annotations: label every N layers
+    label_layers = [5, 10, 15, 20, 30, 45, 60, 90, 120, 150]
+    label_layers = [nl for nl in label_layers if nl <= args.max_layers]
+
+    for col, t_ox in enumerate(oxides):
+        data = results[t_ox]
+        ax = axes[0, col]
+
+        # Theory curve
+        ax.plot(data["G"], data["R"], "k-", linewidth=1.5, label="Theory", zorder=2)
+
+        # Annotate thickness at select points
+        for nl in label_layers:
+            t_nm = nl * _HBN_LAYER_THICKNESS_NM
+            g_val = data["G"][nl]
+            r_val = data["R"][nl]
+            ax.plot(g_val, r_val, "ko", markersize=4, zorder=3)
+            ax.annotate(
+                f"{t_nm:.0f}nm",
+                (g_val, r_val),
+                textcoords="offset points",
+                xytext=(6, 4),
+                fontsize=7,
+                color="0.3",
+            )
+
+        # Overlay empirical data
+        if col == 0:
+            cal_r = _CAL_DATA[:, 1] + args.r_offset
+            cal_g = _CAL_DATA[:, 2] + args.g_offset
+            ax.scatter(
+                cal_g,
+                cal_r,
+                c="tab:orange",
+                marker="o",
+                s=50,
+                zorder=5,
+                edgecolors="k",
+                linewidths=0.7,
+                label="AFM (90nm, shifted)",
+            )
+            for i, row in enumerate(_CAL_DATA):
+                t_nm = row[0]
+                ax.annotate(
+                    f"{t_nm:.0f}",
+                    (cal_g[i], cal_r[i]),
+                    textcoords="offset points",
+                    xytext=(6, -6),
+                    fontsize=7,
+                    color="tab:orange",
+                    fontweight="bold",
+                )
+
+        # Overlay 285nm empirical data on the 285nm panel
+        show_285 = abs(t_ox - 285) < 10 and len(_CAL_DATA_285) > 0
+        if show_285:
+            cal285_r = _CAL_DATA_285[:, 1] + args.r_offset
+            cal285_g = _CAL_DATA_285[:, 2] + args.g_offset
+            ax.scatter(
+                cal285_g,
+                cal285_r,
+                c="tab:red",
+                marker="s",
+                s=50,
+                zorder=5,
+                edgecolors="k",
+                linewidths=0.7,
+                label="285nm empirical",
+            )
+            for i, row in enumerate(_CAL_DATA_285):
+                t_nm = row[0]
+                ax.annotate(
+                    f"~{t_nm:.0f}",
+                    (cal285_g[i], cal285_r[i]),
+                    textcoords="offset points",
+                    xytext=(6, -6),
+                    fontsize=7,
+                    color="tab:red",
+                    fontweight="bold",
+                )
+
+        ax.axhline(0, color="k", linewidth=0.5, linestyle="--", alpha=0.5)
+        ax.axvline(0, color="k", linewidth=0.5, linestyle="--", alpha=0.5)
+        ax.set_xlabel("Green contrast")
+        ax.set_ylabel("Red contrast")
+        ax.set_title(f"{t_ox:.0f} nm SiO₂")
+        ax.legend(fontsize=9)
+        ax.grid(True, alpha=0.3)
+        ax.set_aspect("equal")
+
+    plt.tight_layout()
+
+    # Print fit diagnostics for the first oxide thickness
+    diag_ox = oxides[0]
+    if diag_ox in results:
+        data_diag = results[diag_ox]
+        from scipy.interpolate import interp1d
+
+        r_interp = interp1d(thickness_nm, data_diag["R"], kind="linear")
+        g_interp = interp1d(thickness_nm, data_diag["G"], kind="linear")
+        mask = _CAL_DATA[:, 0] <= thickness_nm[-1]
+        cal = _CAL_DATA[mask]
+        r_residuals = []
+        g_residuals = []
+        print(f"\n--- {diag_ox:.0f}nm fit diagnostics ---")
+        print(f"{'t(nm)':>6} {'R_emp':>8} {'R_thy':>8} {'R_off':>8} {'G_emp':>8} {'G_thy':>8} {'G_off':>8}")
+        for row in cal:
+            t, r_e, g_e = row
+            r_e += args.r_offset
+            g_e += args.g_offset
+            r_t = float(r_interp(t))
+            g_t = float(g_interp(t))
+            r_residuals.append(r_e - r_t)
+            g_residuals.append(g_e - g_t)
+            print(f"{t:6.1f} {r_e:8.3f} {r_t:8.3f} {r_e - r_t:8.3f} {g_e:8.3f} {g_t:8.3f} {g_e - g_t:8.3f}")
+        r_res = np.array(r_residuals)
+        g_res = np.array(g_residuals)
+        print(f"\nR residual: rms={np.sqrt(np.mean(r_res**2)):.3f} mae={np.mean(np.abs(r_res)):.3f}")
+        print(f"G residual: rms={np.sqrt(np.mean(g_res**2)):.3f} mae={np.mean(np.abs(g_res)):.3f}")
+
+    if args.output:
+        fig.savefig(args.output, dpi=150, bbox_inches="tight")
+        print(f"Saved to {args.output}")
+    else:
+        plt.show()
+
+
+if __name__ == "__main__":
+    main()
