@@ -54,25 +54,29 @@ HBN_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
     (2.520, 4.636, 46.0),
 )
 
-# Starter calibration for hBN on 285nm SiO₂ (10x/20x measurements, no AFM).
-# Source: docs/hbn_285nm_calibration.md
+# Theory-derived calibration for hBN on 285nm SiO₂ (transfer matrix model).
+# Params: n=2.20, oxide=281.55nm, NA=0.3375, offsets R=+0.55 G=-0.20 (camera-space).
 HBN_285NM_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
-    (-0.29, 0.15, 1.0),  # very thin — clipboard crop, left/right contrast
-    (-0.46, 0.19, 1.5),  # very thin — clipboard crop, top/bottom
-    (-0.70, 0.30, 2.0),  # thin — clipboard crop, top/bottom
-    (-0.63, 0.39, 2.5),  # thin — clipboard crop, 20x top-left/bottom-right
-    (-0.90, 0.42, 3.0),
-    (-0.90, 0.55, 5.0),
-    (-0.82, 0.65, 7.0),
-    (-0.88, 0.79, 8.0),  # clipboard crop, bottom flake
-    (-0.93, 0.83, 8.5),  # clipboard crop, top-left flake
-    (-0.98, 0.83, 9.0),  # clipboard crop, thick per user
-    (-0.88, 1.00, 10.0),  # clipboard crop, bottom flake
-    (-0.81, 1.00, 10.0),  # clipboard crop, top flake
-    (-0.74, 1.13, 12.0),
-    (-0.56, 1.39, 16.0),
-    (-0.43, 1.48, 17.0),  # clipboard crop, bottom-right flake
-    (-0.53, 1.62, 18.0),
+    (-0.645, 0.221, 2.0),
+    (-0.735, 0.264, 4.0),
+    (-0.817, 0.327, 6.0),
+    (-0.890, 0.409, 8.0),
+    (-0.954, 0.506, 10.0),
+    (-1.005, 0.615, 12.0),
+    (-1.044, 0.734, 14.0),
+    (-1.069, 0.859, 16.0),
+    (-1.081, 0.989, 18.0),
+    (-1.079, 1.120, 20.0),
+    (-1.064, 1.251, 22.0),
+    (-1.037, 1.380, 24.0),
+    (-0.998, 1.506, 26.0),
+    (-0.949, 1.628, 28.0),
+    (-0.890, 1.744, 30.0),
+    (-0.824, 1.854, 32.0),
+    (-0.750, 1.958, 34.0),
+    (-0.672, 2.055, 36.0),
+    (-0.589, 2.146, 38.0),
+    (-0.503, 2.229, 40.0),
 )
 
 
@@ -210,7 +214,7 @@ def _score_hbn_medium_285nm(det: Detection) -> tuple[int, float]:
         and b < -0.08
         and ent < 4.5
         and ar < 6.0
-        and size_um2 >= 400.0
+        and size_um2 >= 350.0
     )
     if t1:
         tier = 1
@@ -464,7 +468,7 @@ class DetectorConfig:
             name="hBN (medium) · 285nm SiO₂",
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=7.0,
-            min_size_um2=400.0,
+            min_size_um2=350.0,
             edge_margin_px=50,
             morph_kernel_size=5,
             entropy_threshold=0.4,
