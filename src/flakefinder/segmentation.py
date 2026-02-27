@@ -42,7 +42,7 @@ class CalProjection(NamedTuple):
 # Source: docs/bn_thickness_calibration.md
 HBN_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
     (-0.600, 0.286, 4.6),
-    (-0.671, 0.079, 5.6),
+    # (-0.671, 0.079, 5.6),  # outlier: G too low for thickness
     (-0.597, 0.219, 6.3),
     (-0.645, 0.313, 7.0),
     (-0.649, 0.376, 8.1),
