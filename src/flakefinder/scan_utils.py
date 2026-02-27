@@ -597,6 +597,7 @@ def build_camera_meta(camera: Camera) -> CameraMeta:
         physical_pixel_y_um=physical_pixel_y_um,
         white_balance_bgr=[b, g, r],
         gamma=camera.gamma,
+        auto_brightness=camera.auto_brightness,
     )
 
 

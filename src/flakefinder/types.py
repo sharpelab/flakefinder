@@ -318,6 +318,7 @@ class CameraMeta(TypedDict):
     physical_pixel_y_um: float | None
     white_balance_bgr: list[float]
     gamma: float
+    auto_brightness: bool
 
 
 class OpticsMeta(TypedDict):

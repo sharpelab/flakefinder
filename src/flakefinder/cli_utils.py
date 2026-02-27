@@ -58,9 +58,11 @@ def report_status(scope: Microscope, *, verbose: bool = False) -> None:
     w, h = camera.frame_size_px
     r, g, b = camera.gain_rgb
     exp_ms = camera.exposure_time * 1000
+    ab = "on" if camera.auto_brightness else "off"
     print(
         f"Camera: {w}x{h} @ {binning_str} binning, {exp_ms:.1f}ms exposure,"
-        f" saturation={camera.saturation}, gamma={camera.gamma:.2f}"
+        f" saturation={camera.saturation}, gamma={camera.gamma:.2f},"
+        f" auto-brightness={ab}"
     )
     print(f"White balance: R={r:.2f} G={g:.2f} B={b:.2f}")
 
