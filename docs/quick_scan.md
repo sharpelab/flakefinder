@@ -6,9 +6,11 @@ Interactive GUI for ad-hoc microscope operation. Canvas-based stage viewer with 
 
 **Phase 1 (done):** Canvas foundation — PySide6 QGraphicsScene stage viewer with pan/zoom, coordinate grid, viewport tracking, and microscope connection.
 
-**Phase 2 (next):** Image display — load frames from existing scan directories onto the canvas, live single-frame capture.
+**Phase 2 (done):** Live camera + controls — left dock with exposure (log slider), white balance (R/G/B), light (shutter + intensity), objective buttons, camera preview. Live camera overlay on canvas at viewport position. Double-click-to-move. ScopeManager background thread handles all SDK calls.
 
-**Phase 3 (future):** ROI drawing, quick scan, pretty scan.
+**Phase 3 (next):** Image display — load frames from existing scan directories onto the canvas, capture button.
+
+**Phase 4 (future):** ROI drawing, quick scan, pretty scan.
 
 ## Running
 
@@ -31,6 +33,7 @@ On the microscope PC, the `quick-scan.exe` in `.venv/Scripts/` can be a desktop 
 | Middle-click drag | Pan |
 | Home | Fit full stage in view |
 | F | Center on microscope viewport (~5× FOV) |
+| Double-click | Move stage to clicked position |
 
 ## Architecture
 
@@ -38,15 +41,17 @@ On the microscope PC, the `quick-scan.exe` in `.venv/Scripts/` can be a desktop 
 src/quick_scan/
     __init__.py
     __main__.py         # python -m quick_scan
-    app.py              # QMainWindow, toolbar, status bar, microscope poller
-    stage_canvas.py     # QGraphicsView/Scene — pan, zoom, grid, viewport rect
+    app.py              # QMainWindow, toolbar, dock panel, signal wiring
+    stage_canvas.py     # QGraphicsView/Scene — pan, zoom, grid, viewport rect, camera overlay
+    scope_manager.py    # Background thread: connection, position polling, camera stream, command queue
+    control_panel.py    # Left dock: exposure, white balance, light, camera preview, objectives
 ```
 
-Sibling package to `flakefinder` in `src/`. Imports `flakefinder.data_utils` and `flakefinder.leica` (the latter only when `--connect` is used).
+Sibling package to `flakefinder` in `src/`. Imports `flakefinder.data_utils` and `flakefinder.leica` (the latter only when connected).
 
 **Dependencies:** PySide6 (in `gui` dependency group). `uv sync --group gui` to install.
 
-**Threading:** Hardware polling runs in a daemon thread (`MicroscopePoller`), posts updates to the GUI via Qt signals. No direct hardware calls from the GUI thread.
+**Threading:** `ScopeManager` runs all SDK interaction on a single background thread. Camera frames arrive via `FrameStream` (SDK-managed thread), are drained each poll cycle, and emitted as Qt signals. Command queue dispatches stage moves, objective switches, and property changes on the same thread. GUI thread does UI only.
 
 ## Design
 
@@ -72,14 +77,14 @@ The scene uses stage coordinates directly (µm). The view transform handles zoom
 
 ## Roadmap
 
-### Phase 2 — Image Display
+### Phase 3 — Image Display
 
 - Load images from existing scan directories (`scan_meta.json` → frame positions)
 - Place as `QGraphicsPixmapItem` at stage coordinates
 - LOD: downsample based on zoom level, only render visible tiles
 - "Capture" button → single frame at current position, placed on canvas
 
-### Phase 3 — ROI & Scans
+### Phase 4 — ROI & Scans
 
 - Rubber-band rectangle drawing (left-click drag on empty canvas)
 - Store ROIs as `AreaRect` in stage coordinates
@@ -89,7 +94,6 @@ The scene uses stage coordinates directly (µm). The view transform handles zoom
 
 ### Future
 
-- Light/exposure/WB controls in sidebar
+- Scale bar on canvas (auto-adapting to zoom level)
 - Load previous stitched images as background layer
-- Click-to-move-stage (click a point, microscope drives there)
 - Flake detection overlay

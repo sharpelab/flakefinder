@@ -12,8 +12,9 @@ import math
 from typing import NamedTuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QWheelEvent
+from PySide6.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import (
+    QGraphicsPixmapItem,
     QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsSimpleTextItem,
@@ -62,6 +63,7 @@ class StageCanvas(QGraphicsView):
     """
 
     cursor_moved = Signal(float, float)
+    move_requested = Signal(float, float)  # double-click → stage move
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -115,6 +117,12 @@ class StageCanvas(QGraphicsView):
         self._scene.addItem(self._viewport_rect)
         self._viewport_info: ViewportInfo | None = None
 
+        # Camera overlay (live frame rendered at viewport position)
+        self._camera_pixmap = QGraphicsPixmapItem()
+        self._camera_pixmap.setZValue(50)  # above grid, below viewport rect
+        self._camera_pixmap.setVisible(False)
+        self._scene.addItem(self._camera_pixmap)
+
         # Start at overview zoom
         self.go_to_overview()
 
@@ -159,9 +167,25 @@ class StageCanvas(QGraphicsView):
         self._viewport_rect.setVisible(True)
 
     def hide_viewport(self):
-        """Hide the viewport rectangle."""
+        """Hide the viewport rectangle and camera overlay."""
         self._viewport_rect.setVisible(False)
+        self._camera_pixmap.setVisible(False)
         self._viewport_info = None
+
+    def update_camera_frame(self, qimg: QImage) -> None:
+        """Place a camera frame on the canvas at the current viewport position."""
+        if self._viewport_info is None:
+            return
+        vi = self._viewport_info
+        pix = QPixmap.fromImage(qimg)
+        if pix.isNull():
+            return
+        self._camera_pixmap.setPixmap(pix)
+        # Scale so the pixmap fills the viewport FOV in scene (µm) coords
+        scale = vi.fov_w_um / pix.width()
+        self._camera_pixmap.setScale(scale)
+        self._camera_pixmap.setPos(vi.x_um - vi.fov_w_um / 2, vi.y_um - vi.fov_h_um / 2)
+        self._camera_pixmap.setVisible(True)
 
     def um_per_px(self) -> float:
         """Current scale: stage µm per screen pixel."""
@@ -225,6 +249,14 @@ class StageCanvas(QGraphicsView):
             event.accept()
         else:
             super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            scene_pos = self.mapToScene(event.position().toPoint())
+            self.move_requested.emit(scene_pos.x(), scene_pos.y())
+            event.accept()
+        else:
+            super().mouseDoubleClickEvent(event)
 
     # ── Grid ────────────────────────────────────────────────────
 
