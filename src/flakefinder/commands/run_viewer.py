@@ -822,6 +822,7 @@ class RunViewerGUI:
         # Current state
         self._runs: list[RunInfo] = []
         self._selected_run: RunInfo | None = None
+        self._run_list_visible = True
 
         # Filter state
         self._all_detections: list[Detection] = []
@@ -1035,11 +1036,20 @@ class RunViewerGUI:
         """Hide the left panel to give detail view full width."""
         with contextlib.suppress(tk.TclError):
             self.paned.forget(self._left_frame)
+        self._run_list_visible = False
 
     def _show_run_list(self):
         """Restore the left panel."""
         with contextlib.suppress(tk.TclError):
             self.paned.insert(0, self._left_frame, weight=1)
+        self._run_list_visible = True
+
+    def _toggle_run_list(self):
+        """Toggle the run list sidebar."""
+        if self._run_list_visible:
+            self._hide_run_list()
+        else:
+            self._show_run_list()
 
     # ── Run detail ───────────────────────────────────────────────
 
@@ -1081,7 +1091,8 @@ class RunViewerGUI:
         # ── Phase 1: lightweight skeleton (renders immediately) ──
 
         # Back button
-        ttk.Button(self._detail_frame, text="← Runs", command=self._show_run_list).pack(anchor="w", padx=8, pady=(4, 0))
+        btn = ttk.Button(self._detail_frame, text="← Runs", command=self._toggle_run_list)
+        btn.pack(anchor="w", padx=8, pady=(4, 0))
 
         # Run header
         header = ttk.LabelFrame(self._detail_frame, text=run.name, padding=8)
