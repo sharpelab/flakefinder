@@ -47,6 +47,8 @@ class RunInfo(NamedTuple):
     total_detections: int
     duration_s: float
     notes: str
+    scan_name: str
+    operator: str
 
 
 def _parse_run_timestamp(name: str) -> datetime | None:
@@ -75,6 +77,8 @@ def _load_run_info(run_dir: Path) -> RunInfo | None:
     preset = args.get("preset", "?")
     material = args.get("material", "")
     notes = cp.get("notes", "") or ""
+    scan_name = cp.get("name", "") or ""
+    operator = cp.get("operator", "") or ""
     n_chips = cp.get("n_chips") or 0
 
     # Sum detections across all chip seg summaries
@@ -103,6 +107,8 @@ def _load_run_info(run_dir: Path) -> RunInfo | None:
         total_detections=total_detections,
         duration_s=duration_s,
         notes=notes,
+        scan_name=scan_name,
+        operator=operator,
     )
 
 
@@ -910,9 +916,11 @@ class RunViewerGUI:
         ttk.Label(btn_row, textvariable=self._run_count_var, foreground="gray").pack(side="right")
 
         # Treeview
-        columns = ("date", "preset", "chips", "detections", "duration", "notes")
+        columns = ("date", "scan_name", "operator", "preset", "chips", "detections", "duration", "notes")
         self.tree = ttk.Treeview(self._left_frame, columns=columns, show="headings", selectmode="browse")
         self.tree.heading("date", text="Date/Time")
+        self.tree.heading("scan_name", text="Scan Name")
+        self.tree.heading("operator", text="Operator")
         self.tree.heading("preset", text="Preset")
         self.tree.heading("chips", text="Chips")
         self.tree.heading("detections", text="Det")
@@ -920,6 +928,8 @@ class RunViewerGUI:
         self.tree.heading("notes", text="Notes")
 
         self.tree.column("date", width=120, minwidth=90)
+        self.tree.column("scan_name", width=130, minwidth=80)
+        self.tree.column("operator", width=70, minwidth=50)
         self.tree.column("preset", width=55, minwidth=40)
         self.tree.column("chips", width=35, minwidth=30, anchor="center")
         self.tree.column("detections", width=45, minwidth=35, anchor="center")
@@ -1002,7 +1012,10 @@ class RunViewerGUI:
             # Show first line of notes, truncated
             notes_short = run.notes.split("\n")[0][:30] if run.notes else ""
             self.tree.insert(
-                "", "end", iid=str(i), values=(date_str, run.preset, run.n_chips, det_str, dur_str, notes_short)
+                "",
+                "end",
+                iid=str(i),
+                values=(date_str, run.scan_name, run.operator, run.preset, run.n_chips, det_str, dur_str, notes_short),
             )
         self._run_count_var.set(f"{len(self._runs)} runs")
 
@@ -1075,6 +1088,13 @@ class RunViewerGUI:
         header.pack(fill="x", padx=8, pady=(8, 4))
 
         info_lines = []
+        if run.scan_name or run.operator:
+            meta_parts = []
+            if run.scan_name:
+                meta_parts.append(f"Scan: {run.scan_name}")
+            if run.operator:
+                meta_parts.append(f"Operator: {run.operator}")
+            info_lines.append("    ".join(meta_parts))
         if run.timestamp:
             info_lines.append(f"Date: {run.timestamp.strftime('%Y-%m-%d %H:%M')}")
         info_lines.append(f"Preset: {run.preset}    Chips: {run.n_chips}    Detections: {run.total_detections}")

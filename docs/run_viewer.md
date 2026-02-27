@@ -16,8 +16,9 @@ Run list auto-hides when a run is selected. Click "← Runs" to restore it.
 │ [← Runs]                                         │
 │                                                   │
 │ ┌─ run_20260220_1543 ──────────────────────────┐  │
+│ │ Scan: 2026-02 E1-7    Operator: Chaitrali   │  │
 │ │ Date / Preset / Chips / Duration             │  │
-│ │ Notes: Operator: Sandesh ...                 │  │
+│ │ Notes: ...                                   │  │
 │ └──────────────────────────────────────────────┘  │
 │                                                   │
 │ ┌─ Overview ───────────────────────────────────┐  │
@@ -150,7 +151,7 @@ Mousewheel bound once at startup via `bind_all`. A `_scroll_active` boolean flag
 
 | Section | Source file | Key fields |
 |---------|-----------|------------|
-| Run list | `checkpoint.json` | `args.preset`, `n_chips`, `step_timing`, `notes` |
+| Run list | `checkpoint.json` | `name`, `operator`, `args.preset`, `n_chips`, `step_timing`, `notes` |
 | Run list detections | `chip_N/seg/summary.json` | `stats.total_detections` |
 | Overview image | `overview_*_stitch_chips_detected.png` | — |
 | Overview locator | `overview_*_stitch.jpg` + `*_stitch_meta.json` | `stage_bounds_um`, `scale_um_per_px`, `image_size_px` |
