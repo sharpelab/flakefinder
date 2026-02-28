@@ -74,6 +74,7 @@ class ControlPanel(QWidget):
     shutter_toggled = Signal(bool)
     lamp_changed = Signal(int)
     objective_clicked = Signal(str)
+    autofocus_requested = Signal()
     preview_move_requested = Signal(float, float)
 
     def __init__(self, parent: QWidget | None = None):
@@ -94,6 +95,12 @@ class ControlPanel(QWidget):
 
         # ── Objectives ───────────────────────────────────────────
         layout.addWidget(self._build_objective_group())
+
+        # ── Autofocus ─────────────────────────────────────────────
+        self._af_button = QPushButton("Autofocus")
+        self._af_button.setMinimumHeight(32)
+        self._af_button.clicked.connect(self._on_autofocus_clicked)
+        layout.addWidget(self._af_button)
 
         # ── Camera Preview ───────────────────────────────────────
         self._preview_label = QLabel()
@@ -382,3 +389,12 @@ class ControlPanel(QWidget):
         if self._updating:
             return
         self.objective_clicked.emit(mag)
+
+    def _on_autofocus_clicked(self) -> None:
+        self._af_button.setEnabled(False)
+        self._af_button.setText("Focusing…")
+        self.autofocus_requested.emit()
+
+    def set_autofocus_enabled(self, enabled: bool) -> None:
+        self._af_button.setEnabled(enabled)
+        self._af_button.setText("Autofocus")

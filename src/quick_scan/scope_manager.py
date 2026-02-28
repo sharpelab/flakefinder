@@ -48,6 +48,7 @@ class ScopeManager(QObject):
     scope_connected = Signal()
     scope_disconnected = Signal()
     scope_error = Signal(str)
+    autofocus_finished = Signal(float, float)  # best_z_um, best_sharpness
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
@@ -55,6 +56,7 @@ class ScopeManager(QObject):
         self._stop = threading.Event()
         self._cmd_queue: queue.Queue[Callable] = queue.Queue()
         self._poll_interval = 0.05  # 50 ms → ~20 Hz
+        self._stream = None  # set on background thread
 
     @property
     def is_connected(self) -> bool:
@@ -111,6 +113,21 @@ class ScopeManager(QObject):
     def set_lamp_intensity(self, value: int) -> None:
         self.send_command(lambda scope: setattr(scope.lamp, "intensity", value))
 
+    def autofocus(self) -> None:
+        def _af(scope):
+            from flakefinder.leica.autofocus import continuous_autofocus
+
+            if self._stream is not None:
+                self._stream.stop()
+            try:
+                result = continuous_autofocus(scope)
+                self.autofocus_finished.emit(result.selected_z_um, result.selected_sharpness)
+            finally:
+                if self._stream is not None:
+                    self._stream.start()
+
+        self.send_command(_af)
+
     # ── Background thread ────────────────────────────────────────
 
     @staticmethod
@@ -138,8 +155,8 @@ class ScopeManager(QObject):
                 self.hw_state_ready.emit(self._read_hw_state(scope))
 
                 # Start camera streaming
-                stream = scope.camera.stream()
-                stream.start()
+                self._stream = scope.camera.stream()
+                self._stream.start()
                 try:
                     while not self._stop.is_set():
                         # --- Commands ---
@@ -166,7 +183,7 @@ class ScopeManager(QObject):
 
                         # --- Camera frame ---
                         latest = None
-                        for frame in stream.drain():
+                        for frame in self._stream.drain():
                             latest = frame
                         if latest is not None:
                             qimg = numpy_rgb_to_qimage(latest.image)
@@ -174,7 +191,8 @@ class ScopeManager(QObject):
 
                         self._stop.wait(self._poll_interval)
                 finally:
-                    stream.stop()
+                    self._stream.stop()
+                    self._stream = None
             finally:
                 scope.__exit__(None, None, None)
         except Exception as e:

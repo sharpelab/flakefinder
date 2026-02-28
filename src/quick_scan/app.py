@@ -90,7 +90,11 @@ class QuickScanWindow(QMainWindow):
         self._controls.shutter_toggled.connect(self._scope.set_shutter)
         self._controls.lamp_changed.connect(self._scope.set_lamp_intensity)
         self._controls.objective_clicked.connect(self._scope.switch_objective)
+        self._controls.autofocus_requested.connect(self._scope.autofocus)
         self._controls.preview_move_requested.connect(self._on_move_requested)
+
+        # AF completion → re-enable button + update status
+        self._scope.autofocus_finished.connect(self._on_autofocus_finished)
 
         # Status bar refresh timer
         self._status_timer = QTimer()
@@ -170,6 +174,7 @@ class QuickScanWindow(QMainWindow):
         self._connected = False
         self._connect_action.setChecked(False)
         self._canvas.hide_viewport()
+        self._controls.set_autofocus_enabled(True)
 
     # ── Scope updates ────────────────────────────────────────────
 
@@ -203,6 +208,11 @@ class QuickScanWindow(QMainWindow):
         self._controls.set_gain_rgb(*state.gain_rgb)
         self._controls.set_shutter(state.shutter_open)
         self._controls.set_lamp(state.lamp_intensity, state.lamp_max)
+
+    @Slot(float, float)
+    def _on_autofocus_finished(self, best_z: float, best_sharpness: float):
+        self._controls.set_autofocus_enabled(True)
+        self._scope_label.setText(f"Stage: AF done — Z={best_z:.1f} µm (sharpness {best_sharpness:.0f})")
 
     # ── Canvas interactions ──────────────────────────────────────
 
