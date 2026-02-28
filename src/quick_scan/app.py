@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Slot
@@ -71,6 +72,7 @@ class QuickScanWindow(QMainWindow):
         self._scope_y = 0.0
         self._scope_z = 0.0
         self._scope_mag: float | None = None
+        self._status_hold_until = 0.0  # monotonic time; position updates suppressed until then
 
         # Wire scope signals
         self._scope.position_updated.connect(self._on_scope_position)
@@ -185,7 +187,8 @@ class QuickScanWindow(QMainWindow):
     @Slot(str)
     def _on_command_error(self, msg: str):
         """Non-fatal error — scope still alive."""
-        self._scope_label.setText(f"Stage: {msg}")
+        self._scope_label.setText(f"⚠ {msg}")
+        self._status_hold_until = time.monotonic() + 5.0
         self._controls.set_autofocus_enabled(True)
 
     # ── Scope updates ────────────────────────────────────────────
@@ -202,7 +205,8 @@ class QuickScanWindow(QMainWindow):
             self._controls.set_preview_viewport(x, y, fov_w, fov_h)
 
         mag_str = f"{mag}x" if mag else f"pos {obj_pos}"
-        self._scope_label.setText(f"Stage: X={x:.0f}  Y={y:.0f}  Z={z:.0f} µm  [{mag_str}]")
+        if time.monotonic() >= self._status_hold_until:
+            self._scope_label.setText(f"Stage: X={x:.0f}  Y={y:.0f}  Z={z:.0f} µm  [{mag_str}]")
 
         # Keep objective buttons in sync
         self._controls.set_objective(mag)
@@ -225,6 +229,7 @@ class QuickScanWindow(QMainWindow):
     def _on_autofocus_finished(self, best_z: float, best_sharpness: float):
         self._controls.set_autofocus_enabled(True)
         self._scope_label.setText(f"Stage: AF done — Z={best_z:.1f} µm (sharpness {best_sharpness:.0f})")
+        self._status_hold_until = time.monotonic() + 3.0
 
     # ── Canvas interactions ──────────────────────────────────────
 
