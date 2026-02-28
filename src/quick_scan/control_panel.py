@@ -76,6 +76,7 @@ class ControlPanel(QWidget):
     objective_clicked = Signal(str)
     autofocus_requested = Signal()
     scan_requested = Signal()
+    cancel_requested = Signal()
     preview_move_requested = Signal(float, float)
 
     def __init__(self, parent: QWidget | None = None):
@@ -86,16 +87,20 @@ class ControlPanel(QWidget):
         self.setMinimumWidth(400)
 
         # ── Exposure ─────────────────────────────────────────────
-        layout.addWidget(self._build_exposure_group())
+        self._exposure_group = self._build_exposure_group()
+        layout.addWidget(self._exposure_group)
 
         # ── White Balance ────────────────────────────────────────
-        layout.addWidget(self._build_wb_group())
+        self._wb_group = self._build_wb_group()
+        layout.addWidget(self._wb_group)
 
         # ── Light ────────────────────────────────────────────────
-        layout.addWidget(self._build_light_group())
+        self._light_group = self._build_light_group()
+        layout.addWidget(self._light_group)
 
         # ── Objectives ───────────────────────────────────────────
-        layout.addWidget(self._build_objective_group())
+        self._obj_group = self._build_objective_group()
+        layout.addWidget(self._obj_group)
 
         # ── Autofocus ─────────────────────────────────────────────
         self._af_button = QPushButton("Autofocus")
@@ -110,6 +115,24 @@ class ControlPanel(QWidget):
         self._scan_button.setEnabled(False)
         self._scan_button.clicked.connect(self._on_scan_clicked)
         layout.addWidget(self._scan_button)
+
+        # ── Cancel (hidden until busy) ────────────────────────────
+        self._cancel_button = QPushButton("Cancel")
+        self._cancel_button.setMinimumHeight(32)
+        self._cancel_button.setStyleSheet("background: #a33; color: white; font-weight: bold;")
+        self._cancel_button.clicked.connect(self.cancel_requested.emit)
+        self._cancel_button.hide()
+        layout.addWidget(self._cancel_button)
+
+        # Widgets to disable during busy state
+        self._control_widgets = [
+            self._exposure_group,
+            self._wb_group,
+            self._light_group,
+            self._obj_group,
+            self._af_button,
+            self._scan_button,
+        ]
 
         # ── Camera Preview ───────────────────────────────────────
         self._preview_label = QLabel()
@@ -411,28 +434,36 @@ class ControlPanel(QWidget):
         self.objective_clicked.emit(mag)
 
     def _on_autofocus_clicked(self) -> None:
-        self._af_button.setEnabled(False)
-        self._af_button.setText("Focusing…")
-        self.set_preview_overlay("Focusing…")
+        self.set_busy("Focusing…")
         self.autofocus_requested.emit()
+
+    def _on_scan_clicked(self) -> None:
+        self.set_busy("Scanning…")
+        self.scan_requested.emit()
+
+    def set_busy(self, label: str) -> None:
+        """Disable all controls, show cancel button and preview overlay."""
+        for w in self._control_widgets:
+            w.setEnabled(False)
+        self._cancel_button.show()
+        self.set_preview_overlay(label)
+
+    def set_idle(self) -> None:
+        """Re-enable controls after a busy operation completes."""
+        for w in self._control_widgets:
+            w.setEnabled(True)
+        self._cancel_button.hide()
+        self.set_preview_overlay(None)
+        # AF/scan buttons have their own enable logic — reset to default disabled
+        # The app will re-enable them based on connection + ROI state
+        self._af_button.setEnabled(False)
+        self._scan_button.setEnabled(False)
 
     def set_autofocus_enabled(self, enabled: bool) -> None:
         self._af_button.setEnabled(enabled)
-        self._af_button.setText("Autofocus")
-        if enabled:
-            self.set_preview_overlay(None)
-
-    def _on_scan_clicked(self) -> None:
-        self._scan_button.setEnabled(False)
-        self._scan_button.setText("Scanning…")
-        self.set_preview_overlay("Scanning…")
-        self.scan_requested.emit()
 
     def set_scan_enabled(self, enabled: bool) -> None:
         self._scan_button.setEnabled(enabled)
-        self._scan_button.setText("Scan ROI")
-        if enabled:
-            self.set_preview_overlay(None)
 
     def set_roi_info(self, w_um: float, h_um: float) -> None:
         """Update the scan button label with ROI dimensions."""

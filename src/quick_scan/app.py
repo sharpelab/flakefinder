@@ -97,6 +97,7 @@ class QuickScanWindow(QMainWindow):
         self._controls.objective_clicked.connect(self._scope.switch_objective)
         self._controls.autofocus_requested.connect(self._scope.autofocus)
         self._controls.scan_requested.connect(self._on_scan_requested)
+        self._controls.cancel_requested.connect(self._on_cancel)
         self._controls.preview_move_requested.connect(self._on_move_requested)
 
         # AF completion → re-enable button + update status
@@ -173,20 +174,16 @@ class QuickScanWindow(QMainWindow):
     def _on_connected(self):
         self._connected = True
         self._connect_action.setChecked(True)
-        self._controls.set_autofocus_enabled(True)
         self._controls.set_preview_overlay(None)
         self._canvas.set_banner(None)
-        if self._roi is not None:
-            self._controls.set_scan_enabled(True)
+        self._enable_controls()
         self._scope_label.setText("Stage: connected")
 
     @Slot()
     def _on_disconnected(self):
         self._connected = False
         self._connect_action.setChecked(False)
-        self._controls.set_autofocus_enabled(False)
-        self._controls.set_scan_enabled(False)
-        self._controls.set_preview_overlay(None)
+        self._controls.set_idle()
         self._canvas.set_banner(None)
         self._canvas.hide_viewport()
         self._scope_label.setText("Stage: disconnected")
@@ -198,9 +195,7 @@ class QuickScanWindow(QMainWindow):
         self._status_hold_until = time.monotonic() + 5.0
         self._connected = False
         self._connect_action.setChecked(False)
-        self._controls.set_autofocus_enabled(False)
-        self._controls.set_scan_enabled(False)
-        self._controls.set_preview_overlay(None)
+        self._controls.set_idle()
         self._canvas.set_banner(None)
         self._canvas.hide_viewport()
 
@@ -209,9 +204,22 @@ class QuickScanWindow(QMainWindow):
         """Non-fatal error — scope still alive."""
         self._scope_label.setText(f"⚠ {msg}")
         self._status_hold_until = time.monotonic() + 5.0
-        self._controls.set_autofocus_enabled(True)
-        if self._roi is not None:
-            self._controls.set_scan_enabled(True)
+        self._controls.set_idle()
+        self._enable_controls()
+
+    def _enable_controls(self):
+        """Re-enable AF/scan buttons based on current state."""
+        if self._connected:
+            self._controls.set_autofocus_enabled(True)
+            if self._roi is not None:
+                self._controls.set_scan_enabled(True)
+
+    @Slot()
+    def _on_cancel(self):
+        """Cancel current operation (best-effort)."""
+        # For now, just set idle. The background command will finish on its own.
+        self._controls.set_idle()
+        self._enable_controls()
 
     # ── Scope updates ────────────────────────────────────────────
 
@@ -249,7 +257,8 @@ class QuickScanWindow(QMainWindow):
 
     @Slot(float, float)
     def _on_autofocus_finished(self, best_z: float, best_sharpness: float):
-        self._controls.set_autofocus_enabled(True)
+        self._controls.set_idle()
+        self._enable_controls()
         self._scope_label.setText(f"Stage: AF done — Z={best_z:.1f} µm (sharpness {best_sharpness:.0f})")
         self._status_hold_until = time.monotonic() + 3.0
 
@@ -306,7 +315,8 @@ class QuickScanWindow(QMainWindow):
 
     @Slot()
     def _on_scan_finished(self):
-        self._controls.set_scan_enabled(True)
+        self._controls.set_idle()
+        self._enable_controls()
         self._scope_label.setText("Stage: scan complete")
         self._status_hold_until = time.monotonic() + 3.0
 
