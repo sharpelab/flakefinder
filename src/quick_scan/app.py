@@ -287,6 +287,7 @@ class QuickScanWindow(QMainWindow):
         if not self._connected or self._roi is None:
             return
         from flakefinder.commands.scan import _plan
+        from flakefinder.data_utils import compute_frame_size_um, require_microscope_description
         from flakefinder.types import AreaRect
 
         x_min, y_min, x_max, y_max = self._roi
@@ -295,9 +296,19 @@ class QuickScanWindow(QMainWindow):
             self._controls.set_scan_enabled(True)
             return
 
+        # _plan() places frame *centers* at y_min..y_max.  Inset by half
+        # a frame so the first/last frames fully cover the drawn ROI.
+        desc = require_microscope_description()
+        fov = compute_frame_size_um(desc.camera, mag, binning_idx=2)
+        if fov is None:
+            self._controls.set_scan_enabled(True)
+            return
+        fw, fh = fov
+        scan_rect = AreaRect(x_min, x_max, y_min + fh / 2, y_max - fh / 2)
+
         try:
             plan = _plan(
-                area_rect=AreaRect(x_min, x_max, y_min, y_max),
+                area_rect=scan_rect,
                 objective_mag=str(mag),
             )
         except ValueError as e:
