@@ -1,7 +1,7 @@
 """Upload a completed find-flakes run to flakes.sharpelab.science.
 
-Packages the run directory into the ZIP format expected by the 2DMatGMM
-website's POST /upload endpoint, then uploads it.
+Uses the resource-oriented REST API: upload files as tokens, then create
+scan/chips/flakes via the REST endpoints.
 
 Usage:
     sls upload scans/run_20260220_1543/
@@ -11,15 +11,13 @@ Usage:
 """
 
 import argparse
-import contextlib
 import json
 import math
 import re
-import shutil
 import sys
 import tempfile
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
@@ -31,7 +29,7 @@ import requests
 from flakefinder.flakes_api import BASE_URL, get_auth
 from flakefinder.segmentation import Detection, DetectorConfig, dedup_detections
 
-# Classification → thickness label for the website
+# Classification -> thickness label for the website
 THICKNESS_MAP = {
     "thin": "thin",
     "medium": "medium",
@@ -42,7 +40,7 @@ THICKNESS_MAP = {
 
 class UploadResult(NamedTuple):
     total_flakes: int
-    zip_size_mb: float
+    upload_mb: float
     uploaded: bool
 
 
@@ -153,108 +151,6 @@ def make_overview_compressed(stitch_path: Path, output_path: Path) -> None:
     cv2.imwrite(str(output_path), resized, [cv2.IMWRITE_JPEG_QUALITY, 80])
 
 
-def make_overview_marked(
-    overview_compressed: np.ndarray,
-    flake_x_um: float,
-    flake_y_um: float,
-    flake_number: int,
-    stage_bounds: dict,
-    overview_size_px: tuple[int, int],
-) -> np.ndarray:
-    """Draw a green circle and red flake number on the overview image.
-
-    Maps stage coordinates to overview pixel coordinates using the stitch
-    metadata's stage_bounds_um.
-    """
-    img = overview_compressed.copy()
-    ow, oh = overview_size_px
-
-    # Map stage µm → overview pixel (the overview_compressed is 2000x2000,
-    # but it was resized from overview_size_px which maps to stage_bounds)
-    x_min = stage_bounds["x_min"]
-    x_max = stage_bounds["x_max"]
-    y_min = stage_bounds["y_min"]
-    y_max = stage_bounds["y_max"]
-
-    # Map to 2000x2000 compressed image
-    px_x = int((flake_x_um - x_min) / (x_max - x_min) * 2000)
-    px_y = int((flake_y_um - y_min) / (y_max - y_min) * 2000)
-
-    # Green circle
-    cv2.circle(img, (px_x, px_y), 20, (0, 255, 0), 2)
-
-    # Red flake number
-    label = str(flake_number)
-    cv2.putText(
-        img,
-        label,
-        (px_x + 25, px_y + 5),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        (0, 0, 255),
-        2,
-    )
-
-    return img
-
-
-def build_scan_meta(
-    run_dir: Path,
-    user: str,
-    scan_name: str,
-    material: str,
-    substrate: str,
-    checkpoint: dict,
-) -> dict:
-    """Build scan-level meta.json for upload."""
-    scan_time = time.time()
-
-    # Try to get timestamp from stitch meta
-    for meta_file in run_dir.glob("overview_*_stitch_meta.json"):
-        with open(meta_file) as f:
-            stitch_meta = json.load(f)
-        ts = stitch_meta.get("timestamp")
-        if ts:
-            try:
-                dt = datetime.fromisoformat(ts)
-                scan_time = dt.timestamp()
-            except (ValueError, TypeError):
-                pass
-        break
-
-    # Build comment from checkpoint metadata
-    cp_args = checkpoint.get("args", {})
-    parts = []
-    cp_name = checkpoint.get("name", "")
-    if cp_name:
-        parts.append(cp_name)
-    preset = cp_args.get("preset", "")
-    if preset:
-        parts.append(f"preset={preset}")
-    mag = cp_args.get("chip_scan_mag", "")
-    if mag:
-        parts.append(f"scan_mag={mag}")
-    cp_notes = checkpoint.get("notes", "")
-    if cp_notes:
-        parts.append(cp_notes)
-    comment = " | ".join(parts) or "FlakeFinder upload"
-
-    return {
-        "scan_user": user,
-        "scan_time": scan_time,
-        "chip_thickness": substrate,
-        "scan_exfoliated_material": material,
-        "comment": comment,
-        "flakefinder": {
-            "operator": checkpoint.get("operator", user),
-            "name": checkpoint.get("name", ""),
-            "notes": checkpoint.get("notes"),
-            "run_dir": run_dir.name,
-            "scan_name": scan_name,
-        },
-    }
-
-
 def classify_thickness(det: dict, material: str) -> str:
     """Compute thickness label from detection contrast using DetectorConfig.
 
@@ -266,70 +162,6 @@ def classify_thickness(det: dict, material: str) -> str:
     config = DetectorConfig.from_material(material)
     label = config.classify(r, g)
     return THICKNESS_MAP.get(label, label)
-
-
-def build_flake_meta(
-    det: dict,
-    material: str,
-    chip_idx: int,
-) -> dict:
-    """Build per-flake meta.json for upload."""
-    # Position: µm → mm
-    pos_x = det["stage_x"] / 1000.0
-    pos_y = det["stage_y"] / 1000.0
-
-    size_um2 = det["size_um2"]
-    entropy = det["entropy"]
-    aspect_ratio = det["aspect_ratio"]
-
-    # Thickness from R/G contrast classification
-    thickness = classify_thickness(det, material)
-
-    # Sidelengths: derive from area + aspect_ratio (rotated bounding box)
-    min_side_um = math.sqrt(size_um2 / aspect_ratio)
-    max_side_um = min_side_um * aspect_ratio
-    # Website expects nanometers
-    max_side = max_side_um * 1000
-    min_side = min_side_um * 1000
-
-    contrast = det["contrast_rgb"]
-
-    return {
-        "flake": {
-            "position_x": round(pos_x, 4),
-            "position_y": round(pos_y, 4),
-            "size": round(size_um2, 1),
-            "thickness": thickness,
-            "entropy": round(entropy, 4),
-            "max_sidelength": round(max_side, 1),
-            "min_sidelength": round(min_side, 1),
-            "false_positive_probability": 0.0,
-            "mean_contrast_r": round(contrast[0], 4),
-            "mean_contrast_g": round(contrast[1], 4),
-            "mean_contrast_b": round(contrast[2], 4),
-        },
-        "images": {},
-        "flakefinder": {
-            "chip_idx": chip_idx,
-            "frame": det["frame"],
-            "det_id": det["det_id"],
-            "tier": det["tier"],
-            "score": det["score"],
-            "classification": det.get("classification"),
-            "cal_dist": det["cal_dist"],
-            "thickness_nm": det.get("thickness_nm"),
-            "size_um2": round(size_um2, 1),
-            "contrast_rgb": [round(c, 4) for c in contrast],
-            "std_rgb": [round(det["r_std"], 4), round(det["g_std"], 4), round(det["b_std"], 4)],
-            "kurt_rgb": [round(det["r_kurt"], 4), round(det["g_kurt"], 4), round(det["b_kurt"], 4)],
-            "grad_energy": round(det["grad_energy"], 2),
-            "perim_ratio": round(det["perim_ratio"], 4),
-            "solidity": round(det["solidity"], 4),
-            "aspect_ratio": round(aspect_ratio, 4),
-            "circularity": round(det["circularity"], 4),
-            "entropy": round(entropy, 4),
-        },
-    }
 
 
 def discover_chips(run_dir: Path) -> list[int]:
@@ -425,6 +257,112 @@ def _resolve_scan_name(run_dir: Path, name: str | None, checkpoint: dict) -> str
     return run_dir.name
 
 
+def _get_scan_time(run_dir: Path) -> float:
+    """Get scan timestamp from stitch metadata, or current time as fallback."""
+    for meta_file in run_dir.glob("overview_*_stitch_meta.json"):
+        with open(meta_file) as f:
+            stitch_meta = json.load(f)
+        ts = stitch_meta.get("timestamp")
+        if ts:
+            try:
+                return datetime.fromisoformat(ts).timestamp()
+            except (ValueError, TypeError):
+                pass
+        break
+    return time.time()
+
+
+def _build_comment(checkpoint: dict) -> str:
+    """Build scan comment string from checkpoint metadata."""
+    cp_args = checkpoint.get("args", {})
+    parts = []
+    if cp_name := checkpoint.get("name", ""):
+        parts.append(cp_name)
+    if preset := cp_args.get("preset", ""):
+        parts.append(f"preset={preset}")
+    if mag := cp_args.get("chip_scan_mag", ""):
+        parts.append(f"scan_mag={mag}")
+    if cp_notes := checkpoint.get("notes", ""):
+        parts.append(cp_notes)
+    return " | ".join(parts) or "FlakeFinder upload"
+
+
+def _build_flake_payload(
+    det: dict,
+    material: str,
+    eval_token: str | None,
+    revisit_tokens: dict[float, str],
+    camera_meta: dict,
+) -> dict:
+    """Build a flake payload for POST /chips/:id/flakes."""
+    pos_x = det["stage_x"] / 1000.0  # um -> mm
+    pos_y = det["stage_y"] / 1000.0
+    size_um2 = det["size_um2"]
+    aspect_ratio = det["aspect_ratio"]
+    min_side_um = math.sqrt(size_um2 / aspect_ratio)
+    max_side_um = min_side_um * aspect_ratio
+    contrast = det["contrast_rgb"]
+    thickness = classify_thickness(det, material)
+
+    payload: dict = {
+        "position_x": round(pos_x, 4),
+        "position_y": round(pos_y, 4),
+        "size": round(size_um2, 1),
+        "thickness": thickness,
+        "entropy": round(det["entropy"], 4),
+        "max_sidelength": round(max_side_um * 1000, 1),  # um -> nm
+        "min_sidelength": round(min_side_um * 1000, 1),
+        "false_positive_probability": 0.0,
+        "mean_r": round(contrast[0], 4),
+        "mean_g": round(contrast[1], 4),
+        "mean_b": round(contrast[2], 4),
+        "score": det.get("score"),
+        "tier": det.get("tier"),
+        "thickness_nm": det.get("thickness_nm"),
+    }
+
+    if eval_token:
+        payload["eval_image"] = eval_token
+
+    if revisit_tokens:
+        images = {}
+        for mag, token in revisit_tokens.items():
+            images[f"{mag:g}"] = {
+                "aperture": 6,
+                "light_voltage": 6.2,
+                "magnification": float(mag),
+                "gain": camera_meta["gain"],
+                "gamma": int(camera_meta["gamma"] * 100),
+                "exposure_time": camera_meta["exposure_s"],
+                "white_balance_r": int(camera_meta["white_balance_bgr"][2] * 25),
+                "white_balance_g": int(camera_meta["white_balance_bgr"][1] * 25),
+                "white_balance_b": int(camera_meta["white_balance_bgr"][0] * 25),
+                "file": token,
+            }
+        payload["images"] = images
+
+    return payload
+
+
+def _upload_file_token(
+    base_url: str,
+    auth: tuple[str, str],
+    key: str,
+    path: Path,
+) -> tuple[str, str, int]:
+    """Upload a file to the staging area. Returns (key, token, size_bytes)."""
+    data = path.read_bytes()
+    resp = requests.post(
+        f"{base_url}/api/uploads",
+        data=data,
+        auth=auth,
+        timeout=120,
+    )
+    if resp.status_code != 201:
+        raise RuntimeError(f"Failed to upload {key} ({path.name}): {resp.status_code} {resp.text[:200]}")
+    return key, resp.json()["token"], len(data)
+
+
 def run(
     run_dir: Path,
     *,
@@ -439,7 +377,7 @@ def run(
     name: str | None = None,
     base_url: str = BASE_URL,
 ) -> UploadResult:
-    """Package and upload a find-flakes run.
+    """Upload a find-flakes run via the incremental REST API.
 
     Args:
         run_dir: Path to the run directory.
@@ -448,17 +386,17 @@ def run(
         substrate: Chip thickness / substrate label.
         tier: Tier to select (exact match).
         top: Max flakes per chip (None = all passing tier filter).
-        dry_run: Build ZIP but don't upload.
+        dry_run: Discover and render but don't upload.
         quiet: Only print [upload] status lines, suppress detail.
         jobs: Parallel workers for eval_img rendering.
         name: Scan name override (default: run directory name).
 
     Returns:
-        UploadResult with flake count, ZIP size, and upload status.
+        UploadResult with flake count, upload size, and upload status.
 
     Raises:
         FileNotFoundError: If run_dir or required files don't exist.
-        RuntimeError: If no flakes pass the tier filter.
+        RuntimeError: If no flakes pass the tier filter or an API call fails.
     """
     run_dir = run_dir.resolve()
     if not run_dir.exists():
@@ -480,48 +418,37 @@ def run(
         raise FileNotFoundError("No overview stitch image found")
     stitch_path = stitch_files[0]
 
-    # Load stitch metadata for coordinate mapping
+    # Load stitch metadata for stage bounds
     stitch_meta_path = stitch_path.with_name(stitch_path.stem + "_meta.json")
     if not stitch_meta_path.exists():
         raise FileNotFoundError(f"No stitch metadata at {stitch_meta_path}")
     with open(stitch_meta_path) as f:
         stitch_meta = json.load(f)
     stage_bounds = stitch_meta["stage_bounds_um"]
-    overview_size_px = tuple(stitch_meta["image_size_px"])
 
-    # Build upload tree in temp directory
     with tempfile.TemporaryDirectory(prefix="upload_") as tmp_root:
-        upload_dir = Path(tmp_root) / scan_name
-        upload_dir.mkdir()
+        tmp = Path(tmp_root)
 
-        # Scan-level meta.json
-        scan_meta = build_scan_meta(run_dir, resolved_user, scan_name, material, substrate, checkpoint)
-        with open(upload_dir / "meta.json", "w") as f:
-            json.dump(scan_meta, f, indent=2)
-        print(f"[upload] {scan_name} (user={resolved_user}, material={material}, substrate={substrate})")
+        # Create overview_compressed.jpg
+        overview_path = tmp / "overview_compressed.jpg"
+        make_overview_compressed(stitch_path, overview_path)
 
-        # overview_compressed.jpg
-        overview_compressed_path = upload_dir / "overview_compressed.jpg"
-        make_overview_compressed(stitch_path, overview_compressed_path)
-
-        # Load overview for marking
-        overview_compressed = cv2.imread(str(overview_compressed_path))
-        assert overview_compressed is not None, f"Failed to read {overview_compressed_path}"
-
-        # Process each chip
-        total_flakes = 0
+        # Collect files to upload and per-chip data for resource creation
+        upload_files: list[tuple[str, Path]] = [("overview", overview_path)]
         eval_img_jobs: list[tuple] = []
-        revisit_copies: list[tuple[Path, str]] = []
-        overview_marked_jobs: list[tuple[float, float, int, str]] = []
+        # Each entry: (chip_idx, camera_meta, seg_material, flake_entries)
+        # flake_entries: list of (det, eval_key, revisit_keys)
+        chip_data: list[tuple[int, dict, str, list]] = []
+        total_flakes = 0
+
+        print(f"[upload] {scan_name} (user={resolved_user}, material={material}, substrate={substrate})")
 
         for chip_idx in chip_indices:
             chip_dir = run_dir / f"chip_{chip_idx}"
             seg_dir = chip_dir / "seg"
 
-            # Load summary
             summary = load_summary(seg_dir)
 
-            # Find scan directory for frame paths and camera meta
             scan_dir = find_scan_dir(chip_dir)
             if scan_dir is None:
                 if not quiet:
@@ -533,10 +460,8 @@ def run(
                 chip_scan_meta = json.load(f)
             camera_meta = chip_scan_meta["camera"]
 
-            # Material preset used for segmentation (for thickness classification)
             seg_material = summary.get("params", {}).get("material", "hbn_medium")
 
-            # Select flakes
             flakes = select_flakes(summary, tier, top)
             if not flakes:
                 continue
@@ -546,69 +471,45 @@ def run(
             if not quiet:
                 print(f"  Chip {chip_idx}: {len(flakes)} flakes (T1:{n_t1}, T2:{n_t2})")
 
-            # Discover available revisit magnifications
             revisit_mags = discover_revisit_mags(chip_dir)
 
-            # Create chip directory in upload tree
-            chip_upload_name = f"Chip_{chip_idx + 1}"
-            chip_upload_dir = upload_dir / chip_upload_name
-
+            flake_entries: list[tuple[dict, str, dict[float, str]]] = []
             for flake_idx, det in enumerate(flakes):
-                flake_number = flake_idx + 1
-                flake_upload_name = f"Flake_{flake_number}"
-                flake_dir = chip_upload_dir / flake_upload_name
-                flake_dir.mkdir(parents=True, exist_ok=True)
-
-                # Flake meta.json
-                flake_meta = build_flake_meta(det, seg_material, chip_idx)
-
-                # Add revisit mag entries to images dict
-                for mag in revisit_mags:
-                    revisit_img = find_revisit_image(chip_dir, det["frame"], det["det_id"], mag)
-                    if revisit_img is not None:
-                        mag_str = f"{mag:g}x"
-                        flake_meta["images"][mag_str] = {
-                            "aperture": 6,
-                            "light": 6.2,
-                            "nosepiece": float(mag),
-                            "gamma": int(camera_meta["gamma"] * 100),
-                            "gain": camera_meta["gain"],
-                            "exposure": camera_meta["exposure_s"],
-                            "white_balance": [
-                                int(camera_meta["white_balance_bgr"][2] * 25),  # R
-                                int(camera_meta["white_balance_bgr"][1] * 25),  # G
-                                int(camera_meta["white_balance_bgr"][0] * 25),  # B
-                            ],
-                        }
-                        revisit_copies.append((revisit_img, str(flake_dir / f"{mag_str}.png")))
-
-                with open(flake_dir / "meta.json", "w") as f:
-                    json.dump(flake_meta, f, indent=2)
-
                 # Queue eval_img rendering
+                eval_key = f"c{chip_idx}_f{flake_idx}_eval"
+                eval_path = tmp / f"{eval_key}.jpg"
                 frame_path = str(scan_dir / f"{det['frame']}.jpg")
                 geom = load_frame_geometry(seg_dir, det["frame"], det["det_id"])
                 contour = geom.get("contour") if geom else None
-                eval_img_path = str(flake_dir / "eval_img.jpg")
-                eval_img_jobs.append((frame_path, contour, det["bbox"], eval_img_path))
+                eval_img_jobs.append((frame_path, contour, det["bbox"], str(eval_path)))
+                upload_files.append((eval_key, eval_path))
 
-                # Queue overview_marked
-                stage_x = det["stage_x"]
-                stage_y = det["stage_y"]
-                overview_marked_path = str(flake_dir / "overview_marked.jpg")
-                overview_marked_jobs.append((stage_x, stage_y, flake_number, overview_marked_path))
+                # Find revisit images
+                revisit_keys: dict[float, str] = {}
+                for mag in revisit_mags:
+                    revisit_img = find_revisit_image(chip_dir, det["frame"], det["det_id"], mag)
+                    if revisit_img is not None:
+                        rkey = f"c{chip_idx}_f{flake_idx}_{mag:g}x"
+                        upload_files.append((rkey, revisit_img))
+                        revisit_keys[mag] = rkey
 
+                flake_entries.append((det, eval_key, revisit_keys))
                 total_flakes += 1
+
+            chip_data.append((chip_idx, camera_meta, seg_material, flake_entries))
 
         if total_flakes == 0:
             raise RuntimeError("No flakes pass the tier filter")
 
-        print(f"[upload] Packaging {total_flakes} flakes...")
+        if dry_run:
+            print(f"[upload] Dry-run: {total_flakes} flakes, {len(upload_files)} files to upload")
+            return UploadResult(total_flakes=total_flakes, upload_mb=0.0, uploaded=False)
 
         # Render eval images in parallel
+        print(f"[upload] Rendering {len(eval_img_jobs)} eval images...")
         t0 = time.monotonic()
         rendered = 0
-        failed = 0
+        failed_eval_paths: set[str] = set()
         with ProcessPoolExecutor(max_workers=jobs) as pool:
             futures = {pool.submit(_render_and_save, job): job for job in eval_img_jobs}
             for fut in as_completed(futures):
@@ -616,62 +517,104 @@ def run(
                 if result is not None:
                     rendered += 1
                 else:
-                    failed += 1
+                    failed_eval_paths.add(futures[fut][3])
         elapsed = time.monotonic() - t0
         if not quiet:
             print(f"  Rendered {rendered} eval images in {elapsed:.1f}s")
-        if failed:
-            print(f"  WARNING: {failed} eval images failed to render")
+        if failed_eval_paths:
+            print(f"  WARNING: {len(failed_eval_paths)} eval images failed to render")
 
-        # Generate overview_marked images
-        for stage_x, stage_y, flake_number, output_path in overview_marked_jobs:
-            marked = make_overview_marked(
-                overview_compressed,
-                stage_x,
-                stage_y,
-                flake_number,
-                stage_bounds,
-                overview_size_px,
-            )
-            cv2.imwrite(output_path, marked, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        # Remove failed eval images from upload list
+        upload_files = [(k, p) for k, p in upload_files if str(p) not in failed_eval_paths]
 
-        # Copy revisit images
-        if revisit_copies:
-            for src, dst in revisit_copies:
-                shutil.copy2(src, dst)
-
-        # Create ZIP
-        zip_path = Path(tmp_root) / scan_name
-        zip_file = shutil.make_archive(str(zip_path), "zip", str(upload_dir))
-        zip_size_mb = Path(zip_file).stat().st_size / (1024 * 1024)
-
-        if dry_run:
-            final_zip = Path(f"{scan_name}_upload.zip")
-            shutil.copy2(zip_file, final_zip)
-            print(f"[upload] Dry-run: ZIP saved to {final_zip} ({zip_size_mb:.1f} MB)")
-            return UploadResult(total_flakes=total_flakes, zip_size_mb=zip_size_mb, uploaded=False)
-
-        # Upload
-        print(f"[upload] Uploading {zip_size_mb:.1f} MB...")
+        # Upload all files in parallel to get tokens
+        print(f"[upload] Uploading {len(upload_files)} files...")
         t0 = time.monotonic()
-        with open(zip_file, "rb") as f:
-            resp = requests.post(
-                f"{base_url}/api/upload",
-                files={"zip": (f"{scan_name}.zip", f, "application/zip")},
-                auth=get_auth().as_tuple(),
-                timeout=600,
-            )
-        elapsed = time.monotonic() - t0
+        auth_tuple = get_auth().as_tuple()
+        tokens: dict[str, str] = {}
+        total_bytes = 0
 
-        if resp.status_code == 200:
-            print(f"[upload] Complete ({elapsed:.1f}s, {zip_size_mb / max(elapsed, 0.001):.1f} MB/s)")
-            print(f"[upload] View at: {base_url}")
-            return UploadResult(total_flakes=total_flakes, zip_size_mb=zip_size_mb, uploaded=True)
-        else:
-            msg = f"Upload failed: {resp.status_code} {resp.reason}"
-            with contextlib.suppress(Exception):
-                msg += f" — {resp.text[:500]}"
-            raise RuntimeError(msg)
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            futures = {
+                pool.submit(_upload_file_token, base_url, auth_tuple, key, path): key for key, path in upload_files
+            }
+            for fut in as_completed(futures):
+                key, token, size = fut.result()
+                tokens[key] = token
+                total_bytes += size
+
+        upload_mb = total_bytes / (1024 * 1024)
+        elapsed = time.monotonic() - t0
+        if not quiet:
+            print(f"  Staged {upload_mb:.1f} MB in {elapsed:.1f}s ({upload_mb / max(elapsed, 0.001):.1f} MB/s)")
+
+        # Create resources via REST API
+        session = requests.Session()
+        session.auth = auth_tuple
+
+        # Create scan
+        scan_time = _get_scan_time(run_dir)
+        comment = _build_comment(checkpoint)
+        resp = session.post(
+            f"{base_url}/api/scans",
+            json={
+                "name": scan_name,
+                "user": resolved_user,
+                "time": int(scan_time),
+                "source": "flakefinder",
+                "comment": comment,
+            },
+            timeout=30,
+        )
+        if resp.status_code != 201:
+            raise RuntimeError(f"Create scan failed: {resp.status_code} {resp.text[:500]}")
+        scan_id = resp.json()["id"]
+
+        # Upload overview
+        resp = session.put(
+            f"{base_url}/api/scans/{scan_id}/overview",
+            json={"image": tokens["overview"], "stage_bounds": stage_bounds},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"Upload overview failed: {resp.status_code} {resp.text[:500]}")
+
+        # Create chips and flakes
+        for chip_idx, camera_meta, seg_material, flake_entries in chip_data:
+            resp = session.post(
+                f"{base_url}/api/scans/{scan_id}/chips",
+                json={"wafer": substrate, "material": material},
+                timeout=30,
+            )
+            if resp.status_code != 201:
+                raise RuntimeError(f"Create chip {chip_idx} failed: {resp.status_code} {resp.text[:500]}")
+            chip_id = resp.json()["id"]
+
+            flake_payloads = []
+            for det, eval_key, revisit_keys in flake_entries:
+                resolved_revisit_tokens = {mag: tokens[rkey] for mag, rkey in revisit_keys.items() if rkey in tokens}
+                payload = _build_flake_payload(
+                    det,
+                    seg_material,
+                    tokens.get(eval_key),
+                    resolved_revisit_tokens,
+                    camera_meta,
+                )
+                flake_payloads.append(payload)
+
+            resp = session.post(
+                f"{base_url}/api/chips/{chip_id}/flakes",
+                json=flake_payloads,
+                timeout=60,
+            )
+            if resp.status_code != 201:
+                raise RuntimeError(f"Create flakes for chip {chip_idx} failed: {resp.status_code} {resp.text[:500]}")
+            if not quiet:
+                print(f"  Chip {chip_idx}: {len(flake_payloads)} flakes created")
+
+        print(f"[upload] Complete -- {total_flakes} flakes, {upload_mb:.1f} MB uploaded")
+        print(f"[upload] View at: {base_url}")
+        return UploadResult(total_flakes=total_flakes, upload_mb=upload_mb, uploaded=True)
 
 
 def main() -> int:
@@ -692,7 +635,7 @@ Examples:
     parser.add_argument("--substrate", default="285nm", help="Chip thickness / substrate (default: 285nm)")
     parser.add_argument("--tier", type=int, default=1, help="Tier to select, exact match (default: 1)")
     parser.add_argument("--top", type=int, default=None, help="Max flakes per chip (default: all passing tier filter)")
-    parser.add_argument("--dry-run", action="store_true", help="Build ZIP but don't upload")
+    parser.add_argument("--dry-run", action="store_true", help="Discover flakes but don't upload")
     parser.add_argument("-j", "--jobs", type=int, default=4, help="Parallel workers for eval_img rendering")
     parser.add_argument("--name", default=None, help="Scan name override (default: run directory name)")
     parser.add_argument("--url", default=BASE_URL, help=f"Target server URL (default: {BASE_URL})")
