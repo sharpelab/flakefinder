@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import Qt, Signal, Slot
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtCore import QEvent, QObject, Qt, Signal, Slot
+from PySide6.QtGui import QImage, QMouseEvent, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -66,6 +66,7 @@ class ControlPanel(QWidget):
         shutter_toggled(is_open): user toggled shutter
         lamp_changed(intensity): user changed lamp intensity
         objective_clicked(mag_str): user clicked an objective button
+        preview_move_requested(x_um, y_um): double-click on preview to move
     """
 
     exposure_changed = Signal(float)
@@ -73,6 +74,7 @@ class ControlPanel(QWidget):
     shutter_toggled = Signal(bool)
     lamp_changed = Signal(int)
     objective_clicked = Signal(str)
+    preview_move_requested = Signal(float, float)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -99,7 +101,12 @@ class ControlPanel(QWidget):
         self._preview_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self._preview_label.setStyleSheet("background: #1e1e1e; border: 1px solid #444;")
         self._preview_label.setText("No camera feed")
+        self._preview_label.installEventFilter(self)
         layout.addWidget(self._preview_label, stretch=1)
+
+        # Viewport state for preview click-to-move
+        self._preview_viewport: tuple[float, float, float, float] | None = None  # (x, y, fov_w, fov_h)
+        self._preview_pixmap_rect: tuple[int, int, int, int] | None = None  # (x, y, w, h) within label
 
         # Block signals during programmatic updates
         self._updating = False
@@ -253,16 +260,49 @@ class ControlPanel(QWidget):
             btn_mag = float(mag_str.replace("x", ""))
             btn.setChecked(mag is not None and btn_mag == mag)
 
+    def set_preview_viewport(self, x_um: float, y_um: float, fov_w: float, fov_h: float) -> None:
+        """Update viewport info used for preview click-to-move mapping."""
+        self._preview_viewport = (x_um, y_um, fov_w, fov_h)
+
     @Slot(QImage)
     def update_preview(self, qimg: QImage) -> None:
         """Display a camera frame in the preview label."""
         pix = QPixmap.fromImage(qimg)
+        label_size = self._preview_label.size()
         scaled = pix.scaled(
-            self._preview_label.size(),
+            label_size,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
+        # Track where the pixmap sits within the label (centered)
+        px = (label_size.width() - scaled.width()) // 2
+        py = (label_size.height() - scaled.height()) // 2
+        self._preview_pixmap_rect = (px, py, scaled.width(), scaled.height())
         self._preview_label.setPixmap(scaled)
+
+    # ── Event filter (preview double-click) ────────────────────────
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if obj is self._preview_label and event.type() == QEvent.Type.MouseButtonDblClick:
+            assert isinstance(event, QMouseEvent)
+            self._on_preview_double_click(event)
+            return True
+        return super().eventFilter(obj, event)
+
+    def _on_preview_double_click(self, event: QMouseEvent) -> None:
+        if self._preview_viewport is None or self._preview_pixmap_rect is None:
+            return
+        vx, vy, fov_w, fov_h = self._preview_viewport
+        px, py, pw, ph = self._preview_pixmap_rect
+        # Click position relative to pixmap origin
+        cx = event.position().x() - px
+        cy = event.position().y() - py
+        if pw <= 0 or ph <= 0 or cx < 0 or cy < 0 or cx > pw or cy > ph:
+            return
+        # Map to stage coords: (0,0) = top-left of FOV, (pw,ph) = bottom-right
+        stage_x = vx - fov_w / 2 + (cx / pw) * fov_w
+        stage_y = vy - fov_h / 2 + (cy / ph) * fov_h
+        self.preview_move_requested.emit(stage_x, stage_y)
 
     # ── Internal signal handlers ─────────────────────────────────
 

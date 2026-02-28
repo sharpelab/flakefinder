@@ -85,6 +85,7 @@ class QuickScanWindow(QMainWindow):
         self._controls.shutter_toggled.connect(self._scope.set_shutter)
         self._controls.lamp_changed.connect(self._scope.set_lamp_intensity)
         self._controls.objective_clicked.connect(self._scope.switch_objective)
+        self._controls.preview_move_requested.connect(self._on_move_requested)
 
         # Status bar refresh timer
         self._status_timer = QTimer()
@@ -176,6 +177,7 @@ class QuickScanWindow(QMainWindow):
 
         if fov_w > 0 and fov_h > 0:
             self._canvas.set_viewport(ViewportInfo(x, y, fov_w, fov_h))
+            self._controls.set_preview_viewport(x, y, fov_w, fov_h)
 
         mag_str = f"{mag}x" if mag else f"pos {obj_pos}"
         self._scope_label.setText(f"Stage: X={x:.0f}  Y={y:.0f}  Z={z:.0f} µm  [{mag_str}]")
