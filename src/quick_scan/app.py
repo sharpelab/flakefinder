@@ -73,6 +73,7 @@ class QuickScanWindow(QMainWindow):
         self._scope_z = 0.0
         self._scope_mag: float | None = None
         self._status_hold_until = 0.0  # monotonic time; position updates suppressed until then
+        self._roi: tuple[float, float, float, float] | None = None  # x_min, y_min, x_max, y_max
 
         # Wire scope signals
         self._scope.position_updated.connect(self._on_scope_position)
@@ -86,6 +87,7 @@ class QuickScanWindow(QMainWindow):
         # Wire canvas signals
         self._canvas.cursor_moved.connect(self._on_cursor_moved)
         self._canvas.move_requested.connect(self._on_move_requested)
+        self._canvas.roi_changed.connect(self._on_roi_changed)
 
         # Wire control signals
         self._controls.exposure_changed.connect(self._scope.set_exposure_ms)
@@ -94,10 +96,13 @@ class QuickScanWindow(QMainWindow):
         self._controls.lamp_changed.connect(self._scope.set_lamp_intensity)
         self._controls.objective_clicked.connect(self._scope.switch_objective)
         self._controls.autofocus_requested.connect(self._scope.autofocus)
+        self._controls.scan_requested.connect(self._on_scan_requested)
         self._controls.preview_move_requested.connect(self._on_move_requested)
 
         # AF completion → re-enable button + update status
         self._scope.autofocus_finished.connect(self._on_autofocus_finished)
+        self._scope.scan_finished.connect(self._on_scan_finished)
+        self._scope.scan_row_started.connect(self._on_scan_row)
 
         # Status bar refresh timer
         self._status_timer = QTimer()
@@ -165,6 +170,8 @@ class QuickScanWindow(QMainWindow):
         self._connected = True
         self._connect_action.setChecked(True)
         self._controls.set_autofocus_enabled(True)
+        if self._roi is not None:
+            self._controls.set_scan_enabled(True)
         self._scope_label.setText("Stage: connected")
 
     @Slot()
@@ -172,6 +179,7 @@ class QuickScanWindow(QMainWindow):
         self._connected = False
         self._connect_action.setChecked(False)
         self._controls.set_autofocus_enabled(False)
+        self._controls.set_scan_enabled(False)
         self._canvas.hide_viewport()
         self._scope_label.setText("Stage: disconnected")
 
@@ -190,6 +198,8 @@ class QuickScanWindow(QMainWindow):
         self._scope_label.setText(f"⚠ {msg}")
         self._status_hold_until = time.monotonic() + 5.0
         self._controls.set_autofocus_enabled(True)
+        if self._roi is not None:
+            self._controls.set_scan_enabled(True)
 
     # ── Scope updates ────────────────────────────────────────────
 
@@ -241,6 +251,57 @@ class QuickScanWindow(QMainWindow):
     def _on_move_requested(self, x_um: float, y_um: float):
         if self._connected:
             self._scope.move_to(x_um, y_um)
+
+    @Slot(float, float, float, float)
+    def _on_roi_changed(self, x_min: float, y_min: float, x_max: float, y_max: float):
+        self._roi = (x_min, y_min, x_max, y_max)
+        w = x_max - x_min
+        h = y_max - y_min
+        self._controls.set_roi_info(w, h)
+        if self._connected:
+            self._controls.set_scan_enabled(True)
+
+    @Slot()
+    def _on_scan_requested(self):
+        if not self._connected or self._roi is None:
+            return
+        from flakefinder.commands.scan import _plan
+        from flakefinder.types import AreaRect
+
+        x_min, y_min, x_max, y_max = self._roi
+        mag = self._scope_mag
+        if mag is None:
+            self._controls.set_scan_enabled(True)
+            return
+
+        try:
+            plan = _plan(
+                area_rect=AreaRect(x_min, x_max, y_min, y_max),
+                objective_mag=str(mag),
+            )
+        except ValueError as e:
+            self._scope_label.setText(f"⚠ Scan plan failed: {e}")
+            self._status_hold_until = time.monotonic() + 5.0
+            self._controls.set_scan_enabled(True)
+            return
+
+        self._scope.quick_scan(
+            row_y_positions=plan.row_y_positions,
+            x_min=plan.x_min,
+            x_max=plan.x_max,
+            speed_mm=10.0,
+        )
+
+    @Slot()
+    def _on_scan_finished(self):
+        self._controls.set_scan_enabled(True)
+        self._scope_label.setText("Stage: scan complete")
+        self._status_hold_until = time.monotonic() + 3.0
+
+    @Slot(int, int)
+    def _on_scan_row(self, current: int, total: int):
+        self._scope_label.setText(f"Stage: scanning row {current + 1}/{total}")
+        self._status_hold_until = time.monotonic() + 1.0
 
     # ── Status bar ───────────────────────────────────────────────
 

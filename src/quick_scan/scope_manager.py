@@ -50,6 +50,8 @@ class ScopeManager(QObject):
     scope_error = Signal(str)  # fatal — connection lost
     command_error = Signal(str)  # non-fatal — command failed, scope still alive
     autofocus_finished = Signal(float, float)  # best_z_um, best_sharpness
+    scan_finished = Signal()
+    scan_row_started = Signal(int, int)  # current_row (0-based), total_rows
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
@@ -131,6 +133,44 @@ class ScopeManager(QObject):
                 self.hw_state_ready.emit(self._read_hw_state(scope))
 
         self.send_command(_af)
+
+    def quick_scan(self, row_y_positions: list[float], x_min: float, x_max: float, speed_mm: float) -> None:
+        """Sweep the stage in a snake pattern over the given rows.
+
+        The FrameStream stays running — the existing frame stamping in
+        StageCanvas builds up the mosaic as the stage moves.
+        """
+
+        def _scan(scope):
+            from flakefinder.leica.units import wait_all
+
+            total = len(row_y_positions)
+            target_um_s = speed_mm * 1000
+            for axis in (scope.stage.x, scope.stage.y):
+                axis.set_velocity_um_s(min(target_um_s, axis.max_velocity_um_s))
+
+            try:
+                for i, y in enumerate(row_y_positions):
+                    if self._stop.is_set():
+                        break
+                    self.scan_row_started.emit(i, total)
+
+                    # Snake: even rows go +X, odd rows go -X
+                    x_start = x_min if i % 2 == 0 else x_max
+                    x_end = x_max if i % 2 == 0 else x_min
+
+                    # Move to row start
+                    wait_all(list(scope.stage.move_to_async(x_start, y)))
+
+                    # Sweep the row — stage moves, FrameStream captures
+                    hx = scope.stage.x.move_to_async(x_end)
+                    hx.wait()
+            except Exception as e:
+                self.command_error.emit(f"Scan failed: {e}")
+            else:
+                self.scan_finished.emit()
+
+        self.send_command(_scan)
 
     # ── Background thread ────────────────────────────────────────
 

@@ -34,6 +34,8 @@ GRID_LABEL_COLOR = QColor(255, 255, 255, 100)
 VIEWPORT_COLOR = QColor(255, 80, 80, 180)
 VIEWPORT_FILL = QColor(255, 80, 80, 20)
 STAGE_BORDER_COLOR = QColor(100, 100, 100, 80)
+ROI_COLOR = QColor(80, 255, 80, 200)
+ROI_FILL = QColor(80, 255, 80, 25)
 
 # Zoom limits (µm per pixel)
 ZOOM_MIN = 0.01  # ~150x equivalent
@@ -64,6 +66,7 @@ class StageCanvas(QGraphicsView):
 
     cursor_moved = Signal(float, float)
     move_requested = Signal(float, float)  # double-click → stage move
+    roi_changed = Signal(float, float, float, float)  # x_min, y_min, x_max, y_max (µm)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -123,6 +126,16 @@ class StageCanvas(QGraphicsView):
         self._camera_pixmap.setZValue(50)  # above grid, below viewport rect
         self._camera_pixmap.setVisible(False)
         self._scene.addItem(self._camera_pixmap)
+
+        # ROI rectangle (user-drawn scan region)
+        self._roi_rect = QGraphicsRectItem()
+        self._roi_rect.setPen(QPen(ROI_COLOR, 0))
+        self._roi_rect.setBrush(QBrush(ROI_FILL))
+        self._roi_rect.setZValue(75)
+        self._roi_rect.setVisible(False)
+        self._scene.addItem(self._roi_rect)
+        self._roi_drawing = False
+        self._roi_start = QPointF()
 
         # Placed frames: persistent images left behind as the stage moves
         self._placed_frames: list[QGraphicsPixmapItem] = []
@@ -229,6 +242,16 @@ class StageCanvas(QGraphicsView):
         self._placed_frames.clear()
         self._last_placed_center = None
 
+    def roi_rect_um(self) -> tuple[float, float, float, float] | None:
+        """Return ROI bounds (x_min, y_min, x_max, y_max) in µm, or None."""
+        if not self._roi_rect.isVisible():
+            return None
+        r = self._roi_rect.rect()
+        return (r.left(), r.top(), r.right(), r.bottom())
+
+    def clear_roi(self) -> None:
+        self._roi_rect.setVisible(False)
+
     def um_per_px(self) -> float:
         """Current scale: stage µm per screen pixel."""
         t = self.transform()
@@ -262,11 +285,18 @@ class StageCanvas(QGraphicsView):
 
     # ── Pan ─────────────────────────────────────────────────────
 
+    _ROI_MIN_PX = 8  # minimum drag distance to register as ROI (screen pixels)
+
     def mousePressEvent(self, event):
         if event.button() in (Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton):
             self._panning = True
             self._pan_start = event.position()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+        elif event.button() == Qt.MouseButton.LeftButton:
+            self._roi_drawing = True
+            self._roi_start = self.mapToScene(event.position().toPoint())
+            self._roi_press_screen = event.position()
             event.accept()
         else:
             super().mousePressEvent(event)
@@ -275,9 +305,14 @@ class StageCanvas(QGraphicsView):
         if self._panning:
             delta = event.position() - self._pan_start
             self._pan_start = event.position()
-            # Pan via scrollbars (works reliably with the internal transform)
             self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - int(delta.x()))
             self.verticalScrollBar().setValue(self.verticalScrollBar().value() - int(delta.y()))
+            event.accept()
+        elif self._roi_drawing:
+            current = self.mapToScene(event.position().toPoint())
+            rect = QRectF(self._roi_start, current).normalized()
+            self._roi_rect.setRect(rect)
+            self._roi_rect.setVisible(True)
             event.accept()
         else:
             scene_pos = self.mapToScene(event.position().toPoint())
@@ -289,11 +324,24 @@ class StageCanvas(QGraphicsView):
             self._panning = False
             self.setCursor(Qt.CursorShape.ArrowCursor)
             event.accept()
+        elif event.button() == Qt.MouseButton.LeftButton and self._roi_drawing:
+            self._roi_drawing = False
+            # Check if drag was large enough to be intentional
+            drag_dist = (event.position() - self._roi_press_screen).manhattanLength()
+            if drag_dist < self._ROI_MIN_PX:
+                # Too small — discard (allow double-click to work)
+                self._roi_rect.setVisible(False)
+            else:
+                r = self._roi_rect.rect()
+                self.roi_changed.emit(r.left(), r.top(), r.right(), r.bottom())
+            event.accept()
         else:
             super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            # Cancel any ROI started by the first click of the double-click
+            self._roi_drawing = False
             scene_pos = self.mapToScene(event.position().toPoint())
             self.move_requested.emit(scene_pos.x(), scene_pos.y())
             event.accept()

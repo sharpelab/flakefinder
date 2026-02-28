@@ -75,6 +75,7 @@ class ControlPanel(QWidget):
     lamp_changed = Signal(int)
     objective_clicked = Signal(str)
     autofocus_requested = Signal()
+    scan_requested = Signal()
     preview_move_requested = Signal(float, float)
 
     def __init__(self, parent: QWidget | None = None):
@@ -102,6 +103,13 @@ class ControlPanel(QWidget):
         self._af_button.setEnabled(False)
         self._af_button.clicked.connect(self._on_autofocus_clicked)
         layout.addWidget(self._af_button)
+
+        # ── Scan ──────────────────────────────────────────────────
+        self._scan_button = QPushButton("Scan ROI")
+        self._scan_button.setMinimumHeight(32)
+        self._scan_button.setEnabled(False)
+        self._scan_button.clicked.connect(self._on_scan_clicked)
+        layout.addWidget(self._scan_button)
 
         # ── Camera Preview ───────────────────────────────────────
         self._preview_label = QLabel()
@@ -413,6 +421,25 @@ class ControlPanel(QWidget):
         self._af_button.setText("Autofocus")
         if enabled:
             self.set_preview_overlay(None)
+
+    def _on_scan_clicked(self) -> None:
+        self._scan_button.setEnabled(False)
+        self._scan_button.setText("Scanning…")
+        self.set_preview_overlay("Scanning…")
+        self.scan_requested.emit()
+
+    def set_scan_enabled(self, enabled: bool) -> None:
+        self._scan_button.setEnabled(enabled)
+        self._scan_button.setText("Scan ROI")
+        if enabled:
+            self.set_preview_overlay(None)
+
+    def set_roi_info(self, w_um: float, h_um: float) -> None:
+        """Update the scan button label with ROI dimensions."""
+        if w_um >= 1000:
+            self._scan_button.setText(f"Scan ROI ({w_um / 1000:.1f} × {h_um / 1000:.1f} mm)")
+        else:
+            self._scan_button.setText(f"Scan ROI ({w_um:.0f} × {h_um:.0f} µm)")
 
     def set_preview_overlay(self, text: str | None) -> None:
         """Show or hide a text overlay on the camera preview."""
