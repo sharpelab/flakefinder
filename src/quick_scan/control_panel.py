@@ -336,7 +336,7 @@ class ControlPanel(QWidget):
                 assert isinstance(event, QMouseEvent)
                 self._on_preview_double_click(event)
                 return True
-            if event.type() == QEvent.Type.Resize and self._preview_overlay.isVisible():
+            if event.type() == QEvent.Type.Resize:
                 self._preview_overlay.resize(self._preview_label.size())
         return super().eventFilter(obj, event)
 
@@ -479,4 +479,5 @@ class ControlPanel(QWidget):
         else:
             self._preview_overlay.setText(text)
             self._preview_overlay.resize(self._preview_label.size())
+            self._preview_overlay.raise_()
             self._preview_overlay.show()
