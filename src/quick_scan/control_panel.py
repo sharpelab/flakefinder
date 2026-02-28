@@ -122,7 +122,8 @@ class ControlPanel(QWidget):
         self._exp_spin.setDecimals(2)
         self._exp_spin.setSuffix(" ms")
         self._exp_spin.setValue(1.0)
-        self._exp_spin.setFixedWidth(100)
+        self._exp_spin.setFixedWidth(60)
+        self._exp_spin.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
         self._exp_spin.editingFinished.connect(self._on_exp_spin)
         layout.addWidget(self._exp_spin)
 
@@ -154,11 +155,16 @@ class ControlPanel(QWidget):
             spin.setDecimals(2)
             spin.setSingleStep(0.01)
             spin.setValue(1.0)
-            spin.setFixedWidth(80)
+            spin.setFixedWidth(48)
             spin.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
             spin.editingFinished.connect(self._on_wb_spin)
             grid.addWidget(spin, row, 2)
             self._wb_spins[channel] = spin
+
+        reset_btn = QPushButton("Reset")
+        reset_btn.setFixedHeight(22)
+        reset_btn.clicked.connect(self._on_wb_reset)
+        grid.addWidget(reset_btn, 3, 0, 1, 3)
 
         return group
 
@@ -303,6 +309,10 @@ class ControlPanel(QWidget):
         self._wb_sliders["B"].setValue(_wb_gain_to_slider(b))
         self._updating = False
         self.wb_changed.emit(r, g, b)
+
+    def _on_wb_reset(self) -> None:
+        self.set_gain_rgb(1.0, 1.0, 1.0)
+        self.wb_changed.emit(1.0, 1.0, 1.0)
 
     def _on_shutter_toggle(self, checked: bool) -> None:
         if self._updating:
