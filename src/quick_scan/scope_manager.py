@@ -47,7 +47,8 @@ class ScopeManager(QObject):
     hw_state_ready = Signal(object)  # HardwareState
     scope_connected = Signal()
     scope_disconnected = Signal()
-    scope_error = Signal(str)
+    scope_error = Signal(str)  # fatal — connection lost
+    command_error = Signal(str)  # non-fatal — command failed, scope still alive
     autofocus_finished = Signal(float, float)  # best_z_um, best_sharpness
 
     def __init__(self, parent: QObject | None = None):
@@ -122,9 +123,12 @@ class ScopeManager(QObject):
             try:
                 result = continuous_autofocus(scope)
                 self.autofocus_finished.emit(result.selected_z_um, result.selected_sharpness)
+            except Exception as e:
+                self.command_error.emit(f"Autofocus failed: {e}")
             finally:
                 if self._stream is not None:
                     self._stream.start()
+                self.hw_state_ready.emit(self._read_hw_state(scope))
 
         self.send_command(_af)
 
@@ -165,7 +169,7 @@ class ScopeManager(QObject):
                                 cmd = self._cmd_queue.get_nowait()
                                 cmd(scope)
                             except Exception as e:
-                                self.scope_error.emit(f"Command error: {e}")
+                                self.command_error.emit(f"Command error: {e}")
 
                         # --- Position ---
                         x, y = scope.stage.position_um

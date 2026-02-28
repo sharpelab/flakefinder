@@ -79,6 +79,7 @@ class QuickScanWindow(QMainWindow):
         self._scope.scope_connected.connect(self._on_connected)
         self._scope.scope_disconnected.connect(self._on_disconnected)
         self._scope.scope_error.connect(self._on_scope_error)
+        self._scope.command_error.connect(self._on_command_error)
 
         # Wire canvas signals
         self._canvas.cursor_moved.connect(self._on_cursor_moved)
@@ -170,10 +171,17 @@ class QuickScanWindow(QMainWindow):
 
     @Slot(str)
     def _on_scope_error(self, msg: str):
+        """Fatal error — connection lost."""
         self._scope_label.setText(f"Stage: error — {msg}")
         self._connected = False
         self._connect_action.setChecked(False)
         self._canvas.hide_viewport()
+        self._controls.set_autofocus_enabled(True)
+
+    @Slot(str)
+    def _on_command_error(self, msg: str):
+        """Non-fatal error — scope still alive."""
+        self._scope_label.setText(f"Stage: {msg}")
         self._controls.set_autofocus_enabled(True)
 
     # ── Scope updates ────────────────────────────────────────────
