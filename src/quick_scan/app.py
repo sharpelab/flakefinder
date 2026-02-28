@@ -1,8 +1,8 @@
 """Quick Scan GUI — interactive stage viewer for the Leica DM6M.
 
 Usage:
-    quick-scan              # offline mode (canvas only)
-    quick-scan --connect    # connect to microscope for live viewport + camera
+    quick-scan              # connect to microscope on startup
+    quick-scan --offline    # offline mode (canvas only)
 """
 
 from __future__ import annotations
@@ -229,13 +229,13 @@ class QuickScanWindow(QMainWindow):
 
 def main():
     parser = argparse.ArgumentParser(description="Quick Scan — interactive stage viewer")
-    parser.add_argument("--connect", action="store_true", help="Connect to microscope on startup")
+    parser.add_argument("--offline", action="store_true", help="Start without connecting to microscope")
     args = parser.parse_args()
 
     app = QApplication(sys.argv)
     app.setApplicationName("Quick Scan")
 
-    window = QuickScanWindow(connect=args.connect)
+    window = QuickScanWindow(connect=not args.offline)
     window.show()
 
     sys.exit(app.exec())

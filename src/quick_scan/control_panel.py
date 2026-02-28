@@ -81,6 +81,7 @@ class ControlPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
+        self.setMinimumWidth(400)
 
         # ── Exposure ─────────────────────────────────────────────
         layout.addWidget(self._build_exposure_group())
