@@ -110,9 +110,7 @@ class QuickScanWindow(QMainWindow):
         self._status_timer.start(200)
 
         if connect:
-            self._scope_label.setText("Stage: connecting…")
-            self._connect_action.setChecked(True)
-            self._scope.open()
+            self._start_connecting()
 
     def _build_toolbar(self):
         toolbar = QToolBar("Main")
@@ -157,11 +155,17 @@ class QuickScanWindow(QMainWindow):
 
     # ── Connection lifecycle ─────────────────────────────────────
 
+    def _start_connecting(self):
+        self._scope_label.setText("Stage: connecting…")
+        self._connect_action.setChecked(True)
+        self._controls.set_preview_overlay("Connecting…")
+        self._canvas.set_banner("Connecting to microscope…")
+        self._scope.open()
+
     @Slot(bool)
     def _on_connect_toggled(self, checked: bool):
         if checked:
-            self._scope_label.setText("Stage: connecting...")
-            self._scope.open()
+            self._start_connecting()
         else:
             self._scope.close()
 
@@ -170,6 +174,8 @@ class QuickScanWindow(QMainWindow):
         self._connected = True
         self._connect_action.setChecked(True)
         self._controls.set_autofocus_enabled(True)
+        self._controls.set_preview_overlay(None)
+        self._canvas.set_banner(None)
         if self._roi is not None:
             self._controls.set_scan_enabled(True)
         self._scope_label.setText("Stage: connected")
@@ -180,6 +186,8 @@ class QuickScanWindow(QMainWindow):
         self._connect_action.setChecked(False)
         self._controls.set_autofocus_enabled(False)
         self._controls.set_scan_enabled(False)
+        self._controls.set_preview_overlay(None)
+        self._canvas.set_banner(None)
         self._canvas.hide_viewport()
         self._scope_label.setText("Stage: disconnected")
 
@@ -187,10 +195,14 @@ class QuickScanWindow(QMainWindow):
     def _on_scope_error(self, msg: str):
         """Fatal error — connection lost."""
         self._scope_label.setText(f"Stage: error — {msg}")
+        self._status_hold_until = time.monotonic() + 5.0
         self._connected = False
         self._connect_action.setChecked(False)
+        self._controls.set_autofocus_enabled(False)
+        self._controls.set_scan_enabled(False)
+        self._controls.set_preview_overlay(None)
+        self._canvas.set_banner(None)
         self._canvas.hide_viewport()
-        self._controls.set_autofocus_enabled(True)
 
     @Slot(str)
     def _on_command_error(self, msg: str):

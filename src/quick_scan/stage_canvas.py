@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QGraphicsScene,
     QGraphicsSimpleTextItem,
     QGraphicsView,
+    QLabel,
 )
 
 # Stage limits (µm) from microscope_description.json
@@ -141,6 +142,14 @@ class StageCanvas(QGraphicsView):
         self._placed_frames: list[QGraphicsPixmapItem] = []
         self._last_placed_center: tuple[float, float] | None = None
 
+        # Banner overlay (viewport widget, not a scene item)
+        self._banner = QLabel(self)
+        self._banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._banner.setStyleSheet(
+            "background: rgba(0, 0, 0, 160); color: white; font-size: 22px; font-weight: bold; padding: 20px;"
+        )
+        self._banner.hide()
+
         # Start at overview zoom
         self.go_to_overview()
 
@@ -251,6 +260,24 @@ class StageCanvas(QGraphicsView):
 
     def clear_roi(self) -> None:
         self._roi_rect.setVisible(False)
+
+    def set_banner(self, text: str | None) -> None:
+        """Show or hide a centered text banner over the canvas."""
+        if text is None:
+            self._banner.hide()
+        else:
+            self._banner.setText(text)
+            self._banner.adjustSize()
+            self._center_banner()
+            self._banner.show()
+            self._banner.raise_()
+
+    def _center_banner(self) -> None:
+        vp = self.viewport()
+        bw = max(self._banner.sizeHint().width(), 300)
+        bh = self._banner.sizeHint().height()
+        self._banner.setFixedSize(bw, bh)
+        self._banner.move((vp.width() - bw) // 2, (vp.height() - bh) // 2)
 
     def um_per_px(self) -> float:
         """Current scale: stage µm per screen pixel."""
@@ -422,3 +449,5 @@ class StageCanvas(QGraphicsView):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_grid()
+        if self._banner.isVisible():
+            self._center_banner()
