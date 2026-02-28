@@ -296,8 +296,8 @@ class QuickScanWindow(QMainWindow):
             self._controls.set_scan_enabled(True)
             return
 
-        # _plan() places frame *centers* at y_min..y_max.  Inset by half
-        # a frame so the first/last frames fully cover the drawn ROI.
+        # _plan() places frame *centers* at y_min..y_max.  Inset y_min by
+        # half a frame so the top of the first frame aligns with the ROI top.
         desc = require_microscope_description()
         fov = compute_frame_size_um(desc.camera, mag, binning_idx=2)
         if fov is None:
@@ -311,6 +311,11 @@ class QuickScanWindow(QMainWindow):
                 area_rect=scan_rect,
                 objective_mag=str(mag),
             )
+            # Ensure the last frame's bottom edge covers the ROI bottom
+            if plan.row_y_positions:
+                last_bottom = plan.row_y_positions[-1] + fh / 2
+                if last_bottom < y_max:
+                    plan.row_y_positions.append(y_max - fh / 2)
         except ValueError as e:
             self._scope_label.setText(f"⚠ Scan plan failed: {e}")
             self._status_hold_until = time.monotonic() + 5.0
