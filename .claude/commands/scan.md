@@ -67,18 +67,20 @@ Paths for push/pull are relative to the flakefinder repo root. `sls --` runs fro
 
 **Autofocus at a point:**
 ```
-sls autofocus --x [X] --y [Y] --z [Z_REF] --fine --z-speed 1250 --settle-time 0.2 --white-balance 2.51,1.02,1.41 --output afs/[name] --clean -q
+sls autofocus --x [X] --y [Y] --z [Z_REF] --white-balance 2.51,1.02,1.41 --output afs/[name] --clean -q
 ```
 - Always use `--z` with a known reference Z (from notebook or microscope_reference.md)
-- Default to 1/4 Z speed (1250 µm/s) for 20x
-- Grab (`rsync`) and `present` the after image
+- Accepts `--objective-mag [MAG]` to switch objective before AF
+- Speed, range, and settle time are automatic per objective (from `AF_DEFAULTS`)
+- Grab (`sls pull`) and `present` the best image
 
 **Focus map for a chip:**
 ```
-sls focus-map --chips-meta scans/[prefix]_chips.json --chip [N] --save-images --z-speed 1250 --z [Z_REF] --af-settle 0.2 -q
+sls focus-map --chips-meta scans/[prefix]_chips.json --chip [N] --save-images --z [Z_REF] -q
 ```
 - `--z` is required — use the autofocused Z at chip centroid
-- Grab results: `rsync -a --quiet sharpelab-microscope:flakefinder/scans/focus_map_chip[N]* scans/`
+- Speed is automatic per objective (from `FM_AF_DEFAULTS`)
+- Grab results: `sls pull scans/focus_map_chip[N]*`
 - Run analysis: `uv run analyze-focus-map scans/focus_map_chip[N].json --export-plane scans/focus_map_chip[N]_plane.json --min-sharpness 20 --quiet`
 - Open all three outputs (analysis, mosaic, contour)
 
@@ -128,9 +130,8 @@ uv run python scripts/process_chip_scan.py scans/[run_dir]/chip_[N]/scan_20x --s
 - **Remote output**: `sls` output goes straight to context. Use `-q` on all scripts that support it. For unexpected verbose output, pipe through `| tail -20`.
 
 ### Key Parameters
-- Z speed 20x: 1250 µm/s (1/4 of 5000 max)
 - Z reference: check notebook "Z Focus" section, or `docs/microscope_reference.md`
-- AF settle: 0.2s (after autofocus, before image capture)
+- AF speed/range/settle: automatic per objective (from `AF_DEFAULTS` in `autofocus.py`)
 - Min sharpness filter: 20 (for focus map analysis)
 - Mosaic max-dim: 4500 px
 - Analysis plots: +Y down

@@ -84,7 +84,7 @@ Objectives are parfocal — Z focus is similar across magnifications.
 | Set 2 | 10x (pos 2) | ~24704 | af_10x_chip1_ff, chip 1 centroid | 2026-02-11 |
 | Set 2 | 20x (pos 3) | ~24718 | af_20x_chip1_ff, chip 1 centroid | 2026-02-11 |
 
-Z is sample-dependent — different substrates shift focus. The ±250 µm autofocus range covers typical variation. Use as starting `--z` for `autofocus_demo.py`.
+Z is sample-dependent — different substrates shift focus. The autofocus range covers typical variation. Use as starting `--z` for `sls autofocus`.
 
 ## Stage Limits
 
