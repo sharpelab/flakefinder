@@ -7,12 +7,14 @@ import math
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDoubleSpinBox,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QSlider,
     QSpinBox,
     QVBoxLayout,
@@ -94,6 +96,7 @@ class ControlPanel(QWidget):
         self._preview_label = QLabel()
         self._preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._preview_label.setMinimumHeight(120)
+        self._preview_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self._preview_label.setStyleSheet("background: #1e1e1e; border: 1px solid #444;")
         self._preview_label.setText("No camera feed")
         layout.addWidget(self._preview_label, stretch=1)
@@ -151,7 +154,7 @@ class ControlPanel(QWidget):
             spin.setDecimals(2)
             spin.setSingleStep(0.01)
             spin.setValue(1.0)
-            spin.setFixedWidth(65)
+            spin.setFixedWidth(80)
             spin.editingFinished.connect(self._on_wb_spin)
             grid.addWidget(spin, row, 2)
             self._wb_spins[channel] = spin
@@ -164,10 +167,13 @@ class ControlPanel(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
 
         # Shutter toggle
-        self._shutter_btn = QPushButton("Shutter OFF")
-        self._shutter_btn.setCheckable(True)
-        self._shutter_btn.clicked.connect(self._on_shutter_toggle)
-        layout.addWidget(self._shutter_btn)
+        shutter_row = QHBoxLayout()
+        self._shutter_check = QCheckBox()
+        self._shutter_check.toggled.connect(self._on_shutter_toggle)
+        shutter_row.addWidget(self._shutter_check)
+        self._shutter_label = QLabel("Shutter Closed")
+        shutter_row.addWidget(self._shutter_label, stretch=1)
+        layout.addLayout(shutter_row)
 
         # Intensity
         row = QHBoxLayout()
@@ -222,8 +228,8 @@ class ControlPanel(QWidget):
 
     def set_shutter(self, is_open: bool) -> None:
         self._updating = True
-        self._shutter_btn.setChecked(is_open)
-        self._shutter_btn.setText("Shutter ON" if is_open else "Shutter OFF")
+        self._shutter_check.setChecked(is_open)
+        self._shutter_label.setText("Shutter Open" if is_open else "Shutter Closed")
         self._updating = False
 
     def set_lamp(self, intensity: int, max_intensity: int) -> None:
@@ -300,7 +306,7 @@ class ControlPanel(QWidget):
     def _on_shutter_toggle(self, checked: bool) -> None:
         if self._updating:
             return
-        self._shutter_btn.setText("Shutter ON" if checked else "Shutter OFF")
+        self._shutter_label.setText("Shutter Open" if checked else "Shutter Closed")
         self.shutter_toggled.emit(checked)
 
     def _on_lamp_slider(self, val: int) -> None:

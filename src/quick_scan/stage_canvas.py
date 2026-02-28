@@ -119,6 +119,7 @@ class StageCanvas(QGraphicsView):
 
         # Camera overlay (live frame rendered at viewport position)
         self._camera_pixmap = QGraphicsPixmapItem()
+        self._camera_pixmap.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
         self._camera_pixmap.setZValue(50)  # above grid, below viewport rect
         self._camera_pixmap.setVisible(False)
         self._scene.addItem(self._camera_pixmap)
