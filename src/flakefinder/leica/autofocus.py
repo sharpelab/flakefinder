@@ -23,7 +23,7 @@ from ..image_utils import sdk_image_to_numpy
 from ..types import Point2F, PositionSample, RGBImage
 from .microscope import Microscope
 from .polling import start_motion_polling
-from .units import Axis, Nosepiece, ZDrive
+from .units import Nosepiece, ZDrive
 
 # Working distances in µm by objective position (from commands/stage.py)
 # Position 1-indexed as used by the Nosepiece class.
@@ -490,31 +490,6 @@ def _get_safe_range(nosepiece: Nosepiece, z_range_um: float | None) -> tuple[flo
     return min(working_distance / 3, 500), objective_position
 
 
-def _validate_z_limits(
-    z_axis: Axis,
-    z_start: float,
-    z_end: float,
-    z_max_safe: float | None,
-) -> None:
-    """Validate Z positions against axis and safety limits.
-
-    Args:
-        z_axis: Z axis for checking hardware limits.
-        z_start: Starting Z position in µm.
-        z_end: Ending Z position in µm.
-        z_max_safe: Optional hard upper limit in µm.
-
-    Raises:
-        ValueError: If any position exceeds limits.
-    """
-    if z_start > z_axis.max_um:
-        raise ValueError(f"Z start {z_start:.1f}µm exceeds axis max {z_axis.max_um:.1f}µm")
-    if z_end < z_axis.min_um:
-        raise ValueError(f"Z end {z_end:.1f}µm below axis min {z_axis.min_um:.1f}µm")
-    if z_max_safe is not None and z_start > z_max_safe:
-        raise ValueError(f"Z start {z_start:.1f}µm exceeds safe max {z_max_safe:.1f}µm")
-
-
 def _run_z_scan(
     z_axis: ZDrive,
     z_start: float,
@@ -784,7 +759,9 @@ def _focus_and_capture_impl(
     z_start = center_z + safe_range / 2
     z_end = center_z - safe_range / 2
 
-    _validate_z_limits(z_axis, z_start, z_end, None)
+    # Clamp to axis travel limits
+    z_start = min(z_start, z_axis.max_um)
+    z_end = max(z_end, z_axis.min_um)
 
     # Position at z_start at full speed, then set scan speed
     z_axis.move_to_corrected(z_start)
@@ -924,8 +901,10 @@ def continuous_autofocus(
     z_start = initial_z + af.coarse_range_um / 2  # Start high
     z_end = initial_z - af.coarse_range_um / 2  # End low (away from sample)
 
-    # Validate against limits
-    _validate_z_limits(z_axis, z_start, z_end, z_max_safe_um)
+    # Clamp to axis travel limits (and z_max_safe if set)
+    z_upper = min(z_axis.max_um, z_max_safe_um) if z_max_safe_um is not None else z_axis.max_um
+    z_start = min(z_start, z_upper)
+    z_end = max(z_end, z_axis.min_um)
 
     # Capture initial sharpness at current position (flush stale sensor buffer first)
     z_axis.move_to_corrected(initial_z)
