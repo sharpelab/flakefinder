@@ -113,6 +113,14 @@ class ControlPanel(QWidget):
         self._preview_label.installEventFilter(self)
         layout.addWidget(self._preview_label, stretch=1)
 
+        # Overlay for busy states (AF, scan)
+        self._preview_overlay = QLabel(self._preview_label)
+        self._preview_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._preview_overlay.setStyleSheet(
+            "background: rgba(0, 0, 0, 160); color: white; font-size: 16px; font-weight: bold;"
+        )
+        self._preview_overlay.hide()
+
         # Viewport state for preview click-to-move
         self._preview_viewport: tuple[float, float, float, float] | None = None  # (x, y, fov_w, fov_h)
         self._preview_pixmap_rect: tuple[int, int, int, int] | None = None  # (x, y, w, h) within label
@@ -292,10 +300,13 @@ class ControlPanel(QWidget):
     # ── Event filter (preview double-click) ────────────────────────
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        if obj is self._preview_label and event.type() == QEvent.Type.MouseButtonDblClick:
-            assert isinstance(event, QMouseEvent)
-            self._on_preview_double_click(event)
-            return True
+        if obj is self._preview_label:
+            if event.type() == QEvent.Type.MouseButtonDblClick:
+                assert isinstance(event, QMouseEvent)
+                self._on_preview_double_click(event)
+                return True
+            if event.type() == QEvent.Type.Resize and self._preview_overlay.isVisible():
+                self._preview_overlay.resize(self._preview_label.size())
         return super().eventFilter(obj, event)
 
     def _on_preview_double_click(self, event: QMouseEvent) -> None:
@@ -394,8 +405,20 @@ class ControlPanel(QWidget):
     def _on_autofocus_clicked(self) -> None:
         self._af_button.setEnabled(False)
         self._af_button.setText("Focusing…")
+        self.set_preview_overlay("Focusing…")
         self.autofocus_requested.emit()
 
     def set_autofocus_enabled(self, enabled: bool) -> None:
         self._af_button.setEnabled(enabled)
         self._af_button.setText("Autofocus")
+        if enabled:
+            self.set_preview_overlay(None)
+
+    def set_preview_overlay(self, text: str | None) -> None:
+        """Show or hide a text overlay on the camera preview."""
+        if text is None:
+            self._preview_overlay.hide()
+        else:
+            self._preview_overlay.setText(text)
+            self._preview_overlay.resize(self._preview_label.size())
+            self._preview_overlay.show()
