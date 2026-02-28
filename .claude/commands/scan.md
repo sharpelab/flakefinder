@@ -97,6 +97,12 @@ sls stage --objective-mag [MAG] -q
 - Magnifications: 2.5x, 5x, 10x, 20x, 50x, 150x
 - Z shifts on swap (parfocal adjustment) — note the new Z
 
+**Park microscope:**
+```
+sls stage --park -q
+```
+- Retracts to safe Z, switches to 5x, moves to origin, turns off lamp and closes shutter
+
 **Full pipeline (find_flakes):**
 ```
 sls find-flakes --initial-z [Z_REF] --notes "[description]" -q
