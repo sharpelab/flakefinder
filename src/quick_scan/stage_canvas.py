@@ -124,6 +124,10 @@ class StageCanvas(QGraphicsView):
         self._camera_pixmap.setVisible(False)
         self._scene.addItem(self._camera_pixmap)
 
+        # Placed frames: persistent images left behind as the stage moves
+        self._placed_frames: list[QGraphicsPixmapItem] = []
+        self._last_placed_center: tuple[float, float] | None = None
+
         # Start at overview zoom
         self.go_to_overview()
 
@@ -174,19 +178,56 @@ class StageCanvas(QGraphicsView):
         self._viewport_info = None
 
     def update_camera_frame(self, qimg: QImage) -> None:
-        """Place a camera frame on the canvas at the current viewport position."""
+        """Place a camera frame on the canvas at the current viewport position.
+
+        When the stage moves far enough from the last placed frame, the
+        previous live frame is stamped as a persistent background image.
+        """
         if self._viewport_info is None:
             return
         vi = self._viewport_info
         pix = QPixmap.fromImage(qimg)
         if pix.isNull():
             return
-        self._camera_pixmap.setPixmap(pix)
-        # Scale so the pixmap fills the viewport FOV in scene (µm) coords
+
+        # Stamp the previous live frame if the stage moved significantly
+        if self._camera_pixmap.isVisible() and self._last_placed_center is not None:
+            lx, ly = self._last_placed_center
+            dx = abs(vi.x_um - lx)
+            dy = abs(vi.y_um - ly)
+            threshold = min(vi.fov_w_um, vi.fov_h_um) * 0.3
+            if dx > threshold or dy > threshold:
+                self._stamp_current_frame()
+
+        # Update live frame
         scale = vi.fov_w_um / pix.width()
+        self._camera_pixmap.setPixmap(pix)
         self._camera_pixmap.setScale(scale)
         self._camera_pixmap.setPos(vi.x_um - vi.fov_w_um / 2, vi.y_um - vi.fov_h_um / 2)
         self._camera_pixmap.setVisible(True)
+        self._last_placed_center = (vi.x_um, vi.y_um)
+
+    def _stamp_current_frame(self) -> None:
+        """Copy the current live frame as a persistent background item."""
+        placed = QGraphicsPixmapItem(self._camera_pixmap.pixmap())
+        placed.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
+        placed.setScale(self._camera_pixmap.scale())
+        placed.setPos(self._camera_pixmap.pos())
+        placed.setZValue(10)  # above grid, below live frame
+        self._scene.addItem(placed)
+        self._placed_frames.append(placed)
+
+        # Evict oldest if over cap
+        if len(self._placed_frames) > 500:
+            old = self._placed_frames.pop(0)
+            self._scene.removeItem(old)
+
+    def clear_placed_frames(self) -> None:
+        """Remove all placed background frames."""
+        for item in self._placed_frames:
+            self._scene.removeItem(item)
+        self._placed_frames.clear()
+        self._last_placed_center = None
 
     def um_per_px(self) -> float:
         """Current scale: stage µm per screen pixel."""
