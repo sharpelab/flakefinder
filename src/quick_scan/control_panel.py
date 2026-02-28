@@ -99,6 +99,7 @@ class ControlPanel(QWidget):
         # ── Autofocus ─────────────────────────────────────────────
         self._af_button = QPushButton("Autofocus")
         self._af_button.setMinimumHeight(32)
+        self._af_button.setEnabled(False)
         self._af_button.clicked.connect(self._on_autofocus_clicked)
         layout.addWidget(self._af_button)
 

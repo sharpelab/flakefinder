@@ -103,6 +103,8 @@ class QuickScanWindow(QMainWindow):
         self._status_timer.start(200)
 
         if connect:
+            self._scope_label.setText("Stage: connecting…")
+            self._connect_action.setChecked(True)
             self._scope.open()
 
     def _build_toolbar(self):
@@ -160,12 +162,14 @@ class QuickScanWindow(QMainWindow):
     def _on_connected(self):
         self._connected = True
         self._connect_action.setChecked(True)
+        self._controls.set_autofocus_enabled(True)
         self._scope_label.setText("Stage: connected")
 
     @Slot()
     def _on_disconnected(self):
         self._connected = False
         self._connect_action.setChecked(False)
+        self._controls.set_autofocus_enabled(False)
         self._canvas.hide_viewport()
         self._scope_label.setText("Stage: disconnected")
 
