@@ -27,7 +27,6 @@ chip-scan = "flakefinder.commands.chip_scan:main"
 revisit = "flakefinder.commands.revisit:main"
 stage = "flakefinder.commands.stage:main"
 upload = "flakefinder.commands.upload:main"
-launch-gui = "flakefinder.commands.launch_gui:main"
 run-viewer = "flakefinder.commands.run_viewer:main"
 
 [build-system]
@@ -36,6 +35,7 @@ build-backend = "hatchling.build"
 
 [project.gui-scripts]
 quick-scan = "quick_scan.app:main"
+find-flakes-gui = "flakefinder.commands.launch_gui:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/flakefinder", "src/quick_scan"]
