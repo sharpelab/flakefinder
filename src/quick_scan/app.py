@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Slot
-from PySide6.QtGui import QAction, QImage, QKeySequence
+from PySide6.QtGui import QAction, QIcon, QImage, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QDockWidget,
@@ -35,6 +36,10 @@ class QuickScanWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Quick Scan")
         self.resize(1400, 900)
+
+        icon_path = Path(__file__).parent / "assets" / "icon.ico"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
 
         # ── Central widget: stage canvas ─────────────────────────
         central = QWidget()
