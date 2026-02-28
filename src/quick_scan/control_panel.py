@@ -155,6 +155,7 @@ class ControlPanel(QWidget):
             spin.setSingleStep(0.01)
             spin.setValue(1.0)
             spin.setFixedWidth(80)
+            spin.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
             spin.editingFinished.connect(self._on_wb_spin)
             grid.addWidget(spin, row, 2)
             self._wb_spins[channel] = spin
