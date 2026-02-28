@@ -202,8 +202,8 @@ class StageCanvas(QGraphicsView):
     def update_camera_frame(self, qimg: QImage) -> None:
         """Place a camera frame on the canvas at the current viewport position.
 
-        When the stage moves far enough from the last placed frame, the
-        previous live frame is stamped as a persistent background image.
+        When the stage moves far enough from the last stamped position, the
+        current live frame is stamped as a persistent background image.
         """
         if self._viewport_info is None:
             return
@@ -212,7 +212,7 @@ class StageCanvas(QGraphicsView):
         if pix.isNull():
             return
 
-        # Stamp the previous live frame if the stage moved significantly
+        # Stamp if the stage moved significantly from the last stamp
         if self._camera_pixmap.isVisible() and self._last_placed_center is not None:
             lx, ly = self._last_placed_center
             dx = abs(vi.x_um - lx)
@@ -220,6 +220,10 @@ class StageCanvas(QGraphicsView):
             threshold = min(vi.fov_w_um, vi.fov_h_um) * 0.3
             if dx > threshold or dy > threshold:
                 self._stamp_current_frame()
+                self._last_placed_center = (vi.x_um, vi.y_um)
+        elif self._last_placed_center is None:
+            # First frame — set reference point
+            self._last_placed_center = (vi.x_um, vi.y_um)
 
         # Update live frame
         scale = vi.fov_w_um / pix.width()
@@ -227,7 +231,6 @@ class StageCanvas(QGraphicsView):
         self._camera_pixmap.setScale(scale)
         self._camera_pixmap.setPos(vi.x_um - vi.fov_w_um / 2, vi.y_um - vi.fov_h_um / 2)
         self._camera_pixmap.setVisible(True)
-        self._last_placed_center = (vi.x_um, vi.y_um)
 
     def _stamp_current_frame(self) -> None:
         """Copy the current live frame as a persistent background item."""
