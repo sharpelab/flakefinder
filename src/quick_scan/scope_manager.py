@@ -60,6 +60,8 @@ class ScopeManager(QObject):
         self._cmd_queue: queue.Queue[Callable] = queue.Queue()
         self._poll_interval = 0.05  # 50 ms → ~20 Hz
         self._stream = None  # set on background thread
+        self._scope = None  # set on background thread
+        self._desc = None  # MicroscopeDescription, set on background thread
 
     @property
     def is_connected(self) -> bool:
@@ -137,13 +139,11 @@ class ScopeManager(QObject):
     def quick_scan(self, row_y_positions: list[float], x_min: float, x_max: float, speed_mm: float) -> None:
         """Sweep the stage in a snake pattern over the given rows.
 
-        The FrameStream stays running — the existing frame stamping in
-        StageCanvas builds up the mosaic as the stage moves.
+        The FrameStream stays running — position and frame updates are
+        emitted during the sweep so the canvas builds up the mosaic live.
         """
 
         def _scan(scope):
-            from flakefinder.leica.units import wait_all
-
             total = len(row_y_positions)
             target_um_s = speed_mm * 1000
             for axis in (scope.stage.x, scope.stage.y):
@@ -159,12 +159,18 @@ class ScopeManager(QObject):
                     x_start = x_min if i % 2 == 0 else x_max
                     x_end = x_max if i % 2 == 0 else x_min
 
-                    # Move to row start
-                    wait_all(list(scope.stage.move_to_async(x_start, y)))
+                    # Move to row start (poll while waiting)
+                    handles = list(scope.stage.move_to_async(x_start, y))
+                    while not all(h.is_complete for h in handles):
+                        self._poll_and_emit(scope)
+                    for h in handles:
+                        h.dispose()
 
-                    # Sweep the row — stage moves, FrameStream captures
+                    # Sweep the row (poll while waiting — this is where frames build up)
                     hx = scope.stage.x.move_to_async(x_end)
-                    hx.wait()
+                    while not hx.is_complete:
+                        self._poll_and_emit(scope)
+                    hx.dispose()
             except Exception as e:
                 self.command_error.emit(f"Scan failed: {e}")
             else:
@@ -185,13 +191,40 @@ class ScopeManager(QObject):
             lamp_max=scope.lamp.max_intensity,
         )
 
+    def _poll_and_emit(self, scope) -> None:
+        """Poll position + drain camera frames, emit signals. Sleeps one interval."""
+        from flakefinder.data_utils import compute_frame_size_um
+
+        x, y = scope.stage.position_um
+        z = scope.z.position_um
+        mag = scope.nosepiece.magnification
+        obj_pos = scope.nosepiece.position
+
+        fov_w, fov_h = 0.0, 0.0
+        if mag is not None and self._desc is not None:
+            size = compute_frame_size_um(self._desc.camera, mag, binning_idx=2)
+            if size is not None:
+                fov_w, fov_h = size
+
+        self.position_updated.emit(x, y, z, mag, obj_pos, fov_w, fov_h)
+
+        if self._stream is not None:
+            latest = None
+            for frame in self._stream.drain():
+                latest = frame
+            if latest is not None:
+                qimg = numpy_rgb_to_qimage(latest.image)
+                self.frame_ready.emit(qimg)
+
+        self._stop.wait(self._poll_interval)
+
     def _run(self) -> None:
         """Main loop for the background thread."""
         try:
-            from flakefinder.data_utils import compute_frame_size_um, require_microscope_description
+            from flakefinder.data_utils import require_microscope_description
             from flakefinder.leica.microscope import Microscope
 
-            desc = require_microscope_description()
+            self._desc = require_microscope_description()
             scope = Microscope()
             scope.__enter__()
             try:
@@ -211,29 +244,7 @@ class ScopeManager(QObject):
                             except Exception as e:
                                 self.command_error.emit(f"Command error: {e}")
 
-                        # --- Position ---
-                        x, y = scope.stage.position_um
-                        z = scope.z.position_um
-                        mag = scope.nosepiece.magnification
-                        obj_pos = scope.nosepiece.position
-
-                        fov_w, fov_h = 0.0, 0.0
-                        if mag is not None:
-                            size = compute_frame_size_um(desc.camera, mag, binning_idx=2)
-                            if size is not None:
-                                fov_w, fov_h = size
-
-                        self.position_updated.emit(x, y, z, mag, obj_pos, fov_w, fov_h)
-
-                        # --- Camera frame ---
-                        latest = None
-                        for frame in self._stream.drain():
-                            latest = frame
-                        if latest is not None:
-                            qimg = numpy_rgb_to_qimage(latest.image)
-                            self.frame_ready.emit(qimg)
-
-                        self._stop.wait(self._poll_interval)
+                        self._poll_and_emit(scope)
                 finally:
                     self._stream.stop()
                     self._stream = None
@@ -242,4 +253,5 @@ class ScopeManager(QObject):
         except Exception as e:
             self.scope_error.emit(str(e))
         finally:
+            self._desc = None
             self.scope_disconnected.emit()
