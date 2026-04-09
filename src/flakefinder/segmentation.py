@@ -278,6 +278,7 @@ def _score_graphene(config: DetectorConfig, det: Detection) -> tuple[int, float]
     t1_color = (
         cd < config.tier1_cal_dist
         and r < config.tier1_r_max
+        and r > -0.6
         and g < config.tier1_g_max
         and br_ratio < config.tier1_br_ratio_max
         and ent < config.tier1_entropy_max
@@ -598,7 +599,7 @@ class DetectorConfig:
             tier1_g_min=-99.0,
             tier1_g_max=0.0,
             tier1_r_max=-0.05,
-            tier1_entropy_max=3.8,
+            tier1_entropy_max=3.7,
             tier1_min_size_um2=350.0,
             tier1_br_ratio_max=1.0,
             tier1_aspect_ratio=7.0,
