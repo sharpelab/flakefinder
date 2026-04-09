@@ -179,7 +179,7 @@ def _score_hbn_medium(config: DetectorConfig, det: Detection) -> tuple[int, floa
         and g < config.tier1_g_max
         and r < config.tier1_r_max
         and ent < config.tier1_entropy_max
-        and ar < 6.0
+        and ar < config.tier1_aspect_ratio
         and size_um2 >= config.tier1_min_size_um2
     ):
         tier = 1
@@ -228,7 +228,7 @@ def _score_hbn_medium_285nm(config: DetectorConfig, det: Detection) -> tuple[int
         and r < config.tier1_r_max
         and b < -0.08
         and ent < config.tier1_entropy_max
-        and ar < 6.0
+        and ar < config.tier1_aspect_ratio
         and size_um2 >= 350.0
     )
     if t1:
@@ -270,9 +270,9 @@ def _score_graphene(config: DetectorConfig, det: Detection) -> tuple[int, float]
     circ = det["circularity"]
     t1_shape = (
         pr < config.tier1_perim_ratio
-        and ar < 6.0
-        and sol >= 0.2
-        and circ >= 0.1
+        and ar < config.tier1_aspect_ratio
+        and sol >= config.tier1_solidity_min
+        and circ >= config.tier1_circularity_min
         and size_um2 >= config.tier1_min_size_um2
     )
     t1_color = (
@@ -376,6 +376,9 @@ class DetectorConfig:
     tier1_entropy_max: float
     tier1_min_size_um2: float
     tier1_br_ratio_max: float
+    tier1_aspect_ratio: float
+    tier1_solidity_min: float
+    tier1_circularity_min: float
     tier2_perim_ratio: float
     tier2_cal_dist: float
     tier2_entropy_max: float
@@ -509,6 +512,9 @@ class DetectorConfig:
             tier1_entropy_max=99.0,
             tier1_min_size_um2=500.0,
             tier1_br_ratio_max=99.0,
+            tier1_aspect_ratio=6.0,
+            tier1_solidity_min=0.0,
+            tier1_circularity_min=0.0,
             tier2_perim_ratio=1.50,
             tier2_cal_dist=0.15,
             tier2_entropy_max=4.65,
@@ -544,6 +550,9 @@ class DetectorConfig:
             tier1_entropy_max=4.5,
             tier1_min_size_um2=400.0,
             tier1_br_ratio_max=99.0,
+            tier1_aspect_ratio=6.0,
+            tier1_solidity_min=0.0,
+            tier1_circularity_min=0.0,
             tier2_perim_ratio=1.50,
             tier2_cal_dist=0.25,
             tier2_entropy_max=4.65,
@@ -592,6 +601,9 @@ class DetectorConfig:
             tier1_entropy_max=99.0,
             tier1_min_size_um2=350.0,
             tier1_br_ratio_max=1.0,
+            tier1_aspect_ratio=7.0,
+            tier1_solidity_min=0.2,
+            tier1_circularity_min=0.1,
             tier2_perim_ratio=1.50,
             tier2_cal_dist=0.15,
             tier2_entropy_max=4.65,
@@ -627,6 +639,9 @@ class DetectorConfig:
             tier1_entropy_max=99.0,
             tier1_min_size_um2=0.0,
             tier1_br_ratio_max=99.0,
+            tier1_aspect_ratio=6.0,
+            tier1_solidity_min=0.0,
+            tier1_circularity_min=0.0,
             tier2_perim_ratio=1.35,
             tier2_cal_dist=0.3,
             tier2_entropy_max=99.0,
