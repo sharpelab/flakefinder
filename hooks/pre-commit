@@ -11,5 +11,6 @@ uv run ruff check --fix -- $STAGED && uv run ruff format -- $STAGED
 # Re-stage files that ruff modified
 echo "$STAGED" | xargs git add
 
-# Check whole repo (matches CI, catches pre-existing issues)
-uv run ruff check . && uv run ruff format --check . && uv run ty check
+# Check whole repo (tracked files only — matches CI, catches pre-existing issues)
+TRACKED=$(git ls-files '*.py')
+uv run ruff check -- $TRACKED && uv run ruff format --check -- $TRACKED && uv run ty check

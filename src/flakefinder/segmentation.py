@@ -243,9 +243,13 @@ def _score_graphene(det: Detection) -> tuple[int, float]:
     ar = det.get("aspect_ratio", 1.0)
     size_um2 = det["size_um2"]
 
-    if pr < 1.20 and cd < 0.3 and g >= -99.0 and g < 4.0 and r < 99.0 and ent < 99.0 and ar < 6.0 and size_um2 >= 0.0:
+    b = det["contrast_rgb"][2]
+    br_ratio = b / r if abs(r) > 0.01 else 99.0
+    t1_shape = pr < 1.50 and ar < 6.0 and size_um2 >= 0.0
+    t1_color = cd < 0.06 and r < -0.05 and g < 0.0 and br_ratio < 1.0 and ent < 99.0
+    if t1_shape and t1_color:
         tier = 1
-    elif pr < 1.35 and cd < 0.3 and ent < 99.0:
+    elif pr < 1.50 and cd < 0.15 and r < -0.05 and ent < 4.65:
         tier = 2
     else:
         tier = 3
@@ -307,6 +311,7 @@ class DetectorConfig:
     morph_kernel_size: int
     entropy_threshold: float  # percentile of local-std within component for uniform region metric
     subseg_min_std: float  # min within-blob std to attempt Otsu subsegmentation
+    subseg_min_range: float  # min (max-min) contrast range to attempt split
 
     # -- Calibration curve: (R, G, thickness_nm) anchor points --
     cal_points: tuple[tuple[float, float, float], ...] | None
@@ -440,6 +445,7 @@ class DetectorConfig:
             morph_kernel_size=5,
             entropy_threshold=0.4,
             subseg_min_std=0.8,
+            subseg_min_range=0.5,
             cal_points=HBN_CAL_POINTS,
             cal_g_range=(-0.5, 6.0),
             cal_dist_match=0.5,
@@ -473,6 +479,7 @@ class DetectorConfig:
             morph_kernel_size=5,
             entropy_threshold=0.4,
             subseg_min_std=0.4,
+            subseg_min_range=0.5,
             cal_points=HBN_285NM_CAL_POINTS,
             cal_g_range=(-0.5, 3.0),
             cal_dist_match=0.5,
@@ -495,36 +502,49 @@ class DetectorConfig:
         )
 
     @classmethod
-    def graphene(cls) -> DetectorConfig:
-        """Graphene detection preset (stub -- no calibration curve yet)."""
+    def graphene_thin(cls) -> DetectorConfig:
+        """Graphene thin flake detection on 90nm SiO₂.
+
+        Calibration curve from scan 154 (old system, SF121 run7) mean R/G
+        contrast per layer count.  Thickness in nm = layers × 0.335.
+        """
         return cls(
-            name="Graphene · 90nm SiO₂",
+            name="Graphene thin · 90nm SiO₂",
             contrast_mode=ContrastMode.BELOW,
-            contrast_offset=10.0,
-            min_size_um2=130.0,
+            contrast_offset=4.0,
+            min_size_um2=400.0,
             edge_margin_px=50,
             morph_kernel_size=5,
             entropy_threshold=0.4,
-            subseg_min_std=0.8,
-            cal_points=None,
-            cal_g_range=(-6.0, 0.5),
+            subseg_min_std=0.05,
+            subseg_min_range=0.08,
+            cal_points=(
+                # (R_contrast, G_contrast, thickness_nm)
+                # From scan 154 mean values per layer count
+                (-0.140, -0.147, 0.335),  # 1 layer
+                (-0.260, -0.276, 0.670),  # 2 layers
+                (-0.378, -0.393, 1.005),  # 3 layers
+                (-0.478, -0.491, 1.340),  # 4 layers
+                (-0.570, -0.579, 1.675),  # 5 layers
+            ),
+            cal_g_range=(-0.7, 0.1),
             cal_dist_match=0.5,
             cal_dist_possible=1.0,
-            thin_max_nm=15.0,
-            medium_max_nm=24.0,
+            thin_max_nm=1.0,
+            medium_max_nm=2.0,
             non_match_label="non-graphene",
             white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
             score_fn=_score_graphene,
-            tier1_perim_ratio=1.20,
-            tier1_cal_dist=0.3,
+            tier1_perim_ratio=1.5,
+            tier1_cal_dist=0.15,
             tier1_g_min=-99.0,
             tier1_g_max=4.0,
             tier1_r_max=99.0,
             tier1_entropy_max=99.0,
             tier1_min_size_um2=0.0,
-            tier2_perim_ratio=1.35,
-            tier2_cal_dist=0.3,
-            tier2_entropy_max=99.0,
+            tier2_perim_ratio=1.5,
+            tier2_cal_dist=0.15,
+            tier2_entropy_max=4.65,
         )
 
     @classmethod
@@ -539,6 +559,7 @@ class DetectorConfig:
             morph_kernel_size=5,
             entropy_threshold=0.4,
             subseg_min_std=0.12,
+            subseg_min_range=0.5,
             cal_points=None,
             cal_g_range=(-6.0, 0.5),
             cal_dist_match=0.5,
@@ -566,7 +587,7 @@ class DetectorConfig:
             # "hbn_thin": cls.hbn_thin,
             "hbn_medium": cls.hbn_medium,
             "hbn_medium_285nm": cls.hbn_medium_285nm,
-            "graphene": cls.graphene,
+            "graphene_thin": cls.graphene_thin,
             "wse2": cls.wse2,
         }
 
@@ -779,6 +800,7 @@ def _otsu_split(
     component: np.ndarray,
     min_size_px: int,
     min_std: float = 0.8,
+    min_range: float = 0.5,
 ) -> list[np.ndarray] | None:
     """Try one Otsu split on the highest-variance channel. Returns sub-components or None."""
     # Crop to component bounding box -- all ops run on the small ROI
@@ -800,7 +822,7 @@ def _otsu_split(
         return None
 
     v_min, v_max = blob_vals.min(), blob_vals.max()
-    if v_max - v_min < 0.5:
+    if v_max - v_min < min_range:
         return None
 
     scaled = ((blob_vals - v_min) / (v_max - v_min) * 255).astype(np.uint8)
@@ -840,6 +862,7 @@ def _subsegment_by_contrast(
     norm_contrast: np.ndarray,
     max_depth: int = 3,
     min_std: float = 0.8,
+    min_range: float = 0.5,
 ) -> list[np.ndarray]:
     """Iteratively split a blob using Otsu on the highest-variance color channel.
 
@@ -857,7 +880,7 @@ def _subsegment_by_contrast(
             final.append(comp)
             continue
 
-        pieces = _otsu_split(norm_contrast, comp, min_size_px, min_std=min_std)
+        pieces = _otsu_split(norm_contrast, comp, min_size_px, min_std=min_std, min_range=min_range)
         if pieces is None:
             final.append(comp)
         else:
@@ -936,6 +959,7 @@ def segment_frame(
             min_size_px,
             norm_contrast,
             min_std=config.subseg_min_std,
+            min_range=config.subseg_min_range,
         )
 
         for sub_comp in sub_components:
@@ -1027,13 +1051,20 @@ def draw_detections(
     for i, d in enumerate(detections):
         s = d["size_px"]
         c = d["mean_contrast"]
+        tier = d.get("tier", 3)
         is_tape = d.get("classification") == "tape"
         if is_tape:
             color = (128, 128, 128)
             thickness = 1
+        elif tier == 1:
+            color = (0, 255, 0)
+            thickness = 2
+        elif tier == 2:
+            color = (0, 255, 255)
+            thickness = 1
         else:
-            color = (0, 255, 0) if s > 1000 else (0, 255, 255) if s > 500 else (0, 0, 255)
-            thickness = 2 if s > 1000 else 1
+            color = (0, 0, 255)
+            thickness = 1
 
         bx, by, bw, bh = d["bbox"]
         if draw_bbox:

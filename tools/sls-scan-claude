@@ -10,4 +10,4 @@ fi
 
 cd "$REPO_DIR"
 export PATH="$REPO_DIR/tools:$PATH"
-claude --model opus --append-system-prompt-file "$REPO_DIR/.claude/commands/scan.md" "$@"
+claude --append-system-prompt-file "$REPO_DIR/.claude/commands/scan.md" "$@"
