@@ -445,7 +445,7 @@ class FindFlakesGUI:
             # CREATE_NEW_PROCESS_GROUP on Windows so CTRL_BREAK_EVENT reaches children
             kwargs = {}
             if sys.platform == "win32":
-                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
             self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
