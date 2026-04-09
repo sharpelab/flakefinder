@@ -158,7 +158,7 @@ class Detection(_DetectionBase, total=False):
 #     return tier, score
 
 
-def _score_hbn_medium(det: Detection) -> tuple[int, float]:
+def _score_hbn_medium(config: DetectorConfig, det: Detection) -> tuple[int, float]:
     """hBN medium: size + cal_dist dominant, light thickness penalty."""
     pr = det["perim_ratio"]
     cd = det["cal_dist"]
@@ -171,12 +171,26 @@ def _score_hbn_medium(det: Detection) -> tuple[int, float]:
     b = det["contrast_rgb"][2]
     bg_ratio = b / g if g > 0.01 else 99.0
 
-    if pr < 1.50 and cd < 0.15 and g >= 0.0 and g < 3.0 and r < 0.0 and ent < 99.0 and ar < 6.0 and size_um2 >= 500.0:
+    if (
+        pr < config.tier1_perim_ratio
+        and cd < config.tier1_cal_dist
+        and g >= config.tier1_g_min
+        and g < config.tier1_g_max
+        and r < config.tier1_r_max
+        and ent < config.tier1_entropy_max
+        and ar < 6.0
+        and size_um2 >= config.tier1_min_size_um2
+    ):
         tier = 1
         # Demote purple medium/thick flakes and messy interiors to T2
-        if (g > 0.8 and bg_ratio > 1.2) or ent > 4.65:
+        if (g > 0.8 and bg_ratio > 1.2) or ent > config.tier2_entropy_max:
             tier = 2
-    elif pr < 1.50 and cd < 0.15 and ent < 4.65 and size_um2 >= 500.0:
+    elif (
+        pr < config.tier2_perim_ratio
+        and cd < config.tier2_cal_dist
+        and ent < config.tier2_entropy_max
+        and size_um2 >= config.tier1_min_size_um2
+    ):
         tier = 2
     else:
         tier = 3
@@ -191,7 +205,7 @@ def _score_hbn_medium(det: Detection) -> tuple[int, float]:
     return tier, score
 
 
-def _score_hbn_medium_285nm(det: Detection) -> tuple[int, float]:
+def _score_hbn_medium_285nm(config: DetectorConfig, det: Detection) -> tuple[int, float]:
     """hBN medium on 285nm SiO₂: tighter R gate to reject tape residue."""
     pr = det["perim_ratio"]
     cd = det["cal_dist"]
@@ -206,19 +220,25 @@ def _score_hbn_medium_285nm(det: Detection) -> tuple[int, float]:
     # Tape residue sits at R ~ -0.63. Gate at R < -0.7 rejects most tape.
     # B < -0.05 separates real thin hBN (B ~ -0.12) from tape (B ~ -0.02).
     t1 = (
-        pr < 1.50
-        and cd < 0.20
-        and g >= 0.0
-        and g < 3.0
-        and r < -0.70
+        pr < config.tier1_perim_ratio
+        and cd < config.tier1_cal_dist
+        and g >= config.tier1_g_min
+        and g < config.tier1_g_max
+        and r < config.tier1_r_max
         and b < -0.08
-        and ent < 4.5
+        and ent < config.tier1_entropy_max
         and ar < 6.0
         and size_um2 >= 350.0
     )
     if t1:
         tier = 1
-    elif pr < 1.50 and cd < 0.25 and r < -0.45 and ent < 4.65 and size_um2 >= 400.0:
+    elif (
+        pr < config.tier2_perim_ratio
+        and cd < config.tier2_cal_dist
+        and r < -0.45
+        and ent < config.tier2_entropy_max
+        and size_um2 >= 400.0
+    ):
         tier = 2
     else:
         tier = 3
@@ -233,7 +253,7 @@ def _score_hbn_medium_285nm(det: Detection) -> tuple[int, float]:
     return tier, score
 
 
-def _score_graphene(det: Detection) -> tuple[int, float]:
+def _score_graphene(config: DetectorConfig, det: Detection) -> tuple[int, float]:
     """Graphene: size + cal_dist dominant, light thickness penalty (stub)."""
     pr = det["perim_ratio"]
     cd = det["cal_dist"]
@@ -245,11 +265,22 @@ def _score_graphene(det: Detection) -> tuple[int, float]:
 
     b = det["contrast_rgb"][2]
     br_ratio = b / r if abs(r) > 0.01 else 99.0
-    t1_shape = pr < 1.50 and ar < 6.0 and size_um2 >= 0.0
-    t1_color = cd < 0.06 and r < -0.05 and g < 0.0 and br_ratio < 1.0 and ent < 99.0
+    t1_shape = pr < config.tier1_perim_ratio and ar < 6.0 and size_um2 >= config.tier1_min_size_um2
+    t1_color = (
+        cd < config.tier1_cal_dist
+        and r < config.tier1_r_max
+        and g < config.tier1_g_max
+        and br_ratio < config.tier1_br_ratio_max
+        and ent < config.tier1_entropy_max
+    )
     if t1_shape and t1_color:
         tier = 1
-    elif pr < 1.50 and cd < 0.15 and r < -0.05 and ent < 4.65:
+    elif (
+        pr < config.tier2_perim_ratio
+        and cd < config.tier2_cal_dist
+        and r < config.tier1_r_max
+        and ent < config.tier2_entropy_max
+    ):
         tier = 2
     else:
         tier = 3
@@ -264,7 +295,7 @@ def _score_graphene(det: Detection) -> tuple[int, float]:
     return tier, score
 
 
-def _score_wse2(det: Detection) -> tuple[int, float]:
+def _score_wse2(config: DetectorConfig, det: Detection) -> tuple[int, float]:
     """WSe2: size-based scoring with blue contrast gate."""
     b = det["contrast_rgb"][2]
     ar = det.get("aspect_ratio", 1.0)
@@ -280,9 +311,6 @@ def _score_wse2(det: Detection) -> tuple[int, float]:
     log2_size = float(np.log2(max(size_um2, 1.0)))
     score = round(log2_size * log2_size * ar_penalty, 4)
     return tier, score
-
-
-ScoreFn = Callable[[Detection], tuple[int, float]]
 
 
 # ============================================================================
@@ -330,7 +358,7 @@ class DetectorConfig:
     # -- Scoring --
     score_fn: ScoreFn
 
-    # -- Viewer filter defaults (not used by scoring) --
+    # -- Tier gate thresholds (used by scoring + viewer filters) --
     tier1_perim_ratio: float
     tier1_cal_dist: float
     tier1_g_min: float
@@ -338,6 +366,7 @@ class DetectorConfig:
     tier1_r_max: float
     tier1_entropy_max: float
     tier1_min_size_um2: float
+    tier1_br_ratio_max: float
     tier2_perim_ratio: float
     tier2_cal_dist: float
     tier2_entropy_max: float
@@ -398,7 +427,7 @@ class DetectorConfig:
 
     def score_detection(self, det: Detection) -> tuple[int, float]:
         """Compute (tier, score) via preset-specific scoring function."""
-        return self.score_fn(det)
+        return self.score_fn(self, det)
 
     # @classmethod
     # def hbn_thin(cls) -> DetectorConfig:
@@ -459,9 +488,10 @@ class DetectorConfig:
             tier1_cal_dist=0.15,
             tier1_g_min=0.0,
             tier1_g_max=3.0,
-            tier1_r_max=0.6,
+            tier1_r_max=0.0,
             tier1_entropy_max=99.0,
             tier1_min_size_um2=500.0,
+            tier1_br_ratio_max=99.0,
             tier2_perim_ratio=1.50,
             tier2_cal_dist=0.15,
             tier2_entropy_max=4.65,
@@ -496,6 +526,7 @@ class DetectorConfig:
             tier1_r_max=-0.70,
             tier1_entropy_max=4.5,
             tier1_min_size_um2=400.0,
+            tier1_br_ratio_max=99.0,
             tier2_perim_ratio=1.50,
             tier2_cal_dist=0.25,
             tier2_entropy_max=4.65,
@@ -535,14 +566,15 @@ class DetectorConfig:
             non_match_label="non-graphene",
             white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
             score_fn=_score_graphene,
-            tier1_perim_ratio=1.5,
-            tier1_cal_dist=0.15,
+            tier1_perim_ratio=1.50,
+            tier1_cal_dist=0.06,
             tier1_g_min=-99.0,
-            tier1_g_max=4.0,
-            tier1_r_max=99.0,
+            tier1_g_max=0.0,
+            tier1_r_max=-0.05,
             tier1_entropy_max=99.0,
-            tier1_min_size_um2=0.0,
-            tier2_perim_ratio=1.5,
+            tier1_min_size_um2=500.0,
+            tier1_br_ratio_max=1.0,
+            tier2_perim_ratio=1.50,
             tier2_cal_dist=0.15,
             tier2_entropy_max=4.65,
         )
@@ -576,6 +608,7 @@ class DetectorConfig:
             tier1_r_max=99.0,
             tier1_entropy_max=99.0,
             tier1_min_size_um2=0.0,
+            tier1_br_ratio_max=99.0,
             tier2_perim_ratio=1.35,
             tier2_cal_dist=0.3,
             tier2_entropy_max=99.0,
@@ -608,6 +641,9 @@ class DetectorConfig:
         if name not in presets:
             raise ValueError(f"Unknown material: {name!r}. Choose from: {', '.join(presets)}")
         return presets[name]()
+
+
+ScoreFn = Callable[[DetectorConfig, Detection], tuple[int, float]]
 
 
 # ============================================================================
