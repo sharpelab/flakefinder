@@ -84,6 +84,7 @@ git config core.hooksPath hooks/
 
 - **Ruff** config: `pyproject.toml` under `[tool.ruff]`. Rules: E, F, I, UP, B, SIM.
 - **ty** config: `pyproject.toml` under `[tool.ty]`. Excludes `driver/`; suppresses `unresolved-reference` (forward-ref string annotations) and .NET SDK imports.
+- **ty LSP**: The `ty-lsp@zack-local` plugin provides `ty server` as the Python LSP (Pyright is disabled). Plugin source: `~/.claude/plugins/ty-lsp/`. Binary: `.venv/bin/ty`.
 
 ## Microscope Operations
 

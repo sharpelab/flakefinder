@@ -56,8 +56,9 @@ def main() -> int:
 
     # --- Step 2: stitch (capture output, suppress unless verbose/error) ---
     cmd = [
-        sys.executable,
-        str(REPO_DIR / "commands" / "stitch.py"),
+        "uv",
+        "run",
+        "stitch",
         str(local_scan_dir),
         "--downsample",
         str(args.downsample),
@@ -83,7 +84,7 @@ def main() -> int:
         print(f"Error: expected stitch not found at {stitch_path}")
         return 1
 
-    cmd = [sys.executable, str(REPO_DIR / "commands" / "find_chips.py"), str(stitch_path)]
+    cmd = ["uv", "run", "find-chips", str(stitch_path)]
     result = subprocess.run(cmd)
     if result.returncode != 0:
         print(f"Error: find_chips failed (exit {result.returncode})")
@@ -92,7 +93,7 @@ def main() -> int:
     # --- Step 4: optionally show detection image ---
     detection_path = stitch_path.with_name(stitch_path.stem + "_chips_detected.png")
     if args.show and detection_path.exists():
-        subprocess.run(["show", str(detection_path)])
+        subprocess.run(["present", str(detection_path)])
 
     # --- Step 5: print all artifact paths ---
     chips_json_path = stitch_path.with_name(stitch_path.stem + "_chips.json")

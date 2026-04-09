@@ -598,7 +598,7 @@ class DetectorConfig:
             tier1_g_min=-99.0,
             tier1_g_max=0.0,
             tier1_r_max=-0.05,
-            tier1_entropy_max=99.0,
+            tier1_entropy_max=3.8,
             tier1_min_size_um2=350.0,
             tier1_br_ratio_max=1.0,
             tier1_aspect_ratio=7.0,

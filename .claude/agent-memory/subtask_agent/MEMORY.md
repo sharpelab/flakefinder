@@ -118,6 +118,9 @@ Use `show <path>` to display images to the user. Do NOT use the Read tool on ima
 - `analyze_scan.py` renamed to `scripts/analyze_chip_scan.py`
 - When moving files with ty overrides, update the include path in pyproject.toml
 
+## Quick Scan GUI
+See [quick_scan.md](quick_scan.md) for full context. PySide6 stage viewer at `src/quick_scan/`. Phase 1 (canvas) and Phase 2 (live camera, controls, frame stamping) done. Phase 3 next (load existing scan data). Architecture doc at `docs/quick_scan.md`.
+
 ## Microscope
 - Do NOT run hardware commands (scans, autofocus, stage moves) — only the main scan session does that.
 - SSH reads, git pulls, and file checks are fine.
