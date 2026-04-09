@@ -117,6 +117,7 @@ class Detection(_DetectionBase, total=False):
     """
 
     classification: str | None
+    layers: int | None
     tier: int
     score: float
     frame: str
@@ -379,6 +380,9 @@ class DetectorConfig:
     tier2_cal_dist: float
     tier2_entropy_max: float
 
+    # -- Layer-count mode (graphene) --
+    layer_spacing_nm: float | None = None
+
     # Precomputed calibration curve (derived from cal_points or cal_g_range)
     _cal_g_curve: np.ndarray = field(init=False, repr=False, compare=False)
     _cal_r_curve: np.ndarray = field(init=False, repr=False, compare=False)
@@ -419,8 +423,13 @@ class DetectorConfig:
             thickness_nm = round(float(self._cal_thickness_curve[idx]), 1)
         return CalProjection(round(dist, 4), thickness_nm)
 
-    def classify(self, r: float, g: float) -> str:
-        """Classify by R-G calibration distance and projected thickness."""
+    def classify(self, r: float, g: float) -> str | None:
+        """Classify by R-G calibration distance and projected thickness.
+
+        Returns None when no calibration curve is configured.
+        """
+        if self._cal_thickness_curve is None:
+            return None
         proj = self.cal_curve(r, g)
         if proj.dist < self.cal_dist_match and proj.thickness_nm is not None:
             if proj.thickness_nm < self.thin_max_nm:
@@ -567,6 +576,7 @@ class DetectorConfig:
                 (-0.570, -0.579, 1.675),  # 5 layers
             ),
             cal_g_range=(-0.7, 0.1),
+            layer_spacing_nm=0.335,
             cal_dist_match=0.5,
             cal_dist_possible=1.0,
             thin_max_nm=1.0,
@@ -1043,12 +1053,19 @@ def classify_detections(
     if not detections:
         return
 
-    # Tape classification
     for det in detections:
         if perim_ratio_thresh > 0 and det["perim_ratio"] >= perim_ratio_thresh:
             det["classification"] = "tape"
         else:
-            det["classification"] = None
+            r, g = det["contrast_rgb"][0], det["contrast_rgb"][1]
+            det["classification"] = config.classify(r, g)
+
+        # Layer count for materials with known interlayer spacing
+        thickness_nm = det["thickness_nm"]
+        if config.layer_spacing_nm is not None and thickness_nm is not None:
+            det["layers"] = max(1, round(thickness_nm / config.layer_spacing_nm))
+        else:
+            det["layers"] = None
 
     score_detections(detections, config)
 

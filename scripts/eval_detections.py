@@ -60,13 +60,13 @@ _LABEL_COLORS: dict[str, tuple[int, int, int]] = {
 }
 
 
-def classify_detection(r: float, g: float, config: DetectorConfig) -> tuple[str, tuple[int, int, int]]:
+def classify_detection(r: float, g: float, config: DetectorConfig) -> tuple[str | None, tuple[int, int, int]]:
     """Classify a detection by R-G calibration distance and G contrast.
 
     Returns (label, bgr_color).
     """
     label = config.classify(r, g)
-    color = _LABEL_COLORS.get(label, COLOR_NON_HBN)
+    color = _LABEL_COLORS.get(label, COLOR_NON_HBN) if label is not None else COLOR_NON_HBN
     return label, color
 
 
@@ -334,11 +334,12 @@ def main():
             r, g, _ = det["contrast_rgb"]
             cls_label, color = classify_detection(r, g, config)
             classifications.append((cls_label, color))
-            cls_counts[cls_label] = cls_counts.get(cls_label, 0) + 1
+            key = cls_label or "unknown"
+            cls_counts[key] = cls_counts.get(key, 0) + 1
 
         # Track target classification
         if target_idx is not None:
-            target_cls = classifications[target_idx][0]
+            target_cls = classifications[target_idx][0] or "unknown"
             target_cls_counts[target_cls] = target_cls_counts.get(target_cls, 0) + 1
 
         # Scatter points

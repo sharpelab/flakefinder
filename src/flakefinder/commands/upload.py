@@ -27,15 +27,7 @@ import numpy as np
 import requests
 
 from flakefinder.flakes_api import BASE_URL, get_auth
-from flakefinder.segmentation import Detection, DetectorConfig, dedup_detections
-
-# Classification -> thickness label for the website
-THICKNESS_MAP = {
-    "thin": "thin",
-    "medium": "medium",
-    "thick": "thick",
-    "possible": "possible",
-}
+from flakefinder.segmentation import Detection, dedup_detections
 
 
 class UploadResult(NamedTuple):
@@ -149,19 +141,6 @@ def make_overview_compressed(stitch_path: Path, output_path: Path) -> None:
         raise FileNotFoundError(f"Cannot read stitch image: {stitch_path}")
     resized = cv2.resize(img, (2000, 2000), interpolation=cv2.INTER_AREA)
     cv2.imwrite(str(output_path), resized, [cv2.IMWRITE_JPEG_QUALITY, 80])
-
-
-def classify_thickness(det: dict, material: str) -> str:
-    """Compute thickness label from detection contrast using DetectorConfig.
-
-    The pipeline's classification field is usually None (it only marks "tape").
-    This recomputes the classification from R/G contrast.
-    """
-    contrast = det["contrast_rgb"]
-    r, g = contrast[0], contrast[1]
-    config = DetectorConfig.from_material(material)
-    label = config.classify(r, g)
-    return THICKNESS_MAP.get(label, label)
 
 
 def discover_chips(run_dir: Path) -> list[int]:
@@ -289,7 +268,6 @@ def _build_comment(checkpoint: dict) -> str:
 
 def _build_flake_payload(
     det: dict,
-    material: str,
     eval_token: str | None,
     revisit_tokens: dict[float, str],
     camera_meta: dict,
@@ -302,13 +280,12 @@ def _build_flake_payload(
     min_side_um = math.sqrt(size_um2 / aspect_ratio)
     max_side_um = min_side_um * aspect_ratio
     contrast = det["contrast_rgb"]
-    thickness = classify_thickness(det, material)
 
     payload: dict = {
         "position_x": round(pos_x, 4),
         "position_y": round(pos_y, 4),
         "size": round(size_um2, 1),
-        "thickness": thickness,
+        "thickness": det.get("classification"),
         "entropy": round(det["entropy"], 4),
         "max_sidelength": round(max_side_um * 1000, 1),  # um -> nm
         "min_sidelength": round(min_side_um * 1000, 1),
@@ -318,7 +295,8 @@ def _build_flake_payload(
         "mean_b": round(contrast[2], 4),
         "score": det.get("score"),
         "tier": det.get("tier"),
-        "thickness_nm": det.get("thickness_nm"),
+        "thickness_nm": det["thickness_nm"],
+        "layers": det.get("layers"),
     }
 
     if eval_token:
@@ -436,9 +414,9 @@ def run(
         # Collect files to upload and per-chip data for resource creation
         upload_files: list[tuple[str, Path]] = [("overview", overview_path)]
         eval_img_jobs: list[tuple] = []
-        # Each entry: (chip_idx, camera_meta, seg_material, flake_entries)
+        # Each entry: (chip_idx, camera_meta, flake_entries)
         # flake_entries: list of (det, eval_key, revisit_keys)
-        chip_data: list[tuple[int, dict, str, list]] = []
+        chip_data: list[tuple[int, dict, list]] = []
         total_flakes = 0
 
         print(f"[upload] {scan_name} (user={resolved_user}, material={material}, substrate={substrate})")
@@ -459,8 +437,6 @@ def run(
             with open(scan_meta_path) as f:
                 chip_scan_meta = json.load(f)
             camera_meta = chip_scan_meta["camera"]
-
-            seg_material = summary.get("params", {}).get("material", "hbn_medium")
 
             flakes = select_flakes(summary, tier, top)
             if not flakes:
@@ -496,7 +472,7 @@ def run(
                 flake_entries.append((det, eval_key, revisit_keys))
                 total_flakes += 1
 
-            chip_data.append((chip_idx, camera_meta, seg_material, flake_entries))
+            chip_data.append((chip_idx, camera_meta, flake_entries))
 
         if total_flakes == 0:
             raise RuntimeError("No flakes pass the tier filter")
@@ -580,7 +556,7 @@ def run(
             raise RuntimeError(f"Upload overview failed: {resp.status_code} {resp.text[:500]}")
 
         # Create chips and flakes
-        for chip_idx, camera_meta, seg_material, flake_entries in chip_data:
+        for chip_idx, camera_meta, flake_entries in chip_data:
             resp = session.post(
                 f"{base_url}/api/scans/{scan_id}/chips",
                 json={"wafer": substrate, "material": material},
@@ -595,7 +571,6 @@ def run(
                 resolved_revisit_tokens = {mag: tokens[rkey] for mag, rkey in revisit_keys.items() if rkey in tokens}
                 payload = _build_flake_payload(
                     det,
-                    seg_material,
                     tokens.get(eval_key),
                     resolved_revisit_tokens,
                     camera_meta,
