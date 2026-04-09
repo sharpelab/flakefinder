@@ -265,7 +265,15 @@ def _score_graphene(config: DetectorConfig, det: Detection) -> tuple[int, float]
 
     b = det["contrast_rgb"][2]
     br_ratio = b / r if abs(r) > 0.01 else 99.0
-    t1_shape = pr < config.tier1_perim_ratio and ar < 6.0 and size_um2 >= config.tier1_min_size_um2
+    sol = det["solidity"]
+    circ = det["circularity"]
+    t1_shape = (
+        pr < config.tier1_perim_ratio
+        and ar < 6.0
+        and sol >= 0.2
+        and circ >= 0.1
+        and size_um2 >= config.tier1_min_size_um2
+    )
     t1_color = (
         cd < config.tier1_cal_dist
         and r < config.tier1_r_max
@@ -572,7 +580,7 @@ class DetectorConfig:
             tier1_g_max=0.0,
             tier1_r_max=-0.05,
             tier1_entropy_max=99.0,
-            tier1_min_size_um2=500.0,
+            tier1_min_size_um2=350.0,
             tier1_br_ratio_max=1.0,
             tier2_perim_ratio=1.50,
             tier2_cal_dist=0.15,
