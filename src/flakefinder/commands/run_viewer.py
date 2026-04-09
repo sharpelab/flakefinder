@@ -232,8 +232,9 @@ SLIDER_MAX_G = 6.0
 SLIDER_MIN_R = -3.0
 SLIDER_MAX_ENTROPY = 8.0
 SLIDER_MAX_GRAD_ENERGY = 120.0
-SLIDER_MAX_ASPECT_RATIO = 6.0
+SLIDER_MAX_ASPECT_RATIO = 8.0
 SLIDER_MAX_KURTOSIS = 50.0
+SLIDER_MAX_THICKNESS = 50.0
 CROP_THUMB_HEIGHT = int(CROP_THUMB_SIZE * 2 / 3)  # 3:2 camera aspect ratio
 
 
@@ -595,6 +596,7 @@ class FlakeInspector(tk.Toplevel):
             ("G", "g_val"),
             ("B", "b_val"),
             ("Size", "size"),
+            ("Thickness", "thickness"),
             ("CalDist", "cal_dist"),
             ("PerimRatio", "perim_ratio"),
             ("AspectRatio", "aspect_ratio"),
@@ -702,6 +704,7 @@ class FlakeInspector(tk.Toplevel):
             "g_val": f"{g_val:+.3f}",
             "b_val": f"{b_val:+.3f}",
             "size": f"{d['size_px'] * um2**2:.0f} µm²",
+            "thickness": f"{d.get('thickness_nm', 0):.1f} nm",
             "cal_dist": f"{d['cal_dist']:.3f}",
             "perim_ratio": f"{d['perim_ratio']:.2f}",
             "aspect_ratio": f"{d['aspect_ratio']:.2f}",
@@ -1407,6 +1410,10 @@ class RunViewerGUI:
             "grad_energy": SLIDER_MAX_GRAD_ENERGY,
             "aspect_ratio": SLIDER_MAX_ASPECT_RATIO,
             "kurtosis": SLIDER_MAX_KURTOSIS,
+            "thickness_min": 0.0,
+            "thickness_max": SLIDER_MAX_THICKNESS,
+            "solidity": config.tier1_solidity_min,
+            "circularity": config.tier1_circularity_min,
         }
         d = self._filter_defaults
 
@@ -1421,20 +1428,28 @@ class RunViewerGUI:
         self._fv_grad_energy = tk.DoubleVar(value=d["grad_energy"])
         self._fv_aspect_ratio = tk.DoubleVar(value=d["aspect_ratio"])
         self._fv_kurtosis = tk.DoubleVar(value=d["kurtosis"])
+        self._fv_thickness_min = tk.DoubleVar(value=d["thickness_min"])
+        self._fv_thickness_max = tk.DoubleVar(value=d["thickness_max"])
+        self._fv_solidity = tk.DoubleVar(value=d["solidity"])
+        self._fv_circularity = tk.DoubleVar(value=d["circularity"])
         self._fv_top_n = tk.IntVar(value=DEFAULT_FILTER_TOP_N)
 
         # Slider definitions: (row, col, label, var, from_, to, resolution, fmt)
         slider_defs = [
             (0, 0, "perim_ratio \u2264", self._fv_perim_ratio, 1.0, 3.0, 0.05, "{:.2f}"),
-            (0, 1, "cal_dist \u2264", self._fv_cal_dist, 0.0, 2.0, 0.05, "{:.2f}"),
+            (0, 1, "cal_dist \u2264", self._fv_cal_dist, 0.0, 2.0, 0.01, "{:.2f}"),
             (0, 2, "min \u00b5m\u00b2 \u2265", self._fv_min_size, 0, 2000, 10, "{:.0f}"),
             (1, 0, "G min \u2265", self._fv_g_min, SLIDER_MIN_G, SLIDER_MAX_G, 0.1, "{:+.1f}"),
             (1, 1, "G max \u2264", self._fv_g_max, SLIDER_MIN_G, SLIDER_MAX_G, 0.1, "{:+.1f}"),
-            (1, 2, "R max \u2264", self._fv_r_max, SLIDER_MIN_R, SLIDER_MAX_G, 0.1, "{:+.1f}"),
+            (1, 2, "R max \u2264", self._fv_r_max, SLIDER_MIN_R, SLIDER_MAX_G, 0.01, "{:+.2f}"),
             (2, 0, "entropy \u2264", self._fv_entropy, 0.0, SLIDER_MAX_ENTROPY, 0.1, "{:.1f}"),
             (2, 1, "grad_energy \u2264", self._fv_grad_energy, 0.0, SLIDER_MAX_GRAD_ENERGY, 0.5, "{:.1f}"),
             (2, 2, "aspect_ratio \u2264", self._fv_aspect_ratio, 1.0, SLIDER_MAX_ASPECT_RATIO, 0.5, "{:.1f}"),
             (3, 0, "kurtosis \u2264", self._fv_kurtosis, -2.0, SLIDER_MAX_KURTOSIS, 1.0, "{:.0f}"),
+            (3, 1, "nm min \u2265", self._fv_thickness_min, 0.0, SLIDER_MAX_THICKNESS, 0.5, "{:.1f}"),
+            (3, 2, "nm max \u2264", self._fv_thickness_max, 0.0, SLIDER_MAX_THICKNESS, 0.5, "{:.1f}"),
+            (4, 0, "solidity \u2265", self._fv_solidity, 0.0, 1.0, 0.05, "{:.2f}"),
+            (4, 1, "circularity \u2265", self._fv_circularity, 0.0, 1.0, 0.05, "{:.2f}"),
         ]
 
         sliders_frame = ttk.Frame(filter_frame)
@@ -1524,6 +1539,10 @@ class RunViewerGUI:
         ge_max = self._fv_grad_energy.get()
         ar_max = self._fv_aspect_ratio.get()
         kurt_max = self._fv_kurtosis.get()
+        t_min = self._fv_thickness_min.get()
+        t_max = self._fv_thickness_max.get()
+        sol_min = self._fv_solidity.get()
+        circ_min = self._fv_circularity.get()
         top_n = self._fv_top_n.get()
         all_dets = self._all_detections
 
@@ -1550,6 +1569,10 @@ class RunViewerGUI:
                         and d["grad_energy"] <= ge_max
                         and d["aspect_ratio"] <= ar_max
                         and max(d["r_kurt"], d["g_kurt"], d["b_kurt"]) <= kurt_max
+                        and (d["thickness_nm"] or 0) >= t_min
+                        and (d["thickness_nm"] or 0) <= t_max
+                        and d["solidity"] >= sol_min
+                        and d["circularity"] >= circ_min
                     ):
                         continue
                 passing.append(d)
@@ -1557,7 +1580,7 @@ class RunViewerGUI:
             if self._filter_gen != gen:
                 return
 
-            passing.sort(key=lambda d: -d.get("score", 0))
+            passing.sort(key=lambda d: (d.get("tier", 3), -d.get("score", 0)))
             deduped = dedup_detections(passing)
             count_text = f"{len(deduped)} / {len(chip_filtered)} pass ({len(passing) - len(deduped)} dupes)"
             top = deduped[:top_n]
@@ -1654,6 +1677,10 @@ class RunViewerGUI:
         self._fv_grad_energy.set(d["grad_energy"])
         self._fv_aspect_ratio.set(d["aspect_ratio"])
         self._fv_kurtosis.set(d["kurtosis"])
+        self._fv_thickness_min.set(d["thickness_min"])
+        self._fv_thickness_max.set(d["thickness_max"])
+        self._fv_solidity.set(d["solidity"])
+        self._fv_circularity.set(d["circularity"])
         self._active_chips.clear()
         self._update_chip_button_visuals()
         self._active_tiers.clear()
@@ -1695,6 +1722,7 @@ class RunViewerGUI:
                     f"{r_val:+.3f}",
                     f"{g_val:+.3f}",
                     f"{d.get('score', 0):.3f}",
+                    f"{d.get('thickness_nm', 0):.1f}",
                     f"{d['cal_dist']:.3f}",
                     f"{d['grad_energy']:.1f}",
                     f"{d.get('entropy', d.get('g_entropy', 0)):.2f}",
@@ -1912,6 +1940,7 @@ class RunViewerGUI:
             "R",
             "G",
             "score",
+            "nm",
             "cal_d",
             "grad",
             "entr",
@@ -1931,6 +1960,7 @@ class RunViewerGUI:
             "R": ("R", 55),
             "G": ("G", 55),
             "score": ("Score", 55),
+            "nm": ("nm", 40),
             "cal_d": ("CalD", 55),
             "grad": ("Grad", 50),
             "entr": ("Entr", 45),
