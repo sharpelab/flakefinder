@@ -1691,11 +1691,14 @@ def main() -> int:
             except KeyboardInterrupt:
                 with _always_console():
                     print("\n[interrupted] Parking microscope...")
-                try:
-                    park_microscope(scope)
-                    print("[parked]")
-                except Exception:
-                    print("[park failed]")
+                    try:
+                        park_microscope(scope)
+                        print("[parked]")
+                    except Exception as e:
+                        import traceback
+
+                        print(f"[park failed] {type(e).__name__}: {e}")
+                        traceback.print_exc()
                 return 1
 
         # Upload runs after microscope is released
