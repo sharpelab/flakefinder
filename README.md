@@ -32,9 +32,10 @@ Segmentation is configured per-material via `DetectorConfig` presets. Each prese
 | Preset | Material | Substrate | Calibration | Notes |
 |--------|----------|-----------|-------------|-------|
 | `hbn_medium` | hBN | 90nm SiO₂ | AFM-verified | Primary hBN preset |
+| `hbn_thick_90nm` | hBN | 90nm SiO₂ | AFM-verified | 30-40nm hBN |
 | `hbn_medium_285nm` | hBN | 285nm SiO₂ | Transfer matrix model | Tighter R gate for tape rejection |
-| `graphene_thin` | Graphene | 90nm SiO₂ | Per-layer contrast | Layer counting (0.335 nm/layer) |
-| `wse2` | WSe₂ | 90nm SiO₂ | None (stub) | Size/shape scoring only |
+| `graphene_thin_90nm` | Graphene | 90nm SiO₂ | Per-layer contrast | Layer counting (0.335 nm/layer) |
+| `wse2_monolayer_90nm` | WSe₂ | 90nm SiO₂ | Point calibration | Single-layer reference |
 
 Detections are classified by proximity to the calibration curve (thin/medium/thick) and assigned a tier (T1 = high confidence, T2 = possible, T3 = unlikely) plus a continuous score based on size, shape, and calibration distance.
 
@@ -63,7 +64,7 @@ uv run find-flakes
 uv run find-flakes --preset 2.5_20
 
 # Graphene detection
-uv run find-flakes --material graphene_thin
+uv run find-flakes --material graphene_thin_90nm
 
 # Only scan specific chips
 uv run find-flakes --chips 0,2,5

@@ -29,8 +29,25 @@ GUI_STATE_PATH = Path("gui_state.json")
 MAX_RECENT_OPERATORS = 10
 
 DEFAULT_PRESET = "2.5_10"
-MATERIAL_DISPLAY = DetectorConfig.display_names()  # key → "hBN (thin) · 90nm SiO₂"
-MATERIAL_KEY_BY_DISPLAY = {v: k for k, v in MATERIAL_DISPLAY.items()}
+DEFAULT_MATERIAL_KEY = "hbn_medium"
+
+
+def _build_material_labels() -> dict[str, str]:
+    """Construct user-visible material labels from preset name + substrate.
+
+    Returns a dict of display label → preset key, e.g.
+    "hBN (medium) · 90nm SiO₂" → "hbn_medium".
+    """
+    labels: dict[str, str] = {}
+    for key in DetectorConfig.material_names():
+        config = DetectorConfig.from_material(key)
+        label = f"{config.name} · {config.substrate.value} SiO₂"
+        labels[label] = key
+    return labels
+
+
+MATERIAL_LABEL_TO_KEY = _build_material_labels()
+MATERIAL_KEY_TO_LABEL = {v: k for k, v in MATERIAL_LABEL_TO_KEY.items()}
 DEFAULT_INITIAL_Z = "24690"
 DEFAULT_AREA_RECT = "8000,95000,0,78000"
 
@@ -171,10 +188,10 @@ class FindFlakesGUI:
         row = ttk.Frame(form_frame)
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="Material:", width=18, anchor="w").pack(side="left")
-        display_names = list(MATERIAL_DISPLAY.values())
-        default_display = MATERIAL_DISPLAY.get("hbn_medium", display_names[0])
-        self.material_var = tk.StringVar(value=default_display)
-        ttk.OptionMenu(row, self.material_var, default_display, *display_names).pack(side="left")
+        material_labels = list(MATERIAL_LABEL_TO_KEY.keys())
+        default_label = MATERIAL_KEY_TO_LABEL.get(DEFAULT_MATERIAL_KEY, material_labels[0])
+        self.material_var = tk.StringVar(value=default_label)
+        ttk.OptionMenu(row, self.material_var, default_label, *material_labels).pack(side="left")
 
         # Revisit magnifications
         row = ttk.Frame(form_frame)
@@ -192,10 +209,7 @@ class FindFlakesGUI:
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="Upload:", width=18, anchor="w").pack(side="left")
         self.upload_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(row, text="Upload after scan", variable=self.upload_var).pack(side="left", padx=(0, 12))
-        self.substrate_var = tk.StringVar(value="90nm")
-        ttk.Label(row, text="Substrate:").pack(side="left", padx=(0, 4))
-        ttk.OptionMenu(row, self.substrate_var, "90nm", *["90nm", "285nm"]).pack(side="left")
+        ttk.Checkbutton(row, text="Upload after scan", variable=self.upload_var).pack(side="left")
 
         # ── Advanced options (collapsed) ────────────────────────
         self.advanced_visible = tk.BooleanVar(value=False)
@@ -356,8 +370,8 @@ class FindFlakesGUI:
         preset_key = self._selected_preset_key()
         cmd += ["--preset", preset_key]
 
-        material_display = self.material_var.get()
-        material = MATERIAL_KEY_BY_DISPLAY.get(material_display, material_display)
+        material_label = self.material_var.get()
+        material = MATERIAL_LABEL_TO_KEY.get(material_label, DEFAULT_MATERIAL_KEY)
         cmd += ["--material", material]
 
         operator = self.operator_var.get().strip()
@@ -395,7 +409,7 @@ class FindFlakesGUI:
             cmd += ["--area-rect", area_rect]
 
         if self.upload_var.get():
-            cmd += ["--upload", "--substrate", self.substrate_var.get()]
+            cmd += ["--upload"]
 
         return cmd
 

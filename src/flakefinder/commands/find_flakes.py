@@ -425,11 +425,9 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         revisit_top=args.revisit_top,
     )
 
-    # Upload config
+    # Upload config — substrate is derived from the material preset
     do_upload = args.upload
-    substrate = args.substrate or ""
-    if do_upload and not substrate:
-        raise SystemExit("Error: --substrate is required when using --upload")
+    substrate = DetectorConfig.from_material(args.material).substrate.value
     if do_upload:
         get_auth()  # fail fast if credentials are missing
 
@@ -653,12 +651,6 @@ Examples:
         "--upload",
         action="store_true",
         help="Upload results to flakes.sharpelab.science after pipeline completes",
-    )
-    upload_group.add_argument(
-        "--substrate",
-        type=str,
-        default=None,
-        help="Chip substrate thickness (e.g. 90nm, 285nm). Required with --upload.",
     )
     return parser
 

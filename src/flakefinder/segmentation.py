@@ -404,6 +404,13 @@ class ContrastMode(Enum):
     BELOW = "below"  # flakes darker than substrate (graphene)
 
 
+class Substrate(str, Enum):
+    """SiO₂ substrate thickness for a detector preset."""
+
+    SI_90NM = "90nm"
+    SI_285NM = "285nm"
+
+
 @dataclass
 class DetectorConfig:
     """Shared base for material-specific flake detector configs.
@@ -414,7 +421,8 @@ class DetectorConfig:
     ``PointDetectorConfig`` for labeled RGB reference points (WSe2).
     """
 
-    name: str  # human-readable display name, e.g. "hBN (thin) · 90nm SiO₂"
+    name: str  # human-readable material name, e.g. "hBN (medium)" (substrate not included)
+    substrate: Substrate  # SiO₂ thickness; forwarded to upload as "wafer" label
 
     # -- Segmentation --
     contrast_mode: ContrastMode
@@ -502,7 +510,8 @@ class DetectorConfig:
     def hbn_medium(cls) -> CurveDetectorConfig:
         """hBN medium flake detection preset."""
         return CurveDetectorConfig(
-            name="hBN (medium) · 90nm SiO₂",
+            name="hBN (medium)",
+            substrate=Substrate.SI_90NM,
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=15.0,
             min_size_um2=400.0,
@@ -537,10 +546,11 @@ class DetectorConfig:
         )
 
     @classmethod
-    def hbn_thick(cls) -> CurveDetectorConfig:
+    def hbn_thick_90nm(cls) -> CurveDetectorConfig:
         """hBN thick flake detection (20-40nm) on 90nm SiO₂."""
         return CurveDetectorConfig(
-            name="hBN (thick) · 90nm SiO₂",
+            name="hBN (thick)",
+            substrate=Substrate.SI_90NM,
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=15.0,
             min_size_um2=400.0,
@@ -578,7 +588,8 @@ class DetectorConfig:
     def hbn_medium_285nm(cls) -> CurveDetectorConfig:
         """hBN medium flake detection on 285nm SiO₂ substrates."""
         return CurveDetectorConfig(
-            name="hBN (medium) · 285nm SiO₂",
+            name="hBN (medium)",
+            substrate=Substrate.SI_285NM,
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=7.0,
             min_size_um2=350.0,
@@ -613,14 +624,15 @@ class DetectorConfig:
         )
 
     @classmethod
-    def graphene_thin(cls) -> CurveDetectorConfig:
+    def graphene_thin_90nm(cls) -> CurveDetectorConfig:
         """Graphene thin flake detection on 90nm SiO₂.
 
         Calibration curve from scan 154 (old system, SF121 run7) mean R/G
         contrast per layer count.  Thickness in nm = layers × 0.335.
         """
         return CurveDetectorConfig(
-            name="Graphene thin · 90nm SiO₂",
+            name="Graphene thin",
+            substrate=Substrate.SI_90NM,
             contrast_mode=ContrastMode.BELOW,
             contrast_offset=4.0,
             min_size_um2=400.0,
@@ -664,14 +676,15 @@ class DetectorConfig:
         )
 
     @classmethod
-    def wse2_monolayer(cls) -> PointDetectorConfig:
+    def wse2_monolayer_90nm(cls) -> PointDetectorConfig:
         """WSe₂ monolayer detection preset on 90nm SiO₂.
 
         Uses point-based calibration: a single labeled RGB reference point
         for 1-layer WSe₂.  Distance is 3D Euclidean over (R, G, B) contrast.
         """
         return PointDetectorConfig(
-            name="WSe₂ monolayer · 90nm SiO₂",
+            name="WSe₂ monolayer",
+            substrate=Substrate.SI_90NM,
             contrast_mode=ContrastMode.BELOW,
             contrast_offset=15.0,
             min_size_um2=100.0,
@@ -707,21 +720,16 @@ class DetectorConfig:
         return {
             # "hbn_thin": cls.hbn_thin,
             "hbn_medium": cls.hbn_medium,
-            "hbn_thick": cls.hbn_thick,
+            "hbn_thick_90nm": cls.hbn_thick_90nm,
             "hbn_medium_285nm": cls.hbn_medium_285nm,
-            "graphene_thin": cls.graphene_thin,
-            "wse2_monolayer": cls.wse2_monolayer,
+            "graphene_thin_90nm": cls.graphene_thin_90nm,
+            "wse2_monolayer_90nm": cls.wse2_monolayer_90nm,
         }
 
     @classmethod
     def material_names(cls) -> list[str]:
         """Available material preset names."""
         return list(cls._presets())
-
-    @classmethod
-    def display_names(cls) -> dict[str, str]:
-        """Map of preset key → human-readable display name."""
-        return {key: factory().name for key, factory in cls._presets().items()}
 
     @classmethod
     def from_material(cls, name: str) -> DetectorConfig:
