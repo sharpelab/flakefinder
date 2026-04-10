@@ -442,10 +442,18 @@ class FindFlakesGUI:
         self.start_time = time.monotonic()
 
         try:
-            # CREATE_NEW_PROCESS_GROUP on Windows so CTRL_BREAK_EVENT reaches children
+            # CREATE_NEW_PROCESS_GROUP on Windows so CTRL_BREAK_EVENT reaches children.
+            # CREATE_NEW_CONSOLE gives the child a console (required for console control
+            # events to be delivered), and STARTUPINFO with SW_HIDE keeps that console
+            # window hidden. CREATE_NO_WINDOW would detach the console entirely, which
+            # breaks the stop button's CTRL_BREAK_EVENT delivery.
             kwargs = {}
             if sys.platform == "win32":
-                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NEW_CONSOLE
+                kwargs["startupinfo"] = startupinfo
             self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
