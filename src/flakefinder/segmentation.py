@@ -54,6 +54,22 @@ HBN_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
     (2.520, 4.636, 46.0),
 )
 
+# Thick hBN calibration on 90nm SiO₂.
+# Linear interpolation between empirical points at 26nm and 46nm.
+HBN_THICK_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
+    (0.421, 2.907, 26.0),
+    (0.631, 3.080, 28.0),
+    (0.841, 3.253, 30.0),
+    (1.051, 3.426, 32.0),
+    (1.261, 3.599, 34.0),
+    (1.471, 3.772, 36.0),
+    (1.680, 3.944, 38.0),
+    (1.890, 4.117, 40.0),
+    (2.100, 4.290, 42.0),
+    (2.310, 4.463, 44.0),
+    (2.520, 4.636, 46.0),
+)
+
 # Theory-derived calibration for hBN on 285nm SiO₂ (transfer matrix model).
 # Params: n=2.20, oxide=281.55nm, NA=0.3375, offsets R=+0.55 G=-0.20 (camera-space).
 HBN_285NM_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
@@ -201,6 +217,49 @@ def _score_hbn_medium(config: DetectorConfig, det: Detection) -> tuple[int, floa
     log2_size = float(np.log2(max(size_um2, 1.0)))
     score = round(
         log2_size * log2_size * np.exp(-cd * 8) * ar_penalty * g_penalty,
+        4,
+    )
+    return tier, score
+
+
+def _score_hbn_thick(config: DetectorConfig, det: Detection) -> tuple[int, float]:
+    """hBN thick (20-40nm): size + cal_dist, no thickness penalty."""
+    pr = det["perim_ratio"]
+    cd = det["cal_dist"]
+    g = det["contrast_rgb"][1]
+    r = det["contrast_rgb"][0]
+    ent = det.get("entropy", det.get("g_entropy", 99.0))
+    ar = det.get("aspect_ratio", 1.0)
+    size_um2 = det["size_um2"]
+
+    if (
+        pr < config.tier1_perim_ratio
+        and cd < config.tier1_cal_dist
+        and g >= config.tier1_g_min
+        and g < config.tier1_g_max
+        and r >= 0.8
+        and r < config.tier1_r_max
+        and ent < config.tier1_entropy_max
+        and ar < config.tier1_aspect_ratio
+        and size_um2 >= config.tier1_min_size_um2
+    ):
+        tier = 1
+        if ent > config.tier2_entropy_max:
+            tier = 2
+    elif (
+        pr < config.tier2_perim_ratio
+        and cd < config.tier2_cal_dist
+        and ent < config.tier2_entropy_max
+        and size_um2 >= config.tier1_min_size_um2
+    ):
+        tier = 2
+    else:
+        tier = 3
+
+    ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
+    log2_size = float(np.log2(max(size_um2, 1.0)))
+    score = round(
+        log2_size * log2_size * np.exp(-cd * 8) * ar_penalty,
         4,
     )
     return tier, score
@@ -522,6 +581,44 @@ class DetectorConfig:
         )
 
     @classmethod
+    def hbn_thick(cls) -> DetectorConfig:
+        """hBN thick flake detection (20-40nm) on 90nm SiO₂."""
+        return cls(
+            name="hBN (thick) · 90nm SiO₂",
+            contrast_mode=ContrastMode.ABOVE,
+            contrast_offset=15.0,
+            min_size_um2=400.0,
+            edge_margin_px=50,
+            morph_kernel_size=5,
+            entropy_threshold=0.4,
+            subseg_min_std=0.8,
+            subseg_min_range=0.5,
+            cal_points=HBN_THICK_CAL_POINTS,
+            cal_g_range=(2.0, 5.0),
+            cal_dist_match=0.5,
+            cal_dist_possible=1.0,
+            thin_max_nm=30.0,
+            medium_max_nm=38.0,
+            non_match_label="non-hBN",
+            white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
+            score_fn=_score_hbn_thick,
+            tier1_perim_ratio=1.50,
+            tier1_cal_dist=0.30,
+            tier1_g_min=3.2,
+            tier1_g_max=4.2,
+            tier1_r_max=1.9,
+            tier1_entropy_max=99.0,
+            tier1_min_size_um2=500.0,
+            tier1_br_ratio_max=99.0,
+            tier1_aspect_ratio=6.0,
+            tier1_solidity_min=0.0,
+            tier1_circularity_min=0.0,
+            tier2_perim_ratio=1.50,
+            tier2_cal_dist=0.40,
+            tier2_entropy_max=4.65,
+        )
+
+    @classmethod
     def hbn_medium_285nm(cls) -> DetectorConfig:
         """hBN medium flake detection on 285nm SiO₂ substrates."""
         return cls(
@@ -653,6 +750,7 @@ class DetectorConfig:
         return {
             # "hbn_thin": cls.hbn_thin,
             "hbn_medium": cls.hbn_medium,
+            "hbn_thick": cls.hbn_thick,
             "hbn_medium_285nm": cls.hbn_medium_285nm,
             "graphene_thin": cls.graphene_thin,
             "wse2": cls.wse2,
