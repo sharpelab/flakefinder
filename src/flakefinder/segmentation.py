@@ -673,7 +673,7 @@ class DetectorConfig:
         return PointDetectorConfig(
             name="WSe₂ monolayer · 90nm SiO₂",
             contrast_mode=ContrastMode.BELOW,
-            contrast_offset=35.0,
+            contrast_offset=15.0,
             min_size_um2=100.0,
             edge_margin_px=50,
             morph_kernel_size=5,
