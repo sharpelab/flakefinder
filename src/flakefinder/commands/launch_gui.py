@@ -488,10 +488,24 @@ class FindFlakesGUI:
         if self.process and self.process.poll() is None:
             self._log("\n--- Stopping process ---\n")
             if sys.platform == "win32":
-                # Send Ctrl+C to process group so Python gets KeyboardInterrupt
-                import signal
+                # The GUI runs under pythonw and has no console of its own.
+                # The worker was spawned with CREATE_NEW_CONSOLE and has a
+                # hidden console. GenerateConsoleCtrlEvent only delivers to
+                # processes that share the caller's console, so we briefly
+                # attach to the worker's console, send CTRL+BREAK, then detach.
+                import ctypes
 
-                self.process.send_signal(signal.CTRL_BREAK_EVENT)
+                kernel32 = ctypes.windll.kernel32
+                CTRL_BREAK_EVENT = 1
+
+                kernel32.FreeConsole()  # no-op if we have no console
+                if kernel32.AttachConsole(self.process.pid):
+                    try:
+                        kernel32.GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, self.process.pid)
+                    finally:
+                        kernel32.FreeConsole()
+                else:
+                    self._log("[gui] Failed to attach to worker console\n")
             else:
                 self.process.terminate()
 
