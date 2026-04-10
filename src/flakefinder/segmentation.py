@@ -32,10 +32,20 @@ from flakefinder.types import ContrastRGB, GainRGB, PixelPolygon, Point2F, XYWHR
 
 
 class CalProjection(NamedTuple):
-    """Result of projecting an (R, G) point onto the calibration curve."""
+    """Result of projecting an (R, G, B) point onto calibration data."""
 
     dist: float
     thickness_nm: float | None
+    layers: int | None = None
+
+
+class CalPoint(NamedTuple):
+    """Labeled RGB reference point for point-based calibration."""
+
+    layers: int
+    r: float
+    g: float
+    b: float
 
 
 # AFM-verified hBN calibration data on 90nm SiO₂ (50x, Leica DM6M).
@@ -396,7 +406,13 @@ class ContrastMode(Enum):
 
 @dataclass
 class DetectorConfig:
-    """All material-specific parameters for flake detection."""
+    """Shared base for material-specific flake detector configs.
+
+    Subclasses supply a concrete calibration implementation via
+    ``cal_projection`` and ``classify``.  Use ``CurveDetectorConfig`` for
+    polynomial R=f(G) thickness curves (hBN, graphene) and
+    ``PointDetectorConfig`` for labeled RGB reference points (WSe2).
+    """
 
     name: str  # human-readable display name, e.g. "hBN (thin) · 90nm SiO₂"
 
@@ -410,16 +426,10 @@ class DetectorConfig:
     subseg_min_std: float  # min within-blob std to attempt Otsu subsegmentation
     subseg_min_range: float  # min (max-min) contrast range to attempt split
 
-    # -- Calibration curve: (R, G, thickness_nm) anchor points --
-    cal_points: tuple[tuple[float, float, float], ...] | None
-    cal_g_range: tuple[float, float]
-
     # -- Classification thresholds --
-    cal_dist_match: float  # max distance for thin/medium/thick
+    cal_dist_match: float  # max distance for a confident label
     cal_dist_possible: float  # max distance for "possible"
-    thin_max_nm: float  # thickness < this -> thin
-    medium_max_nm: float  # thickness <= this -> medium, else thick
-    non_match_label: str  # label for detections far from cal curve
+    non_match_label: str  # label for detections far from calibration data
 
     # -- Capture --
     white_balance: GainRGB
@@ -443,67 +453,13 @@ class DetectorConfig:
     tier2_cal_dist: float
     tier2_entropy_max: float
 
-    # -- Layer-count mode (graphene) --
-    layer_spacing_nm: float | None = None
+    def cal_projection(self, r: float, g: float, b: float) -> CalProjection:
+        """Project a contrast triple onto this config's calibration data."""
+        raise NotImplementedError
 
-    # Precomputed calibration curve (derived from cal_points or cal_g_range)
-    _cal_g_curve: np.ndarray = field(init=False, repr=False, compare=False)
-    _cal_r_curve: np.ndarray = field(init=False, repr=False, compare=False)
-    _cal_thickness_curve: np.ndarray | None = field(init=False, repr=False, compare=False)
-    cal_poly: tuple[float, ...] = field(init=False, repr=False, compare=False)
-
-    def __post_init__(self) -> None:
-        g_grid = np.linspace(self.cal_g_range[0], self.cal_g_range[1], 500)
-        self._cal_g_curve = g_grid
-
-        if self.cal_points is not None:
-            rs = np.array([p[0] for p in self.cal_points])
-            gs = np.array([p[1] for p in self.cal_points])
-            nms = np.array([p[2] for p in self.cal_points])
-
-            # Fit R = poly(G) from anchor points
-            self.cal_poly = tuple(float(c) for c in np.polyfit(gs, rs, 2))
-            self._cal_r_curve = np.polyval(self.cal_poly, g_grid)
-
-            # Interpolate thickness onto the same G grid
-            order = np.argsort(gs)
-            self._cal_thickness_curve = np.interp(g_grid, gs[order], nms[order])
-        else:
-            self.cal_poly = (0.0, 0.0, 0.0)
-            self._cal_r_curve = np.polyval(self.cal_poly, g_grid)
-            self._cal_thickness_curve = None
-
-    def cal_curve(self, r: float, g: float) -> CalProjection:
-        """Project (R, G) onto the calibration curve.
-
-        Returns distance to curve and estimated thickness in nm.
-        """
-        dists = np.sqrt((self._cal_g_curve - g) ** 2 + (self._cal_r_curve - r) ** 2)
-        idx = int(dists.argmin())
-        dist = float(dists[idx])
-        thickness_nm: float | None = None
-        if self._cal_thickness_curve is not None:
-            thickness_nm = round(float(self._cal_thickness_curve[idx]), 1)
-        return CalProjection(round(dist, 4), thickness_nm)
-
-    def classify(self, r: float, g: float) -> str | None:
-        """Classify by R-G calibration distance and projected thickness.
-
-        Returns None when no calibration curve is configured.
-        """
-        if self._cal_thickness_curve is None:
-            return None
-        proj = self.cal_curve(r, g)
-        if proj.dist < self.cal_dist_match and proj.thickness_nm is not None:
-            if proj.thickness_nm < self.thin_max_nm:
-                return "thin"
-            elif proj.thickness_nm <= self.medium_max_nm:
-                return "medium"
-            else:
-                return "thick"
-        elif proj.dist < self.cal_dist_possible:
-            return "possible"
-        return self.non_match_label
+    def classify(self, r: float, g: float, b: float) -> str | None:
+        """Return a material-specific label for a contrast triple."""
+        raise NotImplementedError
 
     def score_detection(self, det: Detection) -> tuple[int, float]:
         """Compute (tier, score) via preset-specific scoring function."""
@@ -543,9 +499,9 @@ class DetectorConfig:
     #     )
 
     @classmethod
-    def hbn_medium(cls) -> DetectorConfig:
+    def hbn_medium(cls) -> CurveDetectorConfig:
         """hBN medium flake detection preset."""
-        return cls(
+        return CurveDetectorConfig(
             name="hBN (medium) · 90nm SiO₂",
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=15.0,
@@ -581,9 +537,9 @@ class DetectorConfig:
         )
 
     @classmethod
-    def hbn_thick(cls) -> DetectorConfig:
+    def hbn_thick(cls) -> CurveDetectorConfig:
         """hBN thick flake detection (20-40nm) on 90nm SiO₂."""
-        return cls(
+        return CurveDetectorConfig(
             name="hBN (thick) · 90nm SiO₂",
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=15.0,
@@ -619,9 +575,9 @@ class DetectorConfig:
         )
 
     @classmethod
-    def hbn_medium_285nm(cls) -> DetectorConfig:
+    def hbn_medium_285nm(cls) -> CurveDetectorConfig:
         """hBN medium flake detection on 285nm SiO₂ substrates."""
-        return cls(
+        return CurveDetectorConfig(
             name="hBN (medium) · 285nm SiO₂",
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=7.0,
@@ -657,13 +613,13 @@ class DetectorConfig:
         )
 
     @classmethod
-    def graphene_thin(cls) -> DetectorConfig:
+    def graphene_thin(cls) -> CurveDetectorConfig:
         """Graphene thin flake detection on 90nm SiO₂.
 
         Calibration curve from scan 154 (old system, SF121 run7) mean R/G
         contrast per layer count.  Thickness in nm = layers × 0.335.
         """
-        return cls(
+        return CurveDetectorConfig(
             name="Graphene thin · 90nm SiO₂",
             contrast_mode=ContrastMode.BELOW,
             contrast_offset=4.0,
@@ -708,10 +664,14 @@ class DetectorConfig:
         )
 
     @classmethod
-    def wse2(cls) -> DetectorConfig:
-        """WSe2 detection preset (stub -- no calibration curve yet)."""
-        return cls(
-            name="WSe₂ · 90nm SiO₂",
+    def wse2_monolayer(cls) -> PointDetectorConfig:
+        """WSe₂ monolayer detection preset on 90nm SiO₂.
+
+        Uses point-based calibration: a single labeled RGB reference point
+        for 1-layer WSe₂.  Distance is 3D Euclidean over (R, G, B) contrast.
+        """
+        return PointDetectorConfig(
+            name="WSe₂ monolayer · 90nm SiO₂",
             contrast_mode=ContrastMode.BELOW,
             contrast_offset=35.0,
             min_size_um2=100.0,
@@ -720,12 +680,9 @@ class DetectorConfig:
             entropy_threshold=0.4,
             subseg_min_std=0.12,
             subseg_min_range=0.5,
-            cal_points=None,
-            cal_g_range=(-6.0, 0.5),
-            cal_dist_match=0.5,
-            cal_dist_possible=1.0,
-            thin_max_nm=15.0,
-            medium_max_nm=24.0,
+            cal_reference_points=(CalPoint(layers=1, r=-0.20, g=-0.20, b=-0.02),),
+            cal_dist_match=0.18,
+            cal_dist_possible=0.30,
             non_match_label="non-WSe2",
             white_balance=GainRGB(red=1.41, green=1.02, blue=1.70),
             score_fn=_score_wse2,
@@ -753,7 +710,7 @@ class DetectorConfig:
             "hbn_thick": cls.hbn_thick,
             "hbn_medium_285nm": cls.hbn_medium_285nm,
             "graphene_thin": cls.graphene_thin,
-            "wse2": cls.wse2,
+            "wse2_monolayer": cls.wse2_monolayer,
         }
 
     @classmethod
@@ -773,6 +730,128 @@ class DetectorConfig:
         if name not in presets:
             raise ValueError(f"Unknown material: {name!r}. Choose from: {', '.join(presets)}")
         return presets[name]()
+
+
+@dataclass
+class CurveDetectorConfig(DetectorConfig):
+    """Detector config with polynomial R=f(G) thickness calibration.
+
+    Fits R = poly(G) over ``cal_points`` anchors and classifies detections
+    by distance to that curve plus projected thickness.
+    """
+
+    # -- Calibration curve: (R, G, thickness_nm) anchor points --
+    cal_points: tuple[tuple[float, float, float], ...] | None = None
+    cal_g_range: tuple[float, float] = (-1.0, 1.0)
+
+    # -- Thickness labeling --
+    thin_max_nm: float = 0.0  # thickness < this -> thin
+    medium_max_nm: float = 0.0  # thickness <= this -> medium, else thick
+
+    # -- Layer-count mode (graphene) --
+    layer_spacing_nm: float | None = None
+
+    # Precomputed calibration curve (derived from cal_points / cal_g_range)
+    _cal_g_curve: np.ndarray = field(init=False, repr=False, compare=False)
+    _cal_r_curve: np.ndarray = field(init=False, repr=False, compare=False)
+    _cal_thickness_curve: np.ndarray | None = field(init=False, repr=False, compare=False)
+    cal_poly: tuple[float, ...] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        g_grid = np.linspace(self.cal_g_range[0], self.cal_g_range[1], 500)
+        self._cal_g_curve = g_grid
+
+        if self.cal_points is not None:
+            rs = np.array([p[0] for p in self.cal_points])
+            gs = np.array([p[1] for p in self.cal_points])
+            nms = np.array([p[2] for p in self.cal_points])
+
+            # Fit R = poly(G) from anchor points
+            self.cal_poly = tuple(float(c) for c in np.polyfit(gs, rs, 2))
+            self._cal_r_curve = np.polyval(self.cal_poly, g_grid)
+
+            # Interpolate thickness onto the same G grid
+            order = np.argsort(gs)
+            self._cal_thickness_curve = np.interp(g_grid, gs[order], nms[order])
+        else:
+            self.cal_poly = (0.0, 0.0, 0.0)
+            self._cal_r_curve = np.polyval(self.cal_poly, g_grid)
+            self._cal_thickness_curve = None
+
+    def cal_curve(self, r: float, g: float) -> CalProjection:
+        """Project (R, G) onto the calibration curve.
+
+        Returns distance to curve, estimated thickness in nm, and layer
+        count when ``layer_spacing_nm`` is configured.
+        """
+        dists = np.sqrt((self._cal_g_curve - g) ** 2 + (self._cal_r_curve - r) ** 2)
+        idx = int(dists.argmin())
+        dist = float(dists[idx])
+        thickness_nm: float | None = None
+        layers: int | None = None
+        if self._cal_thickness_curve is not None:
+            thickness_nm = round(float(self._cal_thickness_curve[idx]), 1)
+            if self.layer_spacing_nm is not None:
+                layers = max(1, round(thickness_nm / self.layer_spacing_nm))
+        return CalProjection(round(dist, 4), thickness_nm, layers)
+
+    def cal_projection(self, r: float, g: float, b: float) -> CalProjection:
+        return self.cal_curve(r, g)
+
+    def classify(self, r: float, g: float, b: float) -> str | None:
+        """Classify by R-G calibration distance and projected thickness.
+
+        Returns None when no calibration curve is configured.
+        """
+        if self._cal_thickness_curve is None:
+            return None
+        proj = self.cal_curve(r, g)
+        if proj.dist < self.cal_dist_match and proj.thickness_nm is not None:
+            if proj.thickness_nm < self.thin_max_nm:
+                return "thin"
+            elif proj.thickness_nm <= self.medium_max_nm:
+                return "medium"
+            else:
+                return "thick"
+        elif proj.dist < self.cal_dist_possible:
+            return "possible"
+        return self.non_match_label
+
+
+@dataclass
+class PointDetectorConfig(DetectorConfig):
+    """Detector config with labeled RGB reference points.
+
+    Classifies detections by 3D Euclidean distance over (R, G, B) contrast
+    to the nearest ``CalPoint``.  Layer count comes from the matched point's
+    ``layers`` field; there is no thickness curve.
+    """
+
+    cal_reference_points: tuple[CalPoint, ...] = ()
+
+    def cal_point(self, r: float, g: float, b: float) -> CalProjection:
+        """Return distance to the nearest reference point and its layer label."""
+        if not self.cal_reference_points:
+            return CalProjection(0.0, None, None)
+        best_dist = float("inf")
+        best_layers: int | None = None
+        for pt in self.cal_reference_points:
+            d = float(np.sqrt((pt.r - r) ** 2 + (pt.g - g) ** 2 + (pt.b - b) ** 2))
+            if d < best_dist:
+                best_dist = d
+                best_layers = pt.layers
+        return CalProjection(round(best_dist, 4), None, best_layers)
+
+    def cal_projection(self, r: float, g: float, b: float) -> CalProjection:
+        return self.cal_point(r, g, b)
+
+    def classify(self, r: float, g: float, b: float) -> str | None:
+        if not self.cal_reference_points:
+            return None
+        proj = self.cal_point(r, g, b)
+        if proj.dist < self.cal_dist_match and proj.layers is not None:
+            return f"{proj.layers}-layer"
+        return self.non_match_label
 
 
 ScoreFn = Callable[[DetectorConfig, Detection], tuple[int, float]]
@@ -931,7 +1010,7 @@ def _analyze_component(
     g_contrast = round(float(norm_contrast_bgr[1]), 4)
     b_contrast = round(float(norm_contrast_bgr[0]), 4)
 
-    proj = config.cal_curve(r_contrast, g_contrast)
+    proj = config.cal_projection(r_contrast, g_contrast, b_contrast)
 
     return Detection(
         bbox=XYWHRect(x_min, y_min, x_max - x_min, y_max - y_min),
@@ -942,6 +1021,7 @@ def _analyze_component(
         contrast_rgb=ContrastRGB(r_contrast, g_contrast, b_contrast),
         cal_dist=proj.dist,
         thickness_nm=proj.thickness_nm,
+        layers=proj.layers,
         solidity=round(solidity, 4),
         circularity=round(circularity, 4),
         perim_ratio=round(perim_ratio, 4),
@@ -1171,15 +1251,8 @@ def classify_detections(
         if perim_ratio_thresh > 0 and det["perim_ratio"] >= perim_ratio_thresh:
             det["classification"] = "tape"
         else:
-            r, g = det["contrast_rgb"][0], det["contrast_rgb"][1]
-            det["classification"] = config.classify(r, g)
-
-        # Layer count for materials with known interlayer spacing
-        thickness_nm = det["thickness_nm"]
-        if config.layer_spacing_nm is not None and thickness_nm is not None:
-            det["layers"] = max(1, round(thickness_nm / config.layer_spacing_nm))
-        else:
-            det["layers"] = None
+            r, g, b = det["contrast_rgb"]
+            det["classification"] = config.classify(r, g, b)
 
     score_detections(detections, config)
 

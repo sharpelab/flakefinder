@@ -21,7 +21,13 @@ import numpy as np
 from mosaic_util import make_mosaic
 
 from flakefinder.scan_utils import apply_flatfield
-from flakefinder.segmentation import Detection, DetectorConfig, draw_scale_bar, segment_frame
+from flakefinder.segmentation import (
+    CurveDetectorConfig,
+    Detection,
+    DetectorConfig,
+    draw_scale_bar,
+    segment_frame,
+)
 
 # R-G calibration curve: R = 0.193*G^2 - 0.217*G - 0.604
 # Polynomial coefficients (G^2, G, constant)
@@ -60,12 +66,12 @@ _LABEL_COLORS: dict[str, tuple[int, int, int]] = {
 }
 
 
-def classify_detection(r: float, g: float, config: DetectorConfig) -> tuple[str | None, tuple[int, int, int]]:
-    """Classify a detection by R-G calibration distance and G contrast.
+def classify_detection(r: float, g: float, b: float, config: DetectorConfig) -> tuple[str | None, tuple[int, int, int]]:
+    """Classify a detection by its contrast triple.
 
     Returns (label, bgr_color).
     """
-    label = config.classify(r, g)
+    label = config.classify(r, g, b)
     color = _LABEL_COLORS.get(label, COLOR_NON_HBN) if label is not None else COLOR_NON_HBN
     return label, color
 
@@ -112,8 +118,8 @@ def draw_eval_frame(
 
     for i, (det, (cls_label, color)) in enumerate(zip(detections, classifications, strict=True)):
         bx, by, bw, bh = det["bbox"]
-        r_contrast, g_contrast, _ = det["contrast_rgb"]
-        d = config.cal_curve(r_contrast, g_contrast).dist
+        r_contrast, g_contrast, b_contrast = det["contrast_rgb"]
+        d = config.cal_projection(r_contrast, g_contrast, b_contrast).dist
 
         # Draw filled bbox
         thickness = 2
@@ -167,7 +173,7 @@ def discover_frames(ref_dir: Path) -> list[dict]:
 def generate_rg_scatter(
     all_detections: list[tuple[float, float, str, bool]],
     output_path: Path,
-    config: DetectorConfig,
+    config: CurveDetectorConfig,
 ) -> None:
     """Generate R vs G scatter plot with calibration curve.
 
@@ -331,8 +337,8 @@ def main():
         # Classify all detections
         classifications = []
         for det in detections:
-            r, g, _ = det["contrast_rgb"]
-            cls_label, color = classify_detection(r, g, config)
+            r, g, b = det["contrast_rgb"]
+            cls_label, color = classify_detection(r, g, b, config)
             classifications.append((cls_label, color))
             key = cls_label or "unknown"
             cls_counts[key] = cls_counts.get(key, 0) + 1
@@ -389,8 +395,8 @@ def main():
         mosaic.save(str(mosaic_path), quality=95)
         print(f"Saved mosaic: {mosaic_path}")
 
-    # Generate R-G scatter
-    if all_scatter_points:
+    # Generate R-G scatter (only meaningful for curve-based calibrations)
+    if all_scatter_points and isinstance(config, CurveDetectorConfig):
         print("Generating R-G scatter plot...")
         scatter_path = args.output / "rg_scatter.png"
         generate_rg_scatter(all_scatter_points, scatter_path, config)

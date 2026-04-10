@@ -33,6 +33,7 @@ from mosaic_util import make_mosaic
 
 from flakefinder.scan_utils import PARFOCAL_Z_UM, build_revisit_json
 from flakefinder.segmentation import (
+    CurveDetectorConfig,
     Detection,
     DetectorConfig,
     classify_detections,
@@ -101,10 +102,11 @@ def plot_rg_scatter(
             zorder=5,
         )
 
-    # Calibration curve
-    g_range = np.linspace(-0.5, 5.0, 200)
-    r_curve = np.polyval(config.cal_poly, g_range)
-    ax.plot(g_range, r_curve, "k-", linewidth=2, label="Cal curve")
+    # Calibration curve (only for curve-based configs)
+    if isinstance(config, CurveDetectorConfig):
+        g_range = np.linspace(-0.5, 5.0, 200)
+        r_curve = np.polyval(config.cal_poly, g_range)
+        ax.plot(g_range, r_curve, "k-", linewidth=2, label="Cal curve")
 
     ax.set_xlabel("G contrast")
     ax.set_ylabel("R contrast")
