@@ -921,9 +921,7 @@ def _run_chip_seg(
             r = results[name]
             if not r.detections:
                 continue
-            geom_dets = [
-                {k: v for k, v in d.items() if k not in ("tier", "score", "classification")} for d in r.detections
-            ]
+            geom_dets = [{k: v for k, v in d.items() if k not in ("tier", "score")} for d in r.detections]
             frame_json = {"frame": name, "dark_frac": round(r.dark_frac, 4), "detections": geom_dets}
             with open(job.seg_dir / f"{name}.json", "w") as f:
                 json.dump(frame_json, f, indent=2)
