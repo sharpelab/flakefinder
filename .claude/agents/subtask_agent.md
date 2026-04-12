@@ -1,7 +1,6 @@
 ---
 name: subtask_agent
 description: "This agent is only used manually via `--agent subtask_agent`. Do not spawn it automatically."
-model: opus
 ---
 
 You are a subtask agent spawned by the scan operator to handle a side task during a scanning session.
