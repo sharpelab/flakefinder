@@ -227,7 +227,14 @@ Example: --where "G > 1.5" --where "entropy < 4.4"
         )
 
     # --- Crop ---
-    output_dir = args.output or (args.run_dir / "crop_mosaic")
+    # If -o looks like an image file, use it as the mosaic path directly
+    out_path = args.output or (args.run_dir / "crop_mosaic")
+    if out_path.suffix.lower() in (".png", ".jpg", ".jpeg"):
+        mosaic_file = out_path
+        output_dir = out_path.parent / out_path.stem
+    else:
+        mosaic_file = None
+        output_dir = out_path
     output_dir.mkdir(parents=True, exist_ok=True)
     crops_dir = output_dir / "crops"
     crops_dir.mkdir(parents=True, exist_ok=True)
@@ -275,8 +282,9 @@ Example: --where "G > 1.5" --where "entropy < 4.4"
             label_color=(255, 255, 255),
             label_bg=(0, 0, 0, 180),
         )
-        mosaic_path = output_dir / f"{output_dir.name}.jpg"
-        mosaic.save(str(mosaic_path), quality=95)
+        mosaic_path = mosaic_file or (output_dir / f"{output_dir.name}.png")
+        save_kwargs = {"quality": 95} if mosaic_path.suffix.lower() in (".jpg", ".jpeg") else {}
+        mosaic.save(str(mosaic_path), **save_kwargs)
         print(f"Saved mosaic: {mosaic_path}")
         subprocess.Popen(
             ["present", str(mosaic_path)],
