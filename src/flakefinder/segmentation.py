@@ -48,6 +48,14 @@ class CalPoint(NamedTuple):
     b: float
 
 
+class CalPointRG(NamedTuple):
+    """Labeled RG reference point (B ignored, unreliable at some oxide thicknesses)."""
+
+    layers: int
+    r: float
+    g: float
+
+
 # AFM-verified hBN calibration data on 90nm SiO₂ (50x, Leica DM6M).
 # Source: docs/bn_thickness_calibration.md
 HBN_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
@@ -624,13 +632,14 @@ class DetectorConfig:
         )
 
     @classmethod
-    def graphene_thin_90nm(cls) -> CurveDetectorConfig:
+    def graphene_thin_90nm(cls) -> RGPointDetectorConfig:
         """Graphene thin flake detection on 90nm SiO₂.
 
-        Calibration curve from scan 154 (old system, SF121 run7) mean R/G
-        contrast per layer count.  Thickness in nm = layers × 0.335.
+        Point-based calibration using 2D (R, G) distance to per-layer
+        reference points (B excluded — unreliable at 90 nm oxide).
+        From scan 154 (old system, SF121 run7) mean R/G per layer count.
         """
-        return CurveDetectorConfig(
+        return RGPointDetectorConfig(
             name="Graphene thin",
             substrate=Substrate.SI_90NM,
             contrast_mode=ContrastMode.BELOW,
@@ -641,21 +650,17 @@ class DetectorConfig:
             entropy_threshold=0.4,
             subseg_min_std=0.05,
             subseg_min_range=0.08,
-            cal_points=(
-                # (R_contrast, G_contrast, thickness_nm)
+            cal_reference_points=(
                 # From scan 154 mean values per layer count
-                (-0.140, -0.147, 0.335),  # 1 layer
-                (-0.260, -0.276, 0.670),  # 2 layers
-                (-0.378, -0.393, 1.005),  # 3 layers
-                (-0.478, -0.491, 1.340),  # 4 layers
-                (-0.570, -0.579, 1.675),  # 5 layers
+                CalPointRG(layers=1, r=-0.140, g=-0.147),
+                CalPointRG(layers=2, r=-0.260, g=-0.276),
+                CalPointRG(layers=3, r=-0.378, g=-0.393),
+                CalPointRG(layers=4, r=-0.478, g=-0.491),
+                CalPointRG(layers=5, r=-0.570, g=-0.579),
             ),
-            cal_g_range=(-0.7, 0.1),
             layer_spacing_nm=0.335,
-            cal_dist_match=0.5,
-            cal_dist_possible=1.0,
-            thin_max_nm=1.0,
-            medium_max_nm=2.0,
+            cal_dist_match=0.08,
+            cal_dist_possible=0.15,
             non_match_label="non-graphene",
             white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
             score_fn=_score_graphene,
@@ -857,6 +862,42 @@ class PointDetectorConfig(DetectorConfig):
         if not self.cal_reference_points:
             return None
         proj = self.cal_point(r, g, b)
+        if proj.dist < self.cal_dist_match and proj.layers is not None:
+            return f"{proj.layers}-layer"
+        return self.non_match_label
+
+
+@dataclass
+class RGPointDetectorConfig(DetectorConfig):
+    """Point-based calibration using 2D Euclidean distance over (R, G).
+
+    B channel is excluded from the distance metric because it is
+    unreliable at certain oxide thicknesses (e.g. 90 nm SiO₂).
+    Layer count comes directly from the nearest reference point.
+    """
+
+    cal_reference_points: tuple[CalPointRG, ...]
+    layer_spacing_nm: float
+
+    def cal_projection(self, r: float, g: float, b: float) -> CalProjection:
+        if not self.cal_reference_points:
+            return CalProjection(0.0, None, None)
+        best_dist = float("inf")
+        best_layers: int | None = None
+        for pt in self.cal_reference_points:
+            d = float(np.sqrt((pt.r - r) ** 2 + (pt.g - g) ** 2))
+            if d < best_dist:
+                best_dist = d
+                best_layers = pt.layers
+        thickness_nm: float | None = None
+        if best_layers is not None:
+            thickness_nm = round(best_layers * self.layer_spacing_nm, 1)
+        return CalProjection(round(best_dist, 4), thickness_nm, best_layers)
+
+    def classify(self, r: float, g: float, b: float) -> str | None:
+        if not self.cal_reference_points:
+            return None
+        proj = self.cal_projection(r, g, b)
         if proj.dist < self.cal_dist_match and proj.layers is not None:
             return f"{proj.layers}-layer"
         return self.non_match_label
