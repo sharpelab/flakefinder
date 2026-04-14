@@ -390,6 +390,7 @@ def _score_wse2(config: DetectorConfig, det: Detection) -> tuple[int, float]:
     size_um2 = det["size_um2"]
     sol = det.get("solidity", 0.0)
     ent = det.get("entropy", det.get("g_entropy", 99.0))
+    ge = det.get("grad_energy", 99.0)
 
     if (
         pr < config.tier1_perim_ratio
@@ -398,6 +399,7 @@ def _score_wse2(config: DetectorConfig, det: Detection) -> tuple[int, float]:
         and sol >= config.tier1_solidity_min
         and size_um2 >= config.tier1_min_size_um2
         and ent < config.tier1_entropy_max
+        and ge < config.tier1_grad_energy_max
     ):
         tier = 1
         if ent > config.tier2_entropy_max:
@@ -478,6 +480,7 @@ class DetectorConfig:
     tier1_aspect_ratio: float
     tier1_solidity_min: float
     tier1_circularity_min: float
+    tier1_grad_energy_max: float
     tier2_perim_ratio: float
     tier2_cal_dist: float
     tier2_entropy_max: float
@@ -561,6 +564,7 @@ class DetectorConfig:
             tier1_aspect_ratio=6.0,
             tier1_solidity_min=0.0,
             tier1_circularity_min=0.0,
+            tier1_grad_energy_max=99.0,
             tier2_perim_ratio=1.50,
             tier2_cal_dist=0.15,
             tier2_entropy_max=4.65,
@@ -600,6 +604,7 @@ class DetectorConfig:
             tier1_aspect_ratio=6.0,
             tier1_solidity_min=0.0,
             tier1_circularity_min=0.0,
+            tier1_grad_energy_max=99.0,
             tier2_perim_ratio=1.50,
             tier2_cal_dist=0.40,
             tier2_entropy_max=4.65,
@@ -639,6 +644,7 @@ class DetectorConfig:
             tier1_aspect_ratio=6.0,
             tier1_solidity_min=0.0,
             tier1_circularity_min=0.0,
+            tier1_grad_energy_max=99.0,
             tier2_perim_ratio=1.50,
             tier2_cal_dist=0.25,
             tier2_entropy_max=4.65,
@@ -688,6 +694,7 @@ class DetectorConfig:
             tier1_aspect_ratio=7.0,
             tier1_solidity_min=0.2,
             tier1_circularity_min=0.1,
+            tier1_grad_energy_max=99.0,
             tier2_perim_ratio=1.50,
             tier2_cal_dist=0.15,
             tier2_entropy_max=4.65,
@@ -711,26 +718,27 @@ class DetectorConfig:
             entropy_threshold=0.4,
             subseg_min_std=0.12,
             subseg_min_range=0.5,
-            cal_reference_points=(CalPoint(layers=1, r=-0.20, g=-0.20, b=-0.24),),
-            cal_dist_match=0.18,
-            cal_dist_possible=0.30,
+            cal_reference_points=(CalPoint(layers=1, r=-0.42, g=-0.02, b=+0.10),),
+            cal_dist_match=0.15,
+            cal_dist_possible=0.25,
             non_match_label="non-WSe2",
-            white_balance=GainRGB(red=1.41, green=1.02, blue=1.70),
+            white_balance=GainRGB(red=1.60, green=1.00, blue=1.20),
             score_fn=_score_wse2,
             tier1_perim_ratio=1.50,
-            tier1_cal_dist=0.30,
+            tier1_cal_dist=0.15,
             tier1_g_min=-99.0,
             tier1_g_max=4.0,
             tier1_r_max=99.0,
-            tier1_entropy_max=4.0,
+            tier1_entropy_max=3.5,
             tier1_min_size_um2=200.0,
             tier1_br_ratio_max=99.0,
             tier1_aspect_ratio=6.0,
             tier1_solidity_min=0.4,
             tier1_circularity_min=0.0,
+            tier1_grad_energy_max=10.0,
             tier2_perim_ratio=1.50,
             tier2_cal_dist=0.20,
-            tier2_entropy_max=4.5,
+            tier2_entropy_max=4.0,
         )
 
     @classmethod
