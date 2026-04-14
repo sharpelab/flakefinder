@@ -91,6 +91,7 @@ class QuickScanWindow(QMainWindow):
 
         # Wire control signals
         self._controls.exposure_changed.connect(self._scope.set_exposure_ms)
+        self._controls.gain_changed.connect(self._scope.set_gain)
         self._controls.wb_changed.connect(self._scope.set_gain_rgb)
         self._controls.shutter_toggled.connect(self._scope.set_shutter)
         self._controls.lamp_changed.connect(self._scope.set_lamp_intensity)
@@ -251,6 +252,7 @@ class QuickScanWindow(QMainWindow):
     @Slot(object)
     def _on_hw_state(self, state: HardwareState):
         self._controls.set_exposure_ms(state.exposure_ms)
+        self._controls.set_gain(state.gain)
         self._controls.set_gain_rgb(*state.gain_rgb)
         self._controls.set_shutter(state.shutter_open)
         self._controls.set_lamp(state.lamp_intensity, state.lamp_max)

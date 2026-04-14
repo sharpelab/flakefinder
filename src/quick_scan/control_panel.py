@@ -26,6 +26,11 @@ _EXP_LOG_MIN = -1.0  # log10(0.1)
 _EXP_LOG_MAX = 4.0  # log10(10000)
 _EXP_SLIDER_STEPS = 1000
 
+# Gain slider range (overall camera gain multiplier)
+_GAIN_MIN = 1.0
+_GAIN_MAX = 16.0
+_GAIN_SLIDER_STEPS = 150  # 0.1 resolution
+
 # White-balance slider range
 _WB_MIN = 0.50
 _WB_MAX = 4.00
@@ -46,6 +51,15 @@ def _exp_ms_to_slider(ms: float) -> int:
     ms = max(0.1, min(10000.0, ms))
     log_val = math.log10(ms)
     return round((log_val - _EXP_LOG_MIN) / (_EXP_LOG_MAX - _EXP_LOG_MIN) * _EXP_SLIDER_STEPS)
+
+
+def _gain_slider_to_value(val: int) -> float:
+    return _GAIN_MIN + val / _GAIN_SLIDER_STEPS * (_GAIN_MAX - _GAIN_MIN)
+
+
+def _gain_value_to_slider(value: float) -> int:
+    value = max(_GAIN_MIN, min(_GAIN_MAX, value))
+    return round((value - _GAIN_MIN) / (_GAIN_MAX - _GAIN_MIN) * _GAIN_SLIDER_STEPS)
 
 
 def _wb_slider_to_gain(val: int) -> float:
@@ -70,6 +84,7 @@ class ControlPanel(QWidget):
     """
 
     exposure_changed = Signal(float)
+    gain_changed = Signal(float)
     wb_changed = Signal(float, float, float)
     shutter_toggled = Signal(bool)
     lamp_changed = Signal(int)
@@ -89,6 +104,10 @@ class ControlPanel(QWidget):
         # ── Exposure ─────────────────────────────────────────────
         self._exposure_group = self._build_exposure_group()
         layout.addWidget(self._exposure_group)
+
+        # ── Gain ─────────────────────────────────────────────────
+        self._gain_group = self._build_gain_group()
+        layout.addWidget(self._gain_group)
 
         # ── White Balance ────────────────────────────────────────
         self._wb_group = self._build_wb_group()
@@ -127,6 +146,7 @@ class ControlPanel(QWidget):
         # Widgets to disable during busy state
         self._control_widgets = [
             self._exposure_group,
+            self._gain_group,
             self._wb_group,
             self._light_group,
             self._obj_group,
@@ -181,6 +201,29 @@ class ControlPanel(QWidget):
         self._exp_spin.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
         self._exp_spin.editingFinished.connect(self._on_exp_spin)
         layout.addWidget(self._exp_spin)
+
+        return group
+
+    def _build_gain_group(self) -> QGroupBox:
+        group = QGroupBox("Gain")
+        layout = QHBoxLayout(group)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        self._gain_slider = QSlider(Qt.Orientation.Horizontal)
+        self._gain_slider.setRange(0, _GAIN_SLIDER_STEPS)
+        self._gain_slider.setValue(_gain_value_to_slider(1.0))
+        self._gain_slider.valueChanged.connect(self._on_gain_slider)
+        layout.addWidget(self._gain_slider, stretch=1)
+
+        self._gain_spin = QDoubleSpinBox()
+        self._gain_spin.setRange(_GAIN_MIN, _GAIN_MAX)
+        self._gain_spin.setDecimals(1)
+        self._gain_spin.setSingleStep(0.1)
+        self._gain_spin.setValue(1.0)
+        self._gain_spin.setFixedWidth(60)
+        self._gain_spin.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
+        self._gain_spin.editingFinished.connect(self._on_gain_spin)
+        layout.addWidget(self._gain_spin)
 
         return group
 
@@ -281,6 +324,13 @@ class ControlPanel(QWidget):
         self._exp_spin.setValue(ms)
         self._updating = False
 
+    def set_gain(self, value: float) -> None:
+        """Update gain controls without emitting signals."""
+        self._updating = True
+        self._gain_slider.setValue(_gain_value_to_slider(value))
+        self._gain_spin.setValue(value)
+        self._updating = False
+
     def set_gain_rgb(self, r: float, g: float, b: float) -> None:
         self._updating = True
         for ch, val in [("R", r), ("G", g), ("B", b)]:
@@ -374,6 +424,24 @@ class ControlPanel(QWidget):
         self._exp_slider.setValue(_exp_ms_to_slider(ms))
         self._updating = False
         self.exposure_changed.emit(ms)
+
+    def _on_gain_slider(self, val: int) -> None:
+        if self._updating:
+            return
+        value = _gain_slider_to_value(val)
+        self._updating = True
+        self._gain_spin.setValue(value)
+        self._updating = False
+        self.gain_changed.emit(value)
+
+    def _on_gain_spin(self) -> None:
+        if self._updating:
+            return
+        value = self._gain_spin.value()
+        self._updating = True
+        self._gain_slider.setValue(_gain_value_to_slider(value))
+        self._updating = False
+        self.gain_changed.emit(value)
 
     def _on_wb_slider(self, _val: int) -> None:
         if self._updating:

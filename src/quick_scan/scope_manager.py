@@ -20,6 +20,7 @@ class HardwareState(NamedTuple):
     """Snapshot of camera/light settings for syncing controls on connect."""
 
     exposure_ms: float
+    gain: float
     gain_rgb: tuple[float, float, float]
     shutter_open: bool
     lamp_intensity: int
@@ -109,6 +110,9 @@ class ScopeManager(QObject):
     def set_exposure_ms(self, ms: float) -> None:
         self.send_command(lambda scope: setattr(scope.camera, "exposure_time", ms / 1000.0))
 
+    def set_gain(self, value: float) -> None:
+        self.send_command(lambda scope: setattr(scope.camera, "gain", value))
+
     def set_gain_rgb(self, r: float, g: float, b: float) -> None:
         self.send_command(lambda scope: setattr(scope.camera, "gain_rgb", (r, g, b)))
 
@@ -185,6 +189,7 @@ class ScopeManager(QObject):
         r, g, b = scope.camera.gain_rgb
         return HardwareState(
             exposure_ms=scope.camera.exposure_time * 1000.0,
+            gain=scope.camera.gain,
             gain_rgb=(r, g, b),
             shutter_open=scope.shutter.is_open,
             lamp_intensity=scope.lamp.intensity,
