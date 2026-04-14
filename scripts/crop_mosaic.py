@@ -121,6 +121,11 @@ Example: --where "G > 1.5" --where "entropy < 4.4"
     pipe = parser.add_argument_group("pipeline")
     pipe.add_argument("--seg-name", default="seg", help="Seg subdir name within each chip dir")
     pipe.add_argument(
+        "--scan-name",
+        default=None,
+        help="Scan subdir name override (default: first scan_* alphabetically)",
+    )
+    pipe.add_argument(
         "--material",
         default="hbn_medium",
         choices=DetectorConfig.material_names(),
@@ -155,7 +160,11 @@ Example: --where "G > 1.5" --where "entropy < 4.4"
 
     for chip_idx, seg_dir in sorted(seg_dirs.items()):
         chip_dir = seg_dir.parent
-        scan_dirs[chip_idx] = _find_scan_dir(chip_dir)
+        if args.scan_name:
+            override = chip_dir / args.scan_name
+            scan_dirs[chip_idx] = override if override.is_dir() else None
+        else:
+            scan_dirs[chip_idx] = _find_scan_dir(chip_dir)
 
         with open(seg_dir / "summary.json") as f:
             summary = json.load(f)
