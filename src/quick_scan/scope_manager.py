@@ -122,6 +122,15 @@ class ScopeManager(QObject):
 
         self.send_command(_move)
 
+    def move_z_by(self, delta_um: float) -> None:
+        """Move Z by delta_um relative to current position. Hysteresis-corrected."""
+
+        def _move(scope):
+            target = scope.z.position_um + delta_um
+            scope.z.move_to_corrected(target)
+
+        self.send_command(_move)
+
     def switch_objective(self, mag: str) -> None:
         def _switch(scope):
             scope.switch_objective_mag(mag)

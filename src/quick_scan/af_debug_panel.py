@@ -77,6 +77,7 @@ class AFDebugPanel(QDialog):
     """
 
     run_requested = Signal(object)  # AFDefaults or None
+    z_step_requested = Signal(float)  # signed delta in µm
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -106,6 +107,32 @@ class AFDebugPanel(QDialog):
         self._canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout.addWidget(self._canvas, stretch=1)
         self._draw_empty()
+
+        # ── Z control row ────────────────────────────────────────
+        # Up = -Z (retract, away from sample); Down = +Z (toward sample, crash risk).
+        z_row = QHBoxLayout()
+        self._z_label = QLabel("Z: — µm")
+        self._z_label.setMinimumWidth(120)
+        z_row.addWidget(self._z_label)
+        self._z_up_btn = QPushButton("Up")
+        self._z_up_btn.setToolTip("Retract (−Z, away from sample)")
+        self._z_up_btn.clicked.connect(lambda: self.z_step_requested.emit(-self._z_step_spin.value()))
+        z_row.addWidget(self._z_up_btn)
+        z_row.addWidget(QLabel("step"))
+        self._z_step_spin = QDoubleSpinBox()
+        self._z_step_spin.setRange(0.1, 500.0)
+        self._z_step_spin.setDecimals(1)
+        self._z_step_spin.setSingleStep(1.0)
+        self._z_step_spin.setSuffix(" µm")
+        self._z_step_spin.setValue(10.0)
+        self._z_step_spin.setFixedWidth(90)
+        z_row.addWidget(self._z_step_spin)
+        self._z_down_btn = QPushButton("Down")
+        self._z_down_btn.setToolTip("Approach (+Z, toward sample)")
+        self._z_down_btn.clicked.connect(lambda: self.z_step_requested.emit(self._z_step_spin.value()))
+        z_row.addWidget(self._z_down_btn)
+        z_row.addStretch(1)
+        layout.addLayout(z_row)
 
         # ── Override group ───────────────────────────────────────
         override_group = QGroupBox("Overrides")
@@ -156,8 +183,14 @@ class AFDebugPanel(QDialog):
 
     def set_busy(self, busy: bool) -> None:
         self._run_btn.setEnabled(not busy)
+        self._z_up_btn.setEnabled(not busy)
+        self._z_down_btn.setEnabled(not busy)
+        self._z_step_spin.setEnabled(not busy)
         if busy:
             self._status_label.setText("Running autofocus…")
+
+    def set_z(self, z_um: float) -> None:
+        self._z_label.setText(f"Z: {z_um:.1f} µm")
 
     def show_result(self, result: AutofocusResult, save_dir: str) -> None:
         """Update plot and status from completed AF result."""

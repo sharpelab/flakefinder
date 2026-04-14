@@ -255,6 +255,7 @@ class QuickScanWindow(QMainWindow):
         self._controls.set_objective(mag)
         if self._af_debug_panel is not None:
             self._af_debug_panel.set_objective(obj_pos or None)
+            self._af_debug_panel.set_z(z)
 
     @Slot(QImage)
     def _on_frame(self, qimg: QImage):
@@ -290,7 +291,9 @@ class QuickScanWindow(QMainWindow):
         if self._af_debug_panel is None:
             self._af_debug_panel = AFDebugPanel(self)
             self._af_debug_panel.run_requested.connect(self._on_af_debug_run)
+            self._af_debug_panel.z_step_requested.connect(self._scope.move_z_by)
             self._af_debug_panel.set_objective(self._scope_obj_pos or None)
+            self._af_debug_panel.set_z(self._scope_z)
         self._af_debug_panel.show()
         self._af_debug_panel.raise_()
         self._af_debug_panel.activateWindow()
