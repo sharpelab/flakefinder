@@ -105,7 +105,13 @@ class ScopeManager(QObject):
         self.send_command(_move)
 
     def switch_objective(self, mag: str) -> None:
-        self.send_command(lambda scope: scope.switch_objective_mag(mag))
+        def _switch(scope):
+            scope.switch_objective_mag(mag)
+            # Leica per-objective profiles can change shutter/lamp/camera
+            # settings on rotation. Re-read so the GUI reflects reality.
+            self.hw_state_ready.emit(self._read_hw_state(scope))
+
+        self.send_command(_switch)
 
     def set_exposure_ms(self, ms: float) -> None:
         self.send_command(lambda scope: setattr(scope.camera, "exposure_time", ms / 1000.0))
