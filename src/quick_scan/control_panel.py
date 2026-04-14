@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal, Slot
-from PySide6.QtGui import QImage, QMouseEvent, QPixmap
+from PySide6.QtGui import QColor, QFont, QImage, QMouseEvent, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -38,6 +38,35 @@ _WB_SLIDER_STEPS = 350  # 0.01 resolution
 
 # Objectives in display order
 _OBJECTIVES = ["2.5x", "5x", "10x", "20x", "50x", "150x"]
+
+# Scale bar target fraction of pixmap width
+_SCALE_BAR_TARGET_FRAC = 0.20
+
+
+def _nice_scale_length(target_um: float) -> float:
+    """Round to 1/2/5 × 10^n sequence for a clean scale bar length."""
+    if target_um <= 0:
+        return 1.0
+    exp = math.floor(math.log10(target_um))
+    base = 10**exp
+    mantissa = target_um / base
+    if mantissa < 1.5:
+        nice = 1.0
+    elif mantissa < 3.5:
+        nice = 2.0
+    elif mantissa < 7.5:
+        nice = 5.0
+    else:
+        nice = 10.0
+    return nice * base
+
+
+def _format_scale_label(um: float) -> str:
+    """Format a length in µm for the scale bar label."""
+    if um >= 1000:
+        mm = um / 1000
+        return f"{mm:g} mm"
+    return f"{um:g} µm"
 
 
 def _exp_slider_to_ms(val: int) -> float:
@@ -372,11 +401,59 @@ class ControlPanel(QWidget):
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
+        self._draw_scale_bar(scaled)
         # Track where the pixmap sits within the label (centered)
         px = (label_size.width() - scaled.width()) // 2
         py = (label_size.height() - scaled.height()) // 2
         self._preview_pixmap_rect = (px, py, scaled.width(), scaled.height())
         self._preview_label.setPixmap(scaled)
+
+    def _draw_scale_bar(self, pixmap: QPixmap) -> None:
+        """Paint a scale bar in the bottom-right of the pixmap (in place)."""
+        if self._preview_viewport is None:
+            return
+        _, _, fov_w, _ = self._preview_viewport
+        if fov_w <= 0 or pixmap.width() <= 0:
+            return
+        um_per_px = fov_w / pixmap.width()
+        target_um = _SCALE_BAR_TARGET_FRAC * fov_w
+        bar_um = _nice_scale_length(target_um)
+        bar_px = max(1, round(bar_um / um_per_px))
+        label = _format_scale_label(bar_um)
+
+        margin = 8
+        bar_thickness = 4
+        text_gap = 3
+        x_right = pixmap.width() - margin
+        x_left = x_right - bar_px
+        y_bar_top = pixmap.height() - margin - bar_thickness
+
+        painter = QPainter(pixmap)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            font = QFont(painter.font())
+            font.setPointSize(9)
+            font.setBold(True)
+            painter.setFont(font)
+
+            # Bar: white fill with black outline
+            painter.setPen(QPen(QColor(0, 0, 0), 1))
+            painter.setBrush(QColor(255, 255, 255))
+            painter.drawRect(x_left, y_bar_top, bar_px, bar_thickness)
+
+            # Label: white with black outline, centered above bar
+            fm = painter.fontMetrics()
+            text_w = fm.horizontalAdvance(label)
+            text_x = x_right - (bar_px + text_w) // 2
+            text_y = y_bar_top - text_gap
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(QColor(0, 0, 0))
+            for dx, dy in ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)):
+                painter.drawText(text_x + dx, text_y + dy, label)
+            painter.setPen(QColor(255, 255, 255))
+            painter.drawText(text_x, text_y, label)
+        finally:
+            painter.end()
 
     # ── Event filter (preview double-click) ────────────────────────
 
