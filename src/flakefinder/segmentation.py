@@ -383,20 +383,33 @@ def _score_graphene(config: DetectorConfig, det: Detection) -> tuple[int, float]
 
 
 def _score_wse2(config: DetectorConfig, det: Detection) -> tuple[int, float]:
-    """WSe2: size-based scoring with blue contrast gate."""
-    b = det["contrast_rgb"][2]
+    """WSe2: cal_dist + size scoring with shape gates."""
+    pr = det["perim_ratio"]
+    cd = det["cal_dist"]
     ar = det.get("aspect_ratio", 1.0)
     size_um2 = det["size_um2"]
+    sol = det.get("solidity", 0.0)
+    ent = det.get("entropy", det.get("g_entropy", 99.0))
 
-    # Blue contrast gate: reject non-blue smudges
-    if b >= -0.1:
-        tier = 3
-    else:
+    if (
+        pr < config.tier1_perim_ratio
+        and cd < config.tier1_cal_dist
+        and ar < config.tier1_aspect_ratio
+        and sol >= config.tier1_solidity_min
+        and size_um2 >= config.tier1_min_size_um2
+        and ent < config.tier1_entropy_max
+    ):
         tier = 1
+        if ent > config.tier2_entropy_max:
+            tier = 2
+    elif pr < config.tier2_perim_ratio and cd < config.tier2_cal_dist and ent < config.tier2_entropy_max:
+        tier = 2
+    else:
+        tier = 3
 
     ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
     log2_size = float(np.log2(max(size_um2, 1.0)))
-    score = round(log2_size * log2_size * ar_penalty, 4)
+    score = round(log2_size * log2_size * np.exp(-cd * 8) * ar_penalty, 4)
     return tier, score
 
 
@@ -698,26 +711,26 @@ class DetectorConfig:
             entropy_threshold=0.4,
             subseg_min_std=0.12,
             subseg_min_range=0.5,
-            cal_reference_points=(CalPoint(layers=1, r=-0.20, g=-0.20, b=-0.02),),
+            cal_reference_points=(CalPoint(layers=1, r=-0.20, g=-0.20, b=-0.24),),
             cal_dist_match=0.18,
             cal_dist_possible=0.30,
             non_match_label="non-WSe2",
             white_balance=GainRGB(red=1.41, green=1.02, blue=1.70),
             score_fn=_score_wse2,
-            tier1_perim_ratio=1.20,
-            tier1_cal_dist=0.3,
+            tier1_perim_ratio=1.50,
+            tier1_cal_dist=0.30,
             tier1_g_min=-99.0,
             tier1_g_max=4.0,
             tier1_r_max=99.0,
-            tier1_entropy_max=99.0,
-            tier1_min_size_um2=0.0,
+            tier1_entropy_max=4.0,
+            tier1_min_size_um2=200.0,
             tier1_br_ratio_max=99.0,
             tier1_aspect_ratio=6.0,
-            tier1_solidity_min=0.0,
+            tier1_solidity_min=0.4,
             tier1_circularity_min=0.0,
-            tier2_perim_ratio=1.35,
-            tier2_cal_dist=0.3,
-            tier2_entropy_max=99.0,
+            tier2_perim_ratio=1.50,
+            tier2_cal_dist=0.20,
+            tier2_entropy_max=4.5,
         )
 
     @classmethod
