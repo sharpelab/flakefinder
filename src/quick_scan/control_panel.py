@@ -8,6 +8,7 @@ from PySide6.QtCore import QEvent, QObject, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QFont, QImage, QMouseEvent, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QGridLayout,
     QGroupBox,
@@ -38,6 +39,17 @@ _WB_SLIDER_STEPS = 350  # 0.01 resolution
 
 # Objectives in display order
 _OBJECTIVES = ["2.5x", "5x", "10x", "20x", "50x", "150x"]
+
+# White-balance presets (display name → (R, G, B))
+_WB_CUSTOM = "— Custom —"
+_WB_PRESETS: dict[str, tuple[float, float, float]] = {
+    "hBN (90/285 nm)": (1.41, 1.02, 2.51),
+    "WSe₂ (300 nm)": (1.60, 1.00, 1.20),
+    "Graphene (2DMatGMM)": (1.40, 1.00, 1.70),
+    "SDK default": (1.93, 1.00, 1.94),
+    "Unity 1:1:1": (1.00, 1.00, 1.00),
+}
+_WB_MATCH_TOL = 0.02  # gain units — match tolerance for detecting a preset
 
 # Scale bar target fraction of pixmap width
 _SCALE_BAR_TARGET_FRAC = 0.20
@@ -288,10 +300,14 @@ class ControlPanel(QWidget):
             grid.addWidget(spin, row, 2)
             self._wb_spins[channel] = spin
 
-        reset_btn = QPushButton("Reset")
-        reset_btn.setFixedHeight(22)
-        reset_btn.clicked.connect(self._on_wb_reset)
-        grid.addWidget(reset_btn, 3, 0, 1, 3)
+        preset_label = QLabel("Preset:")
+        grid.addWidget(preset_label, 3, 0)
+        self._wb_preset_combo = QComboBox()
+        self._wb_preset_combo.addItem(_WB_CUSTOM)
+        for name in _WB_PRESETS:
+            self._wb_preset_combo.addItem(name)
+        self._wb_preset_combo.currentTextChanged.connect(self._on_wb_preset_selected)
+        grid.addWidget(self._wb_preset_combo, 3, 1, 1, 2)
 
         return group
 
@@ -365,7 +381,16 @@ class ControlPanel(QWidget):
         for ch, val in [("R", r), ("G", g), ("B", b)]:
             self._wb_sliders[ch].setValue(_wb_gain_to_slider(val))
             self._wb_spins[ch].setValue(val)
+        self._sync_wb_preset_selection(r, g, b)
         self._updating = False
+
+    def _sync_wb_preset_selection(self, r: float, g: float, b: float) -> None:
+        """Pick the matching preset in the combo, or 'Custom' if none match."""
+        for name, (pr, pg, pb) in _WB_PRESETS.items():
+            if abs(r - pr) < _WB_MATCH_TOL and abs(g - pg) < _WB_MATCH_TOL and abs(b - pb) < _WB_MATCH_TOL:
+                self._wb_preset_combo.setCurrentText(name)
+                return
+        self._wb_preset_combo.setCurrentText(_WB_CUSTOM)
 
     def set_shutter(self, is_open: bool) -> None:
         self._updating = True
@@ -530,6 +555,7 @@ class ControlPanel(QWidget):
         self._wb_spins["R"].setValue(r)
         self._wb_spins["G"].setValue(g)
         self._wb_spins["B"].setValue(b)
+        self._sync_wb_preset_selection(r, g, b)
         self._updating = False
         self.wb_changed.emit(r, g, b)
 
@@ -543,12 +569,19 @@ class ControlPanel(QWidget):
         self._wb_sliders["R"].setValue(_wb_gain_to_slider(r))
         self._wb_sliders["G"].setValue(_wb_gain_to_slider(g))
         self._wb_sliders["B"].setValue(_wb_gain_to_slider(b))
+        self._sync_wb_preset_selection(r, g, b)
         self._updating = False
         self.wb_changed.emit(r, g, b)
 
-    def _on_wb_reset(self) -> None:
-        self.set_gain_rgb(1.0, 1.0, 1.0)
-        self.wb_changed.emit(1.0, 1.0, 1.0)
+    def _on_wb_preset_selected(self, name: str) -> None:
+        if self._updating:
+            return
+        preset = _WB_PRESETS.get(name)
+        if preset is None:
+            return
+        r, g, b = preset
+        self.set_gain_rgb(r, g, b)
+        self.wb_changed.emit(r, g, b)
 
     def _on_shutter_toggle(self, checked: bool) -> None:
         if self._updating:
