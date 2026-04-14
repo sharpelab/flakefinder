@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from quick_scan.af_debug_panel import AFDebugPanel
 from quick_scan.control_panel import ControlPanel
 from quick_scan.scope_manager import HardwareState, ScopeManager
 from quick_scan.stage_canvas import StageCanvas, ViewportInfo
@@ -63,6 +64,9 @@ class QuickScanWindow(QMainWindow):
         # ── Status bar ───────────────────────────────────────────
         self._build_status_bar()
 
+        # AF debug panel (lazy-created when toolbar action fires)
+        self._af_debug_panel: AFDebugPanel | None = None
+
         # ── Scope manager ────────────────────────────────────────
         self._scope = ScopeManager(self)
         self._connected = False
@@ -72,6 +76,7 @@ class QuickScanWindow(QMainWindow):
         self._scope_y = 0.0
         self._scope_z = 0.0
         self._scope_mag: float | None = None
+        self._scope_obj_pos: int = 0
         self._status_hold_until = 0.0  # monotonic time; position updates suppressed until then
         self._roi: tuple[float, float, float, float] | None = None  # x_min, y_min, x_max, y_max
 
@@ -103,6 +108,7 @@ class QuickScanWindow(QMainWindow):
 
         # AF completion → re-enable button + update status
         self._scope.autofocus_finished.connect(self._on_autofocus_finished)
+        self._scope.autofocus_result_ready.connect(self._on_autofocus_result_ready)
         self._scope.scan_finished.connect(self._on_scan_finished)
         self._scope.scan_row_started.connect(self._on_scan_row)
 
@@ -138,6 +144,11 @@ class QuickScanWindow(QMainWindow):
         self._connect_action.setToolTip("Connect to microscope")
         self._connect_action.triggered.connect(self._on_connect_toggled)
         toolbar.addAction(self._connect_action)
+
+        af_debug_action = QAction("AF Debug", self)
+        af_debug_action.setToolTip("Open autofocus debug panel")
+        af_debug_action.triggered.connect(self._on_af_debug_clicked)
+        toolbar.addAction(af_debug_action)
 
     def _build_status_bar(self):
         status = QStatusBar()
@@ -230,6 +241,7 @@ class QuickScanWindow(QMainWindow):
         self._scope_y = y
         self._scope_z = z
         self._scope_mag = mag
+        self._scope_obj_pos = obj_pos
 
         if fov_w > 0 and fov_h > 0:
             self._canvas.set_viewport(ViewportInfo(x, y, fov_w, fov_h))
@@ -241,6 +253,8 @@ class QuickScanWindow(QMainWindow):
 
         # Keep objective buttons in sync
         self._controls.set_objective(mag)
+        if self._af_debug_panel is not None:
+            self._af_debug_panel.set_objective(obj_pos or None)
 
     @Slot(QImage)
     def _on_frame(self, qimg: QImage):
@@ -263,6 +277,31 @@ class QuickScanWindow(QMainWindow):
         self._enable_controls()
         self._scope_label.setText(f"Stage: AF done — Z={best_z:.1f} µm (sharpness {best_sharpness:.0f})")
         self._status_hold_until = time.monotonic() + 3.0
+        if self._af_debug_panel is not None:
+            self._af_debug_panel.set_busy(False)
+
+    @Slot(object, str)
+    def _on_autofocus_result_ready(self, result, save_dir: str):
+        if self._af_debug_panel is not None:
+            self._af_debug_panel.show_result(result, save_dir)
+
+    @Slot()
+    def _on_af_debug_clicked(self):
+        if self._af_debug_panel is None:
+            self._af_debug_panel = AFDebugPanel(self)
+            self._af_debug_panel.run_requested.connect(self._on_af_debug_run)
+            self._af_debug_panel.set_objective(self._scope_obj_pos or None)
+        self._af_debug_panel.show()
+        self._af_debug_panel.raise_()
+        self._af_debug_panel.activateWindow()
+
+    @Slot(object)
+    def _on_af_debug_run(self, af_defaults):
+        if not self._connected or self._af_debug_panel is None:
+            return
+        self._af_debug_panel.set_busy(True)
+        self._controls.set_busy("Focusing…")
+        self._scope.autofocus_debug(af_defaults)
 
     # ── Canvas interactions ──────────────────────────────────────
 

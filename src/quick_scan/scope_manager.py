@@ -35,6 +35,23 @@ def numpy_rgb_to_qimage(arr: np.ndarray) -> QImage:
     return QImage(arr.data, w, h, bytes_per_line, QImage.Format.Format_RGB888).copy()
 
 
+def _write_af_debug_dump(save_dir, result) -> None:
+    """Write AutofocusResult to disk: summary.json + initial/best/final PNGs."""
+    import json
+
+    import cv2
+
+    with open(save_dir / "summary.json", "w") as f:
+        json.dump(result.to_dict(), f, indent=2)
+    for name, img in (
+        ("initial.png", result.initial_image),
+        ("best.png", result.best_frame.image if result.best_frame is not None else None),
+        ("final.png", result.final_image),
+    ):
+        if img is not None:
+            cv2.imwrite(str(save_dir / name), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+
+
 class ScopeManager(QObject):
     """Manages microscope connection on a background thread.
 
@@ -51,6 +68,7 @@ class ScopeManager(QObject):
     scope_error = Signal(str)  # fatal — connection lost
     command_error = Signal(str)  # non-fatal — command failed, scope still alive
     autofocus_finished = Signal(float, float)  # best_z_um, best_sharpness
+    autofocus_result_ready = Signal(object, str)  # AutofocusResult, save_dir
     scan_finished = Signal()
     scan_row_started = Signal(int, int)  # current_row (0-based), total_rows
 
@@ -137,6 +155,40 @@ class ScopeManager(QObject):
             try:
                 result = continuous_autofocus(scope)
                 self.autofocus_finished.emit(result.selected_z_um, result.selected_sharpness)
+            except Exception as e:
+                self.command_error.emit(f"Autofocus failed: {e}")
+            finally:
+                if self._stream is not None:
+                    self._stream.start()
+                self.hw_state_ready.emit(self._read_hw_state(scope))
+
+        self.send_command(_af)
+
+    def autofocus_debug(self, af_defaults) -> None:
+        """Run autofocus, store all frames, save results to afs/quickscan-<ts>/.
+
+        Emits autofocus_result_ready with the full AutofocusResult and save dir.
+        """
+        import datetime
+        from pathlib import Path
+
+        def _af(scope):
+            from flakefinder.leica.autofocus import continuous_autofocus
+
+            if self._stream is not None:
+                self._stream.stop()
+            save_dir = Path("afs") / f"quickscan-{datetime.datetime.now():%Y%m%d_%H%M%S}"
+            try:
+                result = continuous_autofocus(
+                    scope,
+                    af_defaults=af_defaults,
+                    store_frames=True,
+                    save_best_frame=True,
+                )
+                save_dir.mkdir(parents=True, exist_ok=True)
+                _write_af_debug_dump(save_dir, result)
+                self.autofocus_finished.emit(result.selected_z_um, result.selected_sharpness)
+                self.autofocus_result_ready.emit(result, str(save_dir))
             except Exception as e:
                 self.command_error.emit(f"Autofocus failed: {e}")
             finally:

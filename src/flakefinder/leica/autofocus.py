@@ -66,8 +66,8 @@ class AFDefaults(NamedTuple):
 
     coarse_range_um: float
     coarse_speed_um_s: float
-    fine_range_um: float
-    fine_speed_um_s: float
+    fine_range_um: float | None  # None = skip fine pass
+    fine_speed_um_s: float | None
     super_fine_range_um: float | None  # None = skip super-fine pass
     super_fine_speed_um_s: float | None
 
@@ -891,8 +891,8 @@ def continuous_autofocus(
         )
 
     coarse_speed = af.coarse_speed_um_s
-    do_fine = True  # always do fine pass
-    do_super_fine = af.super_fine_speed_um_s is not None
+    do_fine = af.fine_speed_um_s is not None and af.fine_range_um is not None
+    do_super_fine = af.super_fine_speed_um_s is not None and af.super_fine_range_um is not None
 
     z_axis.set_velocity_um_s(coarse_speed)
 
@@ -963,6 +963,8 @@ def continuous_autofocus(
     fine_frames = None
 
     if do_fine:
+        assert af.fine_range_um is not None
+        assert af.fine_speed_um_s is not None
         fine_z_start = best_z + af.fine_range_um / 2
         fine_z_end = best_z - af.fine_range_um / 2
 
