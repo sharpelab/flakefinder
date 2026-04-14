@@ -1148,17 +1148,27 @@ def compute_robust_plane_fit(
             else:
                 prefilter_reasons[i] = "flat_curve"
 
-    # --- Stage 2: Iterative LOO (leave-one-out) rejection ---
-    # For each surviving point, fit plane to N-1 others and compute LOO residual.
-    # Reject the single worst outlier per iteration, refit, repeat.
-    # This avoids the problem where one bad point warps the plane enough to
-    # make good neighbors look like outliers in a bulk MAD pass.
-    loo_reject_reasons: dict[int, float] = {}  # original index -> LOO residual
+    # --- Stage 2: Iterative LOO-fit-improvement rejection ---
+    # Per iteration, for each surviving point fit a plane to the other N-1
+    # and score its RMSE. Reject the candidate whose removal most reduces
+    # that RMSE, if baseline_rmse / rmse_after_drop > LOO_RATIO_THRESHOLD.
+    # A residual-vs-point test wouldn't work here: one bad point contaminates
+    # the planes used to score every OTHER point (each LOO plane still contains
+    # the outlier), inflating all residuals together. The fit-quality ratio
+    # isn't fooled — dropping the real outlier collapses RMSE 10-20x, dropping
+    # any inlier moves it <2x.
+    # Thresholds informed by scripts/experiments/loo_ratio_sweep.py (n=127).
+    LOO_RATIO_THRESHOLD = 3.0
+    LOO_MIN_BASELINE_RMSE = 5.0  # µm; empirical noise floor — below this, any ratio is noise
+    LOO_MAX_DROP_RMSE = 20.0  # µm; drop must plausibly land in the clean regime
+
+    loo_reject_reasons: dict[int, float] = {}  # original index -> residual vs. plane-without-it
     loo_mask = prefilter_mask.copy()
 
     while True:
         loo_indices = np.where(loo_mask)[0]
         n_loo = len(loo_indices)
+        # Need at least min_points_after_reject to remain AFTER any drop
         if n_loo <= min_points_after_reject:
             break
 
@@ -1166,35 +1176,36 @@ def compute_robust_plane_fit(
         y_loo = y[loo_indices]
         z_loo = z[loo_indices]
 
-        # Compute LOO residuals: for each point, fit plane to N-1 others
-        loo_residuals = np.zeros(n_loo)
+        # Baseline fit (all N)
+        A_all = np.column_stack([x_loo, y_loo, np.ones(n_loo)])
+        coeffs_all, _, _, _ = np.linalg.lstsq(A_all, z_loo, rcond=None)
+        baseline_rmse = float(np.sqrt(np.mean((z_loo - A_all @ coeffs_all) ** 2)))
+
+        # For each candidate j, fit a plane to the OTHER N-1. Track both the
+        # resulting RMSE (for ranking) and j's residual vs. that plane (used
+        # as the "reason" value if j is rejected).
+        drop_rmse = np.zeros(n_loo)
+        drop_residual = np.zeros(n_loo)
         for j in range(n_loo):
             mask_j = np.ones(n_loo, dtype=bool)
             mask_j[j] = False
             A_j = np.column_stack([x_loo[mask_j], y_loo[mask_j], np.ones(n_loo - 1)])
             coeffs_j, _, _, _ = np.linalg.lstsq(A_j, z_loo[mask_j], rcond=None)
+            drop_rmse[j] = float(np.sqrt(np.mean((z_loo[mask_j] - A_j @ coeffs_j) ** 2)))
             z_pred_j = coeffs_j[0] * x_loo[j] + coeffs_j[1] * y_loo[j] + coeffs_j[2]
-            loo_residuals[j] = z_loo[j] - z_pred_j
+            drop_residual[j] = float(z_loo[j] - z_pred_j)
 
-        # MAD threshold from the N-1 in-plane residuals
-        # Use the MAD of the LOO residuals themselves as the robust scale
-        loo_mad = float(np.median(np.abs(loo_residuals)))
-        loo_robust_sigma = loo_mad * 1.4826
-        loo_threshold = mad_sigma_threshold * loo_robust_sigma if loo_robust_sigma > 0 else float("inf")
+        worst_j = int(np.argmin(drop_rmse))
+        rmse_best = drop_rmse[worst_j]
+        ratio = baseline_rmse / rmse_best if rmse_best > 0 else float("inf")
 
-        # Find the worst outlier
-        worst_j = int(np.argmax(np.abs(loo_residuals)))
-        if abs(loo_residuals[worst_j]) <= loo_threshold:
-            break  # No outliers remain
-
-        # Safety: don't drop below min_points
-        if n_loo - 1 < min_points_after_reject:
+        fires = ratio > LOO_RATIO_THRESHOLD and baseline_rmse > LOO_MIN_BASELINE_RMSE and rmse_best < LOO_MAX_DROP_RMSE
+        if not fires:
             break
 
-        # Reject the worst point
         orig_idx = loo_indices[worst_j]
         loo_mask[orig_idx] = False
-        loo_reject_reasons[orig_idx] = float(loo_residuals[worst_j])
+        loo_reject_reasons[orig_idx] = drop_residual[worst_j]
 
     # --- Stage 3: MAD-based residual rejection (defense in depth) ---
     # Initial plane fit on LOO-surviving points
