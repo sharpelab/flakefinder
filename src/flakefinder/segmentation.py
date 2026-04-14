@@ -432,6 +432,7 @@ class Substrate(str, Enum):
 
     SI_90NM = "90nm"
     SI_285NM = "285nm"
+    SI_300NM = "300nm"
 
 
 @dataclass
@@ -701,15 +702,15 @@ class DetectorConfig:
         )
 
     @classmethod
-    def wse2_monolayer_90nm(cls) -> PointDetectorConfig:
-        """WSe₂ monolayer detection preset on 90nm SiO₂.
+    def wse2_monolayer_300nm(cls) -> PointDetectorConfig:
+        """WSe₂ monolayer detection preset on 300nm SiO₂.
 
         Uses point-based calibration: a single labeled RGB reference point
         for 1-layer WSe₂.  Distance is 3D Euclidean over (R, G, B) contrast.
         """
         return PointDetectorConfig(
             name="WSe₂ monolayer",
-            substrate=Substrate.SI_90NM,
+            substrate=Substrate.SI_300NM,
             contrast_mode=ContrastMode.BELOW,
             contrast_offset=15.0,
             min_size_um2=100.0,
@@ -730,7 +731,7 @@ class DetectorConfig:
             tier1_g_max=4.0,
             tier1_r_max=99.0,
             tier1_entropy_max=3.5,
-            tier1_min_size_um2=200.0,
+            tier1_min_size_um2=100.0,
             tier1_br_ratio_max=99.0,
             tier1_aspect_ratio=6.0,
             tier1_solidity_min=0.4,
@@ -749,7 +750,7 @@ class DetectorConfig:
             "hbn_thick_90nm": cls.hbn_thick_90nm,
             "hbn_medium_285nm": cls.hbn_medium_285nm,
             "graphene_thin_90nm": cls.graphene_thin_90nm,
-            "wse2_monolayer_90nm": cls.wse2_monolayer_90nm,
+            "wse2_monolayer_300nm": cls.wse2_monolayer_300nm,
         }
 
     @classmethod
