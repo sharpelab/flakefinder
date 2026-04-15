@@ -435,6 +435,41 @@ class Substrate(str, Enum):
     SI_300NM = "300nm"
 
 
+# Shared defaults for WSe₂ monolayer presets. Per-substrate variants splat these
+# in and override `substrate` + `cal_reference_points`.
+_WSE2_MONOLAYER_BASE: dict = {
+    "name": "WSe₂ monolayer",
+    "contrast_mode": ContrastMode.BELOW,
+    "contrast_offset": 15.0,
+    "min_size_um2": 100.0,
+    "edge_margin_px": 50,
+    "morph_kernel_size": 5,
+    "entropy_threshold": 0.4,
+    "subseg_min_std": 0.12,
+    "subseg_min_range": 0.5,
+    "cal_dist_match": 0.15,
+    "cal_dist_possible": 0.25,
+    "non_match_label": "non-WSe2",
+    "white_balance": GainRGB(red=1.60, green=1.00, blue=1.20),
+    "score_fn": _score_wse2,
+    "tier1_perim_ratio": 1.50,
+    "tier1_cal_dist": 0.15,
+    "tier1_g_min": -99.0,
+    "tier1_g_max": 4.0,
+    "tier1_r_max": 99.0,
+    "tier1_entropy_max": 3.5,
+    "tier1_min_size_um2": 100.0,
+    "tier1_br_ratio_max": 99.0,
+    "tier1_aspect_ratio": 6.0,
+    "tier1_solidity_min": 0.4,
+    "tier1_circularity_min": 0.0,
+    "tier1_grad_energy_max": 10.0,
+    "tier2_perim_ratio": 1.50,
+    "tier2_cal_dist": 0.20,
+    "tier2_entropy_max": 4.0,
+}
+
+
 @dataclass
 class DetectorConfig:
     """Shared base for material-specific flake detector configs.
@@ -702,44 +737,28 @@ class DetectorConfig:
         )
 
     @classmethod
+    def wse2_monolayer_285nm(cls) -> PointDetectorConfig:
+        """WSe₂ monolayer detection preset on 285nm SiO₂.
+
+        Cal derived from SF122 chip 1 (run_20260413_1955) via operator eyedrop
+        of 4 clean 1L flakes, 2026-04-14.
+        """
+        return PointDetectorConfig(
+            **_WSE2_MONOLAYER_BASE,
+            substrate=Substrate.SI_285NM,
+            cal_reference_points=(CalPoint(layers=1, r=-0.42, g=-0.02, b=+0.10),),
+        )
+
+    @classmethod
     def wse2_monolayer_300nm(cls) -> PointDetectorConfig:
         """WSe₂ monolayer detection preset on 300nm SiO₂.
 
-        Uses point-based calibration: a single labeled RGB reference point
-        for 1-layer WSe₂.  Distance is 3D Euclidean over (R, G, B) contrast.
+        Cal derived from SF124 (run_20260414_1727) operator eyedrop, 2026-04-14.
         """
         return PointDetectorConfig(
-            name="WSe₂ monolayer",
+            **_WSE2_MONOLAYER_BASE,
             substrate=Substrate.SI_300NM,
-            contrast_mode=ContrastMode.BELOW,
-            contrast_offset=15.0,
-            min_size_um2=100.0,
-            edge_margin_px=50,
-            morph_kernel_size=5,
-            entropy_threshold=0.4,
-            subseg_min_std=0.12,
-            subseg_min_range=0.5,
-            cal_reference_points=(CalPoint(layers=1, r=-0.42, g=-0.02, b=+0.10),),
-            cal_dist_match=0.15,
-            cal_dist_possible=0.25,
-            non_match_label="non-WSe2",
-            white_balance=GainRGB(red=1.60, green=1.00, blue=1.20),
-            score_fn=_score_wse2,
-            tier1_perim_ratio=1.50,
-            tier1_cal_dist=0.15,
-            tier1_g_min=-99.0,
-            tier1_g_max=4.0,
-            tier1_r_max=99.0,
-            tier1_entropy_max=3.5,
-            tier1_min_size_um2=100.0,
-            tier1_br_ratio_max=99.0,
-            tier1_aspect_ratio=6.0,
-            tier1_solidity_min=0.4,
-            tier1_circularity_min=0.0,
-            tier1_grad_energy_max=10.0,
-            tier2_perim_ratio=1.50,
-            tier2_cal_dist=0.20,
-            tier2_entropy_max=4.0,
+            cal_reference_points=(CalPoint(layers=1, r=-0.40, g=+0.11, b=+0.07),),
         )
 
     @classmethod
@@ -750,6 +769,7 @@ class DetectorConfig:
             "hbn_thick_90nm": cls.hbn_thick_90nm,
             "hbn_medium_285nm": cls.hbn_medium_285nm,
             "graphene_thin_90nm": cls.graphene_thin_90nm,
+            "wse2_monolayer_285nm": cls.wse2_monolayer_285nm,
             "wse2_monolayer_300nm": cls.wse2_monolayer_300nm,
         }
 
