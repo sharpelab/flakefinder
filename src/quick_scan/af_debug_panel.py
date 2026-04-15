@@ -11,6 +11,7 @@ from matplotlib.figure import Figure
 from PySide6.QtCore import QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QDialog,
     QDoubleSpinBox,
@@ -25,6 +26,15 @@ from PySide6.QtWidgets import (
 )
 
 from flakefinder.leica.autofocus import AF_DEFAULTS, AFDefaults, AutofocusResult
+
+
+def _fmt(val: float | None) -> str:
+    """Format a phase value for Python-code export (int when clean, else float)."""
+    if val is None:
+        return "None"
+    if float(val).is_integer():
+        return str(int(val))
+    return str(val)
 
 
 class _PhaseWidgets:
@@ -165,6 +175,10 @@ class AFDebugPanel(QDialog):
         self._open_folder_btn.setEnabled(False)
         self._open_folder_btn.clicked.connect(self._on_open_folder_clicked)
         btn_row.addWidget(self._open_folder_btn)
+        self._export_btn = QPushButton("Export to clipboard")
+        self._export_btn.setToolTip("Copy current phase settings as an AFDefaults entry")
+        self._export_btn.clicked.connect(self._on_export_clicked)
+        btn_row.addWidget(self._export_btn)
         btn_row.addStretch(1)
         og_layout.addLayout(btn_row)
 
@@ -272,6 +286,25 @@ class AFDebugPanel(QDialog):
         if self._save_dir is None:
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._save_dir.resolve())))
+
+    def _on_export_clicked(self) -> None:
+        """Copy current phase settings to clipboard as an AFDefaults(...) block."""
+        c_range, c_speed = self._coarse.get_values()
+        f_range, f_speed = self._fine.get_values()
+        sf_range, sf_speed = self._super_fine.get_values()
+        pos = self._current_objective_pos if self._current_objective_pos is not None else "?"
+        text = (
+            f"{pos}: AFDefaults(\n"
+            f"    coarse_range_um={_fmt(c_range)},\n"
+            f"    coarse_speed_um_s={_fmt(c_speed)},\n"
+            f"    fine_range_um={_fmt(f_range)},\n"
+            f"    fine_speed_um_s={_fmt(f_speed)},\n"
+            f"    super_fine_range_um={_fmt(sf_range)},\n"
+            f"    super_fine_speed_um_s={_fmt(sf_speed)},\n"
+            f"),"
+        )
+        QApplication.clipboard().setText(text)
+        self._status_label.setText(f"Copied AFDefaults for pos {pos} to clipboard")
 
     # ── Plotting ────────────────────────────────────────────────
 
