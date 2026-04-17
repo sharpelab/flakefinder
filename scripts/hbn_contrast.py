@@ -1,13 +1,14 @@
-"""Predict camera-channel contrast for hBN on SiO₂/Si via transfer matrix method.
+"""Predict camera-channel contrast for thin films on SiO₂/Si via transfer matrix method.
 
-Uses the propagation matrix approach from Aaron's graphene_optics notebook,
-swapping in hBN optical constants and convolving with the Sony IMX183 (Leica K5C)
-RGB Bayer filter response to predict per-channel contrast.
+Supports hBN and graphene. Uses the propagation matrix approach from Aaron's
+graphene_optics notebook, convolving with the Sony IMX183 (Leica K5C) RGB Bayer
+filter response to predict per-channel contrast.
 
 References:
   - Transfer matrix: Heavens, "Optical Properties of Thin Solid Films"
   - Si/SiO₂ index data: refractiveindex.info (Malitson for SiO₂, Aspnes for Si)
   - hBN index: Lee et al. 2019 (Sellmeier), Zotev et al. 2023 (extraordinary)
+  - Graphene: n = 2.4 - 1j, t = 0.335 nm/layer (Aaron's graphene_optics)
   - IMX183 spectral response: Basler acA5472-5gc documentation
 """
 
@@ -45,9 +46,63 @@ def _interp_index(lamb_nm: np.ndarray, data: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# hBN refractive index models
+# Material layer thicknesses
 # ---------------------------------------------------------------------------
 _HBN_LAYER_THICKNESS_NM = 0.333  # monolayer, nm
+_GRAPHENE_LAYER_THICKNESS_NM = 0.335  # monolayer, nm
+_WSE2_LAYER_THICKNESS_NM = 0.649  # monolayer, nm
+
+
+# ---------------------------------------------------------------------------
+# WSe₂ refractive index (Zotev et al. 2023, bulk, ordinary/in-plane)
+# ---------------------------------------------------------------------------
+_WSE2_DATA_NM = np.array(
+    [
+        [400, 3.741, 2.126],
+        [410, 3.792, 2.090],
+        [420, 3.850, 2.066],
+        [430, 3.916, 2.052],
+        [440, 3.990, 2.041],
+        [450, 4.076, 2.025],
+        [460, 4.180, 1.995],
+        [470, 4.287, 1.944],
+        [480, 4.380, 1.880],
+        [490, 4.460, 1.800],
+        [500, 4.528, 1.704],
+        [510, 4.573, 1.605],
+        [520, 4.594, 1.520],
+        [530, 4.601, 1.448],
+        [540, 4.598, 1.394],
+        [550, 4.597, 1.371],
+        [560, 4.624, 1.380],
+        [570, 4.710, 1.396],
+        [580, 4.873, 1.343],
+        [590, 5.004, 1.166],
+        [600, 5.024, 0.969],
+        [610, 4.976, 0.810],
+        [620, 4.900, 0.690],
+        [630, 4.822, 0.606],
+        [640, 4.754, 0.550],
+        [650, 4.691, 0.507],
+        [660, 4.627, 0.473],
+        [670, 4.564, 0.447],
+        [680, 4.507, 0.430],
+        [690, 4.449, 0.422],
+        [700, 4.383, 0.425],
+    ]
+)
+
+
+def n_wse2(lamb_nm: np.ndarray) -> np.ndarray:
+    """WSe₂ complex refractive index interpolated from Zotev et al. 2023."""
+    n = np.interp(lamb_nm, _WSE2_DATA_NM[:, 0], _WSE2_DATA_NM[:, 1])
+    k = np.interp(lamb_nm, _WSE2_DATA_NM[:, 0], _WSE2_DATA_NM[:, 2])
+    return n - 1j * k
+
+
+# ---------------------------------------------------------------------------
+# hBN refractive index models
+# ---------------------------------------------------------------------------
 
 
 def n_hbn_lee(lamb_nm: np.ndarray) -> np.ndarray:
@@ -96,6 +151,38 @@ _N_MODELS: dict[str, object] = {
 
 
 # ---------------------------------------------------------------------------
+# Graphene refractive index
+# ---------------------------------------------------------------------------
+def n_graphene_constant(n_re: float = 2.4, n_im: float = 1.0):
+    """Return a callable that gives constant complex n at any wavelength."""
+
+    def _n(lamb_nm: np.ndarray) -> np.ndarray:
+        return np.full_like(lamb_nm, n_re - 1j * n_im, dtype=complex)
+
+    return _n
+
+
+# ---------------------------------------------------------------------------
+# NA-cone Gauss-Legendre quadrature (shared between reflectance() and widget)
+# ---------------------------------------------------------------------------
+_DEFAULT_NA_QUAD_NODES = 21
+
+
+def _na_gauss_legendre(na: float, n_angles: int = _DEFAULT_NA_QUAD_NODES):
+    """Nodes and weights for ∫ sin(θ)cos(θ) f(θ) dθ over the NA cone.
+
+    Returns (thetas, weights) where the weights already absorb the
+    sin(θ)cos(θ) factor for uniform-illumination averaging.  Divide any
+    weighted sum by weights.sum() to normalise.
+    """
+    theta_max = np.arcsin(na)
+    nodes, ws = np.polynomial.legendre.leggauss(n_angles)
+    thetas = 0.5 * theta_max * (nodes + 1)
+    weights = 0.5 * theta_max * ws * np.sin(thetas) * np.cos(thetas)
+    return thetas, weights
+
+
+# ---------------------------------------------------------------------------
 # Transfer matrix reflectance (vectorised over wavelength)
 # ---------------------------------------------------------------------------
 def _reflectance_at_angle(
@@ -105,6 +192,7 @@ def _reflectance_at_angle(
     t_oxide_nm: float,
     theta0: float,
     pol: str,
+    layer_thickness_nm: float = _HBN_LAYER_THICKNESS_NM,
 ) -> np.ndarray:
     """R(λ) for air/film/SiO₂/Si at incidence angle theta0, single polarisation.
 
@@ -122,7 +210,7 @@ def _reflectance_at_angle(
     else:
         n1 = n_film_fn(lamb_nm)
         cos_t1 = np.sqrt(1 - (n0 * sin_t0 / n1) ** 2)
-        t_film = _HBN_LAYER_THICKNESS_NM * n_layers
+        t_film = layer_thickness_nm * n_layers
         beta1 = 2 * np.pi * n1 * cos_t1 * t_film / lamb_nm
 
     n2 = _interp_index(lamb_nm, _SIO2_DATA)
@@ -157,7 +245,8 @@ def reflectance(
     n_layers: int,
     t_oxide_nm: float,
     na: float = 0.0,
-    n_angles: int = 21,
+    n_angles: int = _DEFAULT_NA_QUAD_NODES,
+    layer_thickness_nm: float = _HBN_LAYER_THICKNESS_NM,
 ) -> np.ndarray:
     """Reflectance R(λ) for air / film / SiO₂ / Si stack.
 
@@ -165,19 +254,39 @@ def reflectance(
     averaging s- and p-polarisations, weighted by sin(θ)cos(θ).
     """
     if na <= 0:
-        return _reflectance_at_angle(lamb_nm, n_film_fn, n_layers, t_oxide_nm, 0.0, "s")
+        return _reflectance_at_angle(
+            lamb_nm,
+            n_film_fn,
+            n_layers,
+            t_oxide_nm,
+            0.0,
+            "s",
+            layer_thickness_nm=layer_thickness_nm,
+        )
 
-    theta_max = np.arcsin(na)
-    nodes, weights = np.polynomial.legendre.leggauss(n_angles)
-    thetas = 0.5 * theta_max * (nodes + 1)
-    quad_w = 0.5 * theta_max * weights
+    thetas, weights = _na_gauss_legendre(na, n_angles)
 
     R_avg = np.zeros_like(lamb_nm)
     norm = 0.0
-    for theta, dw in zip(thetas, quad_w, strict=True):
-        w = np.sin(theta) * np.cos(theta) * dw
-        R_s = _reflectance_at_angle(lamb_nm, n_film_fn, n_layers, t_oxide_nm, theta, "s")
-        R_p = _reflectance_at_angle(lamb_nm, n_film_fn, n_layers, t_oxide_nm, theta, "p")
+    for theta, w in zip(thetas, weights, strict=True):
+        R_s = _reflectance_at_angle(
+            lamb_nm,
+            n_film_fn,
+            n_layers,
+            t_oxide_nm,
+            theta,
+            "s",
+            layer_thickness_nm=layer_thickness_nm,
+        )
+        R_p = _reflectance_at_angle(
+            lamb_nm,
+            n_film_fn,
+            n_layers,
+            t_oxide_nm,
+            theta,
+            "p",
+            layer_thickness_nm=layer_thickness_nm,
+        )
         R_avg += 0.5 * (R_s + R_p) * w
         norm += w
     return R_avg / norm
@@ -189,10 +298,11 @@ def spectral_contrast(
     n_layers: int,
     t_oxide_nm: float,
     na: float = 0.0,
+    layer_thickness_nm: float = _HBN_LAYER_THICKNESS_NM,
 ) -> np.ndarray:
     """(R₀ - R) / R₀ at each wavelength."""
-    R = reflectance(lamb_nm, n_film_fn, n_layers, t_oxide_nm, na=na)
-    R0 = reflectance(lamb_nm, n_film_fn, 0, t_oxide_nm, na=na)
+    R = reflectance(lamb_nm, n_film_fn, n_layers, t_oxide_nm, na=na, layer_thickness_nm=layer_thickness_nm)
+    R0 = reflectance(lamb_nm, n_film_fn, 0, t_oxide_nm, na=na, layer_thickness_nm=layer_thickness_nm)
     return (R0 - R) / R0
 
 
@@ -323,6 +433,7 @@ def camera_channel_contrast(
     t_oxide_nm: float,
     illumination: np.ndarray | None = None,
     na: float = 0.0,
+    layer_thickness_nm: float = _HBN_LAYER_THICKNESS_NM,
 ) -> tuple[float, float, float]:
     """Camera-channel contrast: (flake - substrate) / substrate per channel.
 
@@ -332,8 +443,8 @@ def camera_channel_contrast(
     Returns (red_contrast, green_contrast, blue_contrast).
     """
     lamb = _IMX183_WAVELENGTHS
-    R = reflectance(lamb, n_film_fn, n_layers, t_oxide_nm, na=na)
-    R0 = reflectance(lamb, n_film_fn, 0, t_oxide_nm, na=na)
+    R = reflectance(lamb, n_film_fn, n_layers, t_oxide_nm, na=na, layer_thickness_nm=layer_thickness_nm)
+    R0 = reflectance(lamb, n_film_fn, 0, t_oxide_nm, na=na, layer_thickness_nm=layer_thickness_nm)
 
     if illumination is None:
         illum = np.ones_like(lamb)
@@ -437,12 +548,41 @@ _CAL_DATA_285 = np.array(
     ]
 )
 
+# Graphene empirical calibration data (90nm SiO₂, 50x)
+# Layer-count assignments from optical contrast; not AFM-verified.
+# Format: [thickness_nm, R_contrast, G_contrast]
+_CAL_DATA_GRAPHENE = np.array(
+    [
+        [0.335, -0.14, -0.15],  # 1 layer, N=41
+        [0.670, -0.26, -0.28],  # 2 layers, N=42
+        [1.005, -0.38, -0.39],  # 3 layers, N=34
+        [1.340, -0.48, -0.49],  # 4 layers, N=18
+        [1.675, -0.57, -0.58],  # 5 layers, N=17
+    ]
+)
+
+# WSe₂ empirical calibration data (300nm SiO₂)
+# Pixel-pick contrast from collaborator images; layer counts optical.
+# Format: [thickness_nm, R_contrast, G_contrast]
+_CAL_DATA_WSE2 = np.array(
+    [
+        [0.649, -0.201, -0.199],  # 1 layer, N=3
+        [1.298, -0.323, -0.385],  # 2 layers, N=1
+    ]
+)
+
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--material",
+        choices=["hbn", "graphene"],
+        default="hbn",
+        help="Material type (default: hbn)",
+    )
     parser.add_argument(
         "--n-hbn",
         default="sqrt3",
@@ -514,8 +654,15 @@ def main():
     )
     args = parser.parse_args()
 
-    # Resolve n model
-    if args.n_hbn in _N_MODELS:
+    # Resolve material and n model
+    is_graphene = args.material == "graphene"
+    layer_t = _GRAPHENE_LAYER_THICKNESS_NM if is_graphene else _HBN_LAYER_THICKNESS_NM
+    material_name = "Graphene" if is_graphene else "hBN"
+
+    if is_graphene:
+        n_fn = n_graphene_constant(2.4, 1.0)
+        model_label = "2.4 − 1.0j"
+    elif args.n_hbn in _N_MODELS:
         n_fn = _N_MODELS[args.n_hbn]
         model_label = args.n_hbn
         if args.n_hbn == "sqrt3":
@@ -546,7 +693,9 @@ def main():
         illum /= illum.max()
         lamp_label = f", lamp {args.lamp:.0f}K"
 
-    # --- Fit ε_r to empirical data ---
+    # --- Fit ε_r to empirical data (hBN only) ---
+    if args.fit and is_graphene:
+        parser.error("--fit is not supported for graphene (no empirical calibration data)")
     if args.fit:
         from scipy.optimize import minimize
 
@@ -641,14 +790,21 @@ def main():
             lamp_label = f", lamp {T_lamp_fit:.0f}K"
 
     layers = np.arange(0, args.max_layers + 1)
-    thickness_nm = layers * _HBN_LAYER_THICKNESS_NM
+    thickness_nm = layers * layer_t
 
     # Compute per-channel contrast for each oxide thickness
     results = {}
     for t_ox in oxides:
         r_arr, g_arr, b_arr = [], [], []
         for nl in layers:
-            r, g, b = camera_channel_contrast(n_fn, int(nl), t_ox, illum, na=args.na)
+            r, g, b = camera_channel_contrast(
+                n_fn,
+                int(nl),
+                t_ox,
+                illum,
+                na=args.na,
+                layer_thickness_nm=layer_t,
+            )
             r_arr.append(r)
             g_arr.append(g)
             b_arr.append(b)
@@ -662,7 +818,10 @@ def main():
     n_ox = len(oxides)
     fig, axes = plt.subplots(1, n_ox, figsize=(7 * n_ox, 6), squeeze=False)
     na_label = f", NA={args.na}" if args.na > 0 else ", normal inc."
-    fig.suptitle(f"hBN on SiO₂/Si — R/G contrast space (n = {model_label}{lamp_label}{na_label})", fontsize=14)
+    fig.suptitle(
+        f"{material_name} on SiO₂/Si — R/G contrast space (n = {model_label}{lamp_label}{na_label})",
+        fontsize=14,
+    )
 
     # Thickness annotations: label every N layers
     label_layers = [5, 10, 15, 20, 30, 45, 60, 90, 120, 150]
@@ -677,7 +836,7 @@ def main():
 
         # Annotate thickness at select points
         for nl in label_layers:
-            t_nm = nl * _HBN_LAYER_THICKNESS_NM
+            t_nm = nl * layer_t
             g_val = data["G"][nl]
             r_val = data["R"][nl]
             ax.plot(g_val, r_val, "ko", markersize=4, zorder=3)
@@ -690,8 +849,8 @@ def main():
                 color="0.3",
             )
 
-        # Overlay empirical data
-        if col == 0:
+        # Overlay empirical data (hBN only)
+        if col == 0 and not is_graphene:
             cal_r = _CAL_DATA[:, 1] + args.r_offset
             cal_g = _CAL_DATA[:, 2] + args.g_offset
             ax.scatter(
@@ -717,8 +876,8 @@ def main():
                     fontweight="bold",
                 )
 
-        # Overlay 285nm empirical data on the 285nm panel
-        show_285 = abs(t_ox - 285) < 10 and len(_CAL_DATA_285) > 0
+        # Overlay 285nm empirical data on the 285nm panel (hBN only)
+        show_285 = not is_graphene and abs(t_ox - 285) < 10 and len(_CAL_DATA_285) > 0
         if show_285:
             cal285_r = _CAL_DATA_285[:, 1] + args.r_offset
             cal285_g = _CAL_DATA_285[:, 2] + args.g_offset
@@ -756,9 +915,9 @@ def main():
 
     plt.tight_layout()
 
-    # Print fit diagnostics for the first oxide thickness
+    # Print fit diagnostics for the first oxide thickness (hBN only)
     diag_ox = oxides[0]
-    if diag_ox in results:
+    if not is_graphene and diag_ox in results:
         data_diag = results[diag_ox]
         from scipy.interpolate import interp1d
 

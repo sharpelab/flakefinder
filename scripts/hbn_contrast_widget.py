@@ -1,14 +1,16 @@
-"""Interactive widget for exploring hBN R/G contrast parameters.
+"""Interactive widget for exploring hBN, graphene, and WSe₂ R/G contrast.
 
-Two panels: ~90nm oxide (with AFM data) and 285nm oxide (with empirical data).
-Sliders for n, oxide thickness, NA, and R/G offsets.
-Uses vectorized transfer matrix for fast updates.
+Tabbed layout with per-tab slider visibility. Heavy compute runs on a
+background thread with a single-slot mailbox (last slider value wins), so
+slider drags stay responsive.
 """
 
 from __future__ import annotations
 
 import json
 import sys
+import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -19,51 +21,66 @@ sys.path.insert(0, str(Path(__file__).parent))
 from hbn_contrast import (
     _CAL_DATA,
     _CAL_DATA_285,
+    _CAL_DATA_GRAPHENE,
+    _CAL_DATA_WSE2,
+    _DEFAULT_NA_QUAD_NODES,
+    _GRAPHENE_LAYER_THICKNESS_NM,
     _HBN_LAYER_THICKNESS_NM,
     _IMX183_GREEN,
     _IMX183_RED,
     _IMX183_WAVELENGTHS,
     _SI_DATA,
     _SIO2_DATA,
+    _WSE2_LAYER_THICKNESS_NM,
     _interp_index,
+    _na_gauss_legendre,
+    n_wse2,
 )
 
 lamb = _IMX183_WAVELENGTHS
 n_sio2 = _interp_index(lamb, _SIO2_DATA)
 n_si = _interp_index(lamb, _SI_DATA)
 
-MAX_LAYERS = 300
 LABEL_LAYERS = [5, 10, 15, 20, 30, 45, 60, 90, 120, 150, 200, 250, 300]
-T_OXIDE_285 = 285.0
+
+# Per-material max compute layers (plot + cache extent)
+HBN_MAX_LAYERS = 300
+GRAPHENE_MAX_LAYERS = 60
+WSE2_MAX_LAYERS = 15
+WSE2_PLOT_LAYERS = 10  # label + line extent on the WSe₂ panel
 
 
 def compute_rg(
-    n_hbn: float,
+    n_film: complex | np.ndarray,
     t_oxide: float,
     na: float,
+    layer_thickness_nm: float = _HBN_LAYER_THICKNESS_NM,
+    max_layers: int = HBN_MAX_LAYERS,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Batch-compute R/G contrast for layers 1..MAX_LAYERS.
+    """Batch-compute R/G contrast for layers 1..max_layers.
 
-    Vectorised over layer count for fast interactive updates.
+    n_film can be a scalar complex (constant n) or an ndarray of complex values
+    (one per wavelength in _IMX183_WAVELENGTHS, for dispersive materials).
+
     Returns (r_contrast, g_contrast, thickness_nm).
     """
-    n1 = np.full(len(lamb), n_hbn, dtype=complex)
+    if isinstance(n_film, np.ndarray):
+        n1 = np.array(n_film, dtype=np.complex128)
+    else:
+        n1 = np.full(len(lamb), n_film, dtype=np.complex128)
 
     if na <= 0:
         thetas = np.array([0.0])
         raw_weights = np.array([1.0])
     else:
-        theta_max = np.arcsin(na)
-        nodes, ws = np.polynomial.legendre.leggauss(11)
-        thetas = 0.5 * theta_max * (nodes + 1)
-        raw_weights = 0.5 * theta_max * ws * np.sin(thetas) * np.cos(thetas)
+        thetas, raw_weights = _na_gauss_legendre(na, _DEFAULT_NA_QUAD_NODES)
 
     total_w = raw_weights.sum()
 
-    nl_arr = np.arange(1, MAX_LAYERS + 1)
-    t_films = nl_arr * _HBN_LAYER_THICKNESS_NM
+    nl_arr = np.arange(1, max_layers + 1)
+    t_films = nl_arr * layer_thickness_nm
 
-    R_flake = np.zeros((MAX_LAYERS, len(lamb)))
+    R_flake = np.zeros((max_layers, len(lamb)))
     R_sub = np.zeros(len(lamb))
 
     for theta, w in zip(thetas, raw_weights, strict=True):
@@ -120,7 +137,7 @@ def compute_rg(
 
 
 def _setup_panel(ax, title):
-    """Common axis setup for both panels."""
+    """Common axis setup."""
     ax.axhline(0, color="k", lw=0.5, ls="--", alpha=0.5)
     ax.axvline(0, color="k", lw=0.5, ls="--", alpha=0.5)
     ax.set_xlabel("Green contrast")
@@ -132,33 +149,184 @@ def _setup_panel(ax, title):
     ax.set_ylim(-1.5, 4)
 
 
-def main():
-    fig, (ax_90, ax_285) = plt.subplots(1, 2, figsize=(15, 7))
-    plt.subplots_adjust(bottom=0.32, wspace=0.25)
+def _make_annotations(ax, layer_thickness_nm, max_layers, label_layers=None, label_fmt="thickness"):
+    """Create thickness annotations and dot artist for a panel.
 
-    init = {"n": 2.152, "oxide": 89.46, "oxide_285": 285.0, "na": 0.25, "r_off": 0.54, "g_off": -0.2}
-
-    # --- Compute initial curves ---
-    r90, g90, t_nm = compute_rg(init["n"], init["oxide"], init["na"])
-    r285, g285, _ = compute_rg(init["n"], init["oxide_285"], init["na"])
-
-    # --- Left panel: ~90nm ---
-    _setup_panel(ax_90, f"{init['oxide']:.0f} nm SiO₂")
-    (line_90,) = ax_90.plot(g90, r90, "k-", lw=1.5, label="Theory")
-
-    ann_90 = []
-    dots_90 = ax_90.plot([], [], "ko", markersize=4, zorder=3)[0]
-    for nl in LABEL_LAYERS:
-        if nl <= MAX_LAYERS:
-            a = ax_90.annotate(
-                f"{nl * _HBN_LAYER_THICKNESS_NM:.0f}nm",
+    label_fmt: "thickness" for "Xnm" labels, "layers" for "XL" labels.
+    """
+    if label_layers is None:
+        label_layers = [nl for nl in LABEL_LAYERS if nl <= max_layers]
+    ann = []
+    dots = ax.plot([], [], "ko", markersize=4, zorder=3)[0]
+    for nl in label_layers:
+        if nl <= max_layers:
+            if label_fmt == "layers":
+                text = f"{nl}L"
+            else:
+                text = f"{nl * layer_thickness_nm:.0f}nm"
+            a = ax.annotate(
+                text,
                 (0, 0),
                 textcoords="offset points",
                 xytext=(6, 4),
                 fontsize=7,
                 color="0.3",
             )
-            ann_90.append((nl, a))
+            ann.append((nl, a))
+    return ann, dots
+
+
+def _update_annotations(ann_list, dots_artist, r_t, g_t):
+    dg, dr = [], []
+    for nl, ann in ann_list:
+        idx = nl - 1
+        if idx < len(r_t):
+            gv, rv = g_t[idx], r_t[idx]
+            dg.append(gv)
+            dr.append(rv)
+            ann.xy = (gv, rv)
+            ann.set_visible(True)
+        else:
+            ann.set_visible(False)
+    dots_artist.set_data(dg, dr)
+
+
+# Axis positions (left, bottom, width, height)
+_PLOT_BOTTOM = 0.38
+_PLOT_HEIGHT = 0.52
+_HBN_LEFT_POS = (0.06, _PLOT_BOTTOM, 0.42, _PLOT_HEIGHT)
+_HBN_RIGHT_POS = (0.55, _PLOT_BOTTOM, 0.42, _PLOT_HEIGHT)
+_SINGLE_POS = (0.08, _PLOT_BOTTOM, 0.86, _PLOT_HEIGHT)
+# Park hidden panels off-canvas so they can't intercept mouse grabs (and
+# silently eat clicks destined for sliders/buttons beneath them).
+_OFFSCREEN_POS = (-2.0, -2.0, 0.01, 0.01)
+
+
+# --- Background worker plumbing --------------------------------------------
+@dataclass(frozen=True)
+class _Vals:
+    """Immutable snapshot of slider state + active tab."""
+
+    tab: str
+    n: float
+    k: float
+    oxide: float
+    oxide_285: float
+    oxide_wse2: float
+    na: float
+    r_off: float
+    g_off: float
+
+
+_EMPTY_ARR = np.zeros(0, dtype=float)
+
+
+@dataclass
+class _TabResult:
+    """Compute output for a single tab.
+
+    Only the fields relevant to the tab that produced the result are
+    populated; the rest stay as empty arrays.  Keeping them all as
+    ``np.ndarray`` (rather than Optional) lets the drawing code pass them
+    straight to matplotlib without narrowing dances.
+    """
+
+    # hBN tab has two panels' worth of data
+    r90: np.ndarray = _EMPTY_ARR
+    g90: np.ndarray = _EMPTY_ARR
+    t_hbn: np.ndarray = _EMPTY_ARR
+    r285: np.ndarray = _EMPTY_ARR
+    g285: np.ndarray = _EMPTY_ARR
+    # Graphene
+    r_gr: np.ndarray = _EMPTY_ARR
+    g_gr: np.ndarray = _EMPTY_ARR
+    t_gr: np.ndarray = _EMPTY_ARR
+    # WSe₂
+    r_wse2: np.ndarray = _EMPTY_ARR
+    g_wse2: np.ndarray = _EMPTY_ARR
+    t_wse2: np.ndarray = _EMPTY_ARR
+
+
+def _compute_for_tab(vals: _Vals, n_wse2_arr: np.ndarray) -> _TabResult:
+    if vals.tab == "hbn":
+        hbn_n = complex(vals.n)
+        r90, g90, t_hbn = compute_rg(hbn_n, vals.oxide, vals.na, max_layers=HBN_MAX_LAYERS)
+        r285, g285, _ = compute_rg(hbn_n, vals.oxide_285, vals.na, max_layers=HBN_MAX_LAYERS)
+        return _TabResult(r90=r90, g90=g90, t_hbn=t_hbn, r285=r285, g285=g285)
+    if vals.tab == "graphene":
+        gr_n = vals.n - 1j * vals.k
+        rg, gg, tg = compute_rg(
+            gr_n,
+            vals.oxide,
+            vals.na,
+            layer_thickness_nm=_GRAPHENE_LAYER_THICKNESS_NM,
+            max_layers=GRAPHENE_MAX_LAYERS,
+        )
+        return _TabResult(r_gr=rg, g_gr=gg, t_gr=tg)
+    if vals.tab == "wse2":
+        rw, gw, tw = compute_rg(
+            n_wse2_arr,
+            vals.oxide_wse2,
+            vals.na,
+            layer_thickness_nm=_WSE2_LAYER_THICKNESS_NM,
+            max_layers=WSE2_MAX_LAYERS,
+        )
+        return _TabResult(r_wse2=rw, g_wse2=gw, t_wse2=tw)
+    return _TabResult()
+
+
+def main():
+    fig = plt.figure(figsize=(15, 8))
+
+    init = {
+        "n": 2.152,
+        "k": 1.0,
+        "oxide": 89.46,
+        "oxide_285": 285.0,
+        "oxide_wse2": 300.0,
+        "na": 0.25,
+        "r_off": 0.54,
+        "g_off": -0.2,
+    }
+
+    n_wse2_arr = n_wse2(lamb)
+
+    # --- Create all axes upfront ---
+    ax_90 = fig.add_axes(_HBN_LEFT_POS)
+    ax_285 = fig.add_axes(_HBN_RIGHT_POS)
+    ax_gr = fig.add_axes(_SINGLE_POS)
+    ax_wse2 = fig.add_axes(_SINGLE_POS)
+
+    # --- Compute initial curves (synchronous so first frame is drawn) ---
+    def _init_vals(tab: str) -> _Vals:
+        return _Vals(
+            tab=tab,
+            n=init["n"],
+            k=init["k"],
+            oxide=init["oxide"],
+            oxide_285=init["oxide_285"],
+            oxide_wse2=init["oxide_wse2"],
+            na=init["na"],
+            r_off=init["r_off"],
+            g_off=init["g_off"],
+        )
+
+    init_vals_hbn = _init_vals("hbn")
+    init_vals_gr = _init_vals("graphene")
+    init_vals_wse2 = _init_vals("wse2")
+    init_hbn = _compute_for_tab(init_vals_hbn, n_wse2_arr)
+    init_gr = _compute_for_tab(init_vals_gr, n_wse2_arr)
+    init_wse2 = _compute_for_tab(init_vals_wse2, n_wse2_arr)
+
+    r90, g90 = init_hbn.r90, init_hbn.g90
+    r285, g285 = init_hbn.r285, init_hbn.g285
+    r_gr, g_gr = init_gr.r_gr, init_gr.g_gr
+    r_wse2, g_wse2 = init_wse2.r_wse2, init_wse2.g_wse2
+
+    # --- hBN 90nm panel ---
+    _setup_panel(ax_90, f"hBN · {init['oxide']:.0f} nm SiO₂")
+    (line_90,) = ax_90.plot(g90, r90, "k-", lw=1.5, label="Theory")
+    ann_90, dots_90 = _make_annotations(ax_90, _HBN_LAYER_THICKNESS_NM, HBN_MAX_LAYERS)
 
     cal_r = _CAL_DATA[:, 1] + init["r_off"]
     cal_g = _CAL_DATA[:, 2] + init["g_off"]
@@ -185,7 +353,6 @@ def main():
             fontweight="bold",
         )
         cal_ann_90.append(a)
-
     rms_text_90 = ax_90.text(
         0.02,
         0.98,
@@ -197,23 +364,10 @@ def main():
     )
     ax_90.legend(fontsize=9, loc="lower right")
 
-    # --- Right panel: 285nm ---
-    _setup_panel(ax_285, "285 nm SiO₂")
+    # --- hBN 285nm panel ---
+    _setup_panel(ax_285, "hBN · 285 nm SiO₂")
     (line_285,) = ax_285.plot(g285, r285, "k-", lw=1.5, label="Theory")
-
-    ann_285 = []
-    dots_285 = ax_285.plot([], [], "ko", markersize=4, zorder=3)[0]
-    for nl in LABEL_LAYERS:
-        if nl <= MAX_LAYERS:
-            a = ax_285.annotate(
-                f"{nl * _HBN_LAYER_THICKNESS_NM:.0f}nm",
-                (0, 0),
-                textcoords="offset points",
-                xytext=(6, 4),
-                fontsize=7,
-                color="0.3",
-            )
-            ann_285.append((nl, a))
+    ann_285, dots_285 = _make_annotations(ax_285, _HBN_LAYER_THICKNESS_NM, HBN_MAX_LAYERS)
 
     if len(_CAL_DATA_285) > 0:
         cal285_r = _CAL_DATA_285[:, 1] + init["r_off"]
@@ -244,7 +398,6 @@ def main():
     else:
         scat_285 = None
         cal_ann_285 = []
-
     rms_text_285 = ax_285.text(
         0.02,
         0.98,
@@ -256,133 +409,465 @@ def main():
     )
     ax_285.legend(fontsize=9, loc="lower right")
 
-    # --- Sliders ---
-    slider_specs = [
-        ("n_hBN", 1.4, 2.8, init["n"]),
-        ("t_oxide (nm)", 70, 120, init["oxide"]),
-        ("t_285 (nm)", 250, 310, init["oxide_285"]),
-        ("NA", 0.0, 0.9, init["na"]),
-        ("R offset", -1.0, 1.5, init["r_off"]),
-        ("G offset", -1.0, 1.0, init["g_off"]),
-    ]
-    sliders = []
-    for i, (label, vmin, vmax, vinit) in enumerate(slider_specs):
-        ax_s = plt.axes((0.10, 0.20 - i * 0.033, 0.80, 0.022))
-        s = Slider(ax_s, label, vmin, vmax, valinit=vinit, valstep=0.01 if "offset" in label else None)
-        sliders.append(s)
+    # --- Graphene 90nm panel ---
+    _setup_panel(ax_gr, "Graphene · 90 nm SiO₂")
+    (line_gr,) = ax_gr.plot(g_gr, r_gr, "k-", lw=1.5, label="Theory")
+    ann_gr, dots_gr = _make_annotations(ax_gr, _GRAPHENE_LAYER_THICKNESS_NM, GRAPHENE_MAX_LAYERS)
 
-    cache = {
-        "n": init["n"],
-        "oxide": init["oxide"],
-        "oxide_285": init["oxide_285"],
-        "na": init["na"],
-        "r90": r90,
-        "g90": g90,
-        "r285": r285,
-        "g285": g285,
-        "t_nm": t_nm,
+    if len(_CAL_DATA_GRAPHENE) > 0:
+        cal_gr_r = _CAL_DATA_GRAPHENE[:, 1] + init["r_off"]
+        cal_gr_g = _CAL_DATA_GRAPHENE[:, 2] + init["g_off"]
+        scat_gr = ax_gr.scatter(
+            cal_gr_g,
+            cal_gr_r,
+            c="tab:green",
+            marker="D",
+            s=50,
+            zorder=5,
+            edgecolors="k",
+            linewidths=0.7,
+            label="Graphene empirical",
+        )
+        cal_ann_gr = []
+        for i, row in enumerate(_CAL_DATA_GRAPHENE):
+            a = ax_gr.annotate(
+                f"{row[0]:.0f}",
+                (cal_gr_g[i], cal_gr_r[i]),
+                textcoords="offset points",
+                xytext=(6, -6),
+                fontsize=7,
+                color="tab:green",
+                fontweight="bold",
+            )
+            cal_ann_gr.append(a)
+    else:
+        scat_gr = None
+        cal_ann_gr = []
+    ax_gr.legend(fontsize=9, loc="lower right")
+
+    # --- WSe₂ 300nm panel ---
+    _setup_panel(ax_wse2, f"WSe₂ · {init['oxide_wse2']:.0f} nm SiO₂")
+    (line_wse2,) = ax_wse2.plot(
+        g_wse2[:WSE2_PLOT_LAYERS],
+        r_wse2[:WSE2_PLOT_LAYERS],
+        "k-",
+        lw=1.5,
+        label="Theory",
+    )
+    ann_wse2, dots_wse2 = _make_annotations(
+        ax_wse2,
+        _WSE2_LAYER_THICKNESS_NM,
+        WSE2_MAX_LAYERS,
+        label_layers=list(range(1, WSE2_PLOT_LAYERS + 1)),
+        label_fmt="layers",
+    )
+
+    if len(_CAL_DATA_WSE2) > 0:
+        cal_wse2_r = _CAL_DATA_WSE2[:, 1] + init["r_off"]
+        cal_wse2_g = _CAL_DATA_WSE2[:, 2] + init["g_off"]
+        scat_wse2 = ax_wse2.scatter(
+            cal_wse2_g,
+            cal_wse2_r,
+            c="tab:purple",
+            marker="^",
+            s=50,
+            zorder=5,
+            edgecolors="k",
+            linewidths=0.7,
+            label="WSe₂ empirical",
+        )
+        cal_ann_wse2 = []
+        for i, row in enumerate(_CAL_DATA_WSE2):
+            a = ax_wse2.annotate(
+                f"{round(row[0] / _WSE2_LAYER_THICKNESS_NM):.0f}L",
+                (cal_wse2_g[i], cal_wse2_r[i]),
+                textcoords="offset points",
+                xytext=(6, -6),
+                fontsize=7,
+                color="tab:purple",
+                fontweight="bold",
+            )
+            cal_ann_wse2.append(a)
+    else:
+        scat_wse2 = None
+        cal_ann_wse2 = []
+    ax_wse2.legend(fontsize=9, loc="lower right")
+
+    # --- Tab buttons ---
+    active_tab = {"name": "hbn"}
+
+    ax_tab_hbn = fig.add_axes((0.06, 0.93, 0.08, 0.04))
+    ax_tab_gr = fig.add_axes((0.15, 0.93, 0.10, 0.04))
+    ax_tab_wse2 = fig.add_axes((0.26, 0.93, 0.08, 0.04))
+    btn_hbn = Button(ax_tab_hbn, "hBN")
+    btn_gr = Button(ax_tab_gr, "Graphene")
+    btn_wse2 = Button(ax_tab_wse2, "WSe₂")
+
+    # --- All sliders (created upfront, visibility toggled per tab) ---
+    slider_defs = {
+        "n": ("n (real)", 1.4, 3.0, init["n"]),
+        "k": ("k (imag)", 0.0, 4.0, init["k"]),
+        "oxide": ("t_oxide (nm)", 70, 120, init["oxide"]),
+        "oxide_285": ("t_285 (nm)", 250, 310, init["oxide_285"]),
+        "oxide_wse2": ("t_wse2 (nm)", 270, 330, init["oxide_wse2"]),
+        "na": ("NA", 0.0, 0.9, init["na"]),
+        "r_off": ("R offset", -1.0, 1.5, init["r_off"]),
+        "g_off": ("G offset", -1.0, 1.0, init["g_off"]),
     }
 
-    def _update_annotations(ann_list, dots_artist, r_t, g_t):
-        dg, dr = [], []
-        for nl, ann in ann_list:
-            idx = nl - 1
-            if idx < len(r_t):
-                gv, rv = g_t[idx], r_t[idx]
-                dg.append(gv)
-                dr.append(rv)
-                ann.xy = (gv, rv)
-                ann.set_visible(True)
-            else:
-                ann.set_visible(False)
-        dots_artist.set_data(dg, dr)
+    # Which sliders each tab uses
+    tab_sliders = {
+        "hbn": ["n", "oxide", "oxide_285", "na", "r_off", "g_off"],
+        "graphene": ["n", "k", "oxide", "na", "r_off", "g_off"],
+        "wse2": ["oxide_wse2", "na", "r_off", "g_off"],
+    }
 
-    def update(_val=None):
-        n_val = sliders[0].val
-        oxide_val = sliders[1].val
-        oxide_285_val = sliders[2].val
-        na_val = sliders[3].val
-        r_off = sliders[4].val
-        g_off = sliders[5].val
+    # Create all slider widgets (initially invisible, positioned later)
+    all_sliders: dict[str, tuple[plt.Axes, Slider]] = {}
+    for key, (label, vmin, vmax, vinit) in slider_defs.items():
+        ax_s = fig.add_axes((0.10, 0.01, 0.80, 0.022))  # placeholder position
+        ax_s.set_visible(False)
+        vstep = 0.01 if "offset" in label else None
+        s = Slider(ax_s, label, vmin, vmax, valinit=vinit, valstep=vstep)
+        all_sliders[key] = (ax_s, s)
 
-        # Check what changed before updating cache
-        left_changed = n_val != cache["n"] or oxide_val != cache["oxide"] or na_val != cache["na"]
-        right_changed = n_val != cache["n"] or oxide_285_val != cache["oxide_285"] or na_val != cache["na"]
+    def _slider(key: str) -> Slider:
+        return all_sliders[key][1]
 
-        if left_changed:
-            r9, g9, t = compute_rg(n_val, oxide_val, na_val)
-            cache.update(n=n_val, oxide=oxide_val, na=na_val, r90=r9, g90=g9, t_nm=t)
+    def _read_vals(tab: str) -> _Vals:
+        return _Vals(
+            tab=tab,
+            n=_slider("n").val,
+            k=_slider("k").val,
+            oxide=_slider("oxide").val,
+            oxide_285=_slider("oxide_285").val,
+            oxide_wse2=_slider("oxide_wse2").val,
+            na=_slider("na").val,
+            r_off=_slider("r_off").val,
+            g_off=_slider("g_off").val,
+        )
 
-        if right_changed:
-            r2, g2, _ = compute_rg(n_val, oxide_285_val, na_val)
-            cache.update(oxide_285=oxide_285_val, r285=r2, g285=g2)
+    # --- Compute cache: last valid result per tab (keyed by inputs that affect it) ---
+    cache: dict[str, tuple[tuple, _TabResult]] = {
+        "hbn": (
+            (init["n"], init["oxide"], init["oxide_285"], init["na"]),
+            init_hbn,
+        ),
+        "graphene": (
+            (init["n"], init["k"], init["oxide"], init["na"]),
+            init_gr,
+        ),
+        "wse2": (
+            (init["oxide_wse2"], init["na"]),
+            init_wse2,
+        ),
+    }
 
-        r9 = cache["r90"]
-        g9 = cache["g90"]
-        r2 = cache["r285"]
-        g2 = cache["g285"]
-        t = cache["t_nm"]
+    def _compute_key(tab: str, vals: _Vals) -> tuple:
+        if tab == "hbn":
+            return (vals.n, vals.oxide, vals.oxide_285, vals.na)
+        if tab == "graphene":
+            return (vals.n, vals.k, vals.oxide, vals.na)
+        return (vals.oxide_wse2, vals.na)
 
-        # Left panel: ~90nm
+    # --- Background worker plumbing ---
+    # _pending holds the latest desired _Vals (mailbox size 1, last wins).
+    # _result holds the most recent completed (_Vals, _TabResult) for the main
+    # thread to pick up.
+    lock = threading.Lock()
+    cond = threading.Condition(lock)
+    _pending: list[_Vals | None] = [None]
+    _result: list[tuple[_Vals, _TabResult] | None] = [None]
+    _shutdown = [False]
+
+    def worker():
+        while True:
+            with cond:
+                while _pending[0] is None and not _shutdown[0]:
+                    cond.wait()
+                if _shutdown[0]:
+                    return
+                vals = _pending[0]
+                _pending[0] = None
+            assert vals is not None  # guaranteed by the wait() loop above
+            # Compute outside the lock.
+            try:
+                r = _compute_for_tab(vals, n_wse2_arr)
+            except Exception as e:
+                print(f"widget worker error: {e}")
+                continue
+            with cond:
+                _result[0] = (vals, r)
+
+    worker_thread = threading.Thread(target=worker, daemon=True, name="contrast-worker")
+    worker_thread.start()
+
+    def _request_compute(vals: _Vals):
+        # Skip if this tab's cache is already up to date.
+        key = _compute_key(vals.tab, vals)
+        cached_key, _ = cache[vals.tab]
+        if key == cached_key:
+            return
+        with cond:
+            _pending[0] = vals
+            cond.notify()
+
+    # --- Artist updates (main thread only) ---
+    def _draw_hbn(vals: _Vals, res: _TabResult):
+        r9, g9, t = res.r90, res.g90, res.t_hbn
+        r2, g2 = res.r285, res.g285
+
         line_90.set_data(g9, r9)
         _update_annotations(ann_90, dots_90, r9, g9)
-        ax_90.set_title(f"{oxide_val:.0f} nm SiO₂")
+        ax_90.set_title(f"hBN · {vals.oxide:.0f} nm SiO₂")
 
-        cal_r_s = _CAL_DATA[:, 1] + r_off
-        cal_g_s = _CAL_DATA[:, 2] + g_off
+        cal_r_s = _CAL_DATA[:, 1] + vals.r_off
+        cal_g_s = _CAL_DATA[:, 2] + vals.g_off
         scat_90.set_offsets(np.column_stack([cal_g_s, cal_r_s]))
         for i, ann in enumerate(cal_ann_90):
             ann.xy = (cal_g_s[i], cal_r_s[i])
-
         r_res = cal_r_s - np.interp(_CAL_DATA[:, 0], t, r9)
         g_res = cal_g_s - np.interp(_CAL_DATA[:, 0], t, g9)
         rms_text_90.set_text(f"R rms={np.sqrt(np.mean(r_res**2)):.3f}  G rms={np.sqrt(np.mean(g_res**2)):.3f}")
 
-        # Right panel: 285nm
         line_285.set_data(g2, r2)
-        ax_285.set_title(f"{oxide_285_val:.0f} nm SiO₂")
+        ax_285.set_title(f"hBN · {vals.oxide_285:.0f} nm SiO₂")
         _update_annotations(ann_285, dots_285, r2, g2)
-
         if scat_285 is not None:
-            c285_r = _CAL_DATA_285[:, 1] + r_off
-            c285_g = _CAL_DATA_285[:, 2] + g_off
+            c285_r = _CAL_DATA_285[:, 1] + vals.r_off
+            c285_g = _CAL_DATA_285[:, 2] + vals.g_off
             scat_285.set_offsets(np.column_stack([c285_g, c285_r]))
             for i, ann in enumerate(cal_ann_285):
                 ann.xy = (c285_g[i], c285_r[i])
-
             r_res_285 = c285_r - np.interp(_CAL_DATA_285[:, 0], t, r2)
             g_res_285 = c285_g - np.interp(_CAL_DATA_285[:, 0], t, g2)
             rms_text_285.set_text(
                 f"R rms={np.sqrt(np.mean(r_res_285**2)):.3f}  G rms={np.sqrt(np.mean(g_res_285**2)):.3f}"
             )
 
+    def _draw_graphene(vals: _Vals, res: _TabResult):
+        line_gr.set_data(res.g_gr, res.r_gr)
+        _update_annotations(ann_gr, dots_gr, res.r_gr, res.g_gr)
+        if scat_gr is not None:
+            cgr_r = _CAL_DATA_GRAPHENE[:, 1] + vals.r_off
+            cgr_g = _CAL_DATA_GRAPHENE[:, 2] + vals.g_off
+            scat_gr.set_offsets(np.column_stack([cgr_g, cgr_r]))
+            for i, ann in enumerate(cal_ann_gr):
+                ann.xy = (cgr_g[i], cgr_r[i])
+
+    def _draw_wse2(vals: _Vals, res: _TabResult):
+        rw, gw = res.r_wse2, res.g_wse2
+        line_wse2.set_data(gw[:WSE2_PLOT_LAYERS], rw[:WSE2_PLOT_LAYERS])
+        ax_wse2.set_title(f"WSe₂ · {vals.oxide_wse2:.0f} nm SiO₂")
+        _update_annotations(ann_wse2, dots_wse2, rw, gw)
+        if scat_wse2 is not None:
+            cwse2_r = _CAL_DATA_WSE2[:, 1] + vals.r_off
+            cwse2_g = _CAL_DATA_WSE2[:, 2] + vals.g_off
+            scat_wse2.set_offsets(np.column_stack([cwse2_g, cwse2_r]))
+            for i, ann in enumerate(cal_ann_wse2):
+                ann.xy = (cwse2_g[i], cwse2_r[i])
+
+    def _draw_active(vals: _Vals, res: _TabResult):
+        if vals.tab == "hbn":
+            _draw_hbn(vals, res)
+        elif vals.tab == "graphene":
+            _draw_graphene(vals, res)
+        elif vals.tab == "wse2":
+            _draw_wse2(vals, res)
+
+    def _draw_offsets_only(vals: _Vals):
+        """Update only the offset-dependent artists on the active tab."""
+        if vals.tab == "hbn":
+            _, res = cache["hbn"]
+            cal_r_s = _CAL_DATA[:, 1] + vals.r_off
+            cal_g_s = _CAL_DATA[:, 2] + vals.g_off
+            scat_90.set_offsets(np.column_stack([cal_g_s, cal_r_s]))
+            for i, ann in enumerate(cal_ann_90):
+                ann.xy = (cal_g_s[i], cal_r_s[i])
+            r_res = cal_r_s - np.interp(_CAL_DATA[:, 0], res.t_hbn, res.r90)
+            g_res = cal_g_s - np.interp(_CAL_DATA[:, 0], res.t_hbn, res.g90)
+            rms_text_90.set_text(f"R rms={np.sqrt(np.mean(r_res**2)):.3f}  G rms={np.sqrt(np.mean(g_res**2)):.3f}")
+            if scat_285 is not None:
+                c285_r = _CAL_DATA_285[:, 1] + vals.r_off
+                c285_g = _CAL_DATA_285[:, 2] + vals.g_off
+                scat_285.set_offsets(np.column_stack([c285_g, c285_r]))
+                for i, ann in enumerate(cal_ann_285):
+                    ann.xy = (c285_g[i], c285_r[i])
+                r_res_285 = c285_r - np.interp(_CAL_DATA_285[:, 0], res.t_hbn, res.r285)
+                g_res_285 = c285_g - np.interp(_CAL_DATA_285[:, 0], res.t_hbn, res.g285)
+                rms_text_285.set_text(
+                    f"R rms={np.sqrt(np.mean(r_res_285**2)):.3f}  G rms={np.sqrt(np.mean(g_res_285**2)):.3f}"
+                )
+        elif vals.tab == "graphene" and scat_gr is not None:
+            cgr_r = _CAL_DATA_GRAPHENE[:, 1] + vals.r_off
+            cgr_g = _CAL_DATA_GRAPHENE[:, 2] + vals.g_off
+            scat_gr.set_offsets(np.column_stack([cgr_g, cgr_r]))
+            for i, ann in enumerate(cal_ann_gr):
+                ann.xy = (cgr_g[i], cgr_r[i])
+        elif vals.tab == "wse2" and scat_wse2 is not None:
+            cwse2_r = _CAL_DATA_WSE2[:, 1] + vals.r_off
+            cwse2_g = _CAL_DATA_WSE2[:, 2] + vals.g_off
+            scat_wse2.set_offsets(np.column_stack([cwse2_g, cwse2_r]))
+            for i, ann in enumerate(cal_ann_wse2):
+                ann.xy = (cwse2_g[i], cwse2_r[i])
+
+    # --- Main-thread timer: polls worker result, updates artists ---
+    last_drawn_offsets = {"r": init["r_off"], "g": init["g_off"], "tab": "hbn"}
+
+    def _poll_result():
+        with cond:
+            r = _result[0]
+            _result[0] = None
+        vals_now = _read_vals(active_tab["name"])
+        dirty = False
+
+        if r is not None:
+            vals, res = r
+            cache[vals.tab] = (_compute_key(vals.tab, vals), res)
+            # Only draw if the result is still for the active tab.
+            if vals.tab == active_tab["name"]:
+                _draw_active(vals, res)
+                last_drawn_offsets["r"] = vals.r_off
+                last_drawn_offsets["g"] = vals.g_off
+                last_drawn_offsets["tab"] = vals.tab
+                dirty = True
+
+        # Offset-only redraw: if offsets changed since last draw and current tab's
+        # compute is up-to-date, update the scatter/rms without recomputing.
+        key = _compute_key(vals_now.tab, vals_now)
+        cached_key, _ = cache[vals_now.tab]
+        if key == cached_key and (
+            vals_now.r_off != last_drawn_offsets["r"]
+            or vals_now.g_off != last_drawn_offsets["g"]
+            or last_drawn_offsets["tab"] != vals_now.tab
+        ):
+            _draw_offsets_only(vals_now)
+            last_drawn_offsets["r"] = vals_now.r_off
+            last_drawn_offsets["g"] = vals_now.g_off
+            last_drawn_offsets["tab"] = vals_now.tab
+            dirty = True
+
+        if dirty:
+            fig.canvas.draw_idle()
+
+    poll_timer = fig.canvas.new_timer(interval=16)
+    poll_timer.add_callback(_poll_result)
+    poll_timer.start()
+
+    # --- Slider and tab-switch callbacks ---
+    def on_slider(_val=None):
+        vals = _read_vals(active_tab["name"])
+        _request_compute(vals)
+
+    def _layout_sliders(tab_name: str):
+        keys = tab_sliders[tab_name]
+        for key, (ax_s, _) in all_sliders.items():
+            ax_s.set_visible(key in keys)
+        for i, key in enumerate(keys):
+            ax_s, _ = all_sliders[key]
+            ax_s.set_position((0.10, 0.26 - i * 0.033, 0.80, 0.022))
+
+    def show_tab(name):
+        active_tab["name"] = name
+        is_hbn = name == "hbn"
+        is_gr = name == "graphene"
+        is_wse2 = name == "wse2"
+        ax_90.set_visible(is_hbn)
+        ax_285.set_visible(is_hbn)
+        ax_gr.set_visible(is_gr)
+        ax_wse2.set_visible(is_wse2)
+        ax_90.set_position(_HBN_LEFT_POS if is_hbn else _OFFSCREEN_POS)
+        ax_285.set_position(_HBN_RIGHT_POS if is_hbn else _OFFSCREEN_POS)
+        ax_gr.set_position(_SINGLE_POS if is_gr else _OFFSCREEN_POS)
+        ax_wse2.set_position(_SINGLE_POS if is_wse2 else _OFFSCREEN_POS)
+        ax_tab_hbn.set_facecolor("0.85" if is_hbn else "0.95")
+        ax_tab_gr.set_facecolor("0.85" if is_gr else "0.95")
+        ax_tab_wse2.set_facecolor("0.85" if is_wse2 else "0.95")
+        _layout_sliders(name)
+
+        # Redraw from cache for the new tab, then request a fresh compute if stale.
+        vals = _read_vals(name)
+        _, cached_res = cache[name]
+        _draw_active(vals, cached_res)
+        last_drawn_offsets["r"] = vals.r_off
+        last_drawn_offsets["g"] = vals.g_off
+        last_drawn_offsets["tab"] = name
+        _request_compute(vals)
         fig.canvas.draw_idle()
 
-    for s in sliders:
-        s.on_changed(update)
+    for _, s in all_sliders.values():
+        s.on_changed(on_slider)
 
-    # Export button
-    ax_btn = plt.axes((0.82, 0.005, 0.12, 0.03))
-    btn = Button(ax_btn, "Export")
+    btn_hbn.on_clicked(lambda _: show_tab("hbn"))
+    btn_gr.on_clicked(lambda _: show_tab("graphene"))
+    btn_wse2.on_clicked(lambda _: show_tab("wse2"))
+
+    # Export button — lives in the tab-button row so it's always reachable
+    ax_btn = fig.add_axes((0.88, 0.93, 0.10, 0.04))
+    btn_export = Button(ax_btn, "Export all")
     export_path = Path("/tmp/hbn_contrast_params.json")
 
     def export(_event=None):
+        r_off = _slider("r_off").val
+        g_off = _slider("g_off").val
+
+        # With lazy per-tab compute, non-active tabs can carry stale cache
+        # entries.  Synchronously refresh any tab whose cached inputs don't
+        # match the current sliders before we dump the file.
+        for tab_name in ("hbn", "graphene", "wse2"):
+            tab_vals = _read_vals(tab_name)
+            key = _compute_key(tab_name, tab_vals)
+            cached_key, _ = cache[tab_name]
+            if key != cached_key:
+                cache[tab_name] = (key, _compute_for_tab(tab_vals, n_wse2_arr))
+
+        def _sample_cal(r_arr, g_arr, t_arr, r_off, g_off):
+            cal = []
+            for t_nm_val in np.arange(2.0, 102.0, 2.0):
+                if t_nm_val > t_arr[-1]:
+                    break
+                r_val = float(np.interp(t_nm_val, t_arr, r_arr))
+                g_val = float(np.interp(t_nm_val, t_arr, g_arr))
+                cal.append([round(r_val + r_off, 4), round(g_val + g_off, 4), t_nm_val])
+            return cal
+
+        # Use cached results where available; recompute tabs whose cache is stale.
+        hbn_res = cache["hbn"][1]
+        gr_res = cache["graphene"][1]
+        wse2_res = cache["wse2"][1]
+
+        hbn_90_cal = _sample_cal(hbn_res.r90, hbn_res.g90, hbn_res.t_hbn, r_off, g_off)
+        graphene_cal = _sample_cal(gr_res.r_gr, gr_res.g_gr, gr_res.t_gr, r_off, g_off)
+        wse2_cal = _sample_cal(wse2_res.r_wse2, wse2_res.g_wse2, wse2_res.t_wse2, r_off, g_off)
+
         params = {
-            "n_hbn": sliders[0].val,
-            "t_oxide_90": sliders[1].val,
-            "t_oxide_285": sliders[2].val,
-            "na": sliders[3].val,
-            "r_offset": sliders[4].val,
-            "g_offset": sliders[5].val,
+            "n_hbn": _slider("n").val,
+            "t_oxide_90": _slider("oxide").val,
+            "t_oxide_285": _slider("oxide_285").val,
+            "t_oxide_wse2": _slider("oxide_wse2").val,
+            "na": _slider("na").val,
+            "r_offset": r_off,
+            "g_offset": g_off,
+            "graphene_n_re": _slider("n").val,
+            "graphene_k": _slider("k").val,
+            "hbn_90_cal_points": hbn_90_cal,
+            "graphene_cal_points": graphene_cal,
+            "wse2_cal_points": wse2_cal,
         }
         export_path.write_text(json.dumps(params, indent=2) + "\n")
-        print(f"Exported to {export_path}:")
-        print(json.dumps(params, indent=2))
+        print(f"Exported to {export_path}:", flush=True)
+        print(json.dumps(params, indent=2), flush=True)
 
-    btn.on_clicked(export)
+    btn_export.on_clicked(export)
 
-    update()  # draw initial RMS values
-    plt.show()
+    show_tab("hbn")
+
+    try:
+        plt.show()
+    finally:
+        with cond:
+            _shutdown[0] = True
+            cond.notify_all()
 
 
 if __name__ == "__main__":
