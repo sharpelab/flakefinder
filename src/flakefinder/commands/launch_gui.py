@@ -171,7 +171,7 @@ class FindFlakesGUI:
         row = ttk.Frame(form_frame)
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="Notes:", width=18, anchor="nw").pack(side="left", anchor="n")
-        self.notes_text = tk.Text(row, height=2, width=40)
+        self.notes_text = tk.Text(row, height=4, width=40)
         self.notes_text.pack(side="left", fill="x", expand=True)
 
         # Preset — dropdown shows human-readable names, maps back to keys
