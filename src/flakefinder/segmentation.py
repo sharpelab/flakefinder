@@ -737,6 +737,58 @@ class DetectorConfig:
         )
 
     @classmethod
+    def graphene_thick_90nm(cls) -> RGPointDetectorConfig:
+        """Graphene thick flake detection on 90nm SiO₂.
+
+        Copy of `graphene_thin_90nm` as a starting point, but uses the
+        2dmatgmm graphene WB (B=1.7 vs hBN-profile B=2.51) so that R/G
+        have more headroom on thick flakes. Cal points and tier gates
+        will be retuned for thicker graphene (5-10 nm range) once contrast
+        pairs are collected at this WB.
+        """
+        return RGPointDetectorConfig(
+            name="Graphene thick",
+            substrate=Substrate.SI_90NM,
+            contrast_mode=ContrastMode.BELOW,
+            contrast_offset=4.0,
+            min_size_um2=400.0,
+            edge_margin_px=50,
+            morph_kernel_size=5,
+            entropy_threshold=0.4,
+            subseg_min_std=0.05,
+            subseg_min_range=0.08,
+            cal_reference_points=(
+                # From scan 154 mean values per layer count
+                CalPointRG(layers=1, r=-0.140, g=-0.147),
+                CalPointRG(layers=2, r=-0.260, g=-0.276),
+                CalPointRG(layers=3, r=-0.378, g=-0.393),
+                CalPointRG(layers=4, r=-0.478, g=-0.491),
+                CalPointRG(layers=5, r=-0.570, g=-0.579),
+            ),
+            layer_spacing_nm=0.335,
+            cal_dist_match=0.08,
+            cal_dist_possible=0.15,
+            non_match_label="non-graphene",
+            white_balance=GainRGB(red=1.4, green=1.0, blue=1.7),
+            score_fn=_score_graphene,
+            tier1_perim_ratio=1.50,
+            tier1_cal_dist=0.06,
+            tier1_g_min=-99.0,
+            tier1_g_max=0.0,
+            tier1_r_max=-0.05,
+            tier1_entropy_max=3.7,
+            tier1_min_size_um2=350.0,
+            tier1_br_ratio_max=1.0,
+            tier1_aspect_ratio=7.0,
+            tier1_solidity_min=0.2,
+            tier1_circularity_min=0.1,
+            tier1_grad_energy_max=99.0,
+            tier2_perim_ratio=1.50,
+            tier2_cal_dist=0.15,
+            tier2_entropy_max=4.65,
+        )
+
+    @classmethod
     def wse2_monolayer_285nm(cls) -> PointDetectorConfig:
         """WSe₂ monolayer detection preset on 285nm SiO₂.
 
@@ -769,6 +821,7 @@ class DetectorConfig:
             "hbn_thick_90nm": cls.hbn_thick_90nm,
             "hbn_medium_285nm": cls.hbn_medium_285nm,
             "graphene_thin_90nm": cls.graphene_thin_90nm,
+            "graphene_thick_90nm": cls.graphene_thick_90nm,
             "wse2_monolayer_285nm": cls.wse2_monolayer_285nm,
             "wse2_monolayer_300nm": cls.wse2_monolayer_300nm,
         }
