@@ -160,7 +160,7 @@ PRESETS: dict[str, ScanPreset] = {
         "overview_mag": "2.5x",
         "chip_scan_mag": "10x",
         "chip_scan_speed_mm": 10.0,
-        "chip_scan_gain": 2.0,
+        "chip_scan_gain": 4.0,
         "chip_scan_exposure_ms": 0.25,
         "focus_map_gain": 1.0,
         "focus_map_exposure_ms": 1.0,
