@@ -33,12 +33,20 @@ from hbn_contrast import (
     _SI_DATA,
     _SIO2_DATA,
     _WSE2_LAYER_THICKNESS_NM,
+    _blackbody,
     _interp_index,
     _na_gauss_legendre,
     n_wse2,
 )
 
 lamb = _IMX183_WAVELENGTHS
+
+# Halogen illuminant — matches the AFM-referenced hBN cal points (3200 K).
+# The Leica's actual lamp is an LED with a different spectrum; swap this when
+# the LED spectrum is measured.
+_ILLUM_3200 = _blackbody(_IMX183_WAVELENGTHS, 3200.0)
+_IMX183_RED_LIT = _IMX183_RED * _ILLUM_3200
+_IMX183_GREEN_LIT = _IMX183_GREEN * _ILLUM_3200
 n_sio2 = _interp_index(lamb, _SIO2_DATA)
 n_si = _interp_index(lamb, _SI_DATA)
 
@@ -125,10 +133,10 @@ def compute_rg(
     R_flake /= total_w
     R_sub /= total_w
 
-    V_sub_r = np.trapezoid(R_sub * _IMX183_RED, lamb)
-    V_sub_g = np.trapezoid(R_sub * _IMX183_GREEN, lamb)
-    V_flake_r = np.trapezoid(R_flake * _IMX183_RED[None, :], lamb, axis=1)
-    V_flake_g = np.trapezoid(R_flake * _IMX183_GREEN[None, :], lamb, axis=1)
+    V_sub_r = np.trapezoid(R_sub * _IMX183_RED_LIT, lamb)
+    V_sub_g = np.trapezoid(R_sub * _IMX183_GREEN_LIT, lamb)
+    V_flake_r = np.trapezoid(R_flake * _IMX183_RED_LIT[None, :], lamb, axis=1)
+    V_flake_g = np.trapezoid(R_flake * _IMX183_GREEN_LIT[None, :], lamb, axis=1)
 
     return (
         (V_flake_r - V_sub_r) / V_sub_r,
