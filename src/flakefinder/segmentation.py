@@ -355,7 +355,7 @@ def _score_graphene(config: DetectorConfig, det: Detection) -> tuple[int, float]
     t1_color = (
         cd < config.tier1_cal_dist
         and r < config.tier1_r_max
-        and r > -0.6
+        and r > config.tier1_r_min
         and g < config.tier1_g_max
         and br_ratio < config.tier1_br_ratio_max
         and ent < config.tier1_entropy_max
@@ -520,6 +520,12 @@ class DetectorConfig:
     tier2_perim_ratio: float
     tier2_cal_dist: float
     tier2_entropy_max: float
+    # Lower-bound R contrast for tier 1 (graphene scoring). Default -0.6 matches
+    # the historical hardcoded value tuned for thin graphene where R below this
+    # implies sensor floor / clipping. Thick-graphene presets should set this
+    # well below -0.85 so genuinely thick flakes can reach tier 1.
+    # kw_only so the default doesn't collide with required fields on subclasses.
+    tier1_r_min: float = field(default=-0.6, kw_only=True)
 
     def cal_projection(self, r: float, g: float, b: float) -> CalProjection:
         """Project a contrast triple onto this config's calibration data."""
@@ -740,11 +746,11 @@ class DetectorConfig:
     def graphene_thick_90nm(cls) -> RGPointDetectorConfig:
         """Graphene thick flake detection on 90nm SiO₂.
 
-        Copy of `graphene_thin_90nm` as a starting point, but uses the
-        2dmatgmm graphene WB (B=1.7 vs hBN-profile B=2.51) so that R/G
-        have more headroom on thick flakes. Cal points and tier gates
-        will be retuned for thicker graphene (5-10 nm range) once contrast
-        pairs are collected at this WB.
+        Single anchor cal point at (R=-0.852, G=-0.719) measured 2026-04-24
+        on a candidate thick flake from run_20260424_1441 (gain=4 preset,
+        WB R=1.4/G=1.0/B=1.7). The ``layers=20`` value is a placeholder —
+        actual thickness pending AFM measurement. cal_dist is moderate so
+        nearby thicknesses get classified together for follow-up imaging.
         """
         return RGPointDetectorConfig(
             name="Graphene thick",
@@ -758,16 +764,12 @@ class DetectorConfig:
             subseg_min_std=0.05,
             subseg_min_range=0.08,
             cal_reference_points=(
-                # From scan 154 mean values per layer count
-                CalPointRG(layers=1, r=-0.140, g=-0.147),
-                CalPointRG(layers=2, r=-0.260, g=-0.276),
-                CalPointRG(layers=3, r=-0.378, g=-0.393),
-                CalPointRG(layers=4, r=-0.478, g=-0.491),
-                CalPointRG(layers=5, r=-0.570, g=-0.579),
+                # Placeholder: single thick anchor pending AFM, 2026-04-24
+                CalPointRG(layers=20, r=-0.852, g=-0.719),
             ),
             layer_spacing_nm=0.335,
-            cal_dist_match=0.08,
-            cal_dist_possible=0.15,
+            cal_dist_match=0.15,
+            cal_dist_possible=0.25,
             non_match_label="non-graphene",
             white_balance=GainRGB(red=1.4, green=1.0, blue=1.7),
             score_fn=_score_graphene,
@@ -776,6 +778,7 @@ class DetectorConfig:
             tier1_g_min=-99.0,
             tier1_g_max=0.0,
             tier1_r_max=-0.05,
+            tier1_r_min=-2.0,  # effectively no lower bound — thick R hits ~-0.85
             tier1_entropy_max=3.7,
             tier1_min_size_um2=350.0,
             tier1_br_ratio_max=1.0,
