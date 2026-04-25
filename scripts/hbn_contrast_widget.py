@@ -12,6 +12,7 @@ import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -221,14 +222,17 @@ class _Vals:
 _EMPTY_ARR = np.zeros(0, dtype=float)
 
 
-@dataclass
-class _TabResult:
+class _TabResult(NamedTuple):
     """Compute output for a single tab.
 
     Only the fields relevant to the tab that produced the result are
     populated; the rest stay as empty arrays.  Keeping them all as
     ``np.ndarray`` (rather than Optional) lets the drawing code pass them
     straight to matplotlib without narrowing dances.
+
+    NamedTuple (not dataclass) because numpy-array defaults trip Python
+    3.11+'s "unhashable default = mutable" check on dataclasses; NamedTuple
+    has no such check and the shared default is safe since we never mutate.
     """
 
     # hBN tab has two panels' worth of data
