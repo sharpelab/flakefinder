@@ -52,7 +52,7 @@ FC_DEFAULTS: dict[int, FCDefaults] = {
     1: FCDefaults(z_range_um=100, z_speed_um_s=500, exposure_ms=1, gain=1.0),  # 5x
     2: FCDefaults(z_range_um=50, z_speed_um_s=250, exposure_ms=1, gain=1.0),  # 10x
     3: FCDefaults(z_range_um=40, z_speed_um_s=75, exposure_ms=1, gain=1.0),  # 20x
-    4: FCDefaults(z_range_um=30, z_speed_um_s=25, exposure_ms=2, gain=1.0),  # 50x
+    4: FCDefaults(z_range_um=30, z_speed_um_s=25, exposure_ms=2, gain=1.5),  # 50x
 }
 
 
