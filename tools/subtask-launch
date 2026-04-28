@@ -57,5 +57,8 @@ mkdir -p "${REPO_DIR}/.worktrees"
 git -C "${REPO_DIR}" worktree add "${worktree}" -b "${branch}" HEAD
 echo "Worktree: ${worktree} (branch: ${branch})"
 
-# Launch subtask
-newclaude "${worktree}" --agent subtask_agent "${passthrough[@]}"
+# Launch subtask. Disable Task* tools so the periodic task-tools system
+# reminder doesn't burn tokens every turn — subtasks rarely need TODO tracking.
+newclaude "${worktree}" --agent subtask_agent \
+    --env CLAUDE_CODE_ENABLE_TASKS=false \
+    "${passthrough[@]}"
