@@ -746,11 +746,14 @@ class DetectorConfig:
     def graphene_thick_90nm(cls) -> RGPointDetectorConfig:
         """Graphene thick flake detection on 90nm SiO₂.
 
-        Single anchor cal point at (R=-0.852, G=-0.719) measured 2026-04-24
-        on a candidate thick flake from run_20260424_1441 (gain=4 preset,
-        WB R=1.4/G=1.0/B=1.7). The ``layers=20`` value is a placeholder —
-        actual thickness pending AFM measurement. cal_dist is moderate so
-        nearby thicknesses get classified together for follow-up imaging.
+        Single anchor cal point at (R=-1.000, G=-0.672) from a 6.5 nm
+        AFM-measured flake (hex flake=#001448, bg=#393d51), measured
+        2026-04-28. ``layers=19`` is the integer rounding of 6.5/0.335;
+        true thickness is the AFM 6.5 nm. R is at the sensor floor on
+        this flake — the cal point describes the saturated-R regime, so
+        any thicker flake will land at the same anchor. cal_dist is
+        moderate so nearby thicknesses get classified together for
+        follow-up imaging.
         """
         return RGPointDetectorConfig(
             name="Graphene thick",
@@ -764,8 +767,8 @@ class DetectorConfig:
             subseg_min_std=0.05,
             subseg_min_range=0.08,
             cal_reference_points=(
-                # Placeholder: single thick anchor pending AFM, 2026-04-24
-                CalPointRG(layers=20, r=-0.852, g=-0.719),
+                # 6.5 nm AFM, 2026-04-28; R at sensor floor
+                CalPointRG(layers=19, r=-1.000, g=-0.672),
             ),
             layer_spacing_nm=0.335,
             cal_dist_match=0.15,
