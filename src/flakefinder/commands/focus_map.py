@@ -588,6 +588,7 @@ def run(
             )
 
     # Resolve reference Z
+    centroid_af_record: dict | None = None
     if z is not None:
         reference_z_um = z
     else:
@@ -606,6 +607,7 @@ def run(
             print(f"\nNo --z provided, autofocusing at centroid ({cx_mm:.2f}, {cy_mm:.2f}) mm...")
         hx, hy = scope.stage.move_to_async(cx, cy)
         wait_all([hx, hy])
+        z_before_af_um = scope.z.position_um
         centroid_af = continuous_autofocus(
             scope,
             af_defaults=centroid_af_defs,
@@ -613,6 +615,11 @@ def run(
         )
         reference_z_um = centroid_af.selected_z_um
         sharpness = centroid_af.selected_sharpness
+        centroid_af_record = {
+            "target_xy_um": [cx, cy],
+            "z_initial_um": z_before_af_um,
+            **centroid_af.to_dict(),
+        }
         if not quiet:
             print(f"  Centroid AF: Z={reference_z_um:.1f} µm, sharpness={sharpness:.1f}")
 
@@ -673,6 +680,7 @@ def run(
             "save_best_image": save_best_image,
             "debug_dir": str(debug_dir) if debug_dir else None,
         },
+        "centroid_af": centroid_af_record,
         "sample_points": [s.to_dict() for s in sample_results],
     }
 
