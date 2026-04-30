@@ -241,6 +241,7 @@ class _Vals:
 
     tab: str
     n: float
+    n_gr: float
     k: float
     oxide: float
     oxide_285: float
@@ -291,7 +292,7 @@ def _compute_for_tab(vals: _Vals, n_wse2_arr: np.ndarray) -> _TabResult:
         r285, g285, _ = compute_rg(hbn_n, vals.oxide_285, vals.na, max_layers=HBN_MAX_LAYERS)
         return _TabResult(r90=r90, g90=g90, t_hbn=t_hbn, r285=r285, g285=g285)
     if vals.tab == "graphene":
-        gr_n = vals.n - 1j * vals.k
+        gr_n = vals.n_gr - 1j * vals.k
         rg, gg, tg = compute_rg(
             gr_n,
             vals.oxide,
@@ -317,7 +318,11 @@ def main():
 
     init = {
         "n": 2.152,
-        "k": 1.0,
+        # Graphite/graphene constant-n approximation (Bruna & Borini APL 2009,
+        # Blake et al. APL 2007).  Real graphite is dispersive — n drops ~0.4
+        # from 700→400 nm — so single (n,k) is a fit compromise across visible.
+        "n_gr": 2.65,
+        "k": 1.30,
         "oxide": 89.46,
         "oxide_285": 285.0,
         "oxide_wse2": 300.0,
@@ -341,6 +346,7 @@ def main():
         return _Vals(
             tab=tab,
             n=init["n"],
+            n_gr=init["n_gr"],
             k=init["k"],
             oxide=init["oxide"],
             oxide_285=init["oxide_285"],
@@ -454,7 +460,7 @@ def main():
     _setup_panel(ax_gr, "Graphene · 90 nm SiO₂")
     # Tighter range than the default — graphene/graphite contrast tops out near unity.
     ax_gr.set_xlim(-1, 3)
-    ax_gr.set_ylim(-1.5, 3)
+    ax_gr.set_ylim(-1.5, 2)
     (line_gr,) = ax_gr.plot(g_gr, r_gr, "k-", lw=1.5, label="Theory")
     ann_gr, dots_gr = _make_annotations(ax_gr, _GRAPHENE_LAYER_THICKNESS_NM, GRAPHENE_MAX_LAYERS)
 
@@ -591,6 +597,7 @@ def main():
     # --- All sliders (created upfront, visibility toggled per tab) ---
     slider_defs = {
         "n": ("n (real)", 1.4, 3.0, init["n"]),
+        "n_gr": ("n (real, gr)", 1.4, 3.0, init["n_gr"]),
         "k": ("k (imag)", 0.0, 4.0, init["k"]),
         "oxide": ("t_oxide (nm)", 70, 120, init["oxide"]),
         "oxide_285": ("t_285 (nm)", 250, 310, init["oxide_285"]),
@@ -605,7 +612,7 @@ def main():
     # Which sliders each tab uses
     tab_sliders = {
         "hbn": ["n", "oxide", "oxide_285", "na", "r_off", "g_off"],
-        "graphene": ["n", "k", "oxide", "na", "r_off_gr", "g_off_gr"],
+        "graphene": ["n_gr", "k", "oxide", "na", "r_off_gr", "g_off_gr"],
         "wse2": ["oxide_wse2", "na", "r_off", "g_off"],
     }
 
@@ -625,6 +632,7 @@ def main():
         return _Vals(
             tab=tab,
             n=_slider("n").val,
+            n_gr=_slider("n_gr").val,
             k=_slider("k").val,
             oxide=_slider("oxide").val,
             oxide_285=_slider("oxide_285").val,
@@ -649,7 +657,7 @@ def main():
             init_hbn,
         ),
         "graphene": (
-            (init["n"], init["k"], init["oxide"], init["na"]),
+            (init["n_gr"], init["k"], init["oxide"], init["na"]),
             init_gr,
         ),
         "wse2": (
@@ -662,7 +670,7 @@ def main():
         if tab == "hbn":
             return (vals.n, vals.oxide, vals.oxide_285, vals.na)
         if tab == "graphene":
-            return (vals.n, vals.k, vals.oxide, vals.na)
+            return (vals.n_gr, vals.k, vals.oxide, vals.na)
         return (vals.oxide_wse2, vals.na)
 
     # --- Background worker plumbing ---
@@ -961,7 +969,7 @@ def main():
             "na": _slider("na").val,
             "r_offset": r_off,
             "g_offset": g_off,
-            "graphene_n_re": _slider("n").val,
+            "graphene_n_re": _slider("n_gr").val,
             "graphene_k": _slider("k").val,
             "graphene_r_offset": r_off_gr,
             "graphene_g_offset": g_off_gr,
