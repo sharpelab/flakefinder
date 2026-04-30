@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.13"
 
 [[package]]
@@ -201,6 +201,7 @@ dev = [
     { name = "matplotlib" },
     { name = "pytest" },
     { name = "ruff" },
+    { name = "tmm" },
     { name = "ty" },
 ]
 gui = [
@@ -223,6 +224,7 @@ dev = [
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "pytest", specifier = ">=7.0.0" },
     { name = "ruff", specifier = ">=0.1.0" },
+    { name = "tmm", specifier = ">=0.2.0" },
     { name = "ty", specifier = ">=0.0.1a0" },
 ]
 gui = [{ name = "pyside6-essentials", specifier = ">=6.7.0" }]
@@ -730,6 +732,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "tmm"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/92/7c/6ba055c61c04cf5b1b73cb91407c220b0f1712e3bad4f14edf4a4f9af9b4/tmm-0.2.0.tar.gz", hash = "sha256:2982683aab12b5bb1ee9910a44d7c6421885ab581d22bebb615351dd70cb8ced", size = 285450, upload-time = "2024-11-26T18:53:54.412Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/64/1c/bd81a37ff4db724957159e3d4badaa1c639e7f6465d541e307bc3fac669e/tmm-0.2.0-py3-none-any.whl", hash = "sha256:f0cde811e0785b2c13887e8d12a4d089d028d3b19c67ae280f97587ad557f724", size = 285393, upload-time = "2024-11-26T18:53:52.851Z" },
 ]
 
 [[package]]

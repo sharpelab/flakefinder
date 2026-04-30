@@ -123,6 +123,67 @@ def _check_widget_matches_cli() -> None:
     assert err_g < 1e-6, f"widget G contrast err {err_g:.3e}"
 
 
+def _check_against_tmm() -> None:
+    """Cross-check our R(λ, θ) against the `tmm` package across a panel of cases.
+
+    `tmm.coh_tmm` is an independently-maintained reference implementation
+    that is the de-facto standard in optics literature.  Two convention
+    notes:
+
+    1. tmm uses ``n + i·k`` for absorbing media (positive imag = absorbing);
+       our code uses ``n - i·k``.  Pass ``np.conj(n)`` when crossing over.
+    2. tmm wants ``[inf, …, inf]`` thicknesses for the semi-infinite cap
+       layers; we feed in finite SiO₂ + the air/Si caps.
+    """
+    import tmm
+
+    cases = [
+        # (label, n_film, t_film, t_oxide, lam, theta, pol)
+        ("transparent normal", complex(2.10, 0.0), 10.0, 90.0, 550.0, 0.0, "s"),
+        ("transparent oblique-s", complex(2.10, 0.0), 20.0, 285.0, 632.8, 0.30, "s"),
+        ("transparent oblique-p", complex(2.10, 0.0), 20.0, 285.0, 632.8, 0.30, "p"),
+        ("absorbing normal", complex(2.6, -1.3), 10.0, 90.0, 550.0, 0.0, "s"),
+        ("absorbing thick", complex(2.6, -1.3), 30.0, 90.0, 633.0, 0.0, "s"),
+        ("strongly abs normal", complex(3.0, -2.5), 15.0, 90.0, 500.0, 0.0, "s"),
+        ("absorbing oblique-s", complex(2.6, -1.3), 12.0, 90.0, 600.0, 0.40, "s"),
+        ("absorbing oblique-p", complex(2.6, -1.3), 12.0, 90.0, 600.0, 0.40, "p"),
+        ("very thick absorber", complex(2.6, -1.3), 500.0, 90.0, 550.0, 0.0, "s"),  # round-trip ≈ 0
+        ("graphite-ish at 6.4nm", complex(2.6, -1.3), 6.4, 89.46, 550.0, 0.0, "s"),
+        ("graphite-ish at 13.7nm", complex(2.6, -1.3), 13.7, 90.0, 700.0, 0.0, "s"),
+    ]
+
+    for label, n_film, t_film, t_oxide, lam_nm, theta, pol in cases:
+        # Our path — single-wavelength array.
+        lamb = np.array([lam_nm])
+        n2 = complex(_interp_index(lamb, _SIO2_DATA)[0])
+        n3 = complex(_interp_index(lamb, _SI_DATA)[0])
+
+        def n_fn(_lam: np.ndarray, _nf: complex = n_film) -> np.ndarray:
+            return np.full_like(_lam, _nf, dtype=np.complex128)
+
+        R_ours = _reflectance_at_angle(
+            lamb,
+            n_fn,
+            n_layers=1,
+            t_oxide_nm=t_oxide,
+            theta0=theta,
+            pol=pol,
+            layer_thickness_nm=t_film,
+        )[0]
+
+        # tmm path — flip imag sign to match its n+ik convention.
+        n_list = [1.0, np.conj(n_film), np.conj(n2), np.conj(n3)]
+        d_list = [np.inf, t_film, t_oxide, np.inf]
+        R_tmm = tmm.coh_tmm(pol, n_list, d_list, theta, lam_nm)["R"]
+
+        err = float(abs(R_ours - R_tmm))
+        status = "OK" if err < 1e-12 else "FAIL"
+        print(
+            f"  [{status}] {label:24s} pol={pol} θ={theta:.2f}  R_ours={R_ours:.6f}  R_tmm={R_tmm:.6f}  err={err:.2e}"
+        )
+        assert err < 1e-12, f"{label}: |R_ours - R_tmm| = {err:.3e} > 1e-12"
+
+
 def main() -> int:
     print("CLI _reflectance_at_angle vs exact closed-form R(λ):")
     # Transparent baseline (k=0): the conj trick used to be correct here, so
@@ -137,6 +198,9 @@ def main() -> int:
 
     print("\nWidget compute_rg vs closed-form-derived contrast:")
     _check_widget_matches_cli()
+
+    print("\nCLI _reflectance_at_angle vs `tmm` package (oblique + s/p included):")
+    _check_against_tmm()
 
     print("\nAll regression checks passed.")
     return 0
