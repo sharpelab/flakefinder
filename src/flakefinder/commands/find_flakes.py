@@ -17,9 +17,6 @@ Calls command modules in-process with a shared Microscope connection.
 If any step fails, prints what completed and exits. Output goes under
 a single timestamped run directory.
 
-Supports checkpointing: re-running with the same -o directory resumes
-from where the previous run left off.
-
 Usage:
     # Full pipeline with default preset (5x overview + 20x chip scan)
     uv run python find_flakes.py
@@ -29,9 +26,6 @@ Usage:
 
     # Only process chips 0 and 2
     uv run python find_flakes.py --chips 0,2
-
-    # Resume a previous run (config loaded from checkpoint)
-    uv run python find_flakes.py --resume scans/run_20260208_1430
 
     # Disable background segmentation
     uv run python find_flakes.py --no-segment
@@ -169,53 +163,19 @@ PRESETS: dict[str, ScanPreset] = {
 
 DEFAULT_PRESET = "2.5_10"
 
-# Config flags that --resume forbids (must come from checkpoint instead)
-_RESUME_FORBIDDEN_FLAGS = frozenset(
-    {
-        "--preset",
-        "--overview-mag",
-        "--chip-scan-mag",
-        "--scan-speed",
-        "--chip-scan-gain",
-        "--chip-scan-exposure-ms",
-        "--area-rect",
-        "--initial-z",
-        "--white-balance",
-        "--operator",
-        "--name",
-        "--notes",
-    }
-)
 
+def _write_run_meta(run_dir: Path, meta: dict) -> None:
+    """Write run metadata to run_dir/checkpoint.json (atomic via temp file).
 
-def load_checkpoint(run_dir):
-    """Load checkpoint from run directory, or return empty checkpoint."""
-    path = run_dir / "checkpoint.json"
-    if path.exists():
-        with open(path) as f:
-            return json.load(f)
-    return {"completed_steps": [], "step_timing": {}, "n_chips": None, "chip_indices": None}
-
-
-def save_checkpoint(run_dir, checkpoint):
-    """Write checkpoint to run directory (atomic via temp file)."""
+    The on-disk filename is `checkpoint.json` for compatibility with
+    `upload.py` and `run_viewer.py`, which read `operator`, `name`,
+    `notes`, `args`, `n_chips`, and `step_timing` from it.
+    """
     path = run_dir / "checkpoint.json"
     tmp = path.with_suffix(".tmp")
     with open(tmp, "w") as f:
-        json.dump(checkpoint, f, indent=2)
+        json.dump(meta, f, indent=2)
     tmp.replace(path)
-
-
-def step_done(checkpoint, step_key):
-    """Check if a step is already checkpointed."""
-    return step_key in checkpoint["completed_steps"]
-
-
-def mark_step(run_dir, checkpoint, step_key, duration=0):
-    """Mark a step as complete, record its timing, and persist."""
-    checkpoint["completed_steps"].append(step_key)
-    checkpoint["step_timing"][step_key] = duration
-    save_checkpoint(run_dir, checkpoint)
 
 
 def run_in_process(name, fn, *, dry_run=False, pause=False, quiet=False):
@@ -480,27 +440,16 @@ Examples:
   # Preview all commands
   uv run python find_flakes.py --dry-run
 
-  # Resume a previous run (config from checkpoint)
-  uv run python find_flakes.py --resume scans/run_20260208_1430
-
   # Process chips after chip 3, limit to 2
   uv run python find_flakes.py --after 3 --limit 2
 """,
     )
-    run_group = parser.add_mutually_exclusive_group()
-    run_group.add_argument(
+    parser.add_argument(
         "-o",
         "--output",
         type=str,
         default=None,
         help="Run directory for new run (default: scans/run_YYYYMMDD_HHMM/)",
-    )
-    run_group.add_argument(
-        "--resume",
-        type=str,
-        metavar="DIR",
-        default=None,
-        help="Resume a previous run (loads all config from checkpoint)",
     )
     parser.add_argument(
         "--preset",
@@ -581,19 +530,19 @@ Examples:
         "--operator",
         type=str,
         default=None,
-        help="Operator name (who is running the scan). Required for new runs.",
+        help="Operator name (who is running the scan). Required.",
     )
     parser.add_argument(
         "--name",
         type=str,
         default=None,
-        help="Scan name / description (e.g. 'SF119 A-H'). Required for new runs.",
+        help="Scan name / description (e.g. 'SF119 A-H'). Required.",
     )
     parser.add_argument(
         "--notes",
         type=str,
         default=None,
-        help="Optional free-text notes stored in checkpoint.json",
+        help="Optional free-text notes stored with the run metadata",
     )
     parser.add_argument(
         "--dry-run",
@@ -813,7 +762,6 @@ class _SegJob:
     """Tracks one chip's segmentation work."""
 
     chip_idx: int
-    seg_key: str  # checkpoint key
     scan_dir: Path  # chip scan directory (frame_NNNN.jpg)
     seg_dir: Path  # segmentation output directory
     plane_path: Path | None  # focus plane JSON for revisit Z computation
@@ -1046,10 +994,11 @@ def _on_seg_done(future: Future, chip_idx: int) -> None:
 
 def _drain_seg(
     seg_futures: list[tuple[_SegJob, Future]],
-    checkpoint: dict,
+    step_timing: dict[str, float],
     run_dir: Path,
+    run_meta: dict,
 ) -> float:
-    """Wait for all seg futures, checkpoint completions.
+    """Wait for all seg futures, recording timings.
 
     Returns total segmentation wall-clock time across all chips.
     """
@@ -1059,7 +1008,8 @@ def _drain_seg(
             result = future.result()
             total_seg_time += result.duration
             if result.success:
-                mark_step(run_dir, checkpoint, job.seg_key, result.duration)
+                step_timing[f"chip_{job.chip_idx}_segment"] = result.duration
+                _write_run_meta(run_dir, run_meta)
         except Exception:
             pass  # callback already logged
     return total_seg_time
@@ -1071,7 +1021,8 @@ def _run_revisit_phase(
     seg: SegConfig,
     chip_indices: list[int],
     run_dir: Path,
-    checkpoint: dict,
+    step_timing: dict[str, float],
+    run_meta: dict,
     p: _Preflight,
 ) -> tuple[float, float]:
     """Drain seg and run revisit captures, overlapping where possible.
@@ -1089,20 +1040,21 @@ def _run_revisit_phase(
 
     total_seg_time = 0.0
     total_revisit_time = 0.0
+    seg_done: set[int] = set()
 
     def _wait_for_seg(chip_idx: int) -> None:
-        """Block until chip's seg is done, checkpoint if successful."""
+        """Block until chip's seg is done, record timing if successful."""
         nonlocal total_seg_time
-        if chip_idx not in job_by_chip:
+        if chip_idx not in job_by_chip or chip_idx in seg_done:
             return
         job, future = job_by_chip[chip_idx]
-        if step_done(checkpoint, job.seg_key):
-            return
+        seg_done.add(chip_idx)
         try:
             result = future.result()
             total_seg_time += result.duration
             if result.success:
-                mark_step(run_dir, checkpoint, job.seg_key, result.duration)
+                step_timing[f"chip_{job.chip_idx}_segment"] = result.duration
+                _write_run_meta(run_dir, run_meta)
         except Exception:
             pass  # _on_seg_done callback already logged
 
@@ -1110,20 +1062,10 @@ def _run_revisit_phase(
     for mag in seg.revisit_mags:
         mag_label = f"{mag:g}x"
 
-        # Which chips need revisit at this mag?
-        chips_for_mag = []
-        for ci in chip_indices:
-            key = f"chip_{ci}_revisit_{mag_label}"
-            if not step_done(checkpoint, key):
-                chips_for_mag.append((ci, key))
-
-        if not chips_for_mag:
-            continue
-
         with _always_console():
-            print(f"\n[revisit] {mag_label}: {len(chips_for_mag)} chip(s)")
+            print(f"\n[revisit] {mag_label}: {len(chip_indices)} chip(s)")
 
-        for ci, key in chips_for_mag:
+        for ci in chip_indices:
             # Wait for seg to finish for this chip
             _wait_for_seg(ci)
 
@@ -1132,10 +1074,12 @@ def _run_revisit_phase(
             revisit_json = chip_dir / "seg" / f"revisit_{mag_label}.json"
             output_dir = chip_dir / f"revisit_{mag_label}"
 
+            key = f"chip_{ci}_revisit_{mag_label}"
             if not revisit_json.exists():
                 with _always_console():
                     print(f"[revisit chip {ci}] No {mag_label} detections, skipping")
-                mark_step(run_dir, checkpoint, key, 0)
+                step_timing[key] = 0
+                _write_run_meta(run_dir, run_meta)
                 continue
 
             revisit_file = revisit._parse_points_file(revisit_json)
@@ -1155,7 +1099,8 @@ def _run_revisit_phase(
             with _always_console():
                 print(f"[revisit chip {ci}] {mag_label}: {n_pts} pts, {_format_duration_compact(duration)}")
 
-            mark_step(run_dir, checkpoint, key, duration)
+            step_timing[key] = duration
+            _write_run_meta(run_dir, run_meta)
             total_revisit_time += duration
 
     # Drain any remaining seg futures (chips not involved in revisit)
@@ -1176,26 +1121,50 @@ def run(scope: Microscope, p: _Preflight) -> int:
     args = p.args
     quiet = args.quiet
     run_dir = p.run_dir
-    checkpoint = load_checkpoint(run_dir)
 
     with _always_console():
         print(f"[run] {run_dir}/")
 
-    checkpoint["operator"] = args.operator or checkpoint.get("operator", "")
-    checkpoint["name"] = args.name or checkpoint.get("name", "")
-    notes = args.notes or checkpoint.get("notes")
-    if notes:
-        checkpoint["notes"] = notes
+    step_timing: dict[str, float] = {}
+    run_meta: dict = {
+        "operator": args.operator,
+        "name": args.name,
+        "step_timing": step_timing,
+        "n_chips": None,
+        "args": {
+            "git_version": get_git_version(),
+            "preset": p.preset_name,
+            "area_rect": args.area_rect,
+            "initial_z": args.initial_z,
+            "overview_mag": p.overview_mag,
+            "chip_scan_mag": p.chip_scan_mag,
+            "scan_speed": p.scan_speed,
+            "chip_scan_gain": p.chip_scan_gain,
+            "chip_scan_exposure_ms": p.chip_scan_exposure_ms,
+            "focus_map_gain": p.focus_map_gain,
+            "focus_map_exposure_ms": p.focus_map_exposure_ms,
+            "white_balance": f"{p.wb.blue},{p.wb.green},{p.wb.red}",
+            "chips": args.chips,
+            "after": args.after,
+            "limit": args.limit,
+            "seg_jobs": p.seg.jobs,
+            "material": p.seg.material,
+            "flatfield": str(p.seg.flatfield) if p.seg.flatfield else None,
+        },
+    }
+    if args.notes:
+        run_meta["notes"] = args.notes
 
-    print(f"Operator:      {checkpoint['operator']}")
-    print(f"Scan name:     {checkpoint['name']}")
-    if notes:
-        print(f"Notes:         {notes}")
+    print(f"Operator:      {args.operator}")
+    print(f"Scan name:     {args.name}")
+    if args.notes:
+        print(f"Notes:         {args.notes}")
 
-    if checkpoint["completed_steps"]:
-        print(f"\nResuming from checkpoint ({len(checkpoint['completed_steps'])} steps complete)")
-        for s in checkpoint["completed_steps"]:
-            print(f"  [checkpoint] {s}")
+    _write_run_meta(run_dir, run_meta)
+
+    def _record(key: str, duration: float) -> None:
+        step_timing[key] = duration
+        _write_run_meta(run_dir, run_meta)
 
     # Background segmentation executor (max 1 concurrent seg job)
     seg_executor: ThreadPoolExecutor | None = None
@@ -1208,26 +1177,23 @@ def run(scope: Microscope, p: _Preflight) -> int:
     # ----------------------------------------------------------------
     # Step 1: Overview scan
     # ----------------------------------------------------------------
-    if step_done(checkpoint, "overview_scan"):
-        print(f"\n  [checkpoint] Skipping {p.overview_mag} Overview Scan (already complete)")
-    else:
-        duration, _ = run_in_process(
-            f"{p.overview_mag} Overview Scan",
-            lambda: scan.run(
-                scope=scope,
-                output=str(p.overview_dir),
-                objective_mag=p.overview_mag,
-                initial_z=args.initial_z,
-                area_rect=p.area,
-                downsample=4,
-                white_balance=p.wb,
-                clean=True,
-                quiet=quiet,
-            ),
-            pause=args.pause,
+    duration, _ = run_in_process(
+        f"{p.overview_mag} Overview Scan",
+        lambda: scan.run(
+            scope=scope,
+            output=str(p.overview_dir),
+            objective_mag=p.overview_mag,
+            initial_z=args.initial_z,
+            area_rect=p.area,
+            downsample=4,
+            white_balance=p.wb,
+            clean=True,
             quiet=quiet,
-        )
-        mark_step(run_dir, checkpoint, "overview_scan", duration)
+        ),
+        pause=args.pause,
+        quiet=quiet,
+    )
+    _record("overview_scan", duration)
 
     with _always_console():
         meta_path = p.overview_dir / "scan_meta.json"
@@ -1236,22 +1202,18 @@ def run(scope: Microscope, p: _Preflight) -> int:
                 scan_meta = json.load(f)
             frames = scan_meta.get("frame_count", "?")
             rows = len(scan_meta.get("lines", []))
-            dur = checkpoint["step_timing"].get("overview_scan", 0)
-            print(f"[overview] {frames} frames, {rows} rows, {_format_duration_compact(dur)}")
+            print(f"[overview] {frames} frames, {rows} rows, {_format_duration_compact(duration)}")
 
     # ----------------------------------------------------------------
     # Step 2: Stitch overview
     # ----------------------------------------------------------------
-    if step_done(checkpoint, "stitch"):
-        print("\n  [checkpoint] Skipping Stitch Overview (already complete)")
-    else:
-        duration, _ = run_in_process(
-            "Stitch Overview",
-            lambda: stitch.run(scan_dir=p.overview_dir, quiet=True),
-            pause=args.pause,
-            quiet=quiet,
-        )
-        mark_step(run_dir, checkpoint, "stitch", duration)
+    duration, _ = run_in_process(
+        "Stitch Overview",
+        lambda: stitch.run(scan_dir=p.overview_dir, quiet=True),
+        pause=args.pause,
+        quiet=quiet,
+    )
+    _record("stitch", duration)
 
     with _always_console():
         stitch_meta_path = p.stitch_path.with_name(p.stitch_path.stem + "_meta.json")
@@ -1264,19 +1226,15 @@ def run(scope: Microscope, p: _Preflight) -> int:
     # ----------------------------------------------------------------
     # Step 3: Detect chips
     # ----------------------------------------------------------------
-    if step_done(checkpoint, "detect_chips"):
-        print("\n  [checkpoint] Skipping Detect Chips (already complete)")
-    else:
-        duration, result = run_in_process(
-            "Detect Chips",
-            lambda: find_chips.run(image_path=p.stitch_path),
-            pause=args.pause,
-            quiet=quiet,
-        )
-        n_chips = len(result.get("chips", []))
-        checkpoint["n_chips"] = n_chips
-        checkpoint["chip_indices"] = list(range(n_chips))
-        mark_step(run_dir, checkpoint, "detect_chips", duration)
+    duration, result = run_in_process(
+        "Detect Chips",
+        lambda: find_chips.run(image_path=p.stitch_path),
+        pause=args.pause,
+        quiet=quiet,
+    )
+    n_chips = len(result.get("chips", []))
+    run_meta["n_chips"] = n_chips
+    _record("detect_chips", duration)
 
     with _always_console():
         with open(p.chips_json_path) as f:
@@ -1287,22 +1245,19 @@ def run(scope: Microscope, p: _Preflight) -> int:
     # Step 4: Switch to chip scan objective
     # ----------------------------------------------------------------
     switch_key = f"switch_{p.chip_scan_mag}"
-    if step_done(checkpoint, switch_key):
-        print(f"\n  [checkpoint] Skipping Switch to {p.chip_scan_mag} (already complete)")
-    else:
 
-        def _switch_and_set_z():
-            stage.run(scope=scope, objective_mag=p.chip_scan_mag)
-            # Override SDK parfocal Z with operator's initial_z
-            stage.run(scope=scope, z=args.initial_z)
+    def _switch_and_set_z():
+        stage.run(scope=scope, objective_mag=p.chip_scan_mag)
+        # Override SDK parfocal Z with operator's initial_z
+        stage.run(scope=scope, z=args.initial_z)
 
-        duration, _ = run_in_process(
-            f"Switch to {p.chip_scan_mag}",
-            _switch_and_set_z,
-            pause=args.pause,
-            quiet=quiet,
-        )
-        mark_step(run_dir, checkpoint, switch_key, duration)
+    duration, _ = run_in_process(
+        f"Switch to {p.chip_scan_mag}",
+        _switch_and_set_z,
+        pause=args.pause,
+        quiet=quiet,
+    )
+    _record(switch_key, duration)
 
     # ----------------------------------------------------------------
     # Load chip data and apply filters
@@ -1313,7 +1268,6 @@ def run(scope: Microscope, p: _Preflight) -> int:
     # Per-chip loop
     # ----------------------------------------------------------------
     chip_loop_start = time.perf_counter()
-    chips_processed = 0
     prev_chip_z: float | None = None  # chain Z between chips
 
     for loop_pos, chip_idx in enumerate(chip_indices):
@@ -1321,19 +1275,6 @@ def run(scope: Microscope, p: _Preflight) -> int:
         focus_map_path = chip_dir / f"focus_map_chip{chip_idx}.json"
         plane_path = chip_dir / f"focus_map_chip{chip_idx}_plane.json"
         chip_scan_dir = chip_dir / f"scan_{p.chip_scan_mag}"
-
-        fm_key = f"chip_{chip_idx}_focus_map"
-        an_key = f"chip_{chip_idx}_analyze"
-        sc_key = f"chip_{chip_idx}_scan"
-
-        if step_done(checkpoint, fm_key) and step_done(checkpoint, an_key) and step_done(checkpoint, sc_key):
-            print(f"\n  [checkpoint] Skipping chip {chip_idx} (all steps complete)")
-            _print_chip_summary(chip_idx, plane_path, chip_scan_dir)
-            # Extract Z for chaining to next chip
-            if focus_map_path.exists():
-                with open(focus_map_path) as f:
-                    prev_chip_z = json.load(f).get("grid_params", {}).get("z_start_um")
-            continue
 
         print(f"\n{'#' * 70}")
         print(f"# CHIP {chip_idx}")
@@ -1346,28 +1287,25 @@ def run(scope: Microscope, p: _Preflight) -> int:
             stage.run(scope=scope, z=prev_chip_z)
 
         # Step 5a: Focus map
-        if step_done(checkpoint, fm_key):
-            print(f"\n  [checkpoint] Skipping Chip {chip_idx} - Focus Map (already complete)")
-        else:
-            duration, _ = run_in_process(
-                f"Chip {chip_idx} - Focus Map",
-                lambda ci=chip_idx, cd=chip_dir: focus_map.run(
-                    scope=scope,
-                    chips_meta=p.chips_json_path,
-                    gain=p.focus_map_gain,
-                    exposure_ms=p.focus_map_exposure_ms,
-                    chip=ci,
-                    save_best_image=True,
-                    af_settle=0.2 if args.debug_focus_map else 0,
-                    move_to_best_z=args.debug_focus_map,
-                    white_balance=p.wb,
-                    output_dir=cd,
-                    quiet=True,
-                ),
-                pause=args.pause,
-                quiet=quiet,
-            )
-            mark_step(run_dir, checkpoint, fm_key, duration)
+        duration, _ = run_in_process(
+            f"Chip {chip_idx} - Focus Map",
+            lambda ci=chip_idx, cd=chip_dir: focus_map.run(
+                scope=scope,
+                chips_meta=p.chips_json_path,
+                gain=p.focus_map_gain,
+                exposure_ms=p.focus_map_exposure_ms,
+                chip=ci,
+                save_best_image=True,
+                af_settle=0.2 if args.debug_focus_map else 0,
+                move_to_best_z=args.debug_focus_map,
+                white_balance=p.wb,
+                output_dir=cd,
+                quiet=True,
+            ),
+            pause=args.pause,
+            quiet=quiet,
+        )
+        _record(f"chip_{chip_idx}_focus_map", duration)
 
         # Extract Z for chaining to next chip
         if focus_map_path.exists():
@@ -1375,58 +1313,51 @@ def run(scope: Microscope, p: _Preflight) -> int:
                 prev_chip_z = json.load(f).get("grid_params", {}).get("z_start_um")
 
         # Step 5b: Analyze focus map + export plane
-        if step_done(checkpoint, an_key):
-            print(f"\n  [checkpoint] Skipping Chip {chip_idx} - Analyze (already complete)")
-        else:
-            duration, _ = run_in_process(
-                f"Chip {chip_idx} - Analyze Focus Map",
-                lambda fmp=focus_map_path, pp=plane_path: analyze_focus_map.run(
-                    focus_map_path=fmp,
-                    export_plane_path=pp,
-                    min_sharpness=20.0,
-                    quiet=True,
-                ),
-                pause=args.pause,
-                quiet=quiet,
-            )
-            mark_step(run_dir, checkpoint, an_key, duration)
+        duration, _ = run_in_process(
+            f"Chip {chip_idx} - Analyze Focus Map",
+            lambda fmp=focus_map_path, pp=plane_path: analyze_focus_map.run(
+                focus_map_path=fmp,
+                export_plane_path=pp,
+                min_sharpness=20.0,
+                quiet=True,
+            ),
+            pause=args.pause,
+            quiet=quiet,
+        )
+        _record(f"chip_{chip_idx}_analyze", duration)
 
         # Summary: focus_map (after analyze exports plane)
         _print_focus_map_summary(chip_idx, plane_path)
 
         # Step 5c: Chip scan
-        if step_done(checkpoint, sc_key):
-            print(f"\n  [checkpoint] Skipping Chip {chip_idx} - {p.chip_scan_mag} Scan (already complete)")
-        else:
-            duration, _ = run_in_process(
-                f"Chip {chip_idx} - {p.chip_scan_mag} Scan",
-                lambda ci=chip_idx, sd=chip_scan_dir, pp=plane_path: chip_scan.run(
-                    scope=scope,
-                    output=str(sd),
-                    chips_meta=p.chips_json_path,
-                    chip=ci,
-                    plane_path=pp,
-                    objective_mag=p.chip_scan_mag,
-                    speed_mm=p.scan_speed,
-                    gain=p.chip_scan_gain,
-                    exposure_ms=p.chip_scan_exposure_ms,
-                    white_balance=p.wb,
-                    clean=True,
-                    quiet=True,
-                ),
-                pause=args.pause,
-                quiet=quiet,
-            )
-            mark_step(run_dir, checkpoint, sc_key, duration)
+        duration, _ = run_in_process(
+            f"Chip {chip_idx} - {p.chip_scan_mag} Scan",
+            lambda ci=chip_idx, sd=chip_scan_dir, pp=plane_path: chip_scan.run(
+                scope=scope,
+                output=str(sd),
+                chips_meta=p.chips_json_path,
+                chip=ci,
+                plane_path=pp,
+                objective_mag=p.chip_scan_mag,
+                speed_mm=p.scan_speed,
+                gain=p.chip_scan_gain,
+                exposure_ms=p.chip_scan_exposure_ms,
+                white_balance=p.wb,
+                clean=True,
+                quiet=True,
+            ),
+            pause=args.pause,
+            quiet=quiet,
+        )
+        _record(f"chip_{chip_idx}_scan", duration)
 
         # Summary: chip scan
         _print_chip_scan_summary(chip_idx, chip_scan_dir)
 
         # Submit background segmentation
-        seg_key = f"chip_{chip_idx}_segment"
-        if seg_executor is not None and not step_done(checkpoint, seg_key):
+        if seg_executor is not None:
             seg_dir = chip_dir / "seg"
-            job = _SegJob(chip_idx, seg_key, chip_scan_dir, seg_dir, plane_path)
+            job = _SegJob(chip_idx, chip_scan_dir, seg_dir, plane_path)
             future = seg_executor.submit(
                 _run_chip_seg,
                 job,
@@ -1443,19 +1374,19 @@ def run(scope: Microscope, p: _Preflight) -> int:
                 try:
                     result = future.result()
                     if result.success:
-                        mark_step(run_dir, checkpoint, seg_key, result.duration)
+                        _record(f"chip_{chip_idx}_segment", result.duration)
                 except Exception:
                     pass  # callback already logged
 
         # ETA for remaining chips
-        chips_processed += 1
-        chips_remaining = len(chip_indices) - (loop_pos + 1)
-        if chips_remaining > 0 and chips_processed > 0:
+        chips_processed = loop_pos + 1
+        chips_remaining = len(chip_indices) - chips_processed
+        if chips_remaining > 0:
             avg_s = (time.perf_counter() - chip_loop_start) / chips_processed
             eta_s = avg_s * chips_remaining
             with _always_console():
                 print(
-                    f"[{loop_pos + 1}/{len(chip_indices)} chips] "
+                    f"[{chips_processed}/{len(chip_indices)} chips] "
                     f"~{_format_duration_compact(eta_s)} remaining "
                     f"(avg {_format_duration_compact(avg_s)}/chip)"
                 )
@@ -1483,7 +1414,8 @@ def run(scope: Microscope, p: _Preflight) -> int:
             p.seg,
             chip_indices,
             run_dir,
-            checkpoint,
+            step_timing,
+            run_meta,
             p,
         )
         seg_wall = time.perf_counter() - seg_wall_start
@@ -1502,22 +1434,20 @@ def run(scope: Microscope, p: _Preflight) -> int:
             pause=args.pause,
             quiet=quiet,
         )
-        if not step_done(checkpoint, "park"):
-            mark_step(run_dir, checkpoint, "park", duration)
+        _record("park", duration)
     else:
         # No-revisit path: park first, then drain seg
-        if not step_done(checkpoint, "park"):
-            duration, _ = run_in_process(
-                "Park Microscope",
-                lambda: park_microscope(scope),
-                pause=args.pause,
-                quiet=quiet,
-            )
-            mark_step(run_dir, checkpoint, "park", duration)
+        duration, _ = run_in_process(
+            "Park Microscope",
+            lambda: park_microscope(scope),
+            pause=args.pause,
+            quiet=quiet,
+        )
+        _record("park", duration)
 
         if seg_futures and seg_executor is not None:
             seg_wall_start = time.perf_counter()
-            total_seg_time = _drain_seg(seg_futures, checkpoint, run_dir)
+            total_seg_time = _drain_seg(seg_futures, step_timing, run_dir, run_meta)
             seg_wall = time.perf_counter() - seg_wall_start
             with _always_console():
                 print(
@@ -1532,7 +1462,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
     # Summary
     # ----------------------------------------------------------------
     pipeline_duration = time.perf_counter() - pipeline_start
-    t = checkpoint["step_timing"]
+    t = step_timing
 
     with _always_console():
         print(f"[scan done] {_format_duration_compact(pipeline_duration)} total")
@@ -1578,69 +1508,9 @@ def run(scope: Microscope, p: _Preflight) -> int:
         print()
         print(f"Output: {run_dir}/")
 
-    # Save args to checkpoint for reference
-    checkpoint["args"] = {
-        "git_version": get_git_version(),
-        "preset": p.preset_name,
-        "area_rect": args.area_rect,
-        "initial_z": args.initial_z,
-        "overview_mag": p.overview_mag,
-        "chip_scan_mag": p.chip_scan_mag,
-        "scan_speed": p.scan_speed,
-        "chip_scan_gain": p.chip_scan_gain,
-        "chip_scan_exposure_ms": p.chip_scan_exposure_ms,
-        "focus_map_gain": p.focus_map_gain,
-        "focus_map_exposure_ms": p.focus_map_exposure_ms,
-        "white_balance": f"{p.wb.blue},{p.wb.green},{p.wb.red}",
-        "chips": args.chips,
-        "after": args.after,
-        "limit": args.limit,
-        "seg_jobs": p.seg.jobs,
-        "material": p.seg.material,
-        "flatfield": str(p.seg.flatfield) if p.seg.flatfield else None,
-    }
-    save_checkpoint(run_dir, checkpoint)
+    _write_run_meta(run_dir, run_meta)
 
     return 0
-
-
-def _apply_resume(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
-    """Load pipeline config from checkpoint for --resume mode.
-
-    Mutates args in place: sets output and all config fields from the
-    saved checkpoint. Calls parser.error() on invalid state.
-    """
-    used = [f for f in sorted(_RESUME_FORBIDDEN_FLAGS) if f in sys.argv]
-    if used:
-        parser.error(f"--resume cannot be combined with: {', '.join(used)}")
-
-    resume_dir = Path(args.resume)
-    cp_path = resume_dir / "checkpoint.json"
-    if not cp_path.exists():
-        parser.error(f"No checkpoint.json in {resume_dir}")
-
-    with open(cp_path) as f:
-        cp = json.load(f)
-    saved = cp.get("args")
-    if not saved:
-        parser.error(f"checkpoint.json in {resume_dir} has no saved args (old format?)")
-
-    args.output = str(resume_dir)
-    args.operator = cp.get("operator", "")
-    args.name = cp.get("name", "")
-    args.notes = cp.get("notes")
-    args.preset = saved.get("preset", DEFAULT_PRESET)
-    args.area_rect = saved["area_rect"]
-    args.initial_z = saved["initial_z"]
-    args.overview_mag = saved["overview_mag"]
-    args.chip_scan_mag = saved["chip_scan_mag"]
-    args.scan_speed = saved["scan_speed"]
-    if "chip_scan_gain" in saved:
-        args.chip_scan_gain = saved["chip_scan_gain"]
-    if "chip_scan_exposure_ms" in saved:
-        args.chip_scan_exposure_ms = saved["chip_scan_exposure_ms"]
-    if "white_balance" in saved:
-        args.white_balance = saved["white_balance"]
 
 
 def main() -> int:
@@ -1654,10 +1524,6 @@ def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
 
-    if args.resume:
-        _apply_resume(args, parser)
-
-    # --operator and --name are required for new runs, loaded from checkpoint on --resume
     if not args.operator:
         parser.error("--operator is required")
     if not args.name:
@@ -1731,22 +1597,25 @@ def main() -> int:
 
         # Upload runs after microscope is released
         if rc == 0 and p.upload:
-            checkpoint = load_checkpoint(p.run_dir)
-            if not step_done(checkpoint, "upload"):
-                try:
-                    t_upload = time.perf_counter()
-                    with _always_console():
-                        upload.run(
-                            p.run_dir,
-                            material=p.seg.material,
-                            substrate=p.substrate,
-                            quiet=quiet,
-                        )
-                    upload_duration = time.perf_counter() - t_upload
-                    mark_step(p.run_dir, checkpoint, "upload", upload_duration)
-                except Exception as e:
-                    with _always_console():
-                        print(f"[upload] FAILED: {e}")
+            try:
+                t_upload = time.perf_counter()
+                with _always_console():
+                    upload.run(
+                        p.run_dir,
+                        material=p.seg.material,
+                        substrate=p.substrate,
+                        quiet=quiet,
+                    )
+                upload_duration = time.perf_counter() - t_upload
+                meta_path = p.run_dir / "checkpoint.json"
+                if meta_path.exists():
+                    with open(meta_path) as f:
+                        meta = json.load(f)
+                    meta.setdefault("step_timing", {})["upload"] = upload_duration
+                    _write_run_meta(p.run_dir, meta)
+            except Exception as e:
+                with _always_console():
+                    print(f"[upload] FAILED: {e}")
 
         with _always_console():
             total_duration = time.perf_counter() - main_start
