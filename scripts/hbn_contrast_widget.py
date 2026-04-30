@@ -52,6 +52,22 @@ n_si = _interp_index(lamb, _SI_DATA)
 
 LABEL_LAYERS = [5, 10, 15, 20, 30, 45, 60, 90, 120, 150, 200, 250, 300]
 
+# 10x line-fit measurements on graphite gate flakes (four AFM-cut regions, 2026-04-29).
+# Background line-fit RGB = (64, 69, 91); contrast = (I_flake - I_bg) / I_bg per channel.
+# Thicknesses 6-14 nm = thick multilayer graphene used as gates (~19-41 layers).
+# cut 3 and cut 4 have R=0 in the line fit, so C_R clips at -1.0 — flagged as
+# unreliable below so the widget renders them with hollow markers + low alpha.
+# Format: [thickness_nm, R_contrast, G_contrast]
+_CAL_DATA_GRAPHITE_10X = np.array(
+    [
+        [13.7, -0.391, 0.362],  # cut 1
+        [11.8, -0.797, -0.087],  # cut 2
+        [9.3, -1.000, -0.623],  # cut 3 — R clipped
+        [6.4, -1.000, -0.768],  # cut 4 — R clipped
+    ]
+)
+_CAL_DATA_GRAPHITE_10X_R_RELIABLE = np.array([True, True, False, False])
+
 # Per-material max compute layers (plot + cache extent)
 HBN_MAX_LAYERS = 300
 GRAPHENE_MAX_LAYERS = 60
@@ -225,6 +241,8 @@ class _Vals:
     na: float
     r_off: float
     g_off: float
+    r_off_gr: float
+    g_off_gr: float
 
 
 _EMPTY_ARR = np.zeros(0, dtype=float)
@@ -299,6 +317,8 @@ def main():
         "na": 0.25,
         "r_off": 0.54,
         "g_off": -0.2,
+        "r_off_gr": 0.0,
+        "g_off_gr": 0.0,
     }
 
     n_wse2_arr = n_wse2(lamb)
@@ -321,6 +341,8 @@ def main():
             na=init["na"],
             r_off=init["r_off"],
             g_off=init["g_off"],
+            r_off_gr=init["r_off_gr"],
+            g_off_gr=init["g_off_gr"],
         )
 
     init_vals_hbn = _init_vals("hbn")
@@ -423,12 +445,15 @@ def main():
 
     # --- Graphene 90nm panel ---
     _setup_panel(ax_gr, "Graphene · 90 nm SiO₂")
+    # Tighter range than the default — graphene/graphite contrast tops out near unity.
+    ax_gr.set_xlim(-1, 3)
+    ax_gr.set_ylim(-1.5, 3)
     (line_gr,) = ax_gr.plot(g_gr, r_gr, "k-", lw=1.5, label="Theory")
     ann_gr, dots_gr = _make_annotations(ax_gr, _GRAPHENE_LAYER_THICKNESS_NM, GRAPHENE_MAX_LAYERS)
 
     if len(_CAL_DATA_GRAPHENE) > 0:
-        cal_gr_r = _CAL_DATA_GRAPHENE[:, 1] + init["r_off"]
-        cal_gr_g = _CAL_DATA_GRAPHENE[:, 2] + init["g_off"]
+        cal_gr_r = _CAL_DATA_GRAPHENE[:, 1] + init["r_off_gr"]
+        cal_gr_g = _CAL_DATA_GRAPHENE[:, 2] + init["g_off_gr"]
         scat_gr = ax_gr.scatter(
             cal_gr_g,
             cal_gr_r,
@@ -455,6 +480,47 @@ def main():
     else:
         scat_gr = None
         cal_ann_gr = []
+
+    # 10x graphite gate-flake overlay (split into two scatters: reliable vs R-clipped).
+    cal10_r = _CAL_DATA_GRAPHITE_10X[:, 1] + init["r_off_gr"]
+    cal10_g = _CAL_DATA_GRAPHITE_10X[:, 2] + init["g_off_gr"]
+    rel = _CAL_DATA_GRAPHITE_10X_R_RELIABLE
+    scat_gr_10x_ok = ax_gr.scatter(
+        cal10_g[rel],
+        cal10_r[rel],
+        c="tab:cyan",
+        marker="^",
+        s=55,
+        zorder=5,
+        edgecolors="k",
+        linewidths=0.7,
+        label="10x graphite (AFM)",
+    )
+    scat_gr_10x_clip = ax_gr.scatter(
+        cal10_g[~rel],
+        cal10_r[~rel],
+        facecolors="none",
+        edgecolors="tab:cyan",
+        marker="^",
+        s=55,
+        zorder=4,
+        linewidths=1.2,
+        alpha=0.55,
+        label="10x · R clipped",
+    )
+    cal_ann_gr_10x = []
+    for i, row in enumerate(_CAL_DATA_GRAPHITE_10X):
+        a = ax_gr.annotate(
+            f"{row[0]:.1f}",
+            (cal10_g[i], cal10_r[i]),
+            textcoords="offset points",
+            xytext=(6, -6),
+            fontsize=7,
+            color="tab:cyan",
+            fontweight="bold",
+            alpha=1.0 if rel[i] else 0.55,
+        )
+        cal_ann_gr_10x.append(a)
     ax_gr.legend(fontsize=9, loc="lower right")
 
     # --- WSe₂ 300nm panel ---
@@ -525,12 +591,14 @@ def main():
         "na": ("NA", 0.0, 0.9, init["na"]),
         "r_off": ("R offset", -1.0, 1.5, init["r_off"]),
         "g_off": ("G offset", -1.0, 1.0, init["g_off"]),
+        "r_off_gr": ("R offset (gr)", -1.0, 1.5, init["r_off_gr"]),
+        "g_off_gr": ("G offset (gr)", -1.0, 1.0, init["g_off_gr"]),
     }
 
     # Which sliders each tab uses
     tab_sliders = {
         "hbn": ["n", "oxide", "oxide_285", "na", "r_off", "g_off"],
-        "graphene": ["n", "k", "oxide", "na", "r_off", "g_off"],
+        "graphene": ["n", "k", "oxide", "na", "r_off_gr", "g_off_gr"],
         "wse2": ["oxide_wse2", "na", "r_off", "g_off"],
     }
 
@@ -557,7 +625,15 @@ def main():
             na=_slider("na").val,
             r_off=_slider("r_off").val,
             g_off=_slider("g_off").val,
+            r_off_gr=_slider("r_off_gr").val,
+            g_off_gr=_slider("g_off_gr").val,
         )
+
+    def _active_offsets(vals: _Vals) -> tuple[float, float]:
+        """Return (r_off, g_off) for the tab's overlay scatters."""
+        if vals.tab == "graphene":
+            return vals.r_off_gr, vals.g_off_gr
+        return vals.r_off, vals.g_off
 
     # --- Compute cache: last valid result per tab (keyed by inputs that affect it) ---
     cache: dict[str, tuple[tuple, _TabResult]] = {
@@ -661,11 +737,17 @@ def main():
         line_gr.set_data(res.g_gr, res.r_gr)
         _update_annotations(ann_gr, dots_gr, res.r_gr, res.g_gr)
         if scat_gr is not None:
-            cgr_r = _CAL_DATA_GRAPHENE[:, 1] + vals.r_off
-            cgr_g = _CAL_DATA_GRAPHENE[:, 2] + vals.g_off
+            cgr_r = _CAL_DATA_GRAPHENE[:, 1] + vals.r_off_gr
+            cgr_g = _CAL_DATA_GRAPHENE[:, 2] + vals.g_off_gr
             scat_gr.set_offsets(np.column_stack([cgr_g, cgr_r]))
             for i, ann in enumerate(cal_ann_gr):
                 ann.xy = (cgr_g[i], cgr_r[i])
+        cal10_r_s = _CAL_DATA_GRAPHITE_10X[:, 1] + vals.r_off_gr
+        cal10_g_s = _CAL_DATA_GRAPHITE_10X[:, 2] + vals.g_off_gr
+        scat_gr_10x_ok.set_offsets(np.column_stack([cal10_g_s[rel], cal10_r_s[rel]]))
+        scat_gr_10x_clip.set_offsets(np.column_stack([cal10_g_s[~rel], cal10_r_s[~rel]]))
+        for i, ann in enumerate(cal_ann_gr_10x):
+            ann.xy = (cal10_g_s[i], cal10_r_s[i])
 
     def _draw_wse2(vals: _Vals, res: _TabResult):
         rw, gw = res.r_wse2, res.g_wse2
@@ -710,12 +792,19 @@ def main():
                 rms_text_285.set_text(
                     f"R rms={np.sqrt(np.mean(r_res_285**2)):.3f}  G rms={np.sqrt(np.mean(g_res_285**2)):.3f}"
                 )
-        elif vals.tab == "graphene" and scat_gr is not None:
-            cgr_r = _CAL_DATA_GRAPHENE[:, 1] + vals.r_off
-            cgr_g = _CAL_DATA_GRAPHENE[:, 2] + vals.g_off
-            scat_gr.set_offsets(np.column_stack([cgr_g, cgr_r]))
-            for i, ann in enumerate(cal_ann_gr):
-                ann.xy = (cgr_g[i], cgr_r[i])
+        elif vals.tab == "graphene":
+            if scat_gr is not None:
+                cgr_r = _CAL_DATA_GRAPHENE[:, 1] + vals.r_off_gr
+                cgr_g = _CAL_DATA_GRAPHENE[:, 2] + vals.g_off_gr
+                scat_gr.set_offsets(np.column_stack([cgr_g, cgr_r]))
+                for i, ann in enumerate(cal_ann_gr):
+                    ann.xy = (cgr_g[i], cgr_r[i])
+            cal10_r_s = _CAL_DATA_GRAPHITE_10X[:, 1] + vals.r_off_gr
+            cal10_g_s = _CAL_DATA_GRAPHITE_10X[:, 2] + vals.g_off_gr
+            scat_gr_10x_ok.set_offsets(np.column_stack([cal10_g_s[rel], cal10_r_s[rel]]))
+            scat_gr_10x_clip.set_offsets(np.column_stack([cal10_g_s[~rel], cal10_r_s[~rel]]))
+            for i, ann in enumerate(cal_ann_gr_10x):
+                ann.xy = (cal10_g_s[i], cal10_r_s[i])
         elif vals.tab == "wse2" and scat_wse2 is not None:
             cwse2_r = _CAL_DATA_WSE2[:, 1] + vals.r_off
             cwse2_g = _CAL_DATA_WSE2[:, 2] + vals.g_off
@@ -739,8 +828,9 @@ def main():
             # Only draw if the result is still for the active tab.
             if vals.tab == active_tab["name"]:
                 _draw_active(vals, res)
-                last_drawn_offsets["r"] = vals.r_off
-                last_drawn_offsets["g"] = vals.g_off
+                r_off, g_off = _active_offsets(vals)
+                last_drawn_offsets["r"] = r_off
+                last_drawn_offsets["g"] = g_off
                 last_drawn_offsets["tab"] = vals.tab
                 dirty = True
 
@@ -748,14 +838,15 @@ def main():
         # compute is up-to-date, update the scatter/rms without recomputing.
         key = _compute_key(vals_now.tab, vals_now)
         cached_key, _ = cache[vals_now.tab]
+        r_off_now, g_off_now = _active_offsets(vals_now)
         if key == cached_key and (
-            vals_now.r_off != last_drawn_offsets["r"]
-            or vals_now.g_off != last_drawn_offsets["g"]
+            r_off_now != last_drawn_offsets["r"]
+            or g_off_now != last_drawn_offsets["g"]
             or last_drawn_offsets["tab"] != vals_now.tab
         ):
             _draw_offsets_only(vals_now)
-            last_drawn_offsets["r"] = vals_now.r_off
-            last_drawn_offsets["g"] = vals_now.g_off
+            last_drawn_offsets["r"] = r_off_now
+            last_drawn_offsets["g"] = g_off_now
             last_drawn_offsets["tab"] = vals_now.tab
             dirty = True
 
@@ -801,8 +892,9 @@ def main():
         vals = _read_vals(name)
         _, cached_res = cache[name]
         _draw_active(vals, cached_res)
-        last_drawn_offsets["r"] = vals.r_off
-        last_drawn_offsets["g"] = vals.g_off
+        r_off, g_off = _active_offsets(vals)
+        last_drawn_offsets["r"] = r_off
+        last_drawn_offsets["g"] = g_off
         last_drawn_offsets["tab"] = name
         _request_compute(vals)
         fig.canvas.draw_idle()
@@ -822,6 +914,8 @@ def main():
     def export(_event=None):
         r_off = _slider("r_off").val
         g_off = _slider("g_off").val
+        r_off_gr = _slider("r_off_gr").val
+        g_off_gr = _slider("g_off_gr").val
 
         # With lazy per-tab compute, non-active tabs can carry stale cache
         # entries.  Synchronously refresh any tab whose cached inputs don't
@@ -849,7 +943,7 @@ def main():
         wse2_res = cache["wse2"][1]
 
         hbn_90_cal = _sample_cal(hbn_res.r90, hbn_res.g90, hbn_res.t_hbn, r_off, g_off)
-        graphene_cal = _sample_cal(gr_res.r_gr, gr_res.g_gr, gr_res.t_gr, r_off, g_off)
+        graphene_cal = _sample_cal(gr_res.r_gr, gr_res.g_gr, gr_res.t_gr, r_off_gr, g_off_gr)
         wse2_cal = _sample_cal(wse2_res.r_wse2, wse2_res.g_wse2, wse2_res.t_wse2, r_off, g_off)
 
         params = {
@@ -862,6 +956,8 @@ def main():
             "g_offset": g_off,
             "graphene_n_re": _slider("n").val,
             "graphene_k": _slider("k").val,
+            "graphene_r_offset": r_off_gr,
+            "graphene_g_offset": g_off_gr,
             "hbn_90_cal_points": hbn_90_cal,
             "graphene_cal_points": graphene_cal,
             "wse2_cal_points": wse2_cal,
