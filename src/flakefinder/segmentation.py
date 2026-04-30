@@ -21,7 +21,6 @@ import numpy as np
 from matplotlib.patches import Rectangle
 from scipy import ndimage
 from scipy.spatial import KDTree
-from scipy.stats import kurtosis as scipy_kurtosis
 
 from flakefinder.scan_utils import apply_flatfield
 from flakefinder.types import ContrastRGB, GainRGB, PixelPolygon, Point2F, XYWHRect
@@ -1076,6 +1075,16 @@ def _uniform_region_area_um2(
     return round(area_px * um_per_px**2, 1)
 
 
+def _excess_kurtosis(vals: np.ndarray) -> float:
+    """Fisher (excess) kurtosis: m4/m2^2 - 3. Inlined to skip scipy.stats overhead."""
+    v = vals - vals.mean()
+    m2 = float((v * v).mean())
+    if m2 <= 0:
+        return -3.0
+    m4 = float((v * v * v * v).mean())
+    return m4 / (m2 * m2) - 3
+
+
 def _analyze_component(
     image: np.ndarray,
     component: np.ndarray,
@@ -1128,13 +1137,13 @@ def _analyze_component(
     # Color uniformity: std of per-pixel normalized contrast within blob (BGR channel order)
     b_vals = norm_contrast[:, :, 0][component]
     b_std = float(b_vals.std())
-    b_kurt = float(scipy_kurtosis(b_vals, fisher=True))
+    b_kurt = _excess_kurtosis(b_vals)
     g_vals = norm_contrast[:, :, 1][component]
     g_std = float(g_vals.std())
-    g_kurt = float(scipy_kurtosis(g_vals, fisher=True))
+    g_kurt = _excess_kurtosis(g_vals)
     r_vals = norm_contrast[:, :, 2][component]
     r_std = float(r_vals.std())
-    r_kurt = float(scipy_kurtosis(r_vals, fisher=True))
+    r_kurt = _excess_kurtosis(r_vals)
 
     # Internal gradient energy (Sobel on G channel, masked to blob)
     grad_energy = float(grad_mag[component].mean())
