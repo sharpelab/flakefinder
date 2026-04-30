@@ -62,7 +62,8 @@ _CAL_DATA_GRAPHITE_10X = np.array(
     [
         [13.7, -0.391, 0.362],  # cut 1
         [11.8, -0.797, -0.087],  # cut 2
-        [9.3, -1.000, -0.623],  # cut 3 — R clipped
+        # cut 3 — flake #001a59, local bg #40445b (G=68, not the global G=69).
+        [9.3, -1.000, -0.618],  # R clipped
         [6.4, -1.000, -0.768],  # cut 4 — R clipped
     ]
 )
@@ -323,7 +324,7 @@ def main():
         # from 700→400 nm — so single (n,k) is a fit compromise across visible.
         "n_gr": 2.65,
         "k": 1.30,
-        "oxide": 89.46,
+        "oxide": 90.0,
         "oxide_285": 285.0,
         "oxide_wse2": 300.0,
         "na": 0.25,
