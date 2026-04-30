@@ -112,6 +112,22 @@ HBN_285NM_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
     (-0.503, 2.229, 40.0),
 )
 
+# Graphene "gate-thick" (5-10 nm) calibration on 90 nm SiO₂.
+# Theory-derived from transfer-matrix model; widget params 2026-04-30:
+#   n_re=2.817, k=1.317, oxide=90.06 nm, NA=0.25,
+#   r_offset=+0.08, g_offset=+0.01.
+# Values are in measured/camera space (model − offset) — matches the
+# AFM-anchored 10x cuts on flake 58553 (cut 4 at 6.4 nm: R=-1.0 clipped,
+# G=-0.768; corrected curve at 6 nm: R=-1.03, G=-0.78).
+# 4 nm omitted: G has a minimum near 5 nm so including 4 nm makes
+# R = poly(G) multivalued.
+GRAPHENE_THICK_90NM_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
+    (-1.0146, -0.8224, 5.0),
+    (-1.0316, -0.7833, 6.0),
+    (-0.9706, -0.6137, 8.0),
+    (-0.8229, -0.3706, 10.0),
+)
+
 
 class _DetectionBase(TypedDict):
     bbox: XYWHRect
@@ -742,19 +758,15 @@ class DetectorConfig:
         )
 
     @classmethod
-    def graphene_thick_90nm(cls) -> RGPointDetectorConfig:
-        """Graphene thick flake detection on 90nm SiO₂.
+    def graphene_thick_90nm(cls) -> CurveDetectorConfig:
+        """Graphene gate-thickness flake detection (5-10 nm) on 90 nm SiO₂.
 
-        Single anchor cal point at (R=-1.000, G=-0.672) from a 6.5 nm
-        AFM-measured flake (hex flake=#001448, bg=#393d51), measured
-        2026-04-28. ``layers=19`` is the integer rounding of 6.5/0.335;
-        true thickness is the AFM 6.5 nm. R is at the sensor floor on
-        this flake — the cal point describes the saturated-R regime, so
-        any thicker flake will land at the same anchor. cal_dist is
-        moderate so nearby thicknesses get classified together for
-        follow-up imaging.
+        Theory-derived calibration curve from transfer-matrix model over
+        the 5-10 nm range; intended for finding gate-quality graphite.
+        All in-range matches classify as "thick" (default thin/medium
+        cutoffs at 0).
         """
-        return RGPointDetectorConfig(
+        return CurveDetectorConfig(
             name="Graphene thick",
             substrate=Substrate.SI_90NM,
             contrast_mode=ContrastMode.BELOW,
@@ -765,11 +777,8 @@ class DetectorConfig:
             entropy_threshold=0.4,
             subseg_min_std=0.05,
             subseg_min_range=0.08,
-            cal_reference_points=(
-                # 6.5 nm AFM, 2026-04-28; R at sensor floor
-                CalPointRG(layers=19, r=-1.000, g=-0.672),
-            ),
-            layer_spacing_nm=0.335,
+            cal_points=GRAPHENE_THICK_90NM_CAL_POINTS,
+            cal_g_range=(-0.85, -0.30),
             cal_dist_match=0.15,
             cal_dist_possible=0.25,
             non_match_label="non-graphene",
@@ -780,7 +789,7 @@ class DetectorConfig:
             tier1_g_min=-99.0,
             tier1_g_max=0.0,
             tier1_r_max=-0.05,
-            tier1_r_min=-2.0,  # effectively no lower bound — thick R hits ~-0.85
+            tier1_r_min=-1.1,
             tier1_entropy_max=3.7,
             tier1_min_size_um2=350.0,
             tier1_br_ratio_max=1.0,
