@@ -11,13 +11,38 @@ set -euo pipefail
 
 DEFAULT_REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 
+usage() {
+    cat <<'EOF'
+Usage: subtask-launch <slug> [-f <prompt-file>] [--repo <path>] [<newclaude args>...]
+
+Creates .worktrees/<slug> worktree on branch subtask/<slug>, prunes stale
+worktrees first, then launches newclaude in it. Extra args are passed
+through to newclaude.
+
+Options:
+  -h, --help    Show this help and exit
+  --repo PATH   Override repo root (default: parent of this script)
+EOF
+}
+
 if [[ $# -lt 1 ]]; then
-    echo "Usage: subtask-launch <slug> [-f <prompt-file>] [--repo <path>]" >&2
+    usage >&2
     exit 1
+fi
+
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+    usage
+    exit 0
 fi
 
 slug="$1"
 shift
+
+if [[ "$slug" == -* ]]; then
+    echo "subtask-launch: slug must not begin with '-' (got '${slug}')" >&2
+    echo "Run 'subtask-launch --help' for usage." >&2
+    exit 2
+fi
 
 # Parse --repo from remaining args, pass the rest through to newclaude
 REPO_DIR="$DEFAULT_REPO"
@@ -61,4 +86,4 @@ echo "Worktree: ${worktree} (branch: ${branch})"
 # reminder doesn't burn tokens every turn — subtasks rarely need TODO tracking.
 newclaude "${worktree}" --agent subtask_agent \
     --env CLAUDE_CODE_ENABLE_TASKS=false \
-    "${passthrough[@]}"
+    ${passthrough[@]+"${passthrough[@]}"}
