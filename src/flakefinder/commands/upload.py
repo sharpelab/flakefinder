@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import contextlib
 import json
 import math
 import re
@@ -25,6 +26,8 @@ from typing import NamedTuple
 import cv2
 import numpy as np
 import requests
+from PIL import Image as PILImage
+from PIL import ImageDraw
 
 from flakefinder.flakes_api import BASE_URL, get_auth
 from flakefinder.segmentation import Detection, dedup_detections
@@ -34,6 +37,96 @@ class UploadResult(NamedTuple):
     total_flakes: int
     upload_mb: float
     uploaded: bool
+
+
+class OverviewAssets(NamedTuple):
+    """Loaded overview stitch + metadata used for rendering detail crops."""
+
+    stitch: PILImage.Image
+    um_per_px: float
+    stage_x_min: float
+    stage_y_min: float
+    fov_w_um: float
+    fov_h_um: float
+
+
+def load_overview_assets(run_dir: Path) -> OverviewAssets:
+    """Load stitched overview image + scan metadata for detail rendering.
+
+    Reads the stitch image once into memory; subsequent crops are cheap.
+    """
+    stitch_files = list(run_dir.glob("overview_*_stitch.jpg"))
+    if not stitch_files:
+        raise FileNotFoundError("No overview stitch image found")
+    stitch_path = stitch_files[0]
+
+    stitch_meta_path = stitch_path.with_name(stitch_path.stem + "_meta.json")
+    with open(stitch_meta_path) as f:
+        stitch_meta = json.load(f)
+
+    # Find matching overview scan dir for FOV dimensions
+    obj_mag = stitch_meta["objective_mag"]
+    mag_label = f"{obj_mag:g}x"
+    overview_dir = run_dir / f"overview_{mag_label}"
+    with open(overview_dir / "scan_meta.json") as f:
+        overview_meta = json.load(f)
+
+    return OverviewAssets(
+        stitch=PILImage.open(stitch_path).convert("RGB"),
+        um_per_px=stitch_meta["scale_um_per_px"],
+        stage_x_min=stitch_meta["stage_bounds_um"]["x_min"],
+        stage_y_min=stitch_meta["stage_bounds_um"]["y_min"],
+        fov_w_um=overview_meta["optics"]["frame_width_um"],
+        fov_h_um=overview_meta["optics"]["frame_height_um"],
+    )
+
+
+def render_wide_detail(
+    overview: OverviewAssets,
+    stage_x_um: float,
+    stage_y_um: float,
+    output_path: Path,
+) -> bool:
+    """Render the 'wide' detail: 2× FOV crop centered on flake, with red circle.
+
+    Crops a region (2× linear, 4× area) around the flake from the stitched
+    overview, draws a red circle at the flake center, and saves a PNG.
+
+    Returns True on success, False if the flake is fully outside the stitch.
+    """
+    box_w_px = overview.fov_w_um * 2 / overview.um_per_px
+    box_h_px = overview.fov_h_um * 2 / overview.um_per_px
+
+    cx = (stage_x_um - overview.stage_x_min) / overview.um_per_px
+    cy = (stage_y_um - overview.stage_y_min) / overview.um_per_px
+
+    left = int(round(cx - box_w_px / 2))
+    top = int(round(cy - box_h_px / 2))
+    right = int(round(cx + box_w_px / 2))
+    bottom = int(round(cy + box_h_px / 2))
+
+    stitch_w, stitch_h = overview.stitch.size
+    left_c = max(0, left)
+    top_c = max(0, top)
+    right_c = min(stitch_w, right)
+    bottom_c = min(stitch_h, bottom)
+    if right_c <= left_c or bottom_c <= top_c:
+        return False
+
+    crop = overview.stitch.crop((left_c, top_c, right_c, bottom_c))
+
+    # Red circle at flake center, radius ~3% of crop's smaller dim
+    cir_x = cx - left_c
+    cir_y = cy - top_c
+    radius = max(8, int(min(box_w_px, box_h_px) * 0.03))
+    draw = ImageDraw.Draw(crop)
+    draw.ellipse(
+        [(cir_x - radius, cir_y - radius), (cir_x + radius, cir_y + radius)],
+        outline=(255, 0, 0),
+        width=3,
+    )
+    crop.save(output_path)
+    return True
 
 
 def load_summary(seg_dir: Path) -> dict:
@@ -270,6 +363,7 @@ def _build_flake_payload(
     det: dict,
     eval_token: str | None,
     revisit_tokens: dict[float, str],
+    detail_tokens: dict[str, str],
     camera_meta: dict,
 ) -> dict:
     """Build a flake payload for POST /chips/:id/flakes."""
@@ -319,6 +413,9 @@ def _build_flake_payload(
             }
         payload["images"] = images
 
+    if detail_tokens:
+        payload["details"] = dict(detail_tokens)
+
     return payload
 
 
@@ -350,10 +447,12 @@ def run(
     tier: int = 1,
     top: int | None = None,
     dry_run: bool = False,
+    stage_dir: Path | None = None,
     quiet: bool = False,
     jobs: int = 4,
     name: str | None = None,
     base_url: str = BASE_URL,
+    wide_detail: bool = True,
 ) -> UploadResult:
     """Upload a find-flakes run via the incremental REST API.
 
@@ -365,9 +464,14 @@ def run(
         tier: Tier to select (exact match).
         top: Max flakes per chip (None = all passing tier filter).
         dry_run: Discover and render but don't upload.
+        stage_dir: If set, use as the staging directory instead of a tempdir
+            and force ``dry_run=True``. Lets you inspect rendered files +
+            payload JSON without hitting the network.
         quiet: Only print [upload] status lines, suppress detail.
         jobs: Parallel workers for eval_img rendering.
         name: Scan name override (default: run directory name).
+        wide_detail: If True (default), render and upload a 'wide' detail
+            image (2× FOV stitch crop, red circle) per flake.
 
     Returns:
         UploadResult with flake count, upload size, and upload status.
@@ -379,6 +483,9 @@ def run(
     run_dir = run_dir.resolve()
     if not run_dir.exists():
         raise FileNotFoundError(f"Run directory does not exist: {run_dir}")
+
+    if stage_dir is not None:
+        dry_run = True
 
     checkpoint = _load_checkpoint(run_dir)
     scan_name = _resolve_scan_name(run_dir, name, checkpoint)
@@ -404,7 +511,18 @@ def run(
         stitch_meta = json.load(f)
     stage_bounds = stitch_meta["stage_bounds_um"]
 
-    with tempfile.TemporaryDirectory(prefix="upload_") as tmp_root:
+    # Load overview assets once if we're rendering detail crops
+    overview_assets: OverviewAssets | None = None
+    if wide_detail:
+        overview_assets = load_overview_assets(run_dir)
+
+    if stage_dir is not None:
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        stage_ctx = contextlib.nullcontext(str(stage_dir))
+    else:
+        stage_ctx = tempfile.TemporaryDirectory(prefix="upload_")
+
+    with stage_ctx as tmp_root:
         tmp = Path(tmp_root)
 
         # Create overview_compressed.jpg
@@ -415,7 +533,7 @@ def run(
         upload_files: list[tuple[str, Path]] = [("overview", overview_path)]
         eval_img_jobs: list[tuple] = []
         # Each entry: (chip_idx, camera_meta, flake_entries)
-        # flake_entries: list of (det, eval_key, revisit_keys)
+        # flake_entries: list of (det, eval_key, revisit_keys, detail_keys)
         chip_data: list[tuple[int, dict, list]] = []
         total_flakes = 0
 
@@ -449,7 +567,7 @@ def run(
 
             revisit_mags = discover_revisit_mags(chip_dir)
 
-            flake_entries: list[tuple[dict, str, dict[float, str]]] = []
+            flake_entries: list[tuple[dict, str, dict[float, str], dict[str, str]]] = []
             for flake_idx, det in enumerate(flakes):
                 # Queue eval_img rendering
                 eval_key = f"c{chip_idx}_f{flake_idx}_eval"
@@ -469,7 +587,16 @@ def run(
                         upload_files.append((rkey, revisit_img))
                         revisit_keys[mag] = rkey
 
-                flake_entries.append((det, eval_key, revisit_keys))
+                # Render detail images (synthesized from overview stitch)
+                detail_keys: dict[str, str] = {}
+                if overview_assets is not None:
+                    wide_key = f"c{chip_idx}_f{flake_idx}_wide"
+                    wide_path = tmp / f"{wide_key}.png"
+                    if render_wide_detail(overview_assets, det["stage_x"], det["stage_y"], wide_path):
+                        upload_files.append((wide_key, wide_path))
+                        detail_keys["wide"] = wide_key
+
+                flake_entries.append((det, eval_key, revisit_keys, detail_keys))
                 total_flakes += 1
 
             chip_data.append((chip_idx, camera_meta, flake_entries))
@@ -478,6 +605,30 @@ def run(
             raise RuntimeError("No flakes pass the tier filter")
 
         if dry_run:
+            # In stage_dir mode, render eval images and dump payloads for inspection.
+            if stage_dir is not None:
+                print(f"[upload] Rendering {len(eval_img_jobs)} eval images into {stage_dir}...")
+                with ProcessPoolExecutor(max_workers=jobs) as pool:
+                    list(pool.map(_render_and_save, eval_img_jobs))
+
+                # Build mock tokens (using the upload key as the token) so we
+                # can render representative payloads without server roundtrip.
+                mock_tokens = {key: f"mock-{key}" for key, _ in upload_files}
+                for chip_idx, camera_meta, flake_entries in chip_data:
+                    flake_payloads = [
+                        _build_flake_payload(
+                            det,
+                            mock_tokens.get(eval_key),
+                            {mag: mock_tokens[k] for mag, k in revisit_keys.items() if k in mock_tokens},
+                            {name: mock_tokens[k] for name, k in detail_keys.items() if k in mock_tokens},
+                            camera_meta,
+                        )
+                        for det, eval_key, revisit_keys, detail_keys in flake_entries
+                    ]
+                    payload_path = Path(stage_dir) / f"c{chip_idx}_flake_payloads.json"
+                    with open(payload_path, "w") as f:
+                        json.dump(flake_payloads, f, indent=2)
+                    print(f"  Wrote {payload_path} ({len(flake_payloads)} flakes)")
             print(f"[upload] Dry-run: {total_flakes} flakes, {len(upload_files)} files to upload")
             return UploadResult(total_flakes=total_flakes, upload_mb=0.0, uploaded=False)
 
@@ -567,12 +718,14 @@ def run(
             chip_id = resp.json()["id"]
 
             flake_payloads = []
-            for det, eval_key, revisit_keys in flake_entries:
+            for det, eval_key, revisit_keys, detail_keys in flake_entries:
                 resolved_revisit_tokens = {mag: tokens[rkey] for mag, rkey in revisit_keys.items() if rkey in tokens}
+                resolved_detail_tokens = {name: tokens[k] for name, k in detail_keys.items() if k in tokens}
                 payload = _build_flake_payload(
                     det,
                     tokens.get(eval_key),
                     resolved_revisit_tokens,
+                    resolved_detail_tokens,
                     camera_meta,
                 )
                 flake_payloads.append(payload)
@@ -611,6 +764,17 @@ Examples:
     parser.add_argument("--tier", type=int, default=1, help="Tier to select, exact match (default: 1)")
     parser.add_argument("--top", type=int, default=None, help="Max flakes per chip (default: all passing tier filter)")
     parser.add_argument("--dry-run", action="store_true", help="Discover flakes but don't upload")
+    parser.add_argument(
+        "--stage-dir",
+        type=Path,
+        default=None,
+        help="Render files into this directory and write payload JSONs. Implies --dry-run.",
+    )
+    parser.add_argument(
+        "--no-detail-wide",
+        action="store_true",
+        help="Disable the per-flake 'wide' detail image (default: enabled)",
+    )
     parser.add_argument("-j", "--jobs", type=int, default=4, help="Parallel workers for eval_img rendering")
     parser.add_argument("--name", default=None, help="Scan name override (default: run directory name)")
     parser.add_argument("--url", default=BASE_URL, help=f"Target server URL (default: {BASE_URL})")
@@ -625,9 +789,11 @@ Examples:
             tier=args.tier,
             top=args.top,
             dry_run=args.dry_run,
+            stage_dir=args.stage_dir,
             jobs=args.jobs,
             name=args.name,
             base_url=args.url,
+            wide_detail=not args.no_detail_wide,
         )
         return 0
     except (FileNotFoundError, RuntimeError) as e:

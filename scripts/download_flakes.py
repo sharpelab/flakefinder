@@ -42,6 +42,15 @@ def _download_flake(flake: dict, target: Path) -> tuple[int, int]:
             total_bytes += size
             total_files += 1
 
+    for detail_name in flake.get("flake_available_details", []):
+        filename = f"{detail_name}.png"
+        url = f"{BASE_URL}/images/{flake_path}/{filename}"
+        dest = flake_dir / filename
+        size = download_image(url, dest)
+        if size is not None:
+            total_bytes += size
+            total_files += 1
+
     return total_files, total_bytes
 
 
