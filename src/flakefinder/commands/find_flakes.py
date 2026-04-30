@@ -176,6 +176,8 @@ _RESUME_FORBIDDEN_FLAGS = frozenset(
         "--overview-mag",
         "--chip-scan-mag",
         "--scan-speed",
+        "--chip-scan-gain",
+        "--chip-scan-exposure-ms",
         "--area-rect",
         "--initial-z",
         "--white-balance",
@@ -403,6 +405,10 @@ def _plan(args: argparse.Namespace) -> _Preflight:
 
     # Scan speed from preset; CLI overrides.
     scan_speed = args.scan_speed if args.scan_speed is not None else preset["chip_scan_speed_mm"]
+    chip_scan_gain = args.chip_scan_gain if args.chip_scan_gain is not None else preset["chip_scan_gain"]
+    chip_scan_exposure_ms = (
+        args.chip_scan_exposure_ms if args.chip_scan_exposure_ms is not None else preset["chip_scan_exposure_ms"]
+    )
 
     # Segmentation config
     if args.flatfield:
@@ -443,8 +449,8 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         overview_mag=overview_mag,
         chip_scan_mag=chip_scan_mag,
         scan_speed=scan_speed,
-        chip_scan_gain=preset["chip_scan_gain"],
-        chip_scan_exposure_ms=preset["chip_scan_exposure_ms"],
+        chip_scan_gain=chip_scan_gain,
+        chip_scan_exposure_ms=chip_scan_exposure_ms,
         focus_map_gain=preset["focus_map_gain"],
         focus_map_exposure_ms=preset["focus_map_exposure_ms"],
         seg=seg,
@@ -552,6 +558,18 @@ Examples:
         type=float,
         default=None,
         help="Chip scan speed in mm/s (default: scales with magnification, 5 at 20x)",
+    )
+    parser.add_argument(
+        "--chip-scan-gain",
+        type=float,
+        default=None,
+        help="Override preset chip-scan camera gain",
+    )
+    parser.add_argument(
+        "--chip-scan-exposure-ms",
+        type=float,
+        default=None,
+        help="Override preset chip-scan camera exposure in ms",
     )
     parser.add_argument(
         "--white-balance",
@@ -668,7 +686,13 @@ def _print_header(p: _Preflight) -> None:
     print(f"Area rect:     {args.area_rect}")
     print(f"Initial Z:     {args.initial_z} µm")
     print(f"Scan speed:    {p.scan_speed} mm/s")
-    print(f"Chip camera:   gain={p.chip_scan_gain}, exposure={p.chip_scan_exposure_ms}ms")
+    overrides = []
+    if args.chip_scan_gain is not None:
+        overrides.append("gain")
+    if args.chip_scan_exposure_ms is not None:
+        overrides.append("exposure")
+    chip_cam_src = f"[CLI overrides: {', '.join(overrides)}]" if overrides else "[preset]"
+    print(f"Chip camera:   gain={p.chip_scan_gain}, exposure={p.chip_scan_exposure_ms}ms {chip_cam_src}")
     print(f"AF camera:     gain={p.focus_map_gain}, exposure={p.focus_map_exposure_ms}ms")
     wb_str = f"{p.wb.blue},{p.wb.green},{p.wb.red}"
     wb_source = "preset" if args.white_balance is None else "CLI"
@@ -1611,6 +1635,10 @@ def _apply_resume(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
     args.overview_mag = saved["overview_mag"]
     args.chip_scan_mag = saved["chip_scan_mag"]
     args.scan_speed = saved["scan_speed"]
+    if "chip_scan_gain" in saved:
+        args.chip_scan_gain = saved["chip_scan_gain"]
+    if "chip_scan_exposure_ms" in saved:
+        args.chip_scan_exposure_ms = saved["chip_scan_exposure_ms"]
     if "white_balance" in saved:
         args.white_balance = saved["white_balance"]
 
