@@ -41,12 +41,93 @@ from hbn_contrast import (
 
 lamb = _IMX183_WAVELENGTHS
 
-# Halogen illuminant — matches the AFM-referenced hBN cal points (3200 K).
-# The Leica's actual lamp is an LED with a different spectrum; swap this when
-# the LED spectrum is measured.
+
+def _load_elijah_led(target_lamb: np.ndarray) -> np.ndarray:
+    """Load Elijah's LED spectrum and resample onto target_lamb (nm).
+
+    Source: calibration/elijah_led_spectrum.csv — 3648-pt spectrometer
+    trace, 200–1011 nm.  Two columns (wavelength_nm, intensity, no header)."""
+    csv_path = Path(__file__).resolve().parents[1] / "calibration" / "elijah_led_spectrum.csv"
+    raw = np.loadtxt(csv_path, delimiter=",")
+    return np.interp(target_lamb, raw[:, 0], raw[:, 1])
+
+
+def _load_objective_transmission_10x(target_lamb: np.ndarray) -> np.ndarray:
+    """Load 10x objective transmission and resample onto target_lamb (nm).
+
+    Source: calibration/objective_10x_transmission.csv — DataThief'd from
+    a chart whose X-axis annotation didn't survive digitization, so column-0
+    values are pixel coordinates spanning [101.34, 297.35].  We remap
+    linearly to [400, 700] nm under the assumption that the chart spanned
+    the visible band; the right edge looks slightly sharp under that
+    assumption (cuts hard near 700 nm) so the chart may have actually been
+    400–680 or 400–690.  Treat this axis as speculative until verified.
+    """
+    csv_path = Path(__file__).resolve().parents[1] / "calibration" / "objective_10x_transmission.csv"
+    raw = np.loadtxt(csv_path, delimiter=",")
+    raw = raw[raw[:, 0].argsort()]
+    x_min, x_max = float(raw[0, 0]), float(raw[-1, 0])
+    lamb_remapped = 400.0 + (raw[:, 0] - x_min) / (x_max - x_min) * 300.0
+    return np.interp(target_lamb, lamb_remapped, raw[:, 1])
+
+
+class _Illuminant(NamedTuple):
+    """One illuminant option for the widget toggle.
+
+    red_lit / green_lit are pre-multiplied (bandpass × illuminant) on the
+    _IMX183_WAVELENGTHS grid; that's the only product compute_rg needs.
+    """
+
+    label: str
+    red_lit: np.ndarray
+    green_lit: np.ndarray
+
+
+# Available illuminants.  Halogen 3200 K is the historical default — matches
+# the 50x AFM cal points; the Leica's actual lamp is a white LED, so the
+# elijah_led entry uses a measured trace from a sister microscope (Elijah's
+# machine) that should be representative.
 _ILLUM_3200 = _blackbody(_IMX183_WAVELENGTHS, 3200.0)
-_IMX183_RED_LIT = _IMX183_RED * _ILLUM_3200
-_IMX183_GREEN_LIT = _IMX183_GREEN * _ILLUM_3200
+_ILLUM_ELIJAH = _load_elijah_led(_IMX183_WAVELENGTHS)
+
+_ILLUMINANTS: dict[str, _Illuminant] = {
+    "halogen_3200K": _Illuminant(
+        label="Halogen 3200K",
+        red_lit=_IMX183_RED * _ILLUM_3200,
+        green_lit=_IMX183_GREEN * _ILLUM_3200,
+    ),
+    "elijah_led": _Illuminant(
+        label="Elijah LED",
+        red_lit=_IMX183_RED * _ILLUM_ELIJAH,
+        green_lit=_IMX183_GREEN * _ILLUM_ELIJAH,
+    ),
+}
+
+# Module-level aliases retained for the regression test, which imports
+# _IMX183_RED_LIT/_IMX183_GREEN_LIT directly.  Always halogen 3200 K.
+_IMX183_RED_LIT = _ILLUMINANTS["halogen_3200K"].red_lit
+_IMX183_GREEN_LIT = _ILLUMINANTS["halogen_3200K"].green_lit
+
+
+class _Transmission(NamedTuple):
+    """One objective-transmission option for the widget toggle.
+
+    `factor` is the per-λ multiplier on (bandpass × illuminant); the
+    light passes through the objective twice (incident + reflected) so
+    real-objective T(λ) is squared before storing here."""
+
+    label: str
+    factor: np.ndarray
+
+
+_TRANSMISSIONS: dict[str, _Transmission] = {
+    "off": _Transmission(label="off", factor=np.ones_like(_IMX183_WAVELENGTHS)),
+    "10x": _Transmission(
+        label="10x (T²)",
+        factor=_load_objective_transmission_10x(_IMX183_WAVELENGTHS) ** 2,
+    ),
+}
+
 n_sio2 = _interp_index(lamb, _SIO2_DATA)
 n_si = _interp_index(lamb, _SI_DATA)
 
@@ -82,14 +163,24 @@ def compute_rg(
     na: float,
     layer_thickness_nm: float = _HBN_LAYER_THICKNESS_NM,
     max_layers: int = HBN_MAX_LAYERS,
+    *,
+    red_lit: np.ndarray | None = None,
+    green_lit: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Batch-compute R/G contrast for layers 1..max_layers.
 
     n_film can be a scalar complex (constant n) or an ndarray of complex values
     (one per wavelength in _IMX183_WAVELENGTHS, for dispersive materials).
 
+    red_lit/green_lit are pre-multiplied (camera bandpass × illuminant) on the
+    _IMX183_WAVELENGTHS grid; default to halogen 3200K.
+
     Returns (r_contrast, g_contrast, thickness_nm).
     """
+    if red_lit is None:
+        red_lit = _IMX183_RED_LIT
+    if green_lit is None:
+        green_lit = _IMX183_GREEN_LIT
     if isinstance(n_film, np.ndarray):
         n1 = np.array(n_film, dtype=np.complex128)
     else:
@@ -157,10 +248,10 @@ def compute_rg(
     R_flake /= total_w
     R_sub /= total_w
 
-    V_sub_r = np.trapezoid(R_sub * _IMX183_RED_LIT, lamb)
-    V_sub_g = np.trapezoid(R_sub * _IMX183_GREEN_LIT, lamb)
-    V_flake_r = np.trapezoid(R_flake * _IMX183_RED_LIT[None, :], lamb, axis=1)
-    V_flake_g = np.trapezoid(R_flake * _IMX183_GREEN_LIT[None, :], lamb, axis=1)
+    V_sub_r = np.trapezoid(R_sub * red_lit, lamb)
+    V_sub_g = np.trapezoid(R_sub * green_lit, lamb)
+    V_flake_r = np.trapezoid(R_flake * red_lit[None, :], lamb, axis=1)
+    V_flake_g = np.trapezoid(R_flake * green_lit[None, :], lamb, axis=1)
 
     return (
         (V_flake_r - V_sub_r) / V_sub_r,
@@ -241,6 +332,8 @@ class _Vals:
     """Immutable snapshot of slider state + active tab."""
 
     tab: str
+    illum: str
+    trans: str
     n: float
     n_gr: float
     k: float
@@ -287,10 +380,18 @@ class _TabResult(NamedTuple):
 
 
 def _compute_for_tab(vals: _Vals, n_wse2_arr: np.ndarray) -> _TabResult:
+    illum = _ILLUMINANTS[vals.illum]
+    trans_factor = _TRANSMISSIONS[vals.trans].factor
+    red_lit = illum.red_lit * trans_factor
+    green_lit = illum.green_lit * trans_factor
     if vals.tab == "hbn":
         hbn_n = complex(vals.n)
-        r90, g90, t_hbn = compute_rg(hbn_n, vals.oxide, vals.na, max_layers=HBN_MAX_LAYERS)
-        r285, g285, _ = compute_rg(hbn_n, vals.oxide_285, vals.na, max_layers=HBN_MAX_LAYERS)
+        r90, g90, t_hbn = compute_rg(
+            hbn_n, vals.oxide, vals.na, max_layers=HBN_MAX_LAYERS, red_lit=red_lit, green_lit=green_lit
+        )
+        r285, g285, _ = compute_rg(
+            hbn_n, vals.oxide_285, vals.na, max_layers=HBN_MAX_LAYERS, red_lit=red_lit, green_lit=green_lit
+        )
         return _TabResult(r90=r90, g90=g90, t_hbn=t_hbn, r285=r285, g285=g285)
     if vals.tab == "graphene":
         gr_n = vals.n_gr - 1j * vals.k
@@ -300,6 +401,8 @@ def _compute_for_tab(vals: _Vals, n_wse2_arr: np.ndarray) -> _TabResult:
             vals.na,
             layer_thickness_nm=_GRAPHENE_LAYER_THICKNESS_NM,
             max_layers=GRAPHENE_MAX_LAYERS,
+            red_lit=red_lit,
+            green_lit=green_lit,
         )
         return _TabResult(r_gr=rg, g_gr=gg, t_gr=tg)
     if vals.tab == "wse2":
@@ -309,6 +412,8 @@ def _compute_for_tab(vals: _Vals, n_wse2_arr: np.ndarray) -> _TabResult:
             vals.na,
             layer_thickness_nm=_WSE2_LAYER_THICKNESS_NM,
             max_layers=WSE2_MAX_LAYERS,
+            red_lit=red_lit,
+            green_lit=green_lit,
         )
         return _TabResult(r_wse2=rw, g_wse2=gw, t_wse2=tw)
     return _TabResult()
@@ -342,10 +447,15 @@ def main():
     ax_gr = fig.add_axes(_SINGLE_POS)
     ax_wse2 = fig.add_axes(_SINGLE_POS)
 
+    active_illum = {"name": "halogen_3200K"}
+    active_trans = {"name": "off"}
+
     # --- Compute initial curves (synchronous so first frame is drawn) ---
     def _init_vals(tab: str) -> _Vals:
         return _Vals(
             tab=tab,
+            illum=active_illum["name"],
+            trans=active_trans["name"],
             n=init["n"],
             n_gr=init["n_gr"],
             k=init["k"],
@@ -632,6 +742,8 @@ def main():
     def _read_vals(tab: str) -> _Vals:
         return _Vals(
             tab=tab,
+            illum=active_illum["name"],
+            trans=active_trans["name"],
             n=_slider("n").val,
             n_gr=_slider("n_gr").val,
             k=_slider("k").val,
@@ -654,25 +766,25 @@ def main():
     # --- Compute cache: last valid result per tab (keyed by inputs that affect it) ---
     cache: dict[str, tuple[tuple, _TabResult]] = {
         "hbn": (
-            (init["n"], init["oxide"], init["oxide_285"], init["na"]),
+            (init["n"], init["oxide"], init["oxide_285"], init["na"], active_illum["name"], active_trans["name"]),
             init_hbn,
         ),
         "graphene": (
-            (init["n_gr"], init["k"], init["oxide"], init["na"]),
+            (init["n_gr"], init["k"], init["oxide"], init["na"], active_illum["name"], active_trans["name"]),
             init_gr,
         ),
         "wse2": (
-            (init["oxide_wse2"], init["na"]),
+            (init["oxide_wse2"], init["na"], active_illum["name"], active_trans["name"]),
             init_wse2,
         ),
     }
 
     def _compute_key(tab: str, vals: _Vals) -> tuple:
         if tab == "hbn":
-            return (vals.n, vals.oxide, vals.oxide_285, vals.na)
+            return (vals.n, vals.oxide, vals.oxide_285, vals.na, vals.illum, vals.trans)
         if tab == "graphene":
-            return (vals.n_gr, vals.k, vals.oxide, vals.na)
-        return (vals.oxide_wse2, vals.na)
+            return (vals.n_gr, vals.k, vals.oxide, vals.na, vals.illum, vals.trans)
+        return (vals.oxide_wse2, vals.na, vals.illum, vals.trans)
 
     # --- Background worker plumbing ---
     # _pending holds the latest desired _Vals (mailbox size 1, last wins).
@@ -921,6 +1033,35 @@ def main():
     btn_hbn.on_clicked(lambda _: show_tab("hbn"))
     btn_gr.on_clicked(lambda _: show_tab("graphene"))
     btn_wse2.on_clicked(lambda _: show_tab("wse2"))
+
+    # Illuminant toggle — cycles through _ILLUMINANTS and re-renders the active tab.
+    ax_illum = fig.add_axes((0.40, 0.93, 0.18, 0.04))
+    btn_illum = Button(ax_illum, f"Illum: {_ILLUMINANTS[active_illum['name']].label}")
+
+    def toggle_illum(_event=None):
+        names = list(_ILLUMINANTS.keys())
+        active_illum["name"] = names[(names.index(active_illum["name"]) + 1) % len(names)]
+        btn_illum.label.set_text(f"Illum: {_ILLUMINANTS[active_illum['name']].label}")
+        # Request a fresh compute for the active tab; the new illum name is in
+        # the cache key so the request will miss and dispatch.  Other tabs will
+        # recompute lazily on their next show.
+        _request_compute(_read_vals(active_tab["name"]))
+        fig.canvas.draw_idle()
+
+    btn_illum.on_clicked(toggle_illum)
+
+    # Objective transmission toggle — multiplies bandpass×illuminant by T(λ)².
+    ax_trans = fig.add_axes((0.59, 0.93, 0.16, 0.04))
+    btn_trans = Button(ax_trans, f"Trans: {_TRANSMISSIONS[active_trans['name']].label}")
+
+    def toggle_trans(_event=None):
+        names = list(_TRANSMISSIONS.keys())
+        active_trans["name"] = names[(names.index(active_trans["name"]) + 1) % len(names)]
+        btn_trans.label.set_text(f"Trans: {_TRANSMISSIONS[active_trans['name']].label}")
+        _request_compute(_read_vals(active_tab["name"]))
+        fig.canvas.draw_idle()
+
+    btn_trans.on_clicked(toggle_trans)
 
     # Export button — lives in the tab-button row so it's always reachable
     ax_btn = fig.add_axes((0.88, 0.93, 0.10, 0.04))
