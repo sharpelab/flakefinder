@@ -134,10 +134,17 @@ def compute_rg(
                 r23 = (n_si * cos_t2 - n_sio2 * cos_t3) / (n_si * cos_t2 + n_sio2 * cos_t3)
                 r_as = (n_sio2 * cos_t0 - cos_t2) / (n_sio2 * cos_t0 + cos_t2)
 
+            # Use explicit exp(-1j*…) for the negative-phase terms rather than
+            # np.conj(exp(1j*…)).  For real β the two are equivalent, but with
+            # complex β (absorbing film, Im(β)<0 in the n-i*k convention) the
+            # conj trick silently drops the round-trip absorption decay —
+            # |conj(exp(1j*β))| = exp(+|Im β|) but |exp(-1j*β)| = exp(-|Im β|).
             eb1pb2 = np.exp(1j * (beta1_all + beta2[None, :]))
             eb1mb2 = np.exp(1j * (beta1_all - beta2[None, :]))
-            num = r01 * eb1pb2 + r12 * np.conj(eb1mb2) + r23 * np.conj(eb1pb2) + r01 * r12 * r23 * eb1mb2
-            den = eb1pb2 + r01 * r12 * np.conj(eb1mb2) + r01 * r23 * np.conj(eb1pb2) + r12 * r23 * eb1mb2
+            eb1pb2_neg = np.exp(-1j * (beta1_all + beta2[None, :]))
+            eb1mb2_neg = np.exp(-1j * (beta1_all - beta2[None, :]))
+            num = r01 * eb1pb2 + r12 * eb1mb2_neg + r23 * eb1pb2_neg + r01 * r12 * r23 * eb1mb2
+            den = eb1pb2 + r01 * r12 * eb1mb2_neg + r01 * r23 * eb1pb2_neg + r12 * r23 * eb1mb2
             r = num / den
             R_flake += 0.5 * w * (r * r.conjugate()).real
 

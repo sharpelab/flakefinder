@@ -229,11 +229,18 @@ def _reflectance_at_angle(
         r12 = (n2 * cos_t1 - n1 * cos_t2) / (n2 * cos_t1 + n1 * cos_t2)
         r23 = (n3 * cos_t2 - n2 * cos_t3) / (n3 * cos_t2 + n2 * cos_t3)
 
+    # Use explicit exp(-1j*…) for the negative-phase terms rather than
+    # np.conj(exp(1j*…)).  For real β the two are equivalent, but with complex
+    # β (absorbing film, Im(β)<0 in the n-i*k convention) the conj trick
+    # silently drops the round-trip absorption decay —
+    # |conj(exp(1j*β))| = exp(+|Im β|) but |exp(-1j*β)| = exp(-|Im β|).
     eb1pb2 = np.exp(1j * (beta1 + beta2))
     eb1mb2 = np.exp(1j * (beta1 - beta2))
+    eb1pb2_neg = np.exp(-1j * (beta1 + beta2))
+    eb1mb2_neg = np.exp(-1j * (beta1 - beta2))
 
-    num = r01 * eb1pb2 + r12 * np.conj(eb1mb2) + r23 * np.conj(eb1pb2) + r01 * r12 * r23 * eb1mb2
-    den = eb1pb2 + r01 * r12 * np.conj(eb1mb2) + r01 * r23 * np.conj(eb1pb2) + r12 * r23 * eb1mb2
+    num = r01 * eb1pb2 + r12 * eb1mb2_neg + r23 * eb1pb2_neg + r01 * r12 * r23 * eb1mb2
+    den = eb1pb2 + r01 * r12 * eb1mb2_neg + r01 * r23 * eb1pb2_neg + r12 * r23 * eb1mb2
 
     r = num / den
     return (r * r.conjugate()).real
