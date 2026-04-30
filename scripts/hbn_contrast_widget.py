@@ -273,21 +273,28 @@ def _setup_panel(ax, title):
     ax.set_ylim(-1.5, 4)
 
 
-def _make_annotations(ax, layer_thickness_nm, max_layers, label_layers=None, label_fmt="thickness"):
+def _make_annotations(ax, layer_thickness_nm, max_layers, label_layers=None, label_fmt="thickness", custom_labels=None):
     """Create thickness annotations and dot artist for a panel.
 
     label_fmt: "thickness" for "Xnm" labels, "layers" for "XL" labels.
+    custom_labels: optional list of (layer_idx, text) tuples; overrides
+    label_layers/label_fmt entirely so a panel can mix layer-count and
+    thickness labels.
     """
-    if label_layers is None:
-        label_layers = [nl for nl in LABEL_LAYERS if nl <= max_layers]
+    if custom_labels is not None:
+        items = list(custom_labels)
+    else:
+        if label_layers is None:
+            label_layers = [nl for nl in LABEL_LAYERS if nl <= max_layers]
+        items = []
+        for nl in label_layers:
+            text = f"{nl}L" if label_fmt == "layers" else f"{nl * layer_thickness_nm:.0f}nm"
+            items.append((nl, text))
+
     ann = []
     dots = ax.plot([], [], "ko", markersize=4, zorder=3)[0]
-    for nl in label_layers:
+    for nl, text in items:
         if nl <= max_layers:
-            if label_fmt == "layers":
-                text = f"{nl}L"
-            else:
-                text = f"{nl * layer_thickness_nm:.0f}nm"
             a = ax.annotate(
                 text,
                 (0, 0),
@@ -573,7 +580,14 @@ def main():
     ax_gr.set_xlim(-1, 3)
     ax_gr.set_ylim(-1.5, 2)
     (line_gr,) = ax_gr.plot(g_gr, r_gr, "k-", lw=1.5, label="Theory")
-    ann_gr, dots_gr = _make_annotations(ax_gr, _GRAPHENE_LAYER_THICKNESS_NM, GRAPHENE_MAX_LAYERS)
+    # Mix layer-count callouts (1-5L, the thin-graphene regime) with thickness
+    # callouts (5/10/12/15/20 nm, the graphite-gate regime).
+    _gr_labels = [(n, f"{n}L") for n in (1, 2, 3, 4, 5)] + [
+        (round(t_nm / _GRAPHENE_LAYER_THICKNESS_NM), f"{t_nm}nm") for t_nm in (5, 10, 12, 15, 20)
+    ]
+    ann_gr, dots_gr = _make_annotations(
+        ax_gr, _GRAPHENE_LAYER_THICKNESS_NM, GRAPHENE_MAX_LAYERS, custom_labels=_gr_labels
+    )
 
     if len(_CAL_DATA_GRAPHENE) > 0:
         cal_gr_r = _CAL_DATA_GRAPHENE[:, 1] + init["r_off_gr"]
@@ -591,8 +605,9 @@ def main():
         )
         cal_ann_gr = []
         for i, row in enumerate(_CAL_DATA_GRAPHENE):
+            n_layers = round(row[0] / _GRAPHENE_LAYER_THICKNESS_NM)
             a = ax_gr.annotate(
-                f"{row[0]:.0f}",
+                f"{n_layers}L",
                 (cal_gr_g[i], cal_gr_r[i]),
                 textcoords="offset points",
                 xytext=(6, -6),
