@@ -17,7 +17,14 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from hbn_contrast import _SI_DATA, _SIO2_DATA, _interp_index, _reflectance_at_angle
+from hbn_contrast import (
+    _SI_DATA,
+    _SIO2_DATA,
+    _interp_index,
+    _na_gauss_legendre,
+    _reflectance_at_angle,
+    reflectance,
+)
 from hbn_contrast_widget import compute_rg
 
 
@@ -184,6 +191,113 @@ def _check_against_tmm() -> None:
         assert err < 1e-12, f"{label}: |R_ours - R_tmm| = {err:.3e} > 1e-12"
 
 
+def _check_na_quadrature_weights() -> None:
+    """`_na_gauss_legendre` weights should integrate sin(θ)cos(θ) over [0, θ_max].
+
+    Analytical: ∫₀^θ_max sin(θ) cos(θ) dθ = ½ sin²(θ_max) = ½ NA² (since
+    θ_max = arcsin(NA)).  This sanity-checks the basic quadrature
+    construction independent of any reflectance.
+    """
+    for na in (0.10, 0.25, 0.50, 0.85):
+        thetas, weights = _na_gauss_legendre(na)
+        # The weights already absorb sin·cos·dθ — summing approximates the
+        # integral of f(θ)=1 weighted by sin(θ)cos(θ).
+        integral = float(weights.sum())
+        expected = 0.5 * na * na
+        err = abs(integral - expected)
+        status = "OK" if err < 1e-12 else "FAIL"
+        print(f"  [{status}] NA={na:.2f}  Σweights={integral:.9f}  ½ sin²θ_max={expected:.9f}  err={err:.2e}")
+        assert err < 1e-12, f"NA={na}: weight sum {integral:.6e} vs expected {expected:.6e}"
+
+
+def _check_na_continuity() -> None:
+    """As NA→0, reflectance(NA) should approach the NA=0 single-angle value.
+
+    Quantitatively, the leading correction is O(NA²) (the cone-averaged R
+    differs from on-axis R by a quadratic in θ_max).  Test: at very small
+    NA the difference is dominated by the |R'(θ)| · NA² term, so for
+    NA=0.005 we expect agreement to a few parts in 1e6 for any smooth R.
+    """
+    lamb = np.array([550.0])
+
+    def n_fn(_lam: np.ndarray) -> np.ndarray:
+        return np.full_like(_lam, complex(2.6, -1.3), dtype=np.complex128)
+
+    R0 = float(reflectance(lamb, n_fn, n_layers=1, t_oxide_nm=90.0, na=0.0, layer_thickness_nm=10.0)[0])
+    R_eps = float(reflectance(lamb, n_fn, n_layers=1, t_oxide_nm=90.0, na=0.005, layer_thickness_nm=10.0)[0])
+    err = abs(R_eps - R0)
+    status = "OK" if err < 5e-6 else "FAIL"
+    print(f"  [{status}] R(NA=0)={R0:.9f}  R(NA=0.005)={R_eps:.9f}  Δ={err:.2e}  (should be O(NA²)≈3e-5)")
+    assert err < 5e-6, f"NA=0.005 should match NA=0 to ~1e-5; got {err:.3e}"
+
+
+def _check_na_node_convergence() -> None:
+    """Increasing the number of Gauss-Legendre nodes shouldn't change the answer."""
+    lamb = np.array([550.0])
+
+    def n_fn(_lam: np.ndarray) -> np.ndarray:
+        return np.full_like(_lam, complex(2.6, -1.3), dtype=np.complex128)
+
+    R_8 = float(reflectance(lamb, n_fn, 1, 90.0, na=0.25, n_angles=8, layer_thickness_nm=10.0)[0])
+    R_20 = float(reflectance(lamb, n_fn, 1, 90.0, na=0.25, n_angles=20, layer_thickness_nm=10.0)[0])
+    R_40 = float(reflectance(lamb, n_fn, 1, 90.0, na=0.25, n_angles=40, layer_thickness_nm=10.0)[0])
+    err_8_40 = abs(R_8 - R_40)
+    err_20_40 = abs(R_20 - R_40)
+    status = "OK" if err_20_40 < 1e-13 else "FAIL"
+    print(f"  [{status}] R(8 nodes)={R_8:.12f}  R(20)={R_20:.12f}  R(40)={R_40:.12f}")
+    print(f"        |8−40|={err_8_40:.2e}  |20−40|={err_20_40:.2e}")
+    assert err_20_40 < 1e-13, f"20-node integration diverges from 40-node: {err_20_40:.3e}"
+
+
+def _check_na_cone_against_tmm() -> None:
+    """Manual-tmm cone average vs `reflectance(na=…)`.
+
+    Pulls the same Gauss-Legendre nodes/weights, calls tmm at each angle
+    for both polarizations, and computes the weighted average ourselves.
+    Compares to the CLI's `reflectance(na=…)` output, which integrates
+    via the same nodes through `_reflectance_at_angle`.
+
+    This isolates the NA-averaging path from the per-angle reflectance
+    path (which the previous test panel already verified vs tmm).
+    """
+    import tmm
+
+    cases = [
+        # (label, n_film, t_film, t_oxide, lam, na)
+        ("transparent NA=0.25", complex(2.10, 0.0), 20.0, 285.0, 550.0, 0.25),
+        ("absorbing NA=0.25", complex(2.6, -1.3), 12.0, 90.0, 600.0, 0.25),
+        ("absorbing NA=0.50", complex(2.6, -1.3), 12.0, 90.0, 600.0, 0.50),
+        ("strongly abs NA=0.85", complex(3.0, -2.5), 15.0, 90.0, 500.0, 0.85),
+        ("graphite NA=0.25", complex(2.6, -1.3), 6.4, 90.0, 550.0, 0.25),
+    ]
+
+    for label, n_film, t_film, t_oxide, lam_nm, na in cases:
+        lamb = np.array([lam_nm])
+        n2 = complex(_interp_index(lamb, _SIO2_DATA)[0])
+        n3 = complex(_interp_index(lamb, _SI_DATA)[0])
+
+        def n_fn(_lam: np.ndarray, _nf: complex = n_film) -> np.ndarray:
+            return np.full_like(_lam, _nf, dtype=np.complex128)
+
+        R_ours = float(reflectance(lamb, n_fn, 1, t_oxide, na=na, layer_thickness_nm=t_film)[0])
+
+        # Manual tmm averaging — same nodes/weights, same s/p convention.
+        thetas, weights = _na_gauss_legendre(na)
+        n_list = [1.0, np.conj(n_film), np.conj(n2), np.conj(n3)]
+        d_list = [np.inf, t_film, t_oxide, np.inf]
+        R_sum = 0.0
+        for theta, w in zip(thetas, weights, strict=True):
+            R_s = tmm.coh_tmm("s", n_list, d_list, theta, lam_nm)["R"]
+            R_p = tmm.coh_tmm("p", n_list, d_list, theta, lam_nm)["R"]
+            R_sum += 0.5 * (R_s + R_p) * w
+        R_tmm = R_sum / weights.sum()
+
+        err = abs(R_ours - R_tmm)
+        status = "OK" if err < 1e-12 else "FAIL"
+        print(f"  [{status}] {label:24s}  R_ours={R_ours:.9f}  R_tmm-avg={R_tmm:.9f}  err={err:.2e}")
+        assert err < 1e-12, f"{label}: |R_ours - R_tmm-avg| = {err:.3e} > 1e-12"
+
+
 def main() -> int:
     print("CLI _reflectance_at_angle vs exact closed-form R(λ):")
     # Transparent baseline (k=0): the conj trick used to be correct here, so
@@ -201,6 +315,18 @@ def main() -> int:
 
     print("\nCLI _reflectance_at_angle vs `tmm` package (oblique + s/p included):")
     _check_against_tmm()
+
+    print("\nNA-cone quadrature weight integral (Σweights = ½ sin²θ_max):")
+    _check_na_quadrature_weights()
+
+    print("\nNA → 0 continuity (small-NA average matches NA=0 single point):")
+    _check_na_continuity()
+
+    print("\nNA quadrature node-count convergence:")
+    _check_na_node_convergence()
+
+    print("\nNA-cone average vs manual tmm cone average (same nodes/weights):")
+    _check_na_cone_against_tmm()
 
     print("\nAll regression checks passed.")
     return 0
