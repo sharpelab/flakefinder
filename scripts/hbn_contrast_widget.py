@@ -352,6 +352,8 @@ class _Vals:
     g_off: float
     r_off_gr: float
     g_off_gr: float
+    r_off_wse2: float
+    g_off_wse2: float
 
 
 _EMPTY_ARR = np.zeros(0, dtype=float)
@@ -444,6 +446,8 @@ def main():
         "g_off": -0.2,
         "r_off_gr": 0.0,
         "g_off_gr": 0.0,
+        "r_off_wse2": 0.0,
+        "g_off_wse2": 0.0,
     }
 
     n_wse2_arr = n_wse2(lamb)
@@ -474,6 +478,8 @@ def main():
             g_off=init["g_off"],
             r_off_gr=init["r_off_gr"],
             g_off_gr=init["g_off_gr"],
+            r_off_wse2=init["r_off_wse2"],
+            g_off_wse2=init["g_off_wse2"],
         )
 
     init_vals_hbn = _init_vals("hbn")
@@ -680,8 +686,8 @@ def main():
     )
 
     if len(_CAL_DATA_WSE2) > 0:
-        cal_wse2_r = _CAL_DATA_WSE2[:, 1] + init["r_off"]
-        cal_wse2_g = _CAL_DATA_WSE2[:, 2] + init["g_off"]
+        cal_wse2_r = _CAL_DATA_WSE2[:, 1] + init["r_off_wse2"]
+        cal_wse2_g = _CAL_DATA_WSE2[:, 2] + init["g_off_wse2"]
         scat_wse2 = ax_wse2.scatter(
             cal_wse2_g,
             cal_wse2_r,
@@ -733,13 +739,15 @@ def main():
         "g_off": ("G offset", -1.0, 1.0, init["g_off"]),
         "r_off_gr": ("R offset (gr)", -1.0, 1.5, init["r_off_gr"]),
         "g_off_gr": ("G offset (gr)", -1.0, 1.0, init["g_off_gr"]),
+        "r_off_wse2": ("R offset (wse2)", -1.0, 1.5, init["r_off_wse2"]),
+        "g_off_wse2": ("G offset (wse2)", -1.0, 1.0, init["g_off_wse2"]),
     }
 
     # Which sliders each tab uses
     tab_sliders = {
         "hbn": ["n", "oxide", "oxide_285", "na", "r_off", "g_off"],
         "graphene": ["n_gr", "k", "oxide", "na", "r_off_gr", "g_off_gr"],
-        "wse2": ["oxide_wse2", "na", "r_off", "g_off"],
+        "wse2": ["oxide_wse2", "na", "r_off_wse2", "g_off_wse2"],
     }
 
     # Create all slider widgets (initially invisible, positioned later)
@@ -770,12 +778,16 @@ def main():
             g_off=_slider("g_off").val,
             r_off_gr=_slider("r_off_gr").val,
             g_off_gr=_slider("g_off_gr").val,
+            r_off_wse2=_slider("r_off_wse2").val,
+            g_off_wse2=_slider("g_off_wse2").val,
         )
 
     def _active_offsets(vals: _Vals) -> tuple[float, float]:
         """Return (r_off, g_off) for the tab's overlay scatters."""
         if vals.tab == "graphene":
             return vals.r_off_gr, vals.g_off_gr
+        if vals.tab == "wse2":
+            return vals.r_off_wse2, vals.g_off_wse2
         return vals.r_off, vals.g_off
 
     # --- Compute cache: last valid result per tab (keyed by inputs that affect it) ---
@@ -898,8 +910,8 @@ def main():
         ax_wse2.set_title(f"WSe₂ · {vals.oxide_wse2:.0f} nm SiO₂")
         _update_annotations(ann_wse2, dots_wse2, rw, gw)
         if scat_wse2 is not None:
-            cwse2_r = _CAL_DATA_WSE2[:, 1] + vals.r_off
-            cwse2_g = _CAL_DATA_WSE2[:, 2] + vals.g_off
+            cwse2_r = _CAL_DATA_WSE2[:, 1] + vals.r_off_wse2
+            cwse2_g = _CAL_DATA_WSE2[:, 2] + vals.g_off_wse2
             scat_wse2.set_offsets(np.column_stack([cwse2_g, cwse2_r]))
             for i, ann in enumerate(cal_ann_wse2):
                 ann.xy = (cwse2_g[i], cwse2_r[i])
@@ -949,8 +961,8 @@ def main():
             for i, ann in enumerate(cal_ann_gr_10x):
                 ann.xy = (cal10_g_s[i], cal10_r_s[i])
         elif vals.tab == "wse2" and scat_wse2 is not None:
-            cwse2_r = _CAL_DATA_WSE2[:, 1] + vals.r_off
-            cwse2_g = _CAL_DATA_WSE2[:, 2] + vals.g_off
+            cwse2_r = _CAL_DATA_WSE2[:, 1] + vals.r_off_wse2
+            cwse2_g = _CAL_DATA_WSE2[:, 2] + vals.g_off_wse2
             scat_wse2.set_offsets(np.column_stack([cwse2_g, cwse2_r]))
             for i, ann in enumerate(cal_ann_wse2):
                 ann.xy = (cwse2_g[i], cwse2_r[i])
@@ -1008,7 +1020,14 @@ def main():
     def _layout_sliders(tab_name: str):
         keys = tab_sliders[tab_name]
         for key, (ax_s, _) in all_sliders.items():
-            ax_s.set_visible(key in keys)
+            in_active = key in keys
+            ax_s.set_visible(in_active)
+            # Park inactive sliders off-canvas so an invisible Slider's Axes
+            # can't keep stealing button-press events from a visible Slider
+            # stacked on top — matches what we already do for hidden plot
+            # panels via _OFFSCREEN_POS.
+            if not in_active:
+                ax_s.set_position(_OFFSCREEN_POS)
         for i, key in enumerate(keys):
             ax_s, _ = all_sliders[key]
             ax_s.set_position((0.10, 0.26 - i * 0.033, 0.80, 0.022))
@@ -1088,6 +1107,8 @@ def main():
         g_off = _slider("g_off").val
         r_off_gr = _slider("r_off_gr").val
         g_off_gr = _slider("g_off_gr").val
+        r_off_wse2 = _slider("r_off_wse2").val
+        g_off_wse2 = _slider("g_off_wse2").val
 
         # With lazy per-tab compute, non-active tabs can carry stale cache
         # entries.  Synchronously refresh any tab whose cached inputs don't
@@ -1116,7 +1137,7 @@ def main():
 
         hbn_90_cal = _sample_cal(hbn_res.r90, hbn_res.g90, hbn_res.t_hbn, r_off, g_off)
         graphene_cal = _sample_cal(gr_res.r_gr, gr_res.g_gr, gr_res.t_gr, r_off_gr, g_off_gr)
-        wse2_cal = _sample_cal(wse2_res.r_wse2, wse2_res.g_wse2, wse2_res.t_wse2, r_off, g_off)
+        wse2_cal = _sample_cal(wse2_res.r_wse2, wse2_res.g_wse2, wse2_res.t_wse2, r_off_wse2, g_off_wse2)
 
         params = {
             "n_hbn": _slider("n").val,
@@ -1130,6 +1151,8 @@ def main():
             "graphene_k": _slider("k").val,
             "graphene_r_offset": r_off_gr,
             "graphene_g_offset": g_off_gr,
+            "wse2_r_offset": r_off_wse2,
+            "wse2_g_offset": g_off_wse2,
             "hbn_90_cal_points": hbn_90_cal,
             "graphene_cal_points": graphene_cal,
             "wse2_cal_points": wse2_cal,
