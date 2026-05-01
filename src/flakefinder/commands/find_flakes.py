@@ -1602,7 +1602,7 @@ def main() -> int:
                 with _always_console():
                     upload.run(
                         p.run_dir,
-                        material=p.seg.material,
+                        material=DetectorConfig.from_material(p.seg.material).name,
                         substrate=p.substrate,
                         quiet=quiet,
                     )

@@ -767,7 +767,7 @@ class DetectorConfig:
         cutoffs at 0).
         """
         return CurveDetectorConfig(
-            name="Graphene thick",
+            name="Graphite 5-10nm",
             substrate=Substrate.SI_90NM,
             contrast_mode=ContrastMode.BELOW,
             contrast_offset=4.0,
