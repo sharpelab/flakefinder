@@ -248,6 +248,9 @@ def discover_chips(run_dir: Path) -> list[int]:
     return chips
 
 
+_REVISIT_FILENAME_RE = re.compile(r"^rank\d+_(?P<frame>frame_\d+)_d(?P<det>\d+)_(?P<mag>[\d.]+)x$")
+
+
 def find_revisit_image(
     chip_dir: Path,
     frame_name: str,
@@ -256,20 +259,25 @@ def find_revisit_image(
 ) -> Path | None:
     """Find a revisit image for a detection at a given magnification.
 
-    Revisit images are named like rank{NN}_{frame}_d{det_id}_{mag}x.png.
-    We match on the frame+det_id part.
+    Revisit images are named ``rank{NN}_{frame}_d{det_id}_{mag:g}x.png``.
+    Parses the filename and compares frame/det_id/mag by value so that, e.g.,
+    det_id=2 doesn't substring-match files for det_id=28 from the same frame.
     """
-    mag_str = f"{mag:g}x"
-    search_key = f"{frame_name}_d{det_id}"
+    mag_str = f"{mag:g}"
+    mag_dir_token = f"{mag_str}x"
 
-    # Check all revisit directories for this mag
     for revisit_dir in chip_dir.iterdir():
         if not revisit_dir.is_dir() or not revisit_dir.name.startswith("revisit_"):
             continue
-        if mag_str not in revisit_dir.name:
+        if mag_dir_token not in revisit_dir.name:
             continue
         for img in revisit_dir.iterdir():
-            if search_key in img.stem and img.suffix == ".png":
+            if img.suffix != ".png":
+                continue
+            m = _REVISIT_FILENAME_RE.match(img.stem)
+            if m is None:
+                continue
+            if m.group("frame") == frame_name and int(m.group("det")) == det_id and m.group("mag") == mag_str:
                 return img
 
     return None
