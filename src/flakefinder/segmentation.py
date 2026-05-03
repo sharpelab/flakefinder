@@ -387,11 +387,13 @@ def _score_graphene(config: DetectorConfig, det: Detection) -> tuple[int, float]
     else:
         tier = 3
 
+    ge = det.get("grad_energy", 99.0)
     ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
     g_penalty = 1.0 / (1.0 + 0.2 * max(g - 1.0, 0))
+    grad_penalty = float(np.exp(-ge / 30.0))
     log2_size = float(np.log2(max(size_um2, 1.0)))
     score = round(
-        log2_size * log2_size * np.exp(-cd * 8) * ar_penalty * g_penalty,
+        log2_size**1.5 * np.exp(-cd * 8) * ar_penalty * g_penalty * grad_penalty,
         4,
     )
     return tier, score
@@ -793,7 +795,7 @@ class DetectorConfig:
             tier1_entropy_max=3.7,
             tier1_min_size_um2=350.0,
             tier1_br_ratio_max=1.0,
-            tier1_aspect_ratio=7.0,
+            tier1_aspect_ratio=10.0,
             tier1_solidity_min=0.2,
             tier1_circularity_min=0.1,
             tier1_grad_energy_max=99.0,
