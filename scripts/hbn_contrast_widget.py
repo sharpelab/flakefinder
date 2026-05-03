@@ -150,6 +150,19 @@ _CAL_DATA_GRAPHITE_10X = np.array(
 )
 _CAL_DATA_GRAPHITE_10X_R_RELIABLE = np.array([True, True, False, False])
 
+# 10x line-fit measurements on thin graphene flakes (1-4 layers).  Each row
+# is the mean over multiple physical flakes per layer count (letters in
+# parentheses identify the source flakes in the operator's notebook).
+# Format: [thickness_nm, R_contrast, G_contrast].  Layer thickness 0.335 nm.
+_CAL_DATA_GRAPHENE_10X = np.array(
+    [
+        [0.335, -0.159, -0.135],  # 1L  (D)
+        [0.670, -0.318, -0.306],  # 2L  (A, C, H)
+        [1.005, -0.445, -0.399],  # 3L  (B, E)
+        [1.340, -0.522, -0.503],  # 4L  (F)
+    ]
+)
+
 # Per-material max compute layers (plot + cache extent)
 HBN_MAX_LAYERS = 300
 GRAPHENE_MAX_LAYERS = 60
@@ -299,7 +312,9 @@ def _make_annotations(ax, layer_thickness_nm, max_layers, label_layers=None, lab
                 text,
                 (0, 0),
                 textcoords="offset points",
-                xytext=(6, 4),
+                xytext=(-5, 0),
+                ha="right",
+                va="center",
                 fontsize=7,
                 color="0.3",
             )
@@ -507,7 +522,7 @@ def main():
         c="tab:orange",
         marker="o",
         s=50,
-        zorder=5,
+        zorder=1,
         edgecolors="k",
         linewidths=0.7,
         label="AFM (90nm, shifted)",
@@ -549,7 +564,7 @@ def main():
             c="tab:red",
             marker="s",
             s=50,
-            zorder=5,
+            zorder=1,
             edgecolors="k",
             linewidths=0.7,
             label="285nm empirical",
@@ -604,7 +619,7 @@ def main():
             c="tab:green",
             marker="D",
             s=50,
-            zorder=5,
+            zorder=1,
             edgecolors="k",
             linewidths=0.7,
             label="Graphene empirical",
@@ -636,7 +651,7 @@ def main():
         c="tab:cyan",
         marker="^",
         s=55,
-        zorder=5,
+        zorder=1,
         edgecolors="k",
         linewidths=0.7,
         label="10x graphite (AFM)",
@@ -648,7 +663,7 @@ def main():
         edgecolors="tab:cyan",
         marker="^",
         s=55,
-        zorder=4,
+        zorder=1,
         linewidths=1.2,
         alpha=0.55,
         label="10x · R clipped",
@@ -666,6 +681,34 @@ def main():
             alpha=1.0 if rel[i] else 0.55,
         )
         cal_ann_gr_10x.append(a)
+
+    # 10x thin-graphene overlay (1-4 layers).
+    cal10_gr_r = _CAL_DATA_GRAPHENE_10X[:, 1] + init["r_off_gr"]
+    cal10_gr_g = _CAL_DATA_GRAPHENE_10X[:, 2] + init["g_off_gr"]
+    scat_gr_10x_thin = ax_gr.scatter(
+        cal10_gr_g,
+        cal10_gr_r,
+        c="tab:olive",
+        marker="s",
+        s=55,
+        zorder=1,
+        edgecolors="k",
+        linewidths=0.7,
+        label="10x graphene 1-4L",
+    )
+    cal_ann_gr_10x_thin = []
+    for i, row in enumerate(_CAL_DATA_GRAPHENE_10X):
+        n_layers_row = round(row[0] / _GRAPHENE_LAYER_THICKNESS_NM)
+        a = ax_gr.annotate(
+            f"{n_layers_row}L",
+            (cal10_gr_g[i], cal10_gr_r[i]),
+            textcoords="offset points",
+            xytext=(6, -6),
+            fontsize=7,
+            color="tab:olive",
+            fontweight="bold",
+        )
+        cal_ann_gr_10x_thin.append(a)
     ax_gr.legend(fontsize=9, loc="lower right")
 
     # --- WSe₂ 300nm panel ---
@@ -694,7 +737,7 @@ def main():
             c="tab:purple",
             marker="^",
             s=50,
-            zorder=5,
+            zorder=1,
             edgecolors="k",
             linewidths=0.7,
             label="WSe₂ empirical",
@@ -903,6 +946,11 @@ def main():
         scat_gr_10x_clip.set_offsets(np.column_stack([cal10_g_s[~rel], cal10_r_s[~rel]]))
         for i, ann in enumerate(cal_ann_gr_10x):
             ann.xy = (cal10_g_s[i], cal10_r_s[i])
+        cal10_thin_r = _CAL_DATA_GRAPHENE_10X[:, 1] + vals.r_off_gr
+        cal10_thin_g = _CAL_DATA_GRAPHENE_10X[:, 2] + vals.g_off_gr
+        scat_gr_10x_thin.set_offsets(np.column_stack([cal10_thin_g, cal10_thin_r]))
+        for i, ann in enumerate(cal_ann_gr_10x_thin):
+            ann.xy = (cal10_thin_g[i], cal10_thin_r[i])
 
     def _draw_wse2(vals: _Vals, res: _TabResult):
         rw, gw = res.r_wse2, res.g_wse2
@@ -960,6 +1008,11 @@ def main():
             scat_gr_10x_clip.set_offsets(np.column_stack([cal10_g_s[~rel], cal10_r_s[~rel]]))
             for i, ann in enumerate(cal_ann_gr_10x):
                 ann.xy = (cal10_g_s[i], cal10_r_s[i])
+            cal10_thin_r = _CAL_DATA_GRAPHENE_10X[:, 1] + vals.r_off_gr
+            cal10_thin_g = _CAL_DATA_GRAPHENE_10X[:, 2] + vals.g_off_gr
+            scat_gr_10x_thin.set_offsets(np.column_stack([cal10_thin_g, cal10_thin_r]))
+            for i, ann in enumerate(cal_ann_gr_10x_thin):
+                ann.xy = (cal10_thin_g[i], cal10_thin_r[i])
         elif vals.tab == "wse2" and scat_wse2 is not None:
             cwse2_r = _CAL_DATA_WSE2[:, 1] + vals.r_off_wse2
             cwse2_g = _CAL_DATA_WSE2[:, 2] + vals.g_off_wse2
