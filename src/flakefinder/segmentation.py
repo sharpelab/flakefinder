@@ -593,7 +593,7 @@ class DetectorConfig:
     def hbn_medium(cls) -> CurveDetectorConfig:
         """hBN medium flake detection preset."""
         return CurveDetectorConfig(
-            name="hBN 5-25nm",
+            name="hBN 5-20nm",
             substrate=Substrate.SI_90NM,
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=15.0,
@@ -673,7 +673,7 @@ class DetectorConfig:
     def hbn_medium_285nm(cls) -> CurveDetectorConfig:
         """hBN medium flake detection on 285nm SiO₂ substrates."""
         return CurveDetectorConfig(
-            name="hBN 2-35nm",
+            name="hBN 5-35nm",
             substrate=Substrate.SI_285NM,
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=7.0,
