@@ -593,7 +593,7 @@ class DetectorConfig:
     def hbn_medium(cls) -> CurveDetectorConfig:
         """hBN medium flake detection preset."""
         return CurveDetectorConfig(
-            name="hBN (medium)",
+            name="hBN 5-25nm",
             substrate=Substrate.SI_90NM,
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=15.0,
@@ -633,7 +633,7 @@ class DetectorConfig:
     def hbn_thick_90nm(cls) -> CurveDetectorConfig:
         """hBN thick flake detection (20-40nm) on 90nm SiO₂."""
         return CurveDetectorConfig(
-            name="hBN (thick)",
+            name="hBN 30-40nm",
             substrate=Substrate.SI_90NM,
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=15.0,
@@ -673,7 +673,7 @@ class DetectorConfig:
     def hbn_medium_285nm(cls) -> CurveDetectorConfig:
         """hBN medium flake detection on 285nm SiO₂ substrates."""
         return CurveDetectorConfig(
-            name="hBN (medium)",
+            name="hBN 2-35nm",
             substrate=Substrate.SI_285NM,
             contrast_mode=ContrastMode.ABOVE,
             contrast_offset=7.0,
@@ -718,7 +718,7 @@ class DetectorConfig:
         From scan 154 (old system, SF121 run7) mean R/G per layer count.
         """
         return RGPointDetectorConfig(
-            name="Graphene thin",
+            name="Graphene 1-5L",
             substrate=Substrate.SI_90NM,
             contrast_mode=ContrastMode.BELOW,
             contrast_offset=4.0,
