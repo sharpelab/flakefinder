@@ -55,6 +55,21 @@ class CalPointRG(NamedTuple):
     g: float
 
 
+class CaptureSettings(NamedTuple):
+    """Camera capture settings for a scan or revisit step."""
+
+    gain: float
+    exposure_ms: float
+
+
+class BGModeRGB(NamedTuple):
+    """Per-channel background histogram mode (image counts, 0-255)."""
+
+    red: float
+    green: float
+    blue: float
+
+
 # AFM-verified hBN calibration data on 90nm SiO₂ (50x, Leica DM6M).
 # Source: docs/bn_thickness_calibration.md
 HBN_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
@@ -346,14 +361,14 @@ def _score_hbn_thick(config: DetectorConfig, det: Detection) -> tuple[int, float
 
 
 def _score_hbn_thick_50_100(config: DetectorConfig, det: Detection) -> tuple[int, float]:
-    """hBN thick (50-100nm): two independent tier-1 paths.
+    """hBN thick (50-100nm): proximity to the transfer-matrix arc, unclipped regime.
 
-    Curve path (unclipped, chip-scan gain ~2): near the transfer-matrix arc.
-    Ceiling path (pinned, gain ~4): a detection at R >= 3.8 with G
-    simultaneously capped in [2.8, 4.2] is saturated by construction —
-    3.70 is the R ceiling of the entire physical 50-100nm locus — so no
-    cal_dist requirement applies there; requiring it would punish the exact
-    distortion that identifies clipped flakes.
+    This preset's chip scans capture at gain 2.0 (carried on the material
+    config), where the G clip ceiling (~7.6-8.4 across the per-chip
+    background spread) clears the entire measured population — flakes are
+    measured unclipped, so tier 1 is cal distance to the arc plus an R/G
+    box and shape gates. There is deliberately no saturation/ceiling path:
+    clipped captures are fixed by capture settings, not by scoring.
 
     Entropy gates are intentionally disabled (99.0 in the preset): band
     flakes have every pixel contrast above +1, so the fixed-range (-1, 1)
@@ -366,26 +381,16 @@ def _score_hbn_thick_50_100(config: DetectorConfig, det: Detection) -> tuple[int
     ar = det.get("aspect_ratio", 1.0)
     size_um2 = det["size_um2"]
 
-    shape_ok = (
-        pr < config.tier1_perim_ratio and ar < config.tier1_aspect_ratio and size_um2 >= config.tier1_min_size_um2
-    )
-    curve_t1 = (
-        shape_ok
+    if (
+        pr < config.tier1_perim_ratio
+        and ar < config.tier1_aspect_ratio
+        and size_um2 >= config.tier1_min_size_um2
         and cd < config.tier1_cal_dist
         and r >= config.tier1_r_min
         and r < config.tier1_r_max
         and g >= config.tier1_g_min
         and g < config.tier1_g_max
-    )
-    # Upper R bound 5.2: a pixel-saturated blob cannot exceed its own clip
-    # ceiling ((255 - bg) / bg ≈ 5.0 in R at gain 4), so R > 5.2 can only
-    # come from an unclipped capture — where it is far above the band's
-    # R ceiling of 3.70 and therefore not 50-100 nm hBN. Validated: 0 of
-    # 4590 gain-4 ceiling-path T1s exceed 5.2 (max 5.03), while 55-64% of
-    # gain-2 ceiling-path admits do and are above-band chunks.
-    ceiling_t1 = shape_ok and 3.8 <= r <= 5.2 and 2.8 <= g <= 4.2
-
-    if curve_t1 or ceiling_t1:
+    ):
         tier = 1
     elif pr < config.tier2_perim_ratio and cd < config.tier2_cal_dist and size_um2 >= config.tier1_min_size_um2:
         tier = 2
@@ -394,15 +399,10 @@ def _score_hbn_thick_50_100(config: DetectorConfig, det: Detection) -> tuple[int
 
     # The band is intrinsically broad (~1.0 in R, ~1.5 in G), so weight cal
     # distance gently (exp(-2 cd), not exp(-8 cd)) — rank by flake quality,
-    # not model-fit noise. On the ceiling path cal distance is meaningless;
-    # use a constant factor so clipped flakes rank purely by size.
-    if ceiling_t1:
-        cal_factor = float(np.exp(-2.0 * config.tier1_cal_dist))
-    else:
-        cal_factor = float(np.exp(-2.0 * cd))
+    # not model-fit noise.
     ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
     log2_size = float(np.log2(max(size_um2, 1.0)))
-    score = round(log2_size * log2_size * cal_factor * ar_penalty, 4)
+    score = round(log2_size * log2_size * float(np.exp(-2.0 * cd)) * ar_penalty, 4)
     return tier, score
 
 
@@ -652,6 +652,16 @@ class DetectorConfig:
     # kw_only so the default doesn't collide with required fields on subclasses.
     tier1_r_min: float = field(default=-0.6, kw_only=True)
 
+    # -- Per-material capture settings --
+    # Chip-scan camera settings. None = use the ScanPreset value; resolution
+    # order in find_flakes is CLI flag > material > ScanPreset.
+    chip_scan_gain: float | None = field(default=None, kw_only=True)
+    chip_scan_exposure_ms: float | None = field(default=None, kw_only=True)
+    # Revisit capture overrides keyed by objective mag (e.g. 50.0). Mags
+    # without an entry use FC_DEFAULTS (leica/autofocus.py); explicit
+    # gain/exposure CLI flags win over material entries.
+    revisit_capture: dict[float, CaptureSettings] = field(default_factory=dict, kw_only=True)
+
     def cal_projection(self, r: float, g: float, b: float) -> CalProjection:
         """Project a contrast triple onto this config's calibration data."""
         raise NotImplementedError
@@ -786,6 +796,12 @@ class DetectorConfig:
         G peaks at ~68 nm so R = poly(G) is multivalued over the band.
         Segmentation params are identical to hbn_medium, so hbn_medium seg
         output can be reranked with this preset without re-segmentation.
+
+        Carries its own capture settings: chip scan at gain 2.0 / 0.25 ms
+        (G clip ceiling ~7.6-8.4 clears the whole measured population; the
+        ScanPreset's gain 4.0 pins in-band flakes at the ceiling) and 50x
+        revisit at gain 1.0 / 1 ms (FC default 1.5 / 2 ms clips flake cores
+        to solid white). See docs/hbn_thick_50_100_calibration.md.
         """
         return RGPointDetectorConfig(
             name="hBN 50-100nm",
@@ -805,6 +821,9 @@ class DetectorConfig:
             cal_dist_possible=0.60,
             non_match_label="non-hBN",
             white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
+            chip_scan_gain=2.0,
+            chip_scan_exposure_ms=0.25,
+            revisit_capture={50.0: CaptureSettings(gain=1.0, exposure_ms=1.0)},
             score_fn=_score_hbn_thick_50_100,
             tier1_perim_ratio=1.50,
             tier1_cal_dist=0.30,
@@ -1469,17 +1488,25 @@ def _subsegment_by_contrast(
     return final if final else [component]
 
 
+class SegmentedFrame(NamedTuple):
+    """Segmentation result for one frame."""
+
+    detections: list[Detection]
+    bg_mode_rgb: BGModeRGB
+
+
 def segment_frame(
     image: np.ndarray,
     config: DetectorConfig,
     um_per_px: float,
     perim_ratio_thresh: float = 0.0,
-) -> list[Detection]:
+) -> SegmentedFrame:
     """Segment flakes by thresholding relative to background mode.
 
     For 'above' contrast mode (hBN), finds pixels brighter than background.
     For 'below' contrast mode (graphene), finds pixels darker than background.
-    Returns list of detected regions with bbox, size, center, mean_contrast.
+    Returns detected regions (bbox, size, center, mean_contrast) plus the
+    per-channel background mode the contrasts were normalized against.
     """
     min_size_px = int(config.min_size_um2 / (um_per_px**2))
 
@@ -1553,7 +1580,9 @@ def segment_frame(
 
     detections.sort(key=lambda d: d["size_px"], reverse=True)
     classify_detections(detections, config, perim_ratio_thresh=perim_ratio_thresh)
-    return detections
+    # bg_modes is in image channel order (BGR from cv2.imread)
+    bg_mode_rgb = BGModeRGB(red=float(bg_modes[2]), green=float(bg_modes[1]), blue=float(bg_modes[0]))
+    return SegmentedFrame(detections, bg_mode_rgb)
 
 
 def score_detections(detections: list[Detection], config: DetectorConfig) -> None:
@@ -1718,6 +1747,7 @@ class FrameResult(NamedTuple):
     detections: list[Detection]
     dark_frac: float
     skipped: bool
+    bg_mode_rgb: BGModeRGB | None = None  # None for skipped/unreadable frames
 
 
 def process_frame(
@@ -1747,8 +1777,8 @@ def process_frame(
     if dark_frac > dark_frac_cutoff:
         return FrameResult(frame_name, [], dark_frac, True)
 
-    detections = segment_frame(corrected, config, um_per_px)
-    return FrameResult(frame_name, detections, dark_frac, False)
+    seg = segment_frame(corrected, config, um_per_px)
+    return FrameResult(frame_name, seg.detections, dark_frac, False, seg.bg_mode_rgb)
 
 
 def natural_sort_key(path: Path) -> int:

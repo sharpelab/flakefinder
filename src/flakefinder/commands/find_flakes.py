@@ -81,6 +81,7 @@ from flakefinder.scan_utils import (
     validate_area_rect,
 )
 from flakefinder.segmentation import (
+    CaptureSettings,
     DetectorConfig,
     FrameResult,
     dedup_detections,
@@ -305,7 +306,10 @@ class _Preflight:
     chip_scan_mag: str
     scan_speed: float
     chip_scan_gain: float
+    chip_scan_gain_source: str  # "CLI" | "material" | "preset"
     chip_scan_exposure_ms: float
+    chip_scan_exposure_source: str  # "CLI" | "material" | "preset"
+    revisit_capture: dict[float, CaptureSettings]  # material overrides by mag
     focus_map_gain: float
     focus_map_exposure_ms: float
     seg: SegConfig
@@ -330,10 +334,11 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         _Preflight with resolved paths and parsed values.
     """
 
+    material_cfg = DetectorConfig.from_material(args.material)
     if args.white_balance is not None:
         wb = parse_white_balance(args.white_balance)
     else:
-        wb = DetectorConfig.from_material(args.material).white_balance
+        wb = material_cfg.white_balance
     area = parse_area_rect(args.area_rect)
 
     # Resolve preset
@@ -365,10 +370,20 @@ def _plan(args: argparse.Namespace) -> _Preflight:
 
     # Scan speed from preset; CLI overrides.
     scan_speed = args.scan_speed if args.scan_speed is not None else preset["chip_scan_speed_mm"]
-    chip_scan_gain = args.chip_scan_gain if args.chip_scan_gain is not None else preset["chip_scan_gain"]
-    chip_scan_exposure_ms = (
-        args.chip_scan_exposure_ms if args.chip_scan_exposure_ms is not None else preset["chip_scan_exposure_ms"]
-    )
+
+    # Chip-scan camera settings: CLI flag > material preset > ScanPreset.
+    if args.chip_scan_gain is not None:
+        chip_scan_gain, chip_scan_gain_source = args.chip_scan_gain, "CLI"
+    elif material_cfg.chip_scan_gain is not None:
+        chip_scan_gain, chip_scan_gain_source = material_cfg.chip_scan_gain, "material"
+    else:
+        chip_scan_gain, chip_scan_gain_source = preset["chip_scan_gain"], "preset"
+    if args.chip_scan_exposure_ms is not None:
+        chip_scan_exposure_ms, chip_scan_exposure_source = args.chip_scan_exposure_ms, "CLI"
+    elif material_cfg.chip_scan_exposure_ms is not None:
+        chip_scan_exposure_ms, chip_scan_exposure_source = material_cfg.chip_scan_exposure_ms, "material"
+    else:
+        chip_scan_exposure_ms, chip_scan_exposure_source = preset["chip_scan_exposure_ms"], "preset"
 
     # Segmentation config
     if args.flatfield:
@@ -393,7 +408,7 @@ def _plan(args: argparse.Namespace) -> _Preflight:
 
     # Upload config — substrate is derived from the material preset
     do_upload = args.upload
-    substrate = DetectorConfig.from_material(args.material).substrate.value
+    substrate = material_cfg.substrate.value
     if do_upload:
         get_auth()  # fail fast if credentials are missing
 
@@ -410,7 +425,10 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         chip_scan_mag=chip_scan_mag,
         scan_speed=scan_speed,
         chip_scan_gain=chip_scan_gain,
+        chip_scan_gain_source=chip_scan_gain_source,
         chip_scan_exposure_ms=chip_scan_exposure_ms,
+        chip_scan_exposure_source=chip_scan_exposure_source,
+        revisit_capture=material_cfg.revisit_capture,
         focus_map_gain=preset["focus_map_gain"],
         focus_map_exposure_ms=preset["focus_map_exposure_ms"],
         seg=seg,
@@ -635,14 +653,18 @@ def _print_header(p: _Preflight) -> None:
     print(f"Area rect:     {args.area_rect}")
     print(f"Initial Z:     {args.initial_z} µm")
     print(f"Scan speed:    {p.scan_speed} mm/s")
-    overrides = []
-    if args.chip_scan_gain is not None:
-        overrides.append("gain")
-    if args.chip_scan_exposure_ms is not None:
-        overrides.append("exposure")
-    chip_cam_src = f"[CLI overrides: {', '.join(overrides)}]" if overrides else "[preset]"
-    print(f"Chip camera:   gain={p.chip_scan_gain}, exposure={p.chip_scan_exposure_ms}ms {chip_cam_src}")
+    print(
+        f"Chip camera:   gain={p.chip_scan_gain} [{p.chip_scan_gain_source}], "
+        f"exposure={p.chip_scan_exposure_ms}ms [{p.chip_scan_exposure_source}]"
+    )
     print(f"AF camera:     gain={p.focus_map_gain}, exposure={p.focus_map_exposure_ms}ms")
+    if p.revisit_capture:
+        cap_str = ", ".join(
+            f"{mag:g}x gain={c.gain:g}/{c.exposure_ms:g}ms" for mag, c in sorted(p.revisit_capture.items())
+        )
+        print(f"Revisit cam:   {cap_str} [material]; other mags FC defaults")
+    else:
+        print("Revisit cam:   FC defaults (per-objective)")
     wb_str = f"{p.wb.blue},{p.wb.green},{p.wb.red}"
     wb_source = "preset" if args.white_balance is None else "CLI"
     print(f"White balance: {wb_str} (B,G,R) [{wb_source}]")
@@ -777,6 +799,7 @@ class _SegResult(NamedTuple):
 def _generate_revisits(
     job: _SegJob,
     all_detections: dict[str, list[Detection]],
+    material: str,
     revisit_mags: list[float],
     revisit_top: int | None,
 ) -> str:
@@ -823,6 +846,7 @@ def _generate_revisits(
         if target_mag not in PARFOCAL_Z_UM:
             continue
         revisit_obj = build_revisit_json(base_points, scan_mag, target_mag)
+        revisit_obj["material"] = material
         revisit_obj["plane_source"] = str(job.plane_path)
         mag_label = f"{target_mag:g}"
         revisit_path = job.seg_dir / f"revisit_{mag_label}x.json"
@@ -919,6 +943,14 @@ def _run_chip_seg(
             all_flat = [d for dets in all_detections.values() for d in dets]
             add_stage_coords(all_flat, scan_meta)
 
+        # Per-frame background modes (local clip ceiling, substrate
+        # fingerprint, lamp-drift visibility for downstream consumers)
+        bg_mode_by_frame = {}
+        for fp in frames:
+            bg = results[fp.stem].bg_mode_rgb
+            if bg is not None:
+                bg_mode_by_frame[fp.stem] = list(bg)
+
         seg_elapsed = time.perf_counter() - start
 
         summary_data = {
@@ -944,6 +976,7 @@ def _run_chip_seg(
                 "tier_2": tier_counts[2],
                 "tier_3": tier_counts[3],
             },
+            "bg_mode_by_frame": bg_mode_by_frame,
             "detections_by_frame": all_detections,
         }
 
@@ -956,6 +989,7 @@ def _run_chip_seg(
             revisit_str = _generate_revisits(
                 job,
                 all_detections,
+                material,
                 revisit_mags,
                 revisit_top,
             )
@@ -1091,6 +1125,7 @@ def _run_revisit_phase(
                 output=str(output_dir),
                 points=revisit_file.points,
                 objective_mag=mag_label,
+                material=p.seg.material,
                 white_balance=p.wb,
                 quiet=True,
             )

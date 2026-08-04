@@ -199,6 +199,14 @@ def run(
     all_flat = [d for dets in all_detections.values() for d in dets]
     add_stage_coords(all_flat, scan_meta)
 
+    # Per-frame background modes (local clip ceiling, substrate fingerprint,
+    # lamp-drift visibility for downstream consumers)
+    bg_mode_by_frame = {}
+    for fp in frames:
+        bg = results[fp.stem].bg_mode_rgb
+        if bg is not None:
+            bg_mode_by_frame[fp.stem] = list(bg)
+
     summary = {
         "timestamp": datetime.now().isoformat(),
         "command": sys.argv,
@@ -223,6 +231,7 @@ def run(
             "tier_2": tier_counts[2],
             "tier_3": tier_counts[3],
         },
+        "bg_mode_by_frame": bg_mode_by_frame,
         "detections_by_frame": all_detections,
     }
 

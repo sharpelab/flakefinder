@@ -60,6 +60,7 @@ class RouteStep(NamedTuple):
 class RevisitFile(NamedTuple):
     points: list[RevisitPoint]
     objective_mag: str
+    material: str | None = None  # material preset the points came from
 
 
 def _parse_points_file(points_file: Path) -> RevisitFile:
@@ -84,7 +85,7 @@ def _parse_points_file(points_file: Path) -> RevisitFile:
                 label=obj.get("label"),
             )
         )
-    return RevisitFile(points=points, objective_mag=f"{obj_mag:g}x")
+    return RevisitFile(points=points, objective_mag=f"{obj_mag:g}x", material=data.get("material"))
 
 
 def _parse_point_args(point_args: list[str]) -> list[RevisitPoint]:
@@ -291,6 +292,7 @@ def run(
     output: str,
     points: list[RevisitPoint],
     objective_mag: str,
+    material: str | None = None,
     z_speed: float | None = None,
     z_range: float | None = None,
     settle: float = 0,
@@ -301,7 +303,12 @@ def run(
     or_opt: bool = False,
     per_chip: bool = False,
 ) -> None:
-    """Run revisit loop: move, focus-scan, save best frame at each point."""
+    """Run revisit loop: move, focus-scan, save best frame at each point.
+
+    Capture settings resolve as explicit gain/exposure_ms args > the
+    material preset's per-mag revisit_capture entry > FC_DEFAULTS
+    (applied inside focus_and_capture).
+    """
 
     def vprint(*a, **kw):
         if not quiet:
@@ -314,6 +321,20 @@ def run(
         vprint(f"Objective: already at {scope.objective_mag}x")
 
     mag = scope.objective_mag
+
+    # Per-material revisit capture overrides (explicit args win)
+    if material is not None and (gain is None or exposure_ms is None):
+        # Local import: keeps the heavy segmentation module (matplotlib,
+        # scipy) out of revisit startup when no material is involved.
+        from flakefinder.segmentation import DetectorConfig
+
+        cap = DetectorConfig.from_material(material).revisit_capture.get(mag)
+        if cap is not None:
+            if gain is None:
+                gain = cap.gain
+            if exposure_ms is None:
+                exposure_ms = cap.exposure_ms
+            vprint(f"Capture: gain={gain:g}, exposure={exposure_ms:g}ms [material {material}]")
 
     # Lighting and camera
     scope.light_on()
@@ -597,12 +618,14 @@ def main() -> int:
             revisit_file = _parse_points_file(args.points)
             points = revisit_file.points
             objective_mag = revisit_file.objective_mag
+            material = revisit_file.material
         else:
             points = _parse_point_args(args.point_args)
             if args.objective_mag is None:
                 print("Error: --objective-mag is required when using --point")
                 return 1
             objective_mag = args.objective_mag
+            material = None
     except (ValueError, FileNotFoundError, json.JSONDecodeError) as e:
         print(f"Error: {e}")
         return 1
@@ -637,6 +660,7 @@ def main() -> int:
                 output=args.output,
                 points=points,
                 objective_mag=objective_mag,
+                material=material,
                 z_speed=args.z_speed,
                 z_range=args.z_range,
                 settle=args.settle,

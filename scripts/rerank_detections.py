@@ -42,6 +42,20 @@ from flakefinder.segmentation import (
 )
 
 
+def _reproject(dets: list[Detection], config: DetectorConfig) -> None:
+    """Recompute cal projection in place against config's calibration data.
+
+    Stored cal_dist/thickness_nm/layers come from the seg-time material;
+    reranking under a different material must not score stale distances.
+    """
+    for d in dets:
+        r, g, b = d["contrast_rgb"]
+        proj = config.cal_projection(r, g, b)
+        d["cal_dist"] = proj.dist
+        d["thickness_nm"] = proj.thickness_nm
+        d["layers"] = proj.layers
+
+
 def plot_rg_scatter(
     ax: plt.Axes,
     detections: list[Detection],
@@ -182,6 +196,7 @@ def _run_wide_main(args: argparse.Namespace, seg_dirs: dict[int, Path]) -> int:
             if not dets:
                 continue
             if args.reclassify:
+                _reproject(dets, config)
                 classify_detections(dets, config)
             else:
                 score_detections(dets, config)
@@ -455,7 +470,8 @@ def main() -> int:
     parser.add_argument(
         "--reclassify",
         action="store_true",
-        help="Also re-run tape classification (default: only rescore tier+score)",
+        help="Recompute cal projection (cal_dist/thickness/layers) and tape classification "
+        "against --material (default: only rescore tier+score from stored values)",
     )
     parser.add_argument(
         "--scan-dir",
@@ -551,6 +567,7 @@ def main() -> int:
         if not dets:
             continue
         if args.reclassify:
+            _reproject(dets, config)
             classify_detections(dets, config)
         else:
             score_detections(dets, config)

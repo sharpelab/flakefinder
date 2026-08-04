@@ -320,7 +320,7 @@ def main():
             corrected = raw
 
         # Run detector
-        detections = segment_frame(corrected, config, args.pixel_size)
+        detections = segment_frame(corrected, config, args.pixel_size).detections
 
         # Compute target centroid
         target_center = mask_centroid(frame_info["mask_path"])

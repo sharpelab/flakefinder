@@ -105,7 +105,7 @@ def main():
         dets = []
         print(f"{args.input.name}: SKIPPED (dark_frac={dark_frac:.3f} > {args.dark_frac_cutoff})")
     else:
-        dets = segment_frame(corrected, config, args.pixel_size, args.perim_ratio)
+        dets = segment_frame(corrected, config, args.pixel_size, args.perim_ratio).detections
         if args.perim_ratio_kill > 0:
             before = len(dets)
             dets = [d for d in dets if d["perim_ratio"] < args.perim_ratio_kill]
