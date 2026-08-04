@@ -124,3 +124,21 @@ See [quick_scan.md](quick_scan.md) for full context. PySide6 stage viewer at `sr
 ## Microscope
 - Do NOT run hardware commands (scans, autofocus, stage moves) — only the main scan session does that.
 - SSH reads, git pulls, and file checks are fine.
+
+## Rerank / mosaic workflows (2026-08-04)
+
+- `scripts/rerank_detections.py` scan-wide mode (run dir with chip_*/seg/) is read-only;
+  **single-chip mode rewrites summary.json in place** — use scan-wide for non-destructive eval.
+- Downscaled mosaic label text is unreliable when Read as an image — verify R/G values
+  against the printed top-N table, not the rendered labels.
+- Detector gates are data-only and can't know capture gain: a "clipped-regime" gate box
+  fires on unclipped runs too. Bound such boxes by what's physically reachable when
+  actually clipped (e.g. contrast ceiling (255-bg)/bg) to avoid cross-regime pollution.
+- **Stored cal_dist is the seg-time material's** — cross-material rerank must use
+  `--reclassify`, which recomputes the cal projection against `--material`. Without it,
+  curve gates score distances to the wrong calibration.
+- Scan-wide rerank without `--name` writes revisit_t1.json (and mosaic) at `rerank/`
+  root, overwriting prior files. Always pass `--name <tag>` to sandbox outputs.
+- Per-material capture settings live on DetectorConfig (`chip_scan_gain/exposure_ms`,
+  `revisit_capture` keyed by mag). Resolution: CLI > material > ScanPreset/FC_DEFAULTS;
+  revisit JSONs embed the material name for standalone re-runs.
