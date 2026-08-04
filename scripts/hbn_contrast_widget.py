@@ -1174,13 +1174,17 @@ def main():
                 cache[tab_name] = (key, _compute_for_tab(tab_vals, n_wse2_arr))
 
         def _sample_cal(r_arr, g_arr, t_arr, r_off, g_off):
+            # Cal points are in measured/camera space: model − offset (the
+            # offset sliders shift *empirical* data up to theory, so going
+            # theory → camera applies the offset with the opposite sign).
+            # Matches the segmentation.py cal_points convention.
             cal = []
             for t_nm_val in np.arange(2.0, 102.0, 2.0):
                 if t_nm_val > t_arr[-1]:
                     break
                 r_val = float(np.interp(t_nm_val, t_arr, r_arr))
                 g_val = float(np.interp(t_nm_val, t_arr, g_arr))
-                cal.append([round(r_val + r_off, 4), round(g_val + g_off, 4), t_nm_val])
+                cal.append([round(r_val - r_off, 4), round(g_val - g_off, 4), t_nm_val])
             return cal
 
         # Use cached results where available; recompute tabs whose cache is stale.
