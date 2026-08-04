@@ -96,6 +96,29 @@ After editing, relaunch the widget to see the new points.
 - **NA = 0.25** — 10x objective (what chip scans use for flake detection)
 - **R/G offsets** — empirical correction for scope-specific systematics. The theory under-predicts R contrast by ~0.5 and over-predicts G by ~0.2. Offsets are applied to the empirical data to align with theory. The offsets are the same for both substrates, confirming they're scope-level (not substrate-level).
 
+## Known Caveats
+
+- **NA mismatch in the fit**: the AFM cal data is 50x (NA≈0.75–0.9) but the
+  best-fit params above were fit with NA=0.25. At 50x, NA is a large lever
+  (NA 0.25→0.75 shifts theory R by up to −0.9 at the cal thicknesses), so the
+  fitted n=1.91 (vs literature ~2.15) partly compensates for the wrong NA and
+  the params should not be trusted to extrapolate beyond the cal range —
+  notably into the 50–100nm band, where n=1.91 vs n=2.15 differ by up to
+  ΔR≈1.1. Refit at the correct NA, or recalibrate at 10x (where NA
+  sensitivity is ≤0.08 R), before relying on extrapolated thickness.
+- **Params drift between tools**: this doc's best-fit, the widget's slider
+  defaults, and the CLI defaults are not currently reconciled (e.g. widget
+  inits n=2.152 / oxide 90,285; CLI graphite n=2.4−1.0j vs widget
+  2.65−1.3j). The same material can produce different curves depending on
+  entry point. Reconciliation pending.
+- **285nm panel RMS readout**: the widget's 285 panel computes its R/G rms
+  against `_CAL_DATA_285` sequential indices (1–60) as if they were nm —
+  the displayed number is meaningless for slider tuning.
+- The transfer matrix core itself is verified against the independent `tmm`
+  package (≤2e-16 across polarizations, oblique incidence, absorbing films),
+  and the 10nm spectral grid contributes ≤0.008 contrast error even at
+  300nm hBN on 294nm oxide.
+
 ## The R Offset Problem
 
 The transfer matrix model consistently under-predicts R-channel contrast by ~0.5 (additive, not multiplicative). The curve *shape* in R/G space matches well, but the absolute R position is off. This persists across all tested n values, oxide thicknesses, NA values, and illumination spectra.
