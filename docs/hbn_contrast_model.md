@@ -106,6 +106,29 @@ After editing, relaunch the widget to see the new points.
   notably into the 50–100nm band, where n=1.91 vs n=2.15 differ by up to
   ΔR≈1.1. Refit at the correct NA, or recalibrate at 10x (where NA
   sensitivity is ≤0.08 R), before relying on extrapolated thickness.
+- **n=1.91 fails its own thick-end anchors**: residuals of the n=1.91/NA=0.25
+  fit against the AFM-verified 90 nm cal set (camera space, model − offset)
+  grow rapidly with thickness, exactly where thick-band presets need the
+  model. The widget's checked-in defaults (n=2.152, NA=0.25) fit the entire
+  set to ≤0.17 in R and ≤0.53 in G:
+
+  | t (nm) | n=1.91, NA=0.25 (this doc's fit) | n=2.152, NA=0.25 (widget defaults) |
+  |--------|----------------------------------|-------------------------------------|
+  | 4.6  | ΔR −0.08, ΔG −0.09 | ΔR −0.13, ΔG −0.09 |
+  | 10.2 | ΔR −0.07, ΔG −0.14 | ΔR −0.08, ΔG +0.01 |
+  | 18.0 | ΔR −0.07, ΔG −0.70 | ΔR +0.15, ΔG −0.24 |
+  | 26.0 | **ΔR −0.51, ΔG −1.28** | ΔR +0.04, ΔG −0.53 |
+  | 46.0 | **ΔR −1.03, ΔG −1.39** | ΔR −0.05, ΔG −0.44 |
+
+  Use n=2.152 for anything at or beyond the thick end of the cal range
+  (the `hbn_thick_50_100_90nm` cal table is generated with it — see
+  `docs/hbn_thick_50_100_calibration.md`).
+- **`_hist_entropy` zeroes out for high-contrast flakes**: the segmentation
+  entropy metric histograms per-pixel contrast over a fixed (−1, 1) range.
+  Flakes whose every pixel contrast exceeds +1 (e.g. the whole 50–100 nm
+  hBN band on 90 nm SiO₂) produce an empty histogram and entropy evaluates
+  to exactly 0.0. Entropy gates must be disabled, not tuned, for such
+  presets — any nonzero threshold there is accidental behavior.
 - **Params drift between tools**: this doc's best-fit, the widget's slider
   defaults, and the CLI defaults are not currently reconciled (e.g. widget
   inits n=2.152 / oxide 90,285; CLI graphite n=2.4−1.0j vs widget

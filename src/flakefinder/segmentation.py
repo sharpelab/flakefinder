@@ -128,6 +128,53 @@ GRAPHENE_THICK_90NM_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
     (-0.8229, -0.3706, 10.0),
 )
 
+# Theory-derived calibration for thick hBN (50-100 nm) on 90 nm SiO₂.
+# Generated headlessly (2026-08-04) from the transfer-matrix code path the
+# widget's "Export all" button uses (scripts/hbn_contrast_widget.py
+# compute_rg), with parameters pinned to the widget's checked-in init
+# defaults:
+#   n_hBN                  = 2.152 (constant, real)
+#   t_oxide                = 90.0 nm
+#   NA                     = 0.25
+#   illuminant             = halogen_3200K
+#   objective transmission = off
+#   r_offset               = +0.54
+#   g_offset               = -0.20
+#   convention             = camera space = model - offset
+#   hBN layer thickness    = 0.333 nm
+#   sampling               = 2 nm, 50 -> 100 nm
+# Point-based (not R=poly(G) curve): G peaks at ~68 nm, so R = poly(G) is
+# multivalued over the band. layers = round(t_nm / 0.333) — literally the
+# hBN layer count. See docs/hbn_thick_50_100_calibration.md.
+HBN_THICK_50_100_90NM_CAL_POINTS: tuple[CalPointRG, ...] = (
+    CalPointRG(layers=150, r=2.7327, g=4.4125),  # 50 nm
+    CalPointRG(layers=156, r=2.8624, g=4.4991),  # 52 nm
+    CalPointRG(layers=162, r=2.9815, g=4.5743),  # 54 nm
+    CalPointRG(layers=168, r=3.0904, g=4.6385),  # 56 nm
+    CalPointRG(layers=174, r=3.1894, g=4.6920),  # 58 nm
+    CalPointRG(layers=180, r=3.2786, g=4.7351),  # 60 nm
+    CalPointRG(layers=186, r=3.3586, g=4.7678),  # 62 nm
+    CalPointRG(layers=192, r=3.4294, g=4.7903),  # 64 nm
+    CalPointRG(layers=198, r=3.4915, g=4.8026),  # 66 nm
+    CalPointRG(layers=204, r=3.5451, g=4.8049),  # 68 nm
+    CalPointRG(layers=210, r=3.5904, g=4.7970),  # 70 nm
+    CalPointRG(layers=216, r=3.6276, g=4.7787),  # 72 nm
+    CalPointRG(layers=222, r=3.6569, g=4.7501),  # 74 nm
+    CalPointRG(layers=228, r=3.6785, g=4.7107),  # 76 nm
+    CalPointRG(layers=234, r=3.6926, g=4.6605),  # 78 nm
+    CalPointRG(layers=240, r=3.6993, g=4.5991),  # 80 nm
+    CalPointRG(layers=246, r=3.6987, g=4.5264),  # 82 nm
+    CalPointRG(layers=252, r=3.6908, g=4.4419),  # 84 nm
+    CalPointRG(layers=258, r=3.6757, g=4.3455),  # 86 nm
+    CalPointRG(layers=264, r=3.6533, g=4.2370),  # 88 nm
+    CalPointRG(layers=270, r=3.6237, g=4.1163),  # 90 nm
+    CalPointRG(layers=276, r=3.5867, g=3.9835),  # 92 nm
+    CalPointRG(layers=282, r=3.5421, g=3.8388),  # 94 nm
+    CalPointRG(layers=288, r=3.4897, g=3.6828),  # 96 nm
+    CalPointRG(layers=294, r=3.4293, g=3.5164),  # 98 nm
+    CalPointRG(layers=300, r=3.3643, g=3.3498),  # 100 nm
+)
+
 
 class _DetectionBase(TypedDict):
     bbox: XYWHRect
@@ -295,6 +342,67 @@ def _score_hbn_thick(config: DetectorConfig, det: Detection) -> tuple[int, float
         log2_size * log2_size * np.exp(-cd * 8) * ar_penalty,
         4,
     )
+    return tier, score
+
+
+def _score_hbn_thick_50_100(config: DetectorConfig, det: Detection) -> tuple[int, float]:
+    """hBN thick (50-100nm): two independent tier-1 paths.
+
+    Curve path (unclipped, chip-scan gain ~2): near the transfer-matrix arc.
+    Ceiling path (pinned, gain ~4): a detection at R >= 3.8 with G
+    simultaneously capped in [2.8, 4.2] is saturated by construction —
+    3.70 is the R ceiling of the entire physical 50-100nm locus — so no
+    cal_dist requirement applies there; requiring it would punish the exact
+    distortion that identifies clipped flakes.
+
+    Entropy gates are intentionally disabled (99.0 in the preset): band
+    flakes have every pixel contrast above +1, so the fixed-range (-1, 1)
+    _hist_entropy histogram is empty and entropy evaluates to exactly 0.0.
+    """
+    pr = det["perim_ratio"]
+    cd = det["cal_dist"]
+    g = det["contrast_rgb"][1]
+    r = det["contrast_rgb"][0]
+    ar = det.get("aspect_ratio", 1.0)
+    size_um2 = det["size_um2"]
+
+    shape_ok = (
+        pr < config.tier1_perim_ratio and ar < config.tier1_aspect_ratio and size_um2 >= config.tier1_min_size_um2
+    )
+    curve_t1 = (
+        shape_ok
+        and cd < config.tier1_cal_dist
+        and r >= config.tier1_r_min
+        and r < config.tier1_r_max
+        and g >= config.tier1_g_min
+        and g < config.tier1_g_max
+    )
+    # Upper R bound 5.2: a pixel-saturated blob cannot exceed its own clip
+    # ceiling ((255 - bg) / bg ≈ 5.0 in R at gain 4), so R > 5.2 can only
+    # come from an unclipped capture — where it is far above the band's
+    # R ceiling of 3.70 and therefore not 50-100 nm hBN. Validated: 0 of
+    # 4590 gain-4 ceiling-path T1s exceed 5.2 (max 5.03), while 55-64% of
+    # gain-2 ceiling-path admits do and are above-band chunks.
+    ceiling_t1 = shape_ok and 3.8 <= r <= 5.2 and 2.8 <= g <= 4.2
+
+    if curve_t1 or ceiling_t1:
+        tier = 1
+    elif pr < config.tier2_perim_ratio and cd < config.tier2_cal_dist and size_um2 >= config.tier1_min_size_um2:
+        tier = 2
+    else:
+        tier = 3
+
+    # The band is intrinsically broad (~1.0 in R, ~1.5 in G), so weight cal
+    # distance gently (exp(-2 cd), not exp(-8 cd)) — rank by flake quality,
+    # not model-fit noise. On the ceiling path cal distance is meaningless;
+    # use a constant factor so clipped flakes rank purely by size.
+    if ceiling_t1:
+        cal_factor = float(np.exp(-2.0 * config.tier1_cal_dist))
+    else:
+        cal_factor = float(np.exp(-2.0 * cd))
+    ar_penalty = float(np.exp(-(max(ar - 3, 0) ** 2) / 8))
+    log2_size = float(np.log2(max(size_um2, 1.0)))
+    score = round(log2_size * log2_size * cal_factor * ar_penalty, 4)
     return tier, score
 
 
@@ -670,6 +778,53 @@ class DetectorConfig:
         )
 
     @classmethod
+    def hbn_thick_50_100_90nm(cls) -> RGPointDetectorConfig:
+        """hBN thick flake detection (50-100 nm) on 90 nm SiO₂.
+
+        Theory-derived point calibration over the 50-100 nm arc
+        (HBN_THICK_50_100_90NM_CAL_POINTS). Point-based, not curve-based:
+        G peaks at ~68 nm so R = poly(G) is multivalued over the band.
+        Segmentation params are identical to hbn_medium, so hbn_medium seg
+        output can be reranked with this preset without re-segmentation.
+        """
+        return RGPointDetectorConfig(
+            name="hBN 50-100nm",
+            substrate=Substrate.SI_90NM,
+            contrast_mode=ContrastMode.ABOVE,
+            contrast_offset=15.0,
+            min_size_um2=400.0,
+            edge_margin_px=50,
+            morph_kernel_size=5,
+            entropy_threshold=0.4,
+            subseg_min_std=0.8,
+            subseg_min_range=0.5,
+            cal_reference_points=HBN_THICK_50_100_90NM_CAL_POINTS,
+            layer_spacing_nm=0.333,
+            classify_nm=True,
+            cal_dist_match=0.30,
+            cal_dist_possible=0.60,
+            non_match_label="non-hBN",
+            white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
+            score_fn=_score_hbn_thick_50_100,
+            tier1_perim_ratio=1.50,
+            tier1_cal_dist=0.30,
+            tier1_g_min=3.0,
+            tier1_g_max=5.1,
+            tier1_r_max=4.0,
+            tier1_r_min=2.3,
+            tier1_entropy_max=99.0,  # disabled: entropy is identically 0.0 for band flakes
+            tier1_min_size_um2=500.0,
+            tier1_br_ratio_max=99.0,
+            tier1_aspect_ratio=6.0,
+            tier1_solidity_min=0.0,
+            tier1_circularity_min=0.0,
+            tier1_grad_energy_max=99.0,
+            tier2_perim_ratio=1.50,
+            tier2_cal_dist=0.60,
+            tier2_entropy_max=99.0,  # disabled (see tier1_entropy_max)
+        )
+
+    @classmethod
     def hbn_medium_285nm(cls) -> CurveDetectorConfig:
         """hBN medium flake detection on 285nm SiO₂ substrates."""
         return CurveDetectorConfig(
@@ -835,6 +990,7 @@ class DetectorConfig:
             # "hbn_thin": cls.hbn_thin,
             "hbn_medium": cls.hbn_medium,
             "hbn_thick_90nm": cls.hbn_thick_90nm,
+            "hbn_thick_50_100_90nm": cls.hbn_thick_50_100_90nm,
             "hbn_medium_285nm": cls.hbn_medium_285nm,
             "graphene_thin_90nm": cls.graphene_thin_90nm,
             "graphene_thick_90nm": cls.graphene_thick_90nm,
@@ -989,6 +1145,9 @@ class RGPointDetectorConfig(DetectorConfig):
 
     cal_reference_points: tuple[CalPointRG, ...]
     layer_spacing_nm: float
+    # Report matches as "{nm}nm" instead of "{layers}-layer" (thick-hBN
+    # convention: nobody discusses gate hBN in layer counts).
+    classify_nm: bool = field(default=False, kw_only=True)
 
     def cal_projection(self, r: float, g: float, b: float) -> CalProjection:
         if not self.cal_reference_points:
@@ -1010,6 +1169,8 @@ class RGPointDetectorConfig(DetectorConfig):
             return None
         proj = self.cal_projection(r, g, b)
         if proj.dist < self.cal_dist_match and proj.layers is not None:
+            if self.classify_nm and proj.thickness_nm is not None:
+                return f"{proj.thickness_nm:.0f}nm"
             return f"{proj.layers}-layer"
         return self.non_match_label
 
