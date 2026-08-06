@@ -38,6 +38,7 @@ pattern from `scripts/colorchecker_analyze.py`):
    back out the 5800K CCM numerically; solve 3×3 per matrix from the sweep block.
 4. Cap block: R-channel response vs request 4/6/8 → linear to 8.0?
 5. sat0 block: solve luma weights.
+6. Backed-out 5800K CCM vs the pre-registered extraction (section below), diag-normalized.
 
 **Outputs**: `ccm_models.json` (per-index measured matrices + M_idx0), updated
 `wb_model.json` validity note, luma weights. If idx0 decouples → new recommended
@@ -65,7 +66,9 @@ G-contrast precision are the beneficiaries.)
 
 Once Stage 1 picks the config: revisit-style per-patch captures (like session 1's
 gray-row matrix) of the 6 primary/secondary patches + gray row at 10x, each under
-(a) scan config (idx2, scan WB) and (b) raw config (idx0, unity WB).
+(a) scan config (idx2, scan WB) and (b) raw config (idx0, unity WB), plus
+(c) a WB trio rider (wbr2/wbg2/wbb2 under idx2) on at least the red, green, and blue
+patches — see M-cancellation below.
 
 **Resolves**:
 - Measured CCM in real units → post-hoc conversion between raw and legacy spaces
@@ -74,12 +77,50 @@ gray-row matrix) of the 6 primary/secondary patches + gray row at 10x, each unde
   r_off/g_off with measured glare + known channel response — session-1 pending #4).
 - Chart-vintage question (session-1 pending #5) benefits from unmixed channels when
   comparing to BabelColor reference spectra.
+- **Lamp SPD validation** (widget-session hypothesis 2026-08-06): the pipeline model
+  fixes the lamp to Elijah's sister-scope spectrometer trace. Predicted raw-config
+  patch RGB (Elijah trace × DataThief 10x T² × raw IMX183 curves × BabelColor
+  reflectances) vs measured — residual structure tests the lamp assumption on
+  spectrally distinct targets, which no white/gray measurement can do.
+- **M-cancellation raw extraction** (block c): per-target WB-trio response
+  coefficients are K_cj = M_cj·V_j; the ratio K^patch/K^white cancels the CCM row
+  by row, yielding raw per-channel signals with zero CCM knowledge. Independent
+  check on the CCM-inversion path for archived data, and works under idx2 even if
+  idx0 turns out to be a junk matrix.
 
 ## Stage 4 (opportunistic, session-1 leftovers needing the chart)
 
 - 2.5x gray/black cells + anything in the 150x turret sector (assisted moves; the
   turret-collision deferral from session 1).
 - Empty-substrate specular glare floors happen on chips, not the chart — separate session.
+
+## Pre-registered predictions (widget-integration session, 2026-08-06)
+
+Written down BEFORE Stage 1 runs, so the checks can't drift. Source:
+`scripts/colorchecker_cal.py` (`derive_pipeline`) — the K5C pipeline model
+`out = CCM @ diag(wb) @ V_raw`, with the CCM extracted from session-1's WB
+coupling W + unity fingerprint under a fixed lamp assumption (Elijah trace ×
+DataThief 10x T²). This model predicts the Toghrul 10x AFM anchors with n as
+the only free parameter (R rms 0.108 / G rms 0.142 vs 0.47/0.51 unmixed).
+
+1. **The measured 5800K CCM (idx 2), diag-normalized, should match**:
+
+   |       | ×R     | ×G     | ×B     |
+   |-------|--------|--------|--------|
+   | R out | 1.000  | −0.245 | −0.140 |
+   | G out | −0.281 | 1.000  | −0.127 |
+   | B out | −0.075 | −0.206 | 1.000  |
+
+2. **If idx0 is identity**: unity-WB white fingerprint under idx0 lands on the
+   model's *raw* column, 10x: **G/R ≈ 1.68, G/B ≈ 2.63** (not the idx2 output
+   values 1.916 / 4.987), and the idx0 WB trio decouples (M_idx0 ≈ diag).
+3. Raw-space glare floors (10x): f ≈ 0.031/0.014/0.045 R/G/B (vs 0.042/0.009/0.100
+   measured in output space) — checkable once black-patch captures exist under idx0.
+
+**Consumer**: Stage 1's `ccm_models.json` replaces the W-extraction at the
+documented swap point in `derive_pipeline`; widget + raw glare floors + per-objective
+T² all follow automatically. Suggested format: `{"idx0": [[...]], "idx2": [[...]], ...}`
+row-major RGB.
 
 ## Decision tree summary
 
