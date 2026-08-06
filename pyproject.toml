@@ -18,6 +18,7 @@ dependencies = [
 find-flakes = "flakefinder.commands.find_flakes:main"
 autofocus = "flakefinder.commands.autofocus:main"
 capture = "flakefinder.commands.capture:main"
+capture-series = "flakefinder.commands.capture_series:main"
 scan = "flakefinder.commands.scan:main"
 stitch = "flakefinder.commands.stitch:main"
 find-chips = "flakefinder.commands.find_chips:main"

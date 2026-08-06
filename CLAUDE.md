@@ -14,6 +14,7 @@ All commands are registered as pyproject.toml entry points and invokable via `sl
 | `find-flakes` | `find_flakes.py` | Full pipeline orchestrator (overview → chips → focus → chip scan) |
 | `autofocus` | `autofocus.py` | Z-scan autofocus CLI with debug output |
 | `capture` | `capture.py` | Single image capture utility |
+| `capture-series` | `capture_series.py` | Batch capture from a JSON spec, one connection, no motion |
 | `scan` | `scan.py` | Multi-row snake scan with continuous motion capture |
 | `stitch` | `stitch.py` | Stitch scan frames into 2D overview image |
 | `find-chips` | `find_chips.py` | Detect chips in stitched image using Otsu thresholding |
