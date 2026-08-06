@@ -142,3 +142,10 @@ See [quick_scan.md](quick_scan.md) for full context. PySide6 stage viewer at `sr
 - Per-material capture settings live on DetectorConfig (`chip_scan_gain/exposure_ms`,
   `revisit_capture` keyed by mag). Resolution: CLI > material > ScanPreset/FC_DEFAULTS;
   revisit JSONs embed the material name for standalone re-runs.
+- **Reranked upload flow**: `sls upload` selects by STORED tier/score in chip
+  summaries, so a rerank-then-upload needs single-chip rerank (`chip_N/seg
+  --reclassify --no-mosaic --no-scatter`, rewrites summary.json in place) per chip
+  first, then `uv run upload <run> --tier 1 --top N --material "<label>" --substrate
+  90nm --name <distinct_name>`. Upload defaults substrate to 285nm — always pass it.
+  Upload runs fine locally (.env auth); revisit images attach by (frame, det_id, mag)
+  match, so old-rank revisit PNGs carry over automatically.
