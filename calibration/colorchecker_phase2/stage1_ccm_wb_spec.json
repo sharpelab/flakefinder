@@ -1,0 +1,46 @@
+{
+  "notes": "Phase 2 Stage 1: CCM identification + WB decoupling on white patch #19 at 10x. Position/focus first. Baseline matches session-1 wb_model conditions (0.5 ms, gain 2, lamp 100). colour_temperature: 0=UserDefinedMatrix 1=4500K 2=5800K(default) 3=6600K.",
+  "defaults": {
+    "lamp": 100.0,
+    "exposure_ms": 0.5,
+    "gain": 2.0,
+    "white_balance": {"r": 1.0, "g": 1.0, "b": 1.0},
+    "binning": 3,
+    "gamma": 1.0,
+    "saturation": 100,
+    "colour_temperature": 2,
+    "frames": 3,
+    "warmup_frames": 1,
+    "settle_s": 0.2
+  },
+  "conditions": [
+    {"name": "base_idx2"},
+    {"name": "wbr2_idx2", "white_balance": {"r": 2.0, "g": 1.0, "b": 1.0}},
+    {"name": "wbg2_idx2", "white_balance": {"r": 1.0, "g": 2.0, "b": 1.0}},
+    {"name": "wbb2_idx2", "white_balance": {"r": 1.0, "g": 1.0, "b": 2.0}},
+
+    {"name": "sat0_unity_idx2", "saturation": 0},
+    {"name": "sat0_scanwb_idx2", "saturation": 0, "white_balance": {"r": 1.41, "g": 1.02, "b": 2.51}},
+    {"name": "sat0_wbr2_idx2", "saturation": 0, "white_balance": {"r": 2.0, "g": 1.0, "b": 1.0}},
+
+    {"name": "ccm_idx1", "colour_temperature": 1},
+    {"name": "ccm_idx3", "colour_temperature": 3},
+
+    {"name": "unity_idx0", "colour_temperature": 0},
+    {"name": "wbr2_idx0", "colour_temperature": 0, "white_balance": {"r": 2.0, "g": 1.0, "b": 1.0}},
+    {"name": "wbg2_idx0", "colour_temperature": 0, "white_balance": {"r": 1.0, "g": 2.0, "b": 1.0}},
+    {"name": "wbb2_idx0", "colour_temperature": 0, "white_balance": {"r": 1.0, "g": 1.0, "b": 2.0}},
+
+    {"name": "unity_idx0_e02", "colour_temperature": 0, "exposure_ms": 0.2},
+    {"name": "wbr2_idx0_e02", "colour_temperature": 0, "exposure_ms": 0.2, "white_balance": {"r": 2.0, "g": 1.0, "b": 1.0}},
+    {"name": "wbg2_idx0_e02", "colour_temperature": 0, "exposure_ms": 0.2, "white_balance": {"r": 1.0, "g": 2.0, "b": 1.0}},
+    {"name": "wbb2_idx0_e02", "colour_temperature": 0, "exposure_ms": 0.2, "white_balance": {"r": 1.0, "g": 1.0, "b": 2.0}},
+
+    {"name": "unity_idx0_e015", "colour_temperature": 0, "exposure_ms": 0.15, "frames": 5},
+    {"name": "wbr4_idx0_e015", "colour_temperature": 0, "exposure_ms": 0.15, "frames": 5, "white_balance": {"r": 4.0, "g": 1.0, "b": 1.0}},
+    {"name": "wbr6_idx0_e015", "colour_temperature": 0, "exposure_ms": 0.15, "frames": 5, "white_balance": {"r": 6.0, "g": 1.0, "b": 1.0}},
+    {"name": "wbr8_idx0_e015", "colour_temperature": 0, "exposure_ms": 0.15, "frames": 5, "white_balance": {"r": 8.0, "g": 1.0, "b": 1.0}},
+
+    {"name": "drift_idx2"}
+  ]
+}
