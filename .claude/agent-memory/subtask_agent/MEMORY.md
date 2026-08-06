@@ -179,3 +179,13 @@ See [quick_scan.md](quick_scan.md) for full context. PySide6 stage viewer at `sr
   90nm --name <distinct_name>`. Upload defaults substrate to 285nm — always pass it.
   Upload runs fine locally (.env auth); revisit images attach by (frame, det_id, mag)
   match, so old-rank revisit PNGs carry over automatically.
+
+## Flakes Website (2026-08-06)
+
+- **Re-uploads create NEW scans** (`upload --name <distinct>`): the same physical run can
+  exist as multiple scan_ids with different flake_ids/thicknesses/notes. Before mutating
+  website records, confirm you're on the CURRENT scan (ask, or check which scan the user's
+  viewer URL shows) — a rerank-era re-upload supersedes the original scan_id.
+- Note updates: `PUT /api/flake/<id>/note` with `{"note": "..."}` (endpoint not in
+  flakes_api.py; found in the viewer JS bundle). `""` clears. api_get("flakes",
+  {"scan_id": N}) returns notes/favorites for verification.
