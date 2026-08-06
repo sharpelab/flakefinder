@@ -1,0 +1,480 @@
+{
+  "implemented": [
+    {
+      "id": 16384,
+      "name": "SERIAL_NUMBER",
+      "value": "700008591829",
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16386,
+      "name": "VERSION_INFO",
+      "value": "LeicaMicrosystems.HardwareModel.PropertyValueIndex",
+      "index": 0,
+      "info_class": "PropertyInfoEnum",
+      "options": [
+        "Driver  2.90.0.0",
+        "Camera Module  2023.3.0.12509",
+        "BGAPI  2.14.0",
+        "Firmware  CID:011003/PID:11704457"
+      ]
+    },
+    {
+      "id": 16387,
+      "name": "SENSOR_XRESOLUTION",
+      "value": 5472,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16388,
+      "name": "SENSOR_YRESOLUTION",
+      "value": 3648,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16389,
+      "name": "PHYSICAL_PIXEL_XSIZE",
+      "value": 2.40234375e-06,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16390,
+      "name": "PHYSICAL_PIXEL_YSIZE",
+      "value": 2.40234375e-06,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16391,
+      "name": "LOGICAL_XRESOLUTION",
+      "value": 2736,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16392,
+      "name": "LOGICAL_YRESOLUTION",
+      "value": 1824,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16395,
+      "name": "LOGICAL_PIXEL_XSIZE",
+      "value": 4.8046875e-06,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16396,
+      "name": "LOGICAL_PIXEL_YSIZE",
+      "value": 4.8046875e-06,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16397,
+      "name": "IMAGE_TRIGGER_MODE",
+      "value": "LeicaMicrosystems.HardwareModel.PropertyValueIndex",
+      "index": 1,
+      "info_class": "PropertyInfoEnum",
+      "options": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": 16398,
+      "name": "TRIGGER_POLARITY",
+      "value": "LeicaMicrosystems.HardwareModel.PropertyValueIndex",
+      "index": 1,
+      "info_class": "PropertyInfoEnum",
+      "options": [
+        0,
+        1
+      ]
+    },
+    {
+      "id": 16399,
+      "name": "EXPOSURE_TIME",
+      "value": 0.016,
+      "info_class": "PropertyInfoSteppedRange",
+      "min": 5.3e-05,
+      "max": 10.0,
+      "step": 1e-06
+    },
+    {
+      "id": 16401,
+      "name": "GAIN",
+      "value": 2.0,
+      "info_class": "PropertyInfoSteppedRange",
+      "min": 1.0,
+      "max": 10.0,
+      "step": 0.1
+    },
+    {
+      "id": 16402,
+      "name": "GAIN_RED",
+      "value": 1.929931640625,
+      "info_class": "PropertyInfoSteppedRange",
+      "min": 1.0,
+      "max": 8.0,
+      "step": 0.1
+    },
+    {
+      "id": 16403,
+      "name": "GAIN_GREEN",
+      "value": 1.0,
+      "info_class": "PropertyInfoSteppedRange",
+      "min": 1.0,
+      "max": 8.0,
+      "step": 0.1
+    },
+    {
+      "id": 16404,
+      "name": "GAIN_BLUE",
+      "value": 1.93994140625,
+      "info_class": "PropertyInfoSteppedRange",
+      "min": 1.0,
+      "max": 8.0,
+      "step": 0.1
+    },
+    {
+      "id": 16405,
+      "name": "AUTO_BRIGHTNESS_ENABLED",
+      "value": false,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16406,
+      "name": "AUTO_BRIGHTNESS_LEVEL",
+      "value": 125.0,
+      "info_class": "PropertyInfoSteppedRange",
+      "min": 0.0,
+      "max": 250.0,
+      "step": 0.1
+    },
+    {
+      "id": 16407,
+      "name": "AUTO_BRIGHTNESS_ROI",
+      "value": "LeicaMicrosystems.HardwareModel.IntRect",
+      "info_class": "PropertyInfoSteppedRange",
+      "min": "LeicaMicrosystems.HardwareModel.IntRect",
+      "max": "LeicaMicrosystems.HardwareModel.IntRect",
+      "step": "LeicaMicrosystems.HardwareModel.IntRect"
+    },
+    {
+      "id": 16408,
+      "name": "AUTO_BRIGHTNESS_ROI_ENABLED",
+      "value": false,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16409,
+      "name": "COLOUR_SATURATION",
+      "value": 100,
+      "info_class": "PropertyInfoSteppedRange",
+      "min": 0,
+      "max": 300,
+      "step": 1
+    },
+    {
+      "id": 16410,
+      "name": "BINNING_LEVEL",
+      "value": "LeicaMicrosystems.HardwareModel.PropertyValueIndex",
+      "index": 1,
+      "info_class": "PropertyInfoEnum",
+      "options": [
+        65537,
+        131074,
+        196611
+      ]
+    },
+    {
+      "id": 16413,
+      "name": "PIXEL_DEPTH",
+      "value": "LeicaMicrosystems.HardwareModel.PropertyValueIndex",
+      "index": 0,
+      "info_class": "PropertyInfoEnum",
+      "options": [
+        8,
+        12
+      ]
+    },
+    {
+      "id": 16414,
+      "name": "PIXEL_TYPE",
+      "value": "LeicaMicrosystems.HardwareModel.PropertyValueIndex",
+      "index": 0,
+      "info_class": "PropertyInfoEnum",
+      "options": [
+        4,
+        2
+      ],
+      "options_decoded": [
+        "BGR",
+        "MONO"
+      ]
+    },
+    {
+      "id": 16415,
+      "name": "READOUT_REGION",
+      "value": "LeicaMicrosystems.HardwareModel.IntRect",
+      "info_class": "PropertyInfoSteppedRange",
+      "min": "LeicaMicrosystems.HardwareModel.IntRect",
+      "max": "LeicaMicrosystems.HardwareModel.IntRect",
+      "step": "LeicaMicrosystems.HardwareModel.IntRect"
+    },
+    {
+      "id": 16417,
+      "name": "GAMMA_LEVEL",
+      "value": 0.45,
+      "info_class": "PropertyInfoSteppedRange",
+      "min": 0.01,
+      "max": 3.0,
+      "step": 0.01
+    },
+    {
+      "id": 16423,
+      "name": "SHARPENING_LEVEL",
+      "value": 1,
+      "info_class": "PropertyInfoSteppedRange",
+      "min": 1,
+      "max": 5,
+      "step": 1
+    },
+    {
+      "id": 16424,
+      "name": "XMIRRORING_ENABLED",
+      "value": false,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16425,
+      "name": "YMIRRORING_ENABLED",
+      "value": false,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16427,
+      "name": "IMAGE_AVERAGING_COUNT",
+      "value": 2,
+      "info_class": "PropertyInfoSteppedRange",
+      "min": 2,
+      "max": 10,
+      "step": 1
+    },
+    {
+      "id": 16446,
+      "name": "ACQUISITION_TIMEOUT",
+      "value": 0.116,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16447,
+      "name": "AUTO_ACQUISITION_TIMEOUT_ENABLED",
+      "value": true,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16448,
+      "name": "TEMPERATURE",
+      "value": 35.0,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16452,
+      "name": "IMAGE_READOUT_TIME",
+      "value": 0.021138,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16462,
+      "name": "COLOUR_TEMPERATURE",
+      "value": "LeicaMicrosystems.HardwareModel.PropertyValueIndex",
+      "index": 2,
+      "info_class": "PropertyInfoEnum",
+      "options": [
+        1,
+        4500,
+        5800,
+        6600
+      ]
+    },
+    {
+      "id": 16474,
+      "name": "ENHANCED_ACQUISITION_MODE",
+      "value": "LeicaMicrosystems.HardwareModel.PropertyValueIndex",
+      "index": 0,
+      "info_class": "PropertyInfoEnum",
+      "options": [
+        0,
+        3
+      ]
+    },
+    {
+      "id": 16487,
+      "name": "CUSTOM_FORMAT_XRESOLUTION",
+      "value": "LeicaMicrosystems.HardwareModel.PropertyValueIndex",
+      "index": 2,
+      "info_class": "PropertyInfoEnum",
+      "options": [
+        3840,
+        1920,
+        -1
+      ]
+    },
+    {
+      "id": 16488,
+      "name": "CUSTOM_FORMAT_YRESOLUTION",
+      "value": "LeicaMicrosystems.HardwareModel.PropertyValueIndex",
+      "index": 2,
+      "info_class": "PropertyInfoEnum",
+      "options": [
+        2160,
+        1080,
+        -1
+      ]
+    },
+    {
+      "id": 16489,
+      "name": "EXPECTED_CONNECTION_INTERFACE",
+      "value": "USB3",
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16490,
+      "name": "DETECTED_CONNECTION_INTERFACE",
+      "value": "USB3",
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16491,
+      "name": "AUTO_EXPOSURE_MIN",
+      "value": 0.001,
+      "info_class": "PropertyInfoSteppedRange",
+      "min": 0.0,
+      "max": 0.0,
+      "step": 0.0
+    },
+    {
+      "id": 16492,
+      "name": "AUTO_EXPOSURE_MAX",
+      "value": 0.05,
+      "info_class": "PropertyInfoSteppedRange",
+      "min": 0.0,
+      "max": 0.0,
+      "step": 0.0
+    },
+    {
+      "id": 16493,
+      "name": "AUTO_GAIN_MAX",
+      "value": 0.0,
+      "info_class": "PropertyInfoSteppedRange",
+      "min": 0.0,
+      "max": 0.0,
+      "step": 0.0
+    },
+    {
+      "id": 16494,
+      "name": "SHARPENING_ENABLED",
+      "value": false,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16497,
+      "name": "AUTO_GAIN_ENABLED",
+      "value": false,
+      "info_class": "PropertyInfo"
+    },
+    {
+      "id": 16498,
+      "name": "AUTO_BRIGHTNESS_MODE",
+      "value": "LeicaMicrosystems.HardwareModel.PropertyValueIndex",
+      "index": 1,
+      "info_class": "PropertyInfoEnum",
+      "options": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "id": 16501,
+      "name": "IMAGE_TRANSFER_TIME",
+      "value": 0.007984928,
+      "info_class": "PropertyInfo"
+    }
+  ],
+  "not_implemented": [
+    "16385 FIRMWARE_HEAD_VERSION",
+    "16393 LOGICAL_CENTRE_XOFFSET",
+    "16394 LOGICAL_CENTRE_YOFFSET",
+    "16400 EMGAIN",
+    "16411 BINNED_BRIGHTNESS_CORRECTION_ENABLED",
+    "16412 READOUT_SPEED",
+    "16416 READOUT_REGIONS",
+    "16418 BLACK_LEVEL",
+    "16419 WHITE_LEVEL",
+    "16420 AUTO_GAMMA_LEVEL_ENABLED",
+    "16421 AUTO_BLACK_LEVEL_ENABLED",
+    "16422 AUTO_WHITE_LEVEL_ENABLED",
+    "16426 IMAGE_AVERAGING_MODE",
+    "16428 CAPTURE_FORMAT_ID",
+    "16429 STREAMING_FORMAT_ID",
+    "16430 ACQUISITION_MODE",
+    "16431 FAN_SPEED_LEVEL",
+    "16432 CONTINUOUS_WHITE_BALANCE_ENABLED",
+    "16433 CONTINUOUS_WHITE_BALANCE_ROI",
+    "16434 CONTINUOUS_WHITE_BALANCE_ROI_ENABLED",
+    "16435 FOCUS_SCORE_ROI",
+    "16436 FOCUS_SCORE_ROI_ENABLED",
+    "16437 WHITE_SHADING_REFERENCE_FILE",
+    "16438 WHITE_SHADING_CORRECTION_ENABLED",
+    "16439 SATURATION_CORRECTION",
+    "16440 HUE_CORRECTION",
+    "16441 AVERAGE_COLOUR_ROI",
+    "16442 AVERAGE_COLOUR_ROI_ENABLED",
+    "16443 PSEUDO_COLOUR_WAVELENGTH",
+    "16444 BLACK_BALANCE_LEVEL",
+    "16445 BLACK_BALANCE_ENABLED",
+    "16449 TARGET_TEMPERATURE",
+    "16450 FAN_SPEED",
+    "16451 MIN_TRIGGER_INTERVAL",
+    "16453 NIR_MODE_ENABLED",
+    "16454 CAMERA_SDK_VERSION",
+    "16455 READOUT_OVERLAP_ENABLED",
+    "16456 EMCCD_MODE",
+    "16457 HOTPIXEL_EXPOSURE_THRESHOLD",
+    "16458 HOTPIXEL_INTENSITY_THRESHOLD",
+    "16459 MICROSCANNING_MODE",
+    "16460 VERTICAL_SHIFT_TIME",
+    "16461 VERTICAL_SHIFT_VOLTAGE_OFFSET",
+    "16463 NOISE_REDUCTION_LEVEL",
+    "16464 NOISE_REDUCTION_ENABLED",
+    "16465 MICRO_SCANNING_SHARPENING_LEVEL",
+    "16466 MICRO_SCANNING_SHARPENING_ENABLED",
+    "16467 BLACK_LOCK_THRESHOLD",
+    "16468 BLACK_LOCK_ENABLED",
+    "16469 WHITE_LOCK_THRESHOLD",
+    "16470 WHITE_LOCK_ENABLED",
+    "16471 ELECTRONCOUNT_SCALING",
+    "16472 EMCCD_NOISE_REDUCTION_THRESHOLD",
+    "16473 EMCCD_NOISE_REDUCTION_ENABLED",
+    "16475 HDR_MODE",
+    "16476 HDR_CONTRAST",
+    "16477 TEMPERATURE_PELTIER_ENABLED",
+    "16478 MULTI_TAP_READOUT_ENABLED",
+    "16479 MULTI_TAP_READOUT_SELECTOR",
+    "16480 HDR_BRIGHTNESS",
+    "16481 DISPLAY_NAME",
+    "16482 PIXEL_ALIGNMENT",
+    "16483 DECIMATION_MODE",
+    "16484 PATH_TO_SAMPLE_IMAGES",
+    "16485 ACCEPT_UNEXPECTED_FORMAT",
+    "16486 SCAN_COUNT",
+    "16495 IMAGE_TIMESTAMP",
+    "16496 CONVERSION_GAIN_MODE",
+    "16499 ZOOM",
+    "16500 IMAGE_PROCESS_TIME",
+    "16502 ACQUISITION_FRAMERATE",
+    "16503 ACQUISITION_FRAMERATE_ENABLED",
+    "16504 HOTPIXEL_CORRECTION_ENABLED",
+    "16505 HOTPIXEL_CORRECTION_FACTOR"
+  ]
+}
