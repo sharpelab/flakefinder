@@ -163,6 +163,29 @@ _CAL_DATA_GRAPHENE_10X = np.array(
     ]
 )
 
+# AFM anchors measured by Toghrul 2026-08-05 on the current scope (Leica
+# DM6M, 10x, gain 2.0, hBN WB 1.41/1.02/2.51, flatfielded — unclipped
+# regime).  Camera-space R/G contrast; thickness is the AFM-range midpoint.
+# First real anchors in the 45–58 nm band.  Source records:
+# downloads/flakes_scan287/flakes_meta.json (rows with non-null flake_note).
+# Format: [thickness_nm, R_contrast, G_contrast]
+_CAL_DATA_AFM_10X_20260805 = np.array(
+    [
+        [45.5, 2.82, 4.80],  # flake 99004
+        [46.5, 2.69, 4.55],  # flake 99012
+        [48.5, 3.16, 4.95],  # flake 98997
+        [49.0, 3.08, 4.79],  # flake 98985
+        [50.5, 3.19, 4.93],  # flake 98998
+        [54.0, 3.45, 4.90],  # flake 99013
+        [54.5, 3.54, 5.07],  # flake 98999
+        [56.5, 3.17, 4.70],  # flake 98982 — suspected outlier (R low for its thickness)
+        [57.5, 3.63, 4.96],  # flake 99014
+    ]
+)
+# Suspected-outlier mask (True = trusted).  98982's R sits well below the
+# neighboring anchors; rendered hollow + faded and excluded from the rms.
+_CAL_DATA_AFM_10X_20260805_OK = np.array([True, True, True, True, True, True, True, False, True])
+
 # Per-material max compute layers (plot + cache extent)
 HBN_MAX_LAYERS = 300
 GRAPHENE_MAX_LAYERS = 60
@@ -283,7 +306,7 @@ def _setup_panel(ax, title):
     ax.grid(True, alpha=0.3)
     ax.set_aspect("equal")
     ax.set_xlim(-1, 5.5)
-    ax.set_ylim(-1.5, 4)
+    ax.set_ylim(-1.5, 5.5)
 
 
 def _make_annotations(ax, layer_thickness_nm, max_layers, label_layers=None, label_fmt="thickness", custom_labels=None):
@@ -446,8 +469,10 @@ def _compute_for_tab(vals: _Vals, n_wse2_arr: np.ndarray) -> _TabResult:
 def main():
     fig = plt.figure(figsize=(15, 8))
 
+    # hBN defaults: 2026-08-06 fit against the Toghrul 10x AFM anchors
+    # (45-58 nm, current scope) with the prev-scope 50x set overlaid.
     init = {
-        "n": 2.152,
+        "n": 2.111,
         # Graphite/graphene constant-n approximation (Bruna & Borini APL 2009,
         # Blake et al. APL 2007).  Real graphite is dispersive — n drops ~0.4
         # from 700→400 nm — so single (n,k) is a fit compromise across visible.
@@ -457,8 +482,8 @@ def main():
         "oxide_285": 285.0,
         "oxide_wse2": 300.0,
         "na": 0.25,
-        "r_off": 0.54,
-        "g_off": -0.2,
+        "r_off": 0.6,
+        "g_off": -0.3,
         "r_off_gr": 0.0,
         "g_off_gr": 0.0,
         "r_off_wse2": 0.0,
@@ -525,7 +550,7 @@ def main():
         zorder=1,
         edgecolors="k",
         linewidths=0.7,
-        label="AFM (90nm, shifted)",
+        label="AFM 90nm (50x, prev scope)",
     )
     cal_ann_90 = []
     for i, row in enumerate(_CAL_DATA):
@@ -539,6 +564,47 @@ def main():
             fontweight="bold",
         )
         cal_ann_90.append(a)
+
+    # Toghrul AFM anchors (current scope, 10x) — split trusted vs suspect.
+    afm10_ok = _CAL_DATA_AFM_10X_20260805_OK
+    afm10_r = _CAL_DATA_AFM_10X_20260805[:, 1] + init["r_off"]
+    afm10_g = _CAL_DATA_AFM_10X_20260805[:, 2] + init["g_off"]
+    scat_afm10 = ax_90.scatter(
+        afm10_g[afm10_ok],
+        afm10_r[afm10_ok],
+        c="tab:blue",
+        marker="*",
+        s=90,
+        zorder=1,
+        edgecolors="k",
+        linewidths=0.7,
+        label="AFM 10x 2026-08-05 (Toghrul)",
+    )
+    scat_afm10_sus = ax_90.scatter(
+        afm10_g[~afm10_ok],
+        afm10_r[~afm10_ok],
+        facecolors="none",
+        edgecolors="tab:blue",
+        marker="*",
+        s=90,
+        zorder=1,
+        linewidths=1.2,
+        alpha=0.55,
+        label="↑ suspect (R low)",
+    )
+    cal_ann_afm10 = []
+    for i, row in enumerate(_CAL_DATA_AFM_10X_20260805):
+        a = ax_90.annotate(
+            f"{row[0]:.1f}",
+            (afm10_g[i], afm10_r[i]),
+            textcoords="offset points",
+            xytext=(6, -6),
+            fontsize=7,
+            color="tab:blue",
+            fontweight="bold",
+            alpha=1.0 if afm10_ok[i] else 0.55,
+        )
+        cal_ann_afm10.append(a)
     rms_text_90 = ax_90.text(
         0.02,
         0.98,
@@ -567,7 +633,7 @@ def main():
             zorder=1,
             edgecolors="k",
             linewidths=0.7,
-            label="285nm empirical",
+            label="285nm empirical (prev scope)",
         )
         cal_ann_285 = []
         for i, row in enumerate(_CAL_DATA_285):
@@ -899,6 +965,34 @@ def main():
             cond.notify()
 
     # --- Artist updates (main thread only) ---
+    def _update_hbn_90_cal(r_off: float, g_off: float, t: np.ndarray, r9: np.ndarray, g9: np.ndarray):
+        """Move both 90nm-panel cal sets to the current offsets and refresh rms.
+
+        Shared by _draw_hbn (full redraw) and _draw_offsets_only.
+        """
+        cal_r_s = _CAL_DATA[:, 1] + r_off
+        cal_g_s = _CAL_DATA[:, 2] + g_off
+        scat_90.set_offsets(np.column_stack([cal_g_s, cal_r_s]))
+        for i, ann in enumerate(cal_ann_90):
+            ann.xy = (cal_g_s[i], cal_r_s[i])
+        r_res = cal_r_s - np.interp(_CAL_DATA[:, 0], t, r9)
+        g_res = cal_g_s - np.interp(_CAL_DATA[:, 0], t, g9)
+
+        a_r_s = _CAL_DATA_AFM_10X_20260805[:, 1] + r_off
+        a_g_s = _CAL_DATA_AFM_10X_20260805[:, 2] + g_off
+        scat_afm10.set_offsets(np.column_stack([a_g_s[afm10_ok], a_r_s[afm10_ok]]))
+        scat_afm10_sus.set_offsets(np.column_stack([a_g_s[~afm10_ok], a_r_s[~afm10_ok]]))
+        for i, ann in enumerate(cal_ann_afm10):
+            ann.xy = (a_g_s[i], a_r_s[i])
+        t_ok = _CAL_DATA_AFM_10X_20260805[afm10_ok, 0]
+        a_r_res = a_r_s[afm10_ok] - np.interp(t_ok, t, r9)
+        a_g_res = a_g_s[afm10_ok] - np.interp(t_ok, t, g9)
+
+        rms_text_90.set_text(
+            f"prev 50x  R rms={np.sqrt(np.mean(r_res**2)):.3f}  G rms={np.sqrt(np.mean(g_res**2)):.3f}\n"
+            f"10x 08-05 R rms={np.sqrt(np.mean(a_r_res**2)):.3f}  G rms={np.sqrt(np.mean(a_g_res**2)):.3f}"
+        )
+
     def _draw_hbn(vals: _Vals, res: _TabResult):
         r9, g9, t = res.r90, res.g90, res.t_hbn
         r2, g2 = res.r285, res.g285
@@ -907,14 +1001,7 @@ def main():
         _update_annotations(ann_90, dots_90, r9, g9)
         ax_90.set_title(f"hBN · {vals.oxide:.0f} nm SiO₂")
 
-        cal_r_s = _CAL_DATA[:, 1] + vals.r_off
-        cal_g_s = _CAL_DATA[:, 2] + vals.g_off
-        scat_90.set_offsets(np.column_stack([cal_g_s, cal_r_s]))
-        for i, ann in enumerate(cal_ann_90):
-            ann.xy = (cal_g_s[i], cal_r_s[i])
-        r_res = cal_r_s - np.interp(_CAL_DATA[:, 0], t, r9)
-        g_res = cal_g_s - np.interp(_CAL_DATA[:, 0], t, g9)
-        rms_text_90.set_text(f"R rms={np.sqrt(np.mean(r_res**2)):.3f}  G rms={np.sqrt(np.mean(g_res**2)):.3f}")
+        _update_hbn_90_cal(vals.r_off, vals.g_off, t, r9, g9)
 
         line_285.set_data(g2, r2)
         ax_285.set_title(f"hBN · {vals.oxide_285:.0f} nm SiO₂")
@@ -976,14 +1063,7 @@ def main():
         """Update only the offset-dependent artists on the active tab."""
         if vals.tab == "hbn":
             _, res = cache["hbn"]
-            cal_r_s = _CAL_DATA[:, 1] + vals.r_off
-            cal_g_s = _CAL_DATA[:, 2] + vals.g_off
-            scat_90.set_offsets(np.column_stack([cal_g_s, cal_r_s]))
-            for i, ann in enumerate(cal_ann_90):
-                ann.xy = (cal_g_s[i], cal_r_s[i])
-            r_res = cal_r_s - np.interp(_CAL_DATA[:, 0], res.t_hbn, res.r90)
-            g_res = cal_g_s - np.interp(_CAL_DATA[:, 0], res.t_hbn, res.g90)
-            rms_text_90.set_text(f"R rms={np.sqrt(np.mean(r_res**2)):.3f}  G rms={np.sqrt(np.mean(g_res**2)):.3f}")
+            _update_hbn_90_cal(vals.r_off, vals.g_off, res.t_hbn, res.r90, res.g90)
             if scat_285 is not None:
                 c285_r = _CAL_DATA_285[:, 1] + vals.r_off
                 c285_g = _CAL_DATA_285[:, 2] + vals.g_off
