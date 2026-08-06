@@ -13,6 +13,7 @@
 - **Don't call `GetObject()` on the same SDK interface twice.** Redundant `get_interface_required` calls can interfere with existing sessions. Delegate to the object that already owns the interface.
 - `Camera.__init__` handles UCAPI registration internally — callers don't need `Extensions.ExUCAPI.Register()`.
 - Leica `ucapi logfile*.log` files look binary to grep (mixed line endings); they're ASCII — use `grep -a`. Don't waste time on UTF-16 decoding.
+- **Scope-side probe/experiment outputs go in `experiments/`** (scope repo top level), not `tmp/`. Committed artifacts still land under `calibration/` in git.
 - .NET property-info API: `prop.GetInfo()` → `MinValue()/MaxValue()/StepSize()` (ranges) or `NumOptions()/GetOption(i)` (enums). `scripts/experiments/probe_camera_pipeline.py` dumps the whole camera property space read-only (no light/motion; does camera `Init()`).
 
 ## K5C Color Pipeline (2026-08-06 investigation)
