@@ -1,0 +1,277 @@
+{
+  "timestamp": "2026-08-06T11:53:11.040563",
+  "command": [
+    "C:\\Users\\GGG-Leica-DM6M\\flakefinder\\.venv\\Scripts\\capture-series",
+    "-o",
+    "calibration/colorchecker_dm6m_20260806/white_5x_riders",
+    "--spec",
+    "calibration/colorchecker_dm6m_20260806/white_5x_riders_spec.json",
+    "-q"
+  ],
+  "spec_path": "calibration\\colorchecker_dm6m_20260806\\white_5x_riders_spec.json",
+  "spec_defaults": {
+    "lamp": 100,
+    "exposure_ms": 3,
+    "gain": 2.0,
+    "white_balance": {
+      "r": 1.0,
+      "g": 1.0,
+      "b": 1.0
+    },
+    "binning": 3,
+    "gamma": 1.0,
+    "saturation": 100,
+    "auto_brightness": false,
+    "aperture": null,
+    "frames": 3,
+    "warmup_frames": 1,
+    "settle_s": 0.2,
+    "format": "png",
+    "quality": 95
+  },
+  "notes": "5x riders redo at 3ms (10ms clipped): scan WB, sat0 luma, unity anchor.",
+  "condition_count": 3,
+  "frame_count": 9,
+  "warmup_frame_count": 3,
+  "total_elapsed_s": 4.62,
+  "save_tail_s": 2.16,
+  "position_um": {
+    "x": 48553.98702959999,
+    "y": 44449.30027199999,
+    "z": 19534.3712
+  },
+  "objective_mag": 5,
+  "camera": {
+    "name": "K5C",
+    "exposure_s": 0.003,
+    "gain": 2.0,
+    "binning": 3,
+    "readout_time_s": 0.014999,
+    "frame_width_px": 1824,
+    "frame_height_px": 1216,
+    "pixel_size_x_um": 4.8046875,
+    "pixel_size_y_um": 4.8046875,
+    "sensor_width_px": 5472,
+    "sensor_height_px": 3648,
+    "physical_pixel_x_um": 2.40234375,
+    "physical_pixel_y_um": 2.40234375,
+    "white_balance_bgr": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "gamma": 1.0,
+    "auto_brightness": false
+  },
+  "optics": {
+    "objective_mag": 5,
+    "objective_idx": 1,
+    "sample_pixel_x_um": 1.44140625,
+    "sample_pixel_y_um": 1.44140625,
+    "frame_width_um": 2629.125,
+    "frame_height_um": 1752.75
+  },
+  "lighting": {
+    "lamp_name": "Lamp LAMP",
+    "lamp_intensity": 255,
+    "lamp_max_intensity": 255,
+    "shutter_name": "ILShutter LAMP",
+    "shutter_open": true,
+    "aperture_value": 11,
+    "aperture_max_value": 11
+  },
+  "conditions": [
+    {
+      "index": 0,
+      "name": "unity_exp3",
+      "requested": {
+        "lamp_pct": 100.0,
+        "exposure_ms": 3.0,
+        "gain": 2.0,
+        "white_balance_bgr": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "binning": 3,
+        "gamma": 1.0,
+        "saturation": 100,
+        "auto_brightness": false,
+        "aperture": null,
+        "frames": 3,
+        "warmup_frames": 1,
+        "settle_s": 0.2
+      },
+      "applied": {
+        "lamp_pct": 100.0,
+        "lamp_native": 255,
+        "shutter_open": true,
+        "exposure_ms": 3.0,
+        "gain": 2.0,
+        "white_balance_bgr": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "binning": 3,
+        "gamma": 1.0,
+        "saturation": 100,
+        "auto_brightness": false,
+        "aperture": 11
+      },
+      "timing_s": {
+        "setup": 0.937,
+        "settle": 0.2003,
+        "warmup": 0.1315,
+        "frames": [
+          0.0592,
+          0.056,
+          0.0579
+        ],
+        "total": 1.4797
+      },
+      "frames": [
+        {
+          "file": "unity_exp3_f1.png",
+          "timestamp": "2026-08-06T11:53:07.686109"
+        },
+        {
+          "file": "unity_exp3_f2.png",
+          "timestamp": "2026-08-06T11:53:07.745336"
+        },
+        {
+          "file": "unity_exp3_f3.png",
+          "timestamp": "2026-08-06T11:53:07.801386"
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "name": "scanwb_exp3",
+      "requested": {
+        "lamp_pct": 100.0,
+        "exposure_ms": 3.0,
+        "gain": 2.0,
+        "white_balance_bgr": [
+          2.51,
+          1.02,
+          1.41
+        ],
+        "binning": 3,
+        "gamma": 1.0,
+        "saturation": 100,
+        "auto_brightness": false,
+        "aperture": null,
+        "frames": 3,
+        "warmup_frames": 1,
+        "settle_s": 0.2
+      },
+      "applied": {
+        "lamp_pct": 100.0,
+        "lamp_native": 255,
+        "shutter_open": true,
+        "exposure_ms": 3.0,
+        "gain": 2.0,
+        "white_balance_bgr": [
+          2.510009765625,
+          1.02001953125,
+          1.409912109375
+        ],
+        "binning": 3,
+        "gamma": 1.0,
+        "saturation": 100,
+        "auto_brightness": false,
+        "aperture": 11
+      },
+      "timing_s": {
+        "setup": 0.0164,
+        "settle": 0.2004,
+        "warmup": 0.053,
+        "frames": [
+          0.0537,
+          0.0651,
+          0.0626
+        ],
+        "total": 0.4849
+      },
+      "frames": [
+        {
+          "file": "scanwb_exp3_f1.png",
+          "timestamp": "2026-08-06T11:53:08.162901"
+        },
+        {
+          "file": "scanwb_exp3_f2.png",
+          "timestamp": "2026-08-06T11:53:08.216580"
+        },
+        {
+          "file": "scanwb_exp3_f3.png",
+          "timestamp": "2026-08-06T11:53:08.281689"
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "name": "sat0_exp3",
+      "requested": {
+        "lamp_pct": 100.0,
+        "exposure_ms": 3.0,
+        "gain": 2.0,
+        "white_balance_bgr": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "binning": 3,
+        "gamma": 1.0,
+        "saturation": 0,
+        "auto_brightness": false,
+        "aperture": null,
+        "frames": 3,
+        "warmup_frames": 1,
+        "settle_s": 0.2
+      },
+      "applied": {
+        "lamp_pct": 100.0,
+        "lamp_native": 255,
+        "shutter_open": true,
+        "exposure_ms": 3.0,
+        "gain": 2.0,
+        "white_balance_bgr": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "binning": 3,
+        "gamma": 1.0,
+        "saturation": 0,
+        "auto_brightness": false,
+        "aperture": 11
+      },
+      "timing_s": {
+        "setup": 0.0301,
+        "settle": 0.2007,
+        "warmup": 0.0632,
+        "frames": [
+          0.0546,
+          0.0537,
+          0.0528
+        ],
+        "total": 0.4905
+      },
+      "frames": [
+        {
+          "file": "sat0_exp3_f1.png",
+          "timestamp": "2026-08-06T11:53:08.673720"
+        },
+        {
+          "file": "sat0_exp3_f2.png",
+          "timestamp": "2026-08-06T11:53:08.728365"
+        },
+        {
+          "file": "sat0_exp3_f3.png",
+          "timestamp": "2026-08-06T11:53:08.782091"
+        }
+      ]
+    }
+  ]
+}

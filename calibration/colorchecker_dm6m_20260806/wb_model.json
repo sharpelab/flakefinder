@@ -1,0 +1,41 @@
+{
+ "scope_id": "leica_dm6m_sharpelab",
+ "camera": "Leica K5C",
+ "date": "2026-08-06",
+ "measured_at": {
+  "objective": "10x",
+  "target": "colorchecker_white_19",
+  "exposure_ms": 0.5,
+  "gain": 2.0,
+  "lamp_pct": 100
+ },
+ "model": "effective_mult = clip(1 + M @ delta, 0, inf); delta_c = max(request_c - 1, 0); requests < 1 clamp to 1",
+ "M_rows_RGB_cols_reqRGB": [
+  [
+   2.05,
+   -0.839,
+   -0.186
+  ],
+  [
+   -0.218,
+   1.296,
+   -0.064
+  ],
+  [
+   -0.352,
+   -1.62,
+   3.045
+  ]
+ ],
+ "validity": "requests in [1.0, ~2.5] verified exact (superposition to 0.002); caps somewhere in (2.51, 4.0] per 2.5x b4==b7 observation; floor clamp at 0 observed",
+ "scan_wb_effective_mult_rgb": [
+  1.543,
+  0.84,
+  5.421
+ ],
+ "verification": {
+  "conditions": 31,
+  "max_pred_error": 0.002,
+  "drift_pct": 0.04
+ }
+}

@@ -1,0 +1,22 @@
+{
+  "notes": "White #19 fingerprint at 20x, 2026-08-06. Short-exposure regime ladder (anomaly territory: 20x 0.25ms). Riders at 0.25ms deliberately.",
+  "defaults": {"gain": 2.0, "lamp": 100, "frames": 3,
+               "white_balance": {"r": 1.0, "g": 1.0, "b": 1.0}},
+  "conditions": [
+    {"name": "exp0.1", "exposure_ms": 0.1},
+    {"name": "exp0.15", "exposure_ms": 0.15},
+    {"name": "exp0.2", "exposure_ms": 0.2},
+    {"name": "exp0.25", "exposure_ms": 0.25},
+    {"name": "exp0.3", "exposure_ms": 0.3},
+    {"name": "exp0.4", "exposure_ms": 0.4},
+    {"name": "exp0.5", "exposure_ms": 0.5},
+    {"name": "exp0.75", "exposure_ms": 0.75},
+    {"name": "exp1", "exposure_ms": 1},
+    {"name": "exp1.5", "exposure_ms": 1.5},
+    {"name": "exp2", "exposure_ms": 2},
+    {"name": "exp3", "exposure_ms": 3},
+    {"name": "scanwb_exp0.25", "exposure_ms": 0.25, "white_balance": {"r": 1.41, "g": 1.02, "b": 2.51}},
+    {"name": "sat0_exp0.25", "exposure_ms": 0.25, "saturation": 0},
+    {"name": "unity_end_exp0.25", "exposure_ms": 0.25}
+  ]
+}

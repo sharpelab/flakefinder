@@ -1,0 +1,166 @@
+{
+ "notes": "WB axis survey on white #19 @10x, 2026-08-06. One axis at a time 0.8-2.0, others unity. Effective-multiplier map incl. cross-channel coupling.",
+ "defaults": {
+  "exposure_ms": 0.5,
+  "gain": 2.0,
+  "lamp": 100,
+  "frames": 3,
+  "white_balance": {
+   "r": 1.0,
+   "g": 1.0,
+   "b": 1.0
+  }
+ },
+ "conditions": [
+  {
+   "name": "unity_start"
+  },
+  {
+   "name": "r0.8",
+   "white_balance": {
+    "r": 0.8,
+    "g": 1.0,
+    "b": 1.0
+   }
+  },
+  {
+   "name": "r1.2",
+   "white_balance": {
+    "r": 1.2,
+    "g": 1.0,
+    "b": 1.0
+   }
+  },
+  {
+   "name": "r1.4",
+   "white_balance": {
+    "r": 1.4,
+    "g": 1.0,
+    "b": 1.0
+   }
+  },
+  {
+   "name": "r1.6",
+   "white_balance": {
+    "r": 1.6,
+    "g": 1.0,
+    "b": 1.0
+   }
+  },
+  {
+   "name": "r1.8",
+   "white_balance": {
+    "r": 1.8,
+    "g": 1.0,
+    "b": 1.0
+   }
+  },
+  {
+   "name": "r2.0",
+   "white_balance": {
+    "r": 2.0,
+    "g": 1.0,
+    "b": 1.0
+   }
+  },
+  {
+   "name": "g0.8",
+   "white_balance": {
+    "r": 1.0,
+    "g": 0.8,
+    "b": 1.0
+   }
+  },
+  {
+   "name": "g1.2",
+   "white_balance": {
+    "r": 1.0,
+    "g": 1.2,
+    "b": 1.0
+   }
+  },
+  {
+   "name": "g1.4",
+   "white_balance": {
+    "r": 1.0,
+    "g": 1.4,
+    "b": 1.0
+   }
+  },
+  {
+   "name": "g1.6",
+   "white_balance": {
+    "r": 1.0,
+    "g": 1.6,
+    "b": 1.0
+   }
+  },
+  {
+   "name": "g1.8",
+   "white_balance": {
+    "r": 1.0,
+    "g": 1.8,
+    "b": 1.0
+   }
+  },
+  {
+   "name": "g2.0",
+   "white_balance": {
+    "r": 1.0,
+    "g": 2.0,
+    "b": 1.0
+   }
+  },
+  {
+   "name": "b0.8",
+   "white_balance": {
+    "r": 1.0,
+    "g": 1.0,
+    "b": 0.8
+   }
+  },
+  {
+   "name": "b1.2",
+   "white_balance": {
+    "r": 1.0,
+    "g": 1.0,
+    "b": 1.2
+   }
+  },
+  {
+   "name": "b1.4",
+   "white_balance": {
+    "r": 1.0,
+    "g": 1.0,
+    "b": 1.4
+   }
+  },
+  {
+   "name": "b1.6",
+   "white_balance": {
+    "r": 1.0,
+    "g": 1.0,
+    "b": 1.6
+   }
+  },
+  {
+   "name": "b1.8",
+   "white_balance": {
+    "r": 1.0,
+    "g": 1.0,
+    "b": 1.8
+   }
+  },
+  {
+   "name": "b2.0",
+   "white_balance": {
+    "r": 1.0,
+    "g": 1.0,
+    "b": 2.0
+   }
+  },
+  {
+   "name": "unity_end"
+  }
+ ]
+}

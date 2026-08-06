@@ -1,0 +1,13 @@
+{
+  "notes": "Gray #23 (neutral 3.5) at 50x — CORRECTED: initially mislabeled #24; Zack visually confirmed grey-before-black. Wide probe ladder, flux unknown at 50x.",
+  "defaults": {"gain": 2.0, "lamp": 100, "frames": 3,
+               "white_balance": {"r": 1.0, "g": 1.0, "b": 1.0}},
+  "conditions": [
+    {"name": "exp1", "exposure_ms": 1},
+    {"name": "exp2", "exposure_ms": 2},
+    {"name": "exp4", "exposure_ms": 4},
+    {"name": "exp8", "exposure_ms": 8},
+    {"name": "exp16", "exposure_ms": 16},
+    {"name": "dark_exp16", "exposure_ms": 16, "lamp": 0}
+  ]
+}

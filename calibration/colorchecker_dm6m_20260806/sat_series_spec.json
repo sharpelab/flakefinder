@@ -1,0 +1,21 @@
+{
+  "notes": "Saturation-mixing probe on white #19, 2026-08-06. Unity WB, 10ms/gain2/lamp100. Sweep saturation 0-150 (SDK range '0-100+', read-back in meta shows clamping). sat0_scanwb separates saturation-mixing from WB-dependent CCM effects.",
+  "defaults": {
+    "exposure_ms": 10,
+    "gain": 2.0,
+    "lamp": 100,
+    "frames": 3,
+    "white_balance": {"r": 1.0, "g": 1.0, "b": 1.0}
+  },
+  "conditions": [
+    {"name": "sat100"},
+    {"name": "sat75", "saturation": 75},
+    {"name": "sat50", "saturation": 50},
+    {"name": "sat25", "saturation": 25},
+    {"name": "sat0", "saturation": 0},
+    {"name": "sat125", "saturation": 125},
+    {"name": "sat150", "saturation": 150},
+    {"name": "sat0_scanwb", "saturation": 0, "white_balance": {"r": 1.41, "g": 1.02, "b": 2.51}},
+    {"name": "sat100_end"}
+  ]
+}

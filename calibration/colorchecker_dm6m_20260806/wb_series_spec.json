@@ -1,0 +1,20 @@
+{
+  "notes": "WB-mechanism probe on ColorChecker white #19, 2026-08-06. Fixed 10ms/gain2/lamp100 (unity baseline R119/G182/B36). Tests: pure-multiplier hypothesis, sub-unity gains, clip behavior when predicted counts exceed 255, scan-WB reproduction. Also first live run of capture-series.",
+  "defaults": {
+    "exposure_ms": 10,
+    "gain": 2.0,
+    "lamp": 100,
+    "frames": 3,
+    "white_balance": {"r": 1.0, "g": 1.0, "b": 1.0}
+  },
+  "conditions": [
+    {"name": "wb_unity"},
+    {"name": "wb_scan", "white_balance": {"r": 1.41, "g": 1.02, "b": 2.51}},
+    {"name": "wb_r2", "white_balance": {"r": 2.0, "g": 1.0, "b": 1.0}},
+    {"name": "wb_b4", "white_balance": {"r": 1.0, "g": 1.0, "b": 4.0}},
+    {"name": "wb_b7", "white_balance": {"r": 1.0, "g": 1.0, "b": 7.0}},
+    {"name": "wb_g1p5", "white_balance": {"r": 1.0, "g": 1.5, "b": 1.0}},
+    {"name": "wb_half", "white_balance": {"r": 0.5, "g": 0.5, "b": 0.5}},
+    {"name": "wb_unity_end"}
+  ]
+}

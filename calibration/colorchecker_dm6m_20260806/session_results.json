@@ -1,0 +1,116 @@
+{
+ "scope_id": "leica_dm6m_sharpelab",
+ "date": "2026-08-06",
+ "chart": "Calibrite ColorChecker Passport 2 (formulation vintage TBD \u2014 Zack checking)",
+ "pipeline": {
+  "gain": 2.0,
+  "binning": 3,
+  "gamma": 1.0,
+  "lamp_pct": 100,
+  "wb": "unity unless noted"
+ },
+ "linearity": {
+  "verdict": "linear <0.5% over full usable range; compression >=180cts REFUTED; short-exposure (0.25ms@20x) clean (-0.6%)",
+  "blooming": "any clipped channel contaminates others (B +11..82% once G clips); distrust all channels where any clips",
+  "intercepts": "-1.1..-1.5 counts all objectives (black level over-subtraction, floor-clamped at 0)"
+ },
+ "white_fingerprint_slopes_per_ms": {
+  "2.5x": [
+   12.058,
+   18.306,
+   3.68
+  ],
+  "5x": [
+   25.389,
+   44.785,
+   9.378
+  ],
+  "10x": [
+   78.58,
+   150.59,
+   30.2
+  ],
+  "20x": [
+   91.16,
+   176.53,
+   33.9
+  ],
+  "50x": [
+   176.69,
+   349.79,
+   67.51
+  ]
+ },
+ "fingerprint_ratios_GR_GB_RB": {
+  "2.5x": [
+   1.518,
+   4.974,
+   3.276
+  ],
+  "5x": [
+   1.764,
+   4.775,
+   2.707
+  ],
+  "10x": [
+   1.916,
+   4.987,
+   2.602
+  ],
+  "20x": [
+   1.936,
+   5.208,
+   2.689
+  ],
+  "50x": [
+   1.98,
+   5.182,
+   2.617
+  ]
+ },
+ "deliverable_wb_gains_rgb_10x": [
+  1.916,
+  1.0,
+  4.987
+ ],
+ "deliverable_effective_lamp_rgb_10x": [
+  0.522,
+  1.0,
+  0.201
+ ],
+ "glare_floor_f_from_black_RGB": {
+  "5x": [
+   0.153,
+   0.105,
+   0.295
+  ],
+  "10x": [
+   0.042,
+   0.009,
+   0.1
+  ],
+  "20x": [
+   0.046,
+   0.013,
+   0.116
+  ],
+  "50x": [
+   0.024,
+   0.023,
+   0.034
+  ]
+ },
+ "glare_notes": "additive, lamp-borne (all darks 0 incl 64ms lamps-on-room); scales with local surround brightness; B excess mostly objective optics (collapses at 50x); contrast deflation ~= f per channel",
+ "wb_model": "see wb_model.json \u2014 3x3 coupling matrix, requests<1 clamp, linear 1..2.5, scan WB effective x1.543/x0.840/x5.421",
+ "saturation_model": "out = luma + (sat/100)(x - luma); sat100 = identity; luma weights ~(0.29,0.52,0.18) provisional",
+ "lamp": "drive % wildly nonlinear (<70% ~dark); cold-start +2.3% overshoot; warm drift -0.9%/20min; always 100% + exposure control",
+ "flux_scaling": "diffuse target: ~0.8*NA^2 (2.5x->10x), breaks down 20x (1.17x vs 2.05 pred); 50x 2.0x over 20x",
+ "pending": [
+  "2.5x gray/black cells (turret sector shared with 150x = crash risk, assisted)",
+  "WB cap location (requests 2.5-4)",
+  "luma weights precise fit (sat0/100 pairs at several WBs, one series)",
+  "empty substrate chips 90/285nm: specular glare + 0.25ms anomaly hunt + oxide blue-boost test",
+  "cross-scope comparison (same chart, other scopes)",
+  "chart formulation vintage (Zack asking); Calibrite current-formulation reference values"
+ ]
+}

@@ -1,0 +1,11 @@
+{
+  "notes": "Gray #21 (neutral 6.5) at 20x — completes 3x3 gray/objective matrix.",
+  "defaults": {"gain": 2.0, "lamp": 100, "frames": 3,
+               "white_balance": {"r": 1.0, "g": 1.0, "b": 1.0}},
+  "conditions": [
+    {"name": "exp0.5", "exposure_ms": 0.5},
+    {"name": "exp1", "exposure_ms": 1},
+    {"name": "exp2", "exposure_ms": 2},
+    {"name": "exp3", "exposure_ms": 3}
+  ]
+}

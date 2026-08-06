@@ -1,0 +1,12 @@
+{
+  "notes": "BLACK #24 at 20x — final matrix cell. G-floor~0 prediction: near-true reading.",
+  "defaults": {"gain": 2.0, "lamp": 100, "frames": 3,
+               "white_balance": {"r": 1.0, "g": 1.0, "b": 1.0}},
+  "conditions": [
+    {"name": "exp8", "exposure_ms": 8},
+    {"name": "exp16", "exposure_ms": 16},
+    {"name": "exp24", "exposure_ms": 24},
+    {"name": "exp30", "exposure_ms": 30},
+    {"name": "dark_exp30", "exposure_ms": 30, "lamp": 0}
+  ]
+}

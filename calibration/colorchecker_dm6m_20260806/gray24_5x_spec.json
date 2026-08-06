@@ -1,0 +1,12 @@
+{
+  "notes": "BLACK #24 (1.5 D) at 5x — decisive glare quantification. Long exposures + dark.",
+  "defaults": {"gain": 2.0, "lamp": 100, "frames": 3,
+               "white_balance": {"r": 1.0, "g": 1.0, "b": 1.0}},
+  "conditions": [
+    {"name": "exp16", "exposure_ms": 16},
+    {"name": "exp32", "exposure_ms": 32},
+    {"name": "exp48", "exposure_ms": 48},
+    {"name": "exp64", "exposure_ms": 64},
+    {"name": "dark_exp64", "exposure_ms": 64, "lamp": 0}
+  ]
+}

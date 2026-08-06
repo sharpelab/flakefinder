@@ -1,0 +1,12 @@
+{
+  "notes": "Gray #22 (neutral 5) at 5x + lamp-0 dark rider (ambient check).",
+  "defaults": {"gain": 2.0, "lamp": 100, "frames": 3,
+               "white_balance": {"r": 1.0, "g": 1.0, "b": 1.0}},
+  "conditions": [
+    {"name": "exp4", "exposure_ms": 4},
+    {"name": "exp8", "exposure_ms": 8},
+    {"name": "exp16", "exposure_ms": 16},
+    {"name": "exp24", "exposure_ms": 24},
+    {"name": "dark_exp24", "exposure_ms": 24, "lamp": 0}
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "notes": "Gray #20 at 5x — objective-dependence discriminator.",
+  "defaults": {"gain": 2.0, "lamp": 100, "frames": 3,
+               "white_balance": {"r": 1.0, "g": 1.0, "b": 1.0}},
+  "conditions": [
+    {"name": "exp1", "exposure_ms": 1},
+    {"name": "exp2", "exposure_ms": 2},
+    {"name": "exp4", "exposure_ms": 4},
+    {"name": "exp8", "exposure_ms": 8}
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "notes": "Gray #21 (neutral 6.5) at 5x.",
+  "defaults": {"gain": 2.0, "lamp": 100, "frames": 3,
+               "white_balance": {"r": 1.0, "g": 1.0, "b": 1.0}},
+  "conditions": [
+    {"name": "exp2", "exposure_ms": 2},
+    {"name": "exp4", "exposure_ms": 4},
+    {"name": "exp8", "exposure_ms": 8},
+    {"name": "exp12", "exposure_ms": 12}
+  ]
+}

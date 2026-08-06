@@ -1,0 +1,11 @@
+{
+  "notes": "Gray-row tour at 10x, unity WB, gain 2, lamp 100. Same spec per patch; exposures 0.5/1/4/10ms cover bright->dark patches (clip-guard in analysis).",
+  "defaults": {"gain": 2.0, "lamp": 100, "frames": 3,
+               "white_balance": {"r": 1.0, "g": 1.0, "b": 1.0}},
+  "conditions": [
+    {"name": "exp0.5", "exposure_ms": 0.5},
+    {"name": "exp1", "exposure_ms": 1},
+    {"name": "exp4", "exposure_ms": 4},
+    {"name": "exp10", "exposure_ms": 10}
+  ]
+}

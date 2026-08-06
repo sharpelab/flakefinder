@@ -75,3 +75,6 @@ captures/*
 !captures/.gitkeep
 results/*
 !results/.gitkeep
+
+# calibration raw frames (bulk PNGs stay local/scope)
+calibration/*/*frames*/

@@ -1,0 +1,94 @@
+{
+ "notes": "WB survey fill-in: near-1 kink location + superposition test of 3x3 coupling matrix.",
+ "defaults": {
+  "exposure_ms": 0.5,
+  "gain": 2.0,
+  "lamp": 100,
+  "frames": 3,
+  "white_balance": {
+   "r": 1.0,
+   "g": 1.0,
+   "b": 1.0
+  }
+ },
+ "conditions": [
+  {
+   "name": "unity_start"
+  },
+  {
+   "name": "n_r1.05",
+   "white_balance": {
+    "r": 1.05,
+    "g": 1.0,
+    "b": 1.0
+   }
+  },
+  {
+   "name": "n_r1.1",
+   "white_balance": {
+    "r": 1.1,
+    "g": 1.0,
+    "b": 1.0
+   }
+  },
+  {
+   "name": "n_b1.05",
+   "white_balance": {
+    "r": 1.0,
+    "g": 1.0,
+    "b": 1.05
+   }
+  },
+  {
+   "name": "n_b1.1",
+   "white_balance": {
+    "r": 1.0,
+    "g": 1.0,
+    "b": 1.1
+   }
+  },
+  {
+   "name": "c_r1.4b1.4",
+   "white_balance": {
+    "r": 1.4,
+    "g": 1.0,
+    "b": 1.4
+   }
+  },
+  {
+   "name": "c_all1.4",
+   "white_balance": {
+    "r": 1.4,
+    "g": 1.4,
+    "b": 1.4
+   }
+  },
+  {
+   "name": "c_r1.2g1.2",
+   "white_balance": {
+    "r": 1.2,
+    "g": 1.2,
+    "b": 1.0
+   }
+  },
+  {
+   "name": "c_scan",
+   "white_balance": {
+    "r": 1.41,
+    "g": 1.02,
+    "b": 2.51
+   }
+  },
+  {
+   "name": "c_r2b2",
+   "white_balance": {
+    "r": 2.0,
+    "g": 1.0,
+    "b": 2.0
+   }
+  },
+  {
+   "name": "unity_end"
+  }
+ ]
+}

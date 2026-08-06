@@ -1,0 +1,45 @@
+{
+  "scope_id": "leica_dm6m_sharpelab",
+  "date": "2026-08-06",
+  "chart": {
+    "id": "calibrite_colorchecker_passport_photo_2",
+    "target": "classic_24_patch",
+    "patch": "19_white",
+    "notes": "Passport open on stage; card top surface ~5.4 mm above chip plane"
+  },
+  "position": {
+    "x_um": 45388.9,
+    "y_um": 37265.4,
+    "z_um": 19248.4,
+    "objective": "2.5x",
+    "objective_na": 0.07
+  },
+  "camera": {
+    "model": "Leica K5C",
+    "binning": "3x3",
+    "gain": 2.0,
+    "white_balance_bgr": [1.0, 1.0, 1.0],
+    "gamma": 1.0,
+    "auto_brightness": false,
+    "notes": "gamma/auto-brightness pinned by flakefinder camera.py defaults; saturation not set"
+  },
+  "illumination": {
+    "lamp": "Leica 11504242 LED (incident BF)",
+    "lamp_pct_default": 100,
+    "ambient": "room lights ON — uncontrollable this session; darks include ambient leak",
+    "koehler": "not re-aligned this session"
+  },
+  "series": {
+    "exposure_ramp_ms": [0.5, 1, 2, 3, 4, 5, 6, 7, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 16, 18, 20, 25, 30, 40, 50, 60, 70],
+    "drift_anchors": "exp 10 ms repeated at start/middle/end (driftA/B/C)",
+    "darks_ms": [1, 10, 70],
+    "lamp_ramp_pct_at_10ms": [10, 30, 50, 70, 90, 100, "50 repeat"],
+    "frames_per_condition": 3
+  },
+  "analysis": {
+    "script": "scripts/colorchecker_analyze.py",
+    "roi_px": 300,
+    "notes": "central ROI; 2.5x vignette (~185 center -> ~115 corner) cancels for fixed geometry"
+  },
+  "session_context": "Testing suspected compressive nonlinearity at >=~180 counts (G contrast +15% at short exposure, 2026-08-06 notebook). Exposure ramp is the linearity truth; lamp ramp characterizes LED drive."
+}

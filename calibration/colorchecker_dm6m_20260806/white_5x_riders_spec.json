@@ -1,0 +1,10 @@
+{
+  "notes": "5x riders redo at 3ms (10ms clipped): scan WB, sat0 luma, unity anchor.",
+  "defaults": {"gain": 2.0, "lamp": 100, "frames": 3, "exposure_ms": 3,
+               "white_balance": {"r": 1.0, "g": 1.0, "b": 1.0}},
+  "conditions": [
+    {"name": "unity_exp3"},
+    {"name": "scanwb_exp3", "white_balance": {"r": 1.41, "g": 1.02, "b": 2.51}},
+    {"name": "sat0_exp3", "saturation": 0}
+  ]
+}
