@@ -125,6 +125,25 @@ See [quick_scan.md](quick_scan.md) for full context. PySide6 stage viewer at `sr
 - Do NOT run hardware commands (scans, autofocus, stage moves) — only the main scan session does that.
 - SSH reads, git pulls, and file checks are fine.
 
+## Batch Capture (2026-08-06)
+
+- `sls capture-series -o DIR --spec spec.json` — many captures in one connection,
+  driven by a JSON spec (`defaults` + per-condition overrides). Use this for
+  calibration sweeps instead of bash loops over `sls capture` (~3.5 s/frame of
+  ssh + venv + SDK-connect overhead). `--dry-run` renders the plan, no hardware.
+- **It never moves anything** (no stage/Z/objective) and rejects motion keys
+  (`x/y/z/objective_mag/focus/...`) at parse time. Position the scope first.
+- **Warmup frame after any settings change.** Batched single-shot `capture()`
+  can hand back a frame acquired under the *previous* exposure/lamp — a fresh
+  connection per capture masked this. Default `warmup_frames: 1` discards it;
+  corruption would otherwise land on frame 1 of every condition.
+- Spec `white_balance` is `{"r","g","b"}` — the codebase already has three
+  orderings in play (CLI takes B,G,R; `DEFAULT_WB` is R,G,B; metadata writes
+  `white_balance_bgr`), so an object is the only unambiguous form.
+- Metadata records requested **and** hardware-read-back applied settings per
+  condition. Read-back is what makes numbers re-derivable ("asked 10 ms" vs
+  "camera held 10.02 ms").
+
 ## Rerank / mosaic workflows (2026-08-04)
 
 - `scripts/rerank_detections.py` scan-wide mode (run dir with chip_*/seg/) is read-only;
