@@ -237,6 +237,69 @@ class Camera:
             prop.SetIndex(value)
 
     @property
+    def colour_temperature(self) -> int | None:
+        """Colour matrix (CCM) selection index, or None if unavailable.
+
+        Selects the host-side colour correction matrix applied after white
+        balance. K5C options (per driver logs): UserDefinedMatrix, 4500K,
+        5800K, 6600K [Standard]; SDK default is 5800K (index 2). The CCM is
+        what couples WB channel gains into a 3x3 mixing matrix.
+        """
+        prop = self._get_property(UCAPI_PROP.PROP_COLOUR_TEMPERATURE)
+        return prop.GetIndex() if prop else None
+
+    @colour_temperature.setter
+    def colour_temperature(self, index: int) -> None:
+        prop = self._get_property(UCAPI_PROP.PROP_COLOUR_TEMPERATURE)
+        if prop:
+            prop.SetIndex(int(index))
+
+    @property
+    def pixel_type(self) -> int | None:
+        """Delivered pixel type index (enum), or None if unavailable.
+
+        K5C default index 0 = PIXEL_TYPE_BGR. Other options (if exposed)
+        may include raw Bayer / mono delivery which bypasses the host
+        colour pipeline. See UCAPI_PIXEL_TYPE for option codes.
+        """
+        prop = self._get_property(UCAPI_PROP.PROP_PIXEL_TYPE)
+        return prop.GetIndex() if prop else None
+
+    @pixel_type.setter
+    def pixel_type(self, index: int) -> None:
+        prop = self._get_property(UCAPI_PROP.PROP_PIXEL_TYPE)
+        if prop:
+            prop.SetIndex(int(index))
+
+    @property
+    def pixel_depth(self) -> int | None:
+        """Pixel depth index (enum), or None if unavailable.
+
+        K5C default index 0 (8 bits/channel). The sensor ADC is 12-bit;
+        the probe determines whether a 12-bit option is exposed.
+        """
+        prop = self._get_property(UCAPI_PROP.PROP_PIXEL_DEPTH)
+        return prop.GetIndex() if prop else None
+
+    @pixel_depth.setter
+    def pixel_depth(self, index: int) -> None:
+        prop = self._get_property(UCAPI_PROP.PROP_PIXEL_DEPTH)
+        if prop:
+            prop.SetIndex(int(index))
+
+    @property
+    def sharpening_enabled(self) -> bool | None:
+        """Host-side 5x5 sharpening filter enabled, or None if unavailable."""
+        prop = self._get_property(UCAPI_PROP.PROP_SHARPENING_ENABLED)
+        return bool(prop.GetValue()) if prop else None
+
+    @sharpening_enabled.setter
+    def sharpening_enabled(self, value: bool) -> None:
+        prop = self._get_property(UCAPI_PROP.PROP_SHARPENING_ENABLED)
+        if prop:
+            prop.SetValue(bool(value))
+
+    @property
     def trigger_mode(self) -> int:
         """Trigger mode index (0=CONTINUOUS, 1=SOFT, etc.)."""
         prop = self._get_property(UCAPI_PROP.PROP_IMAGE_TRIGGER_MODE)

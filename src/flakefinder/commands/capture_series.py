@@ -79,6 +79,7 @@ BUILTIN_DEFAULTS: dict[str, Any] = {
     "binning": 3,
     "gamma": 1.0,
     "saturation": 100,
+    "colour_temperature": None,
     "auto_brightness": False,
     "aperture": None,
     "frames": 1,
@@ -103,6 +104,7 @@ class Condition(NamedTuple):
     binning: int
     gamma: float
     saturation: int
+    colour_temperature: int | None
     auto_brightness: bool
     aperture: int | None
     frames: int
@@ -129,6 +131,7 @@ class Condition(NamedTuple):
             "binning": self.binning,
             "gamma": self.gamma,
             "saturation": self.saturation,
+            "colour_temperature": self.colour_temperature,
             "auto_brightness": self.auto_brightness,
             "aperture": self.aperture,
             "frames": self.frames,
@@ -241,6 +244,14 @@ def _resolve_condition(raw: dict[str, Any], defaults: dict[str, Any], index: int
     if isinstance(saturation, bool) or not isinstance(saturation, int):
         raise SpecError(f"{where}: saturation must be an integer, got {saturation!r}")
 
+    colour_temperature = merged["colour_temperature"]
+    if colour_temperature is not None and (
+        isinstance(colour_temperature, bool) or not isinstance(colour_temperature, int) or colour_temperature < 0
+    ):
+        raise SpecError(
+            f"{where}: colour_temperature must be a CCM enum index (int >= 0) or null, got {colour_temperature!r}"
+        )
+
     auto_brightness = merged["auto_brightness"]
     if not isinstance(auto_brightness, bool):
         raise SpecError(f"{where}: auto_brightness must be true or false, got {auto_brightness!r}")
@@ -278,6 +289,7 @@ def _resolve_condition(raw: dict[str, Any], defaults: dict[str, Any], index: int
         binning=binning,
         gamma=gamma,
         saturation=saturation,
+        colour_temperature=colour_temperature,
         auto_brightness=auto_brightness,
         aperture=aperture,
         frames=frames,
@@ -386,6 +398,7 @@ def _read_applied(scope: Microscope) -> dict[str, Any]:
         "binning": _binning_factor_by_index().get(camera.binning, camera.binning),
         "gamma": camera.gamma,
         "saturation": camera.saturation,
+        "colour_temperature": camera.colour_temperature,
         "auto_brightness": camera.auto_brightness,
         "aperture": scope.aperture.value,
     }
@@ -409,6 +422,8 @@ def _apply(scope: Microscope, cond: Condition, prev: Condition | None) -> None:
         camera.saturation = cond.saturation
     if prev is None or cond.gamma != prev.gamma:
         camera.gamma = cond.gamma
+    if cond.colour_temperature is not None and (prev is None or cond.colour_temperature != prev.colour_temperature):
+        camera.colour_temperature = cond.colour_temperature
     if prev is None or cond.white_balance != prev.white_balance:
         camera.gain_rgb = cond.white_balance
     if prev is None or cond.auto_brightness != prev.auto_brightness:
