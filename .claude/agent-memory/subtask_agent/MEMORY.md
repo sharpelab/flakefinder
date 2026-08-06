@@ -12,6 +12,16 @@
 ## Leica SDK Gotchas
 - **Don't call `GetObject()` on the same SDK interface twice.** Redundant `get_interface_required` calls can interfere with existing sessions. Delegate to the object that already owns the interface.
 - `Camera.__init__` handles UCAPI registration internally — callers don't need `Extensions.ExUCAPI.Register()`.
+- Leica `ucapi logfile*.log` files look binary to grep (mixed line endings); they're ASCII — use `grep -a`. Don't waste time on UTF-16 decoding.
+- .NET property-info API: `prop.GetInfo()` → `MinValue()/MaxValue()/StepSize()` (ranges) or `NumOptions()/GetOption(i)` (enums). `scripts/experiments/probe_camera_pipeline.py` dumps the whole camera property space read-only (no light/motion; does camera `Init()`).
+
+## K5C Color Pipeline (2026-08-06 investigation)
+See `calibration/camera_probe_20260806/camera_pipeline_probe.json` + `/tmp/camera_raw_summary.md`.
+- Camera streams raw BayerRG8 to host; debayer/CCM/saturation/gamma are host-side in ucBgapi.dll (deployed = 1.15.0.12509, the 2023.3 build).
+- WB coupling matrix (wb_model.json) = per-channel camera gains (floor 1.0, **max 8.0**, step 0.1) passing through the CCM selected by `camera.colour_temperature` (options [UserDefinedMatrix, 4500, 5800, 6600]K, default idx 2).
+- PIXEL_TYPE options are only BGR|MONO — **no raw Bayer via UCAPI** (dead end). PIXEL_DEPTH offers 8|12 — 12-bit needs uint16 converter work.
+- K5C does NOT implement: black/white level, hue/sat correction, shading, noise reduction, continuous WB, hot-pixel props.
+- SDK evidence on scope: `SDK_Tests/ARCHIVE/UCAPI_SDK_V2023.3.0.12509/` (ucapi.h, Programmer's Guide, `docs/Genstruct Files/K5C.html`, real driver logs in `bin/`).
 
 ## Microscope Facade API
 - `with Microscope() as scope:` — owns connection, all subsystems, acquisition context
