@@ -17,8 +17,8 @@ Hardware footprint: opens the SDK connection and calls camera unit Init()
 defaults, same as every normal capture session). NO acquisition, NO stage,
 NO Z, NO lamp, NO shutter.
 
-Usage (on the microscope PC):
-    uv run python scripts/experiments/probe_camera_pipeline.py [--json out.json]
+Usage (on the microscope PC; probe outputs go in experiments/):
+    uv run python scripts/experiments/probe_camera_pipeline.py --json experiments/camera_pipeline_probe.json
 """
 
 import argparse

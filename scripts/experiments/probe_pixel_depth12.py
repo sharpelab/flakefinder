@@ -113,7 +113,7 @@ def main() -> int:
     parser.add_argument("--lamp", type=float, default=100.0, help="Lamp intensity %% (default 100)")
     parser.add_argument("--exposure-ms", type=float, default=0.5, help="Exposure in ms (default 0.5)")
     parser.add_argument("--gain", type=float, default=2.0, help="Camera gain (default 2.0)")
-    parser.add_argument("-o", "--output", default="calibration/raw12_recon", help="Output directory")
+    parser.add_argument("-o", "--output", default="experiments/raw12_recon", help="Output directory")
     args = parser.parse_args()
 
     out = Path(args.output)
