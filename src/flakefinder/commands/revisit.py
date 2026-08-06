@@ -343,9 +343,6 @@ def run(
     camera.binning = 2  # 3x3 binning
     camera.gain_rgb = white_balance
 
-    # Build microscope metadata
-    micro_meta = build_microscope_meta(scope)
-
     # Read current position for route planning
     cur_x, cur_y = scope.stage.position_um
     vprint(f"Starting position: X={cur_x:.0f}, Y={cur_y:.0f} um")
@@ -479,6 +476,12 @@ def run(
     # Aggregate timing
     move_total = sum(r["timing_s"]["move"] for r in results)
     af_total = sum(r["timing_s"]["autofocus"] for r in results)
+
+    # Build microscope metadata AFTER the capture loop so the camera block
+    # records the actually-applied capture settings (focus_and_capture
+    # resolves and sets exposure/gain per point; reading before the loop
+    # would record stale pre-run state).
+    micro_meta = build_microscope_meta(scope)
 
     # Save metadata
     meta = {

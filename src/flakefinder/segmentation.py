@@ -143,12 +143,13 @@ GRAPHENE_THICK_90NM_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
     (-0.8229, -0.3706, 10.0),
 )
 
-# Theory-derived calibration for thick hBN (50-100 nm) on 90 nm SiO₂.
-# Generated headlessly (2026-08-04) from the transfer-matrix code path the
-# widget's "Export all" button uses (scripts/hbn_contrast_widget.py
-# compute_rg), with parameters pinned to the widget's checked-in init
-# defaults:
-#   n_hBN                  = 2.152 (constant, real)
+# Theory-derived calibration for thick hBN (50-100 nm target band) on 90 nm
+# SiO₂. Generated headlessly (2026-08-06) from the transfer-matrix code path
+# the widget's "Export all" button uses (scripts/hbn_contrast_widget.py
+# compute_rg). n is fit to the 9 Toghrul AFM anchors from run_20260804_1354
+# (scripts/hbn_contrast.py _CAL_DATA_HBN_10X_THICK, flake 98982 excluded);
+# all other parameters pinned to the v2 values:
+#   n_hBN                  = 2.269 (constant, real; AFM-fit, NA fixed)
 #   t_oxide                = 90.0 nm
 #   NA                     = 0.25
 #   illuminant             = halogen_3200K
@@ -157,37 +158,51 @@ GRAPHENE_THICK_90NM_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
 #   g_offset               = -0.20
 #   convention             = camera space = model - offset
 #   hBN layer thickness    = 0.333 nm
-#   sampling               = 2 nm, 50 -> 100 nm
-# Point-based (not R=poly(G) curve): G peaks at ~68 nm, so R = poly(G) is
-# multivalued over the band. layers = round(t_nm / 0.333) — literally the
-# hBN layer count. See docs/hbn_thick_50_100_calibration.md.
+#   sampling               = 2 nm, 40 -> 110 nm
+# The table deliberately extends past the 50-100 nm target band so
+# out-of-band flakes get honest thickness estimates instead of clamping to
+# the table endpoints; the band itself is enforced by the preset's
+# tier1_thickness_window_nm. Point-based (not R=poly(G) curve): G peaks at
+# ~64 nm, so R = poly(G) is multivalued over the band.
+# layers = round(t_nm / 0.333) — literally the hBN layer count.
+# See docs/hbn_thick_50_100_calibration.md.
 HBN_THICK_50_100_90NM_CAL_POINTS: tuple[CalPointRG, ...] = (
-    CalPointRG(layers=150, r=2.7327, g=4.4125),  # 50 nm
-    CalPointRG(layers=156, r=2.8624, g=4.4991),  # 52 nm
-    CalPointRG(layers=162, r=2.9815, g=4.5743),  # 54 nm
-    CalPointRG(layers=168, r=3.0904, g=4.6385),  # 56 nm
-    CalPointRG(layers=174, r=3.1894, g=4.6920),  # 58 nm
-    CalPointRG(layers=180, r=3.2786, g=4.7351),  # 60 nm
-    CalPointRG(layers=186, r=3.3586, g=4.7678),  # 62 nm
-    CalPointRG(layers=192, r=3.4294, g=4.7903),  # 64 nm
-    CalPointRG(layers=198, r=3.4915, g=4.8026),  # 66 nm
-    CalPointRG(layers=204, r=3.5451, g=4.8049),  # 68 nm
-    CalPointRG(layers=210, r=3.5904, g=4.7970),  # 70 nm
-    CalPointRG(layers=216, r=3.6276, g=4.7787),  # 72 nm
-    CalPointRG(layers=222, r=3.6569, g=4.7501),  # 74 nm
-    CalPointRG(layers=228, r=3.6785, g=4.7107),  # 76 nm
-    CalPointRG(layers=234, r=3.6926, g=4.6605),  # 78 nm
-    CalPointRG(layers=240, r=3.6993, g=4.5991),  # 80 nm
-    CalPointRG(layers=246, r=3.6987, g=4.5264),  # 82 nm
-    CalPointRG(layers=252, r=3.6908, g=4.4419),  # 84 nm
-    CalPointRG(layers=258, r=3.6757, g=4.3455),  # 86 nm
-    CalPointRG(layers=264, r=3.6533, g=4.2370),  # 88 nm
-    CalPointRG(layers=270, r=3.6237, g=4.1163),  # 90 nm
-    CalPointRG(layers=276, r=3.5867, g=3.9835),  # 92 nm
-    CalPointRG(layers=282, r=3.5421, g=3.8388),  # 94 nm
-    CalPointRG(layers=288, r=3.4897, g=3.6828),  # 96 nm
-    CalPointRG(layers=294, r=3.4293, g=3.5164),  # 98 nm
-    CalPointRG(layers=300, r=3.3643, g=3.3498),  # 100 nm
+    CalPointRG(layers=120, r=2.4228, g=4.2539),  # 40 nm
+    CalPointRG(layers=126, r=2.6067, g=4.3952),  # 42 nm
+    CalPointRG(layers=132, r=2.7771, g=4.5217),  # 44 nm
+    CalPointRG(layers=138, r=2.9342, g=4.6340),  # 46 nm
+    CalPointRG(layers=144, r=3.0783, g=4.7326),  # 48 nm
+    CalPointRG(layers=150, r=3.2098, g=4.8182),  # 50 nm
+    CalPointRG(layers=156, r=3.3292, g=4.8913),  # 52 nm
+    CalPointRG(layers=162, r=3.4369, g=4.9524),  # 54 nm
+    CalPointRG(layers=168, r=3.5334, g=5.0017),  # 56 nm
+    CalPointRG(layers=174, r=3.6193, g=5.0396),  # 58 nm
+    CalPointRG(layers=180, r=3.6948, g=5.0664),  # 60 nm
+    CalPointRG(layers=186, r=3.7604, g=5.0820),  # 62 nm
+    CalPointRG(layers=192, r=3.8166, g=5.0867),  # 64 nm
+    CalPointRG(layers=198, r=3.8635, g=5.0802),  # 66 nm
+    CalPointRG(layers=204, r=3.9015, g=5.0624),  # 68 nm
+    CalPointRG(layers=210, r=3.9309, g=5.0332),  # 70 nm
+    CalPointRG(layers=216, r=3.9518, g=4.9923),  # 72 nm
+    CalPointRG(layers=222, r=3.9644, g=4.9393),  # 74 nm
+    CalPointRG(layers=228, r=3.9690, g=4.8737),  # 76 nm
+    CalPointRG(layers=234, r=3.9655, g=4.7953),  # 78 nm
+    CalPointRG(layers=240, r=3.9541, g=4.7035),  # 80 nm
+    CalPointRG(layers=246, r=3.9349, g=4.5980),  # 82 nm
+    CalPointRG(layers=252, r=3.9077, g=4.4782),  # 84 nm
+    CalPointRG(layers=258, r=3.8725, g=4.3441),  # 86 nm
+    CalPointRG(layers=264, r=3.8290, g=4.1954),  # 88 nm
+    CalPointRG(layers=270, r=3.7770, g=4.0325),  # 90 nm
+    CalPointRG(layers=276, r=3.7161, g=3.8559),  # 92 nm
+    CalPointRG(layers=282, r=3.6462, g=3.6668),  # 94 nm
+    CalPointRG(layers=288, r=3.5667, g=3.4669),  # 96 nm
+    CalPointRG(layers=294, r=3.4774, g=3.2586),  # 98 nm
+    CalPointRG(layers=300, r=3.3778, g=3.0448),  # 100 nm
+    CalPointRG(layers=306, r=3.2677, g=2.8291),  # 102 nm
+    CalPointRG(layers=312, r=3.1469, g=2.6153),  # 104 nm
+    CalPointRG(layers=318, r=3.0150, g=2.4076),  # 106 nm
+    CalPointRG(layers=324, r=2.8721, g=2.2099),  # 108 nm
+    CalPointRG(layers=330, r=2.7180, g=2.0262),  # 110 nm
 )
 
 
@@ -373,6 +388,12 @@ def _score_hbn_thick_50_100(config: DetectorConfig, det: Detection) -> tuple[int
     Entropy gates are intentionally disabled (99.0 in the preset): band
     flakes have every pixel contrast above +1, so the fixed-range (-1, 1)
     _hist_entropy histogram is empty and entropy evaluates to exactly 0.0.
+
+    Tier 1 additionally requires the projected thickness to fall inside
+    tier1_thickness_window_nm — the cal table extends past the target band
+    so out-of-band flakes get honest thickness estimates, and the window
+    (not table extent) decides band membership. Out-of-window flakes fall
+    through to the tier-2 check.
     """
     pr = det["perim_ratio"]
     cd = det["cal_dist"]
@@ -381,11 +402,16 @@ def _score_hbn_thick_50_100(config: DetectorConfig, det: Detection) -> tuple[int
     ar = det.get("aspect_ratio", 1.0)
     size_um2 = det["size_um2"]
 
+    nm = det.get("thickness_nm")
+    window = config.tier1_thickness_window_nm
+    in_window = window is None or (nm is not None and window[0] <= nm <= window[1])
+
     if (
         pr < config.tier1_perim_ratio
         and ar < config.tier1_aspect_ratio
         and size_um2 >= config.tier1_min_size_um2
         and cd < config.tier1_cal_dist
+        and in_window
         and r >= config.tier1_r_min
         and r < config.tier1_r_max
         and g >= config.tier1_g_min
@@ -651,6 +677,11 @@ class DetectorConfig:
     # well below -0.85 so genuinely thick flakes can reach tier 1.
     # kw_only so the default doesn't collide with required fields on subclasses.
     tier1_r_min: float = field(default=-0.6, kw_only=True)
+    # Tier-1 thickness window (nm, inclusive). Detections whose projected
+    # thickness_nm falls outside the window keep their honest thickness but
+    # are capped at tier 2. None = no window. This makes band edges explicit
+    # policy rather than an accident of calibration-table extent.
+    tier1_thickness_window_nm: tuple[float, float] | None = field(default=None, kw_only=True)
 
     # -- Per-material capture settings --
     # Chip-scan camera settings. None = use the ScanPreset value; resolution
@@ -791,11 +822,14 @@ class DetectorConfig:
     def hbn_thick_50_100_90nm(cls) -> RGPointDetectorConfig:
         """hBN thick flake detection (50-100 nm) on 90 nm SiO₂.
 
-        Theory-derived point calibration over the 50-100 nm arc
-        (HBN_THICK_50_100_90NM_CAL_POINTS). Point-based, not curve-based:
-        G peaks at ~68 nm so R = poly(G) is multivalued over the band.
-        Segmentation params are identical to hbn_medium, so hbn_medium seg
-        output can be reranked with this preset without re-segmentation.
+        Theory-derived point calibration over the 40-110 nm arc
+        (HBN_THICK_50_100_90NM_CAL_POINTS, n AFM-fit at 10x), with the
+        50-100 nm target band enforced by tier1_thickness_window_nm —
+        out-of-band flakes keep honest thickness estimates and cap at
+        tier 2. Point-based, not curve-based: G peaks at ~64 nm so
+        R = poly(G) is multivalued over the band. Segmentation params are
+        identical to hbn_medium, so hbn_medium seg output can be reranked
+        with this preset without re-segmentation.
 
         Carries its own capture settings: chip scan at gain 2.0 / 0.25 ms
         (G clip ceiling ~7.6-8.4 clears the whole measured population; the
@@ -825,12 +859,16 @@ class DetectorConfig:
             chip_scan_exposure_ms=0.25,
             revisit_capture={50.0: CaptureSettings(gain=1.0, exposure_ms=1.0)},
             score_fn=_score_hbn_thick_50_100,
+            tier1_thickness_window_nm=(50.0, 100.0),
             tier1_perim_ratio=1.50,
             tier1_cal_dist=0.30,
-            tier1_g_min=3.0,
-            tier1_g_max=5.1,
-            tier1_r_max=4.0,
-            tier1_r_min=2.3,
+            # R/G box = 50-100 nm arc segment extent ± the 0.30 cal gate.
+            # Geometrically subsumed by window + cal_dist; kept as a coarse
+            # independent sanity bound.
+            tier1_g_min=2.7,
+            tier1_g_max=5.4,
+            tier1_r_max=4.3,
+            tier1_r_min=2.9,
             tier1_entropy_max=99.0,  # disabled: entropy is identically 0.0 for band flakes
             tier1_min_size_um2=500.0,
             tier1_br_ratio_max=99.0,

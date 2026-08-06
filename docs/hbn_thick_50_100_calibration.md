@@ -7,13 +7,12 @@ band middle (~60–80 nm), weaker performance at the 90–100 nm edge accepted.
 
 ## Calibration table generation
 
-26 reference points at 2 nm spacing over 50–100 nm, generated headlessly
+36 reference points at 2 nm spacing over 40–110 nm, generated headlessly
 from the transfer-matrix code path the widget's **Export all** button uses
-(`scripts/hbn_contrast_widget.py` `compute_rg`), with parameters pinned to
-the widget's checked-in `init` defaults:
+(`scripts/hbn_contrast_widget.py` `compute_rg`):
 
 ```
-n_hBN                  = 2.152 (constant, real)
+n_hBN                  = 2.269 (constant, real; AFM-fit, see below)
 t_oxide                = 90.0 nm
 NA                     = 0.25
 illuminant             = halogen_3200K
@@ -22,24 +21,77 @@ r_offset               = +0.54
 g_offset               = -0.20
 convention             = camera space = model − offset
 hBN layer thickness    = 0.333 nm
-sampling               = 2 nm, 50 → 100 nm
+sampling               = 2 nm, 40 → 110 nm
 ```
 
-n=2.152/NA=0.25 was chosen over the doc's historical n=1.91 fit, which fails
-its own thick-end anchors (see caveats in `docs/hbn_contrast_model.md`), and
-over session-specific widget exports (differences ≤0.13 in R/G across the
-band — immaterial, and the checked-in defaults are reproducible).
+The table deliberately extends past the 50–100 nm target band: nearest-point
+assignment clamps out-of-band flakes onto whichever endpoint the table
+happens to stop at, so table extent must not double as band policy. Band
+membership is enforced by `tier1_thickness_window_nm` (below); the 40/110
+extent covers the tier-2 `cal_dist < 0.60` acceptance region beyond the
+window so out-of-band flakes get honest thickness estimates.
+
+## AFM-anchored n fit (10x)
+
+n is the single fitted parameter, least-squares over camera-space (R, G)
+residuals at each anchor's AFM thickness. All other model parameters fixed
+at the values above. Anchors: 9 flakes from `run_20260804_1354` (10x,
+gain 2.0, flatfielded frames, hBN WB 1.41/1.02/2.51), AFM by Toghrul,
+recorded in `scripts/hbn_contrast.py` `_CAL_DATA_HBN_10X_THICK`.
+
+Offsets are held at the values validated over 4.6–57.5 nm rather than
+refit: freeing them gains only rms 0.116 → 0.108 on 8 anchors while
+entangling n with the offsets (`docs/hbn_contrast_model.md` caveats), and
+changes predictions by <1 nm.
+
+**Outlier 98982 (AFM 56.5 nm) is excluded from the fit**: its R sits 0.39
+below the fitted curve (~4× the ±0.1 measurement repeatability) and the
+site is under AFM re-check. Sensitivity: fitting all 9 anchors moves n only
+2.2688 → 2.2587 and leaves the other anchors' predictions essentially
+unchanged, so the exclusion is low-stakes either way.
+
+Result **n = 2.2688** (table generated at 2.269), rms residual 0.116 in
+(R, G). Predictions through the shipped table vs AFM:
+
+| flake | AFM nm | pred nm | Δ | cal_dist |
+|---|---|---|---|---|
+| 99004 | 45.5 | 46.0 | +0.5 | 0.202 |
+| 99012 | 46.5 | 44.0 | −2.5 | 0.092 |
+| 98997 | 48.5 | 50.0 | +1.5 | 0.141 |
+| 98985 | 49.0 | 48.0 | −1.0 | 0.057 |
+| 98998 | 50.5 | 50.0 | −0.5 | 0.114 |
+| 99013 | 54.0 | 53.9 | −0.1 | 0.054 |
+| 98999 | 54.5 | 55.9 | +1.4 | 0.069 |
+| 98982 | 56.5 | 48.0 | −8.5 | 0.097 (outlier, excluded) |
+| 99014 | 57.5 | 57.9 | +0.4 | 0.080 |
+
+Excluding 98982: mean bias **−0.04 nm**, σ 1.32 nm, max |Δ| 2.5 nm.
+
+The anchors span 45.5–57.5 nm; outside that window the curve is the
+transfer-matrix physics evaluated at larger t with the fitted effective n —
+extrapolation error grows roughly as Δn/n·t and is untested above ~58 nm on
+this scope. AFM of flakes predicted in the 60–105 nm range is the direct
+test (shortlist sent to Toghrul 2026-08-06).
+
+## Tier-1 thickness window
+
+`tier1_thickness_window_nm = (50.0, 100.0)` on the preset (generic
+`DetectorConfig` field, `None` = no window). Tier 1 requires the projected
+`thickness_nm` inside the window (inclusive); out-of-window flakes keep
+their honest thickness and fall through to the tier-2 check. Band edges are
+explicit policy, not table-extent accidents. Table quantization at the
+edges behaves: the 50 nm point rounds to 50.0 (in), 102 nm → 101.9 (out).
 
 ## Why point-based (RGPointDetectorConfig), not a curve
 
-The band is an arc that doubles back in G: G peaks at +4.81 near 68 nm, so
-`R = poly(G)` is multivalued over G ∈ [4.41, 4.81] and
-`CurveDetectorConfig`'s G-parameterized thickness interpolation would
-produce garbage. The arc does not self-intersect in 2D, so nearest-point
-distance over (R, G) recovers thickness correctly. Quantization error from
-the 2 nm spacing is ≤0.08 (chord half-length), negligible against the 0.30
-tier-1 gate. `layers = round(t_nm / 0.333)` is literally the hBN layer
-count; classification reports nm (`classify_nm=True`).
+The band is an arc that doubles back in G: G peaks at +5.09 near 64 nm, so
+`R = poly(G)` is multivalued over the band and `CurveDetectorConfig`'s
+G-parameterized thickness interpolation would produce garbage. The arc does
+not self-intersect in 2D, so nearest-point distance over (R, G) recovers
+thickness correctly. Quantization error from the 2 nm spacing is ≤0.08
+(chord half-length), negligible against the 0.30 tier-1 gate.
+`layers = round(t_nm / 0.333)` is literally the hBN layer count;
+classification reports nm (`classify_nm=True`).
 
 ## Capture settings live on the material
 
@@ -109,9 +161,13 @@ visibility.
 
 Single tier-1 path for the unclipped gain-2.0 regime:
 
-- **Tier 1**: `cal_dist < 0.30` to the arc, R ∈ [2.3, 4.0), G ∈ [3.0, 5.1),
-  perim_ratio < 1.5, aspect < 6, size ≥ 500 µm².
-- **Tier 2**: `cal_dist < 0.60` + shape/size.
+- **Tier 1**: `cal_dist < 0.30` to the arc, projected thickness inside the
+  50–100 nm window, R ∈ [2.9, 4.3), G ∈ [2.7, 5.4), perim_ratio < 1.5,
+  aspect < 6, size ≥ 500 µm². The R/G box is the 50–100 nm arc segment
+  extent ± the 0.30 cal gate — geometrically subsumed by window + cal_dist,
+  kept as a coarse independent sanity bound.
+- **Tier 2**: `cal_dist < 0.60` + shape/size (includes out-of-window flakes
+  that otherwise pass tier-1 gates).
 - Entropy gates disabled (99.0): band flakes have every pixel contrast
   above +1, so the fixed-range (−1, 1) `_hist_entropy` histogram is empty
   and entropy evaluates to exactly 0.0.
@@ -152,12 +208,14 @@ distances to the wrong calibration.
 
 | Run (gain) | detections (dedup) | T1 | per-chip T1 spread |
 |---|---|---|---|
-| run_20260409_1721 (2.0) | 23 094 | 1 003 | 86–246 (all 8 chips) |
-| run_20260221_1651 (2.0) | 61 259 | 1 173 | 107–243 (all 8 chips) |
+| run_20260804_1303 (2.0) | 9 413 | 530 | 16–231 (6 chips) |
 
-Top ranks in both runs are large (10⁴–10⁵ px), low-cal_dist (mostly < 0.2)
-flakes on both limbs of the arc (G ~3.3–3.5 thick end and G ~4.6–4.9 band
-middle). Mosaics: `<run>/rerank/hbn50100_v3/hbn50100_v3.jpg`.
+T1 thickness distribution declines smoothly from the 50 nm edge (47 flakes
+at the 50.0 table value, continuous with 46 at 51.9 — no endpoint pileup),
+with a dip through 74–88 nm and a secondary population on the thick limb
+at 90–100 nm. 374 below-window flakes sit at honest 40–48 nm values in
+tier 2. Top ranks are large, low-cal_dist (< 0.25) flakes on both limbs.
+Mosaic: `<run>/rerank/v3_afmfit/v3_afmfit.jpg`.
 
 ## Impostor posture
 

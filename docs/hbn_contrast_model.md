@@ -120,9 +120,10 @@ After editing, relaunch the widget to see the new points.
   | 26.0 | **ΔR −0.51, ΔG −1.28** | ΔR +0.04, ΔG −0.53 |
   | 46.0 | **ΔR −1.03, ΔG −1.39** | ΔR −0.05, ΔG −0.44 |
 
-  Use n=2.152 for anything at or beyond the thick end of the cal range
-  (the `hbn_thick_50_100_90nm` cal table is generated with it — see
-  `docs/hbn_thick_50_100_calibration.md`).
+  Use n=2.152 or above for anything at or beyond the thick end of the cal
+  range. The `hbn_thick_50_100_90nm` cal table is generated with n=2.269,
+  fit at 10x/NA=0.25 to the AFM anchor set `_CAL_DATA_HBN_10X_THICK`
+  (45.5–57.5 nm) — see `docs/hbn_thick_50_100_calibration.md`.
 - **`_hist_entropy` zeroes out for high-contrast flakes**: the segmentation
   entropy metric histograms per-pixel contrast over a fixed (−1, 1) range.
   Flakes whose every pixel contrast exceeds +1 (e.g. the whole 50–100 nm

@@ -555,6 +555,26 @@ _CAL_DATA_285 = np.array(
     ]
 )
 
+# Thick-hBN AFM anchors (90 nm SiO₂, 10x, gain 2.0, flatfielded scan frames,
+# hBN WB 1.41/1.02/2.51).  AFM by Toghrul on run_20260804_1354 flakes,
+# 2026-08-05; R/G are camera-space (model − offset) means from the flake DB.
+# Format: [afm_midpoint_nm, R_contrast, G_contrast]
+_CAL_DATA_HBN_10X_THICK = np.array(
+    [
+        [45.5, 2.82, 4.80],  # flake 99004
+        [46.5, 2.69, 4.55],  # flake 99012
+        [48.5, 3.16, 4.95],  # flake 98997
+        [49.0, 3.08, 4.79],  # flake 98985
+        [50.5, 3.19, 4.93],  # flake 98998
+        [54.0, 3.45, 4.90],  # flake 99013
+        [54.5, 3.54, 5.07],  # flake 98999
+        [56.5, 3.17, 4.70],  # flake 98982 — OUTLIER (R ~0.4 below trend), site under AFM re-check
+        [57.5, 3.63, 4.96],  # flake 99014
+    ]
+)
+# Mask for fitting: excludes 98982 (see docs/hbn_thick_50_100_calibration.md).
+_CAL_DATA_HBN_10X_THICK_FIT_OK = np.array([True, True, True, True, True, True, True, False, True])
+
 # Graphene empirical calibration data (90nm SiO₂, 50x)
 # Layer-count assignments from optical contrast; not AFM-verified.
 # Format: [thickness_nm, R_contrast, G_contrast]
