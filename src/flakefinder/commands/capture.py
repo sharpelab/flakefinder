@@ -23,7 +23,8 @@ from flakefinder.cli_utils import report_status
 from flakefinder.data_utils import require_microscope_description
 from flakefinder.leica import Microscope, wait_all
 from flakefinder.leica.autofocus import focus_and_capture
-from flakefinder.scan_utils import parse_white_balance
+from flakefinder.leica.enums import ccm_label
+from flakefinder.scan_utils import add_colour_temperature_arg, parse_white_balance
 
 
 def main() -> int:
@@ -50,6 +51,7 @@ def main() -> int:
         default="2.51,1.02,1.41",
         help="White balance as B,G,R gains (default: '2.51,1.02,1.41')",
     )
+    add_colour_temperature_arg(parser)
     parser.add_argument("--gain", type=float, help="Camera gain (e.g., 4.0)")
     parser.add_argument("--saturation", type=int, help="Color saturation (e.g., 100)")
     parser.add_argument("--gamma", type=float, help="Gamma correction (e.g., 1.0)")
@@ -121,6 +123,8 @@ def main() -> int:
             camera.gamma = args.gamma
 
         camera.gain_rgb = args.white_balance
+        if args.colour_temperature is not None:
+            camera.colour_temperature = args.colour_temperature
 
         # Report capture settings
         if not args.quiet:
@@ -141,6 +145,7 @@ def main() -> int:
             print(f"Exposure: {camera.exposure_time * 1000:.2f} ms")
             print(f"Binning: {binning_str}")
             print(f"White balance: R={r:.2f} G={g:.2f} B={b:.2f}")
+            print(f"Colour matrix: {ccm_label(camera.colour_temperature)}")
             print()
 
         # Capture

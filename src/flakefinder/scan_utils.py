@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import bisect
 import subprocess
 from argparse import ArgumentTypeError
@@ -188,6 +189,21 @@ def parse_white_balance(s: str) -> GainRGB:
     except ValueError as e:
         raise ArgumentTypeError(f"values must be numbers, got: {s}") from e
     return GainRGB(red=r, green=g, blue=b)
+
+
+def add_colour_temperature_arg(parser: argparse.ArgumentParser | argparse._ArgumentGroup) -> None:
+    """Add the shared --colour-temperature argument.
+
+    None (the default) means keep the connection-time state — the camera
+    pins UCAPI_CCM.K5800 at init, so the colour space is known either way.
+    """
+    parser.add_argument(
+        "--colour-temperature",
+        type=int,
+        default=None,
+        metavar="IDX",
+        help="CCM selector index (0=identity, 2=5800K); default: keep connection default (5800K)",
+    )
 
 
 def validate_area_rect(area: AreaRect, stage: StageBounds) -> None:
@@ -596,6 +612,7 @@ def build_camera_meta(camera: Camera) -> CameraMeta:
         physical_pixel_x_um=physical_pixel_x_um,
         physical_pixel_y_um=physical_pixel_y_um,
         white_balance_bgr=[b, g, r],
+        colour_temperature=camera.colour_temperature,
         gamma=camera.gamma,
         auto_brightness=camera.auto_brightness,
     )

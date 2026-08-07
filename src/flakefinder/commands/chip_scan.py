@@ -47,6 +47,7 @@ from flakefinder.leica import Microscope, wait_all
 from flakefinder.leica.polling import start_motion_polling, start_polling
 from flakefinder.scan_utils import (
     DEFAULT_WB,
+    add_colour_temperature_arg,
     build_microscope_meta,
     compute_planar_scan_plan,
     compute_plane_z,
@@ -596,6 +597,7 @@ def run(
     gain: float = 4.0,
     binning: int = 3,
     white_balance: GainRGB = DEFAULT_WB,
+    colour_temperature: int | None = None,
     gamma: float = 1.0,
     downsample: int = 1,
     warmup_frames: int = 3,
@@ -675,6 +677,8 @@ def run(
     camera.exposure_time = exposure_ms / 1000.0
     camera.gain = gain
     camera.gain_rgb = white_balance
+    if colour_temperature is not None:
+        camera.colour_temperature = colour_temperature
     camera.gamma = gamma
 
     # ---- Build microscope metadata (reads all values back from hardware) ----
@@ -1198,6 +1202,7 @@ Examples:
     frame_group.add_argument(
         "--white-balance", type=parse_white_balance, default="2.51,1.02,1.41", help="White balance as B,G,R gains"
     )
+    add_colour_temperature_arg(frame_group)
     frame_group.add_argument("--gamma", type=float, default=1.0, help="Gamma (default: 1.0)")
     frame_group.add_argument("--downsample", type=int, default=1, help="Downsample factor")
     frame_group.add_argument(
@@ -1283,6 +1288,7 @@ def main() -> int:
                 gain=args.gain,
                 binning=args.binning,
                 white_balance=args.white_balance,
+                colour_temperature=args.colour_temperature,
                 gamma=args.gamma,
                 downsample=args.downsample,
                 warmup_frames=args.warmup_frames,

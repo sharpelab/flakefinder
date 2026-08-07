@@ -17,7 +17,7 @@ import numpy as np
 from flakefinder.types import GainRGB, Point2F, RGBImage
 
 from .core import LeicaConnection, find_unit, get_interface_required
-from .enums import IID, UCAPI_IID, UCAPI_PROP, UCAPI_TID
+from .enums import IID, UCAPI_CCM, UCAPI_IID, UCAPI_PROP, UCAPI_TID
 from .types import Image as SdkImage
 from .types import Unit
 from .units import Stage
@@ -96,11 +96,16 @@ class Camera:
         unit.Init() resets binning, gamma, saturation, and white balance
         to SDK defaults (2x2, 0.45, 100, R1.93/G1.00/B1.94).
         Exposure and gain are NOT reset by the SDK.
+
+        colour_temperature (CCM selector) is pinned explicitly so the
+        colour space is always known regardless of what LAS X or a prior
+        session left behind.
         """
         self.binning = 2  # 3x3 (SDK default: 1 / 2x2)
         self.gamma = 1.0  # linear (SDK default: 0.45)
         self.saturation = 100  # same as SDK, but explicit
         self.gain_rgb = (1.0, 1.0, 1.0)  # neutral (SDK default: R1.93/G1.00/B1.94)
+        self.colour_temperature = UCAPI_CCM.K5800  # SDK default CCM, but explicit
 
     @classmethod
     def from_connection(cls, conn: LeicaConnection) -> Camera:

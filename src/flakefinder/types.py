@@ -317,6 +317,7 @@ class CameraMeta(TypedDict):
     physical_pixel_x_um: float | None
     physical_pixel_y_um: float | None
     white_balance_bgr: list[float]
+    colour_temperature: int | None
     gamma: float
     auto_brightness: bool
 

@@ -52,6 +52,7 @@ Camera hardware settings (`CameraMeta`):
 | `physical_pixel_x_um` | float | Physical pixel pitch X (µm) |
 | `physical_pixel_y_um` | float | Physical pixel pitch Y (µm) |
 | `white_balance_bgr` | [B,G,R] | White balance gains (blue, green, red) |
+| `colour_temperature` | int | CCM selector index (0=identity, 2=5800K); pinned to 2 at connection unless overridden |
 | `gamma` | float | Gamma correction value |
 
 ## `optics` Object

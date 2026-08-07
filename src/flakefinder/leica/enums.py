@@ -379,6 +379,42 @@ class UCAPI_PROP(IntEnum):
     PROP_HOTPIXEL_CORRECTION_FACTOR = 16505
 
 
+class UCAPI_CCM(IntEnum):
+    """PROP_COLOUR_TEMPERATURE enum indices on the K5C.
+
+    Selects the host-side colour correction matrix applied after WB.
+    IDENTITY (UserDefinedMatrix) is the identity to 0.6% (Phase 2 Stage 1,
+    2026-08-06) — unity-WB idx0 captures are raw sensor signal. K5800 is the
+    SDK default; all historical scans and cal tables live in that mixed
+    space. Measured matrices: calibration/colorchecker_phase2_20260806/
+    ccm_models.json.
+    """
+
+    IDENTITY = 0  # UserDefinedMatrix — no channel mixing
+    K4500 = 1
+    K5800 = 2  # SDK default
+    K6600 = 3
+
+
+_CCM_LABELS = {
+    UCAPI_CCM.IDENTITY: "identity",
+    UCAPI_CCM.K4500: "4500K",
+    UCAPI_CCM.K5800: "5800K",
+    UCAPI_CCM.K6600: "6600K",
+}
+
+
+def ccm_label(index: int | None) -> str:
+    """Human-readable CCM selector label, e.g. ``"2 (5800K)"``."""
+    if index is None:
+        return "unknown"
+    try:
+        name = _CCM_LABELS[UCAPI_CCM(index)]
+    except ValueError:
+        name = "?"
+    return f"{index} ({name})"
+
+
 class UCAPI_PIXEL_TYPE(IntEnum):
     """PROP_PIXEL_TYPE option values (ucapi.h 2023.3 PIXEL_TYPE enum).
 

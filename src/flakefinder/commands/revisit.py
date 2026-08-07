@@ -37,7 +37,7 @@ from PIL import Image as PILImage
 from flakefinder.leica import wait_all
 from flakefinder.leica.autofocus import focus_and_capture
 from flakefinder.leica.microscope import Microscope
-from flakefinder.scan_utils import DEFAULT_WB, build_microscope_meta, parse_white_balance
+from flakefinder.scan_utils import DEFAULT_WB, add_colour_temperature_arg, build_microscope_meta, parse_white_balance
 from flakefinder.types import GainRGB
 
 XY_MAX_SPEED_MM_S = 40.0
@@ -299,6 +299,7 @@ def run(
     exposure_ms: float | None = None,
     gain: float | None = None,
     white_balance: GainRGB = DEFAULT_WB,
+    colour_temperature: int | None = None,
     quiet: bool = False,
     or_opt: bool = False,
     per_chip: bool = False,
@@ -342,6 +343,8 @@ def run(
     camera.trigger_mode = 0  # CONTINUOUS
     camera.binning = 2  # 3x3 binning
     camera.gain_rgb = white_balance
+    if colour_temperature is not None:
+        camera.colour_temperature = colour_temperature
 
     # Read current position for route planning
     cur_x, cur_y = scope.stage.position_um
@@ -588,6 +591,7 @@ Examples:
     cam_group.add_argument(
         "--white-balance", type=parse_white_balance, default="2.51,1.02,1.41", help="White balance as B,G,R gains"
     )
+    add_colour_temperature_arg(cam_group)
 
     # Output control
     out_group = parser.add_argument_group("Output control")
@@ -670,6 +674,7 @@ def main() -> int:
                 exposure_ms=args.exposure_ms,
                 gain=args.gain,
                 white_balance=args.white_balance,
+                colour_temperature=args.colour_temperature,
                 quiet=args.quiet,
                 or_opt=args.or_opt,
                 per_chip=args.per_chip,

@@ -38,7 +38,13 @@ from flakefinder.leica.autofocus import (
     continuous_autofocus,
 )
 from flakefinder.leica.microscope import Microscope
-from flakefinder.scan_utils import DEFAULT_WB, build_microscope_meta, get_git_version, parse_white_balance
+from flakefinder.scan_utils import (
+    DEFAULT_WB,
+    add_colour_temperature_arg,
+    build_microscope_meta,
+    get_git_version,
+    parse_white_balance,
+)
 from flakefinder.types import ChipGeometry, GainRGB, Point2F
 
 
@@ -519,6 +525,7 @@ def run(
     af_settle: float = 0,
     move_to_best_z: bool = True,
     white_balance: GainRGB = DEFAULT_WB,
+    colour_temperature: int | None = None,
     suffix: str | None = None,
     notes: str | None = None,
     quiet: bool = False,
@@ -571,6 +578,8 @@ def run(
     camera.exposure_time = exposure_ms / 1000.0
     camera.gain = gain
     camera.gain_rgb = white_balance
+    if colour_temperature is not None:
+        camera.colour_temperature = colour_temperature
     camera.gamma = 1.0
 
     if not quiet:
@@ -809,6 +818,7 @@ def _build_parser():
         default="2.51,1.02,1.41",
         help="White balance as B,G,R gains (default: 2.51,1.02,1.41)",
     )
+    add_colour_temperature_arg(parser)
     parser.add_argument(
         "--suffix",
         type=str,
@@ -882,6 +892,7 @@ def main() -> int:
                 af_settle=0 if args.no_verify else args.af_settle,
                 move_to_best_z=not args.no_verify,
                 white_balance=args.white_balance,
+                colour_temperature=args.colour_temperature,
                 suffix=args.suffix,
                 notes=args.notes,
                 quiet=args.quiet,

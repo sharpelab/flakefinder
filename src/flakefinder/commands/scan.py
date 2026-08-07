@@ -26,9 +26,11 @@ from PIL import Image as PILImage
 from flakefinder.data_utils import compute_frame_size_um, require_microscope_description
 from flakefinder.image_utils import sdk_image_to_numpy
 from flakefinder.leica import Microscope, continuous_autofocus, wait_all
+from flakefinder.leica.enums import ccm_label
 from flakefinder.leica.polling import start_motion_polling
 from flakefinder.scan_utils import (
     DEFAULT_WB,
+    add_colour_temperature_arg,
     build_microscope_meta,
     get_git_version,
     interpolate_position,
@@ -172,6 +174,7 @@ def run(
     y_overlap_percent: float = 2,
     downsample: int = 1,
     white_balance: GainRGB = DEFAULT_WB,
+    colour_temperature: int | None = None,
     gamma: float = 1.0,
     binning: int = 3,
     exposure_ms: float = 1.0,
@@ -260,6 +263,8 @@ def run(
     camera.exposure_time = exposure_ms / 1000.0
     camera.gain = gain
     camera.gain_rgb = white_balance
+    if colour_temperature is not None:
+        camera.colour_temperature = colour_temperature
     camera.gamma = gamma
 
     af_result = None
@@ -287,6 +292,7 @@ def run(
     print(f"  Trigger: CONTINUOUS, Binning: {binning_actual}x{binning_actual}, Exposure: {exp_str}{readout_fps}")
     wb_bgr = cam_meta["white_balance_bgr"]
     print(f"  White balance (B,G,R): {wb_bgr[0]}, {wb_bgr[1]}, {wb_bgr[2]}")
+    print(f"  Colour matrix: {ccm_label(cam_meta['colour_temperature'])}")
     print(f"  Gamma: {cam_meta['gamma']}")
     print(f"  Frame: {cam_meta['frame_width_px']}x{cam_meta['frame_height_px']} px")
     print(f"  FOV: {frame_width_um:.2f} x {frame_height_um:.2f} µm")
@@ -768,6 +774,7 @@ Examples:
         default="2.51,1.02,1.41",
         help="White balance as B,G,R gains (default: 2.51,1.02,1.41)",
     )
+    add_colour_temperature_arg(frame_group)
     frame_group.add_argument("--gamma", type=float, default=1.0, help="Gamma level (default: 1.0)")
     frame_group.add_argument(
         "--binning",
@@ -845,6 +852,7 @@ def main() -> int:
                 y_overlap_percent=args.y_overlap_percent,
                 downsample=args.downsample,
                 white_balance=args.white_balance,
+                colour_temperature=args.colour_temperature,
                 gamma=args.gamma,
                 binning=args.binning,
                 exposure_ms=args.exposure_ms,

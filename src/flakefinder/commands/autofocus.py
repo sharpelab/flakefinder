@@ -25,7 +25,12 @@ from flakefinder.leica.autofocus import (
     continuous_autofocus,
     sharpness,
 )
-from flakefinder.scan_utils import build_microscope_meta, get_git_version, parse_white_balance
+from flakefinder.scan_utils import (
+    add_colour_temperature_arg,
+    build_microscope_meta,
+    get_git_version,
+    parse_white_balance,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -77,6 +82,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="White balance as B,G,R gains (e.g., 2.51,1.02,1.41)",
     )
+    add_colour_temperature_arg(parser)
     parser.add_argument("--gamma", type=float, default=None, help="Gamma correction (default: unchanged)")
     parser.add_argument(
         "--quiet",
@@ -183,6 +189,8 @@ def main():
             camera.gain = args.gain
         if args.white_balance is not None:
             camera.gain_rgb = args.white_balance
+        if args.colour_temperature is not None:
+            camera.colour_temperature = args.colour_temperature
         if args.gamma is not None:
             camera.gamma = args.gamma
 
