@@ -22,6 +22,7 @@ class HardwareState(NamedTuple):
     exposure_ms: float
     gain: float
     gain_rgb: tuple[float, float, float]
+    colour_temperature: int | None  # CCM enum index, None if unavailable
     shutter_open: bool
     lamp_intensity: int
     lamp_max: int
@@ -149,6 +150,9 @@ class ScopeManager(QObject):
     def set_gain_rgb(self, r: float, g: float, b: float) -> None:
         self.send_command(lambda scope: setattr(scope.camera, "gain_rgb", (r, g, b)))
 
+    def set_colour_temperature(self, index: int) -> None:
+        self.send_command(lambda scope: setattr(scope.camera, "colour_temperature", index))
+
     def set_shutter(self, is_open: bool) -> None:
         self.send_command(lambda scope: scope.shutter.open() if is_open else scope.shutter.close())
 
@@ -258,6 +262,7 @@ class ScopeManager(QObject):
             exposure_ms=scope.camera.exposure_time * 1000.0,
             gain=scope.camera.gain,
             gain_rgb=(r, g, b),
+            colour_temperature=scope.camera.colour_temperature,
             shutter_open=scope.shutter.is_open,
             lamp_intensity=scope.lamp.intensity,
             lamp_max=scope.lamp.max_intensity,

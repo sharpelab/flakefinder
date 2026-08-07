@@ -32,8 +32,7 @@ STAGE_Y_MAX = 85_103.0
 BG_COLOR = QColor(30, 30, 30)
 GRID_COLOR = QColor(255, 255, 255, 40)
 GRID_LABEL_COLOR = QColor(255, 255, 255, 100)
-VIEWPORT_COLOR = QColor(255, 80, 80, 180)
-VIEWPORT_FILL = QColor(255, 80, 80, 20)
+VIEWPORT_COLOR = QColor(255, 255, 255, 200)
 STAGE_BORDER_COLOR = QColor(100, 100, 100, 80)
 ROI_COLOR = QColor(80, 255, 80, 200)
 ROI_FILL = QColor(80, 255, 80, 25)
@@ -115,7 +114,7 @@ class StageCanvas(QGraphicsView):
         # Viewport rectangle (hidden until set_viewport called)
         self._viewport_rect = QGraphicsRectItem()
         self._viewport_rect.setPen(QPen(VIEWPORT_COLOR, 0))
-        self._viewport_rect.setBrush(QBrush(VIEWPORT_FILL))
+        # No fill: the live camera frame sits underneath — tinting it shifts hue
         self._viewport_rect.setZValue(100)
         self._viewport_rect.setVisible(False)
         self._scene.addItem(self._viewport_rect)

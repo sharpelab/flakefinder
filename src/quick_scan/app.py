@@ -98,6 +98,7 @@ class QuickScanWindow(QMainWindow):
         self._controls.exposure_changed.connect(self._scope.set_exposure_ms)
         self._controls.gain_changed.connect(self._scope.set_gain)
         self._controls.wb_changed.connect(self._scope.set_gain_rgb)
+        self._controls.ccm_changed.connect(self._scope.set_colour_temperature)
         self._controls.shutter_toggled.connect(self._scope.set_shutter)
         self._controls.lamp_changed.connect(self._scope.set_lamp_intensity)
         self._controls.objective_clicked.connect(self._scope.switch_objective)
@@ -269,6 +270,7 @@ class QuickScanWindow(QMainWindow):
         self._controls.set_exposure_ms(state.exposure_ms)
         self._controls.set_gain(state.gain)
         self._controls.set_gain_rgb(*state.gain_rgb)
+        self._controls.set_colour_temperature(state.colour_temperature)
         self._controls.set_shutter(state.shutter_open)
         self._controls.set_lamp(state.lamp_intensity, state.lamp_max)
 

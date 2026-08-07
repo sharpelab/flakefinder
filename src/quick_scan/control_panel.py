@@ -51,6 +51,10 @@ _WB_PRESETS: dict[str, tuple[float, float, float]] = {
 }
 _WB_MATCH_TOL = 0.02  # gain units — match tolerance for detecting a preset
 
+# Colour correction matrix (CCM) options, in K5C enum-index order
+# (PROP_COLOUR_TEMPERATURE: index 0 = UserDefinedMatrix, then 4500/5800/6600 K)
+_CCM_OPTIONS = ["User matrix", "4500 K", "5800 K (default)", "6600 K"]
+
 # Scale bar target fraction of pixmap width
 _SCALE_BAR_TARGET_FRAC = 0.20
 
@@ -127,6 +131,7 @@ class ControlPanel(QWidget):
     exposure_changed = Signal(float)
     gain_changed = Signal(float)
     wb_changed = Signal(float, float, float)
+    ccm_changed = Signal(int)  # PROP_COLOUR_TEMPERATURE enum index
     shutter_toggled = Signal(bool)
     lamp_changed = Signal(int)
     objective_clicked = Signal(str)
@@ -300,14 +305,23 @@ class ControlPanel(QWidget):
             grid.addWidget(spin, row, 2)
             self._wb_spins[channel] = spin
 
+        ccm_label = QLabel("CCM:")
+        grid.addWidget(ccm_label, 3, 0)
+        self._ccm_combo = QComboBox()
+        self._ccm_combo.addItems(_CCM_OPTIONS)
+        self._ccm_combo.setCurrentIndex(2)  # SDK default: 5800 K
+        self._ccm_combo.setEnabled(False)  # enabled once hardware reports a value
+        self._ccm_combo.currentIndexChanged.connect(self._on_ccm_selected)
+        grid.addWidget(self._ccm_combo, 3, 1, 1, 2)
+
         preset_label = QLabel("Preset:")
-        grid.addWidget(preset_label, 3, 0)
+        grid.addWidget(preset_label, 4, 0)
         self._wb_preset_combo = QComboBox()
         self._wb_preset_combo.addItem(_WB_CUSTOM)
         for name in _WB_PRESETS:
             self._wb_preset_combo.addItem(name)
         self._wb_preset_combo.currentTextChanged.connect(self._on_wb_preset_selected)
-        grid.addWidget(self._wb_preset_combo, 3, 1, 1, 2)
+        grid.addWidget(self._wb_preset_combo, 4, 1, 1, 2)
 
         return group
 
@@ -391,6 +405,16 @@ class ControlPanel(QWidget):
                 self._wb_preset_combo.setCurrentText(name)
                 return
         self._wb_preset_combo.setCurrentText(_WB_CUSTOM)
+
+    def set_colour_temperature(self, index: int | None) -> None:
+        """Update CCM combo without emitting signals. None = unavailable."""
+        self._updating = True
+        if index is None or not (0 <= index < len(_CCM_OPTIONS)):
+            self._ccm_combo.setEnabled(False)
+        else:
+            self._ccm_combo.setEnabled(True)
+            self._ccm_combo.setCurrentIndex(index)
+        self._updating = False
 
     def set_shutter(self, is_open: bool) -> None:
         self._updating = True
@@ -572,6 +596,11 @@ class ControlPanel(QWidget):
         self._sync_wb_preset_selection(r, g, b)
         self._updating = False
         self.wb_changed.emit(r, g, b)
+
+    def _on_ccm_selected(self, index: int) -> None:
+        if self._updating:
+            return
+        self.ccm_changed.emit(index)
 
     def _on_wb_preset_selected(self, name: str) -> None:
         if self._updating:
