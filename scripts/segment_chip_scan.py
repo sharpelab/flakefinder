@@ -58,6 +58,7 @@ def run(
     jobs: int = 16,
     viz: bool = False,
     quiet: bool = False,
+    config: DetectorConfig | None = None,
 ) -> SegStats:
     """Run parallel flake segmentation over a chip scan directory.
 
@@ -111,7 +112,8 @@ def run(
     output.mkdir(parents=True, exist_ok=True)
     flatfield_str = str(flatfield) if flatfield else None
 
-    config = DetectorConfig.from_material(material)
+    if config is None:
+        config = DetectorConfig.from_material(material)
     overrides = {}
     if contrast_offset is not None:
         overrides["contrast_offset"] = contrast_offset
