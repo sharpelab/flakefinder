@@ -114,7 +114,10 @@ class Camera:
         self.gamma = 1.0  # linear (SDK default: 0.45)
         self.saturation = 100  # same as SDK, but explicit
         self.gain_rgb = (1.0, 1.0, 1.0)  # neutral (SDK default: R1.93/G1.00/B1.94)
-        self.colour_matrix = ColourMatrix.IDENTITY  # raw channels, no CCM mixing (5800K = legacy scan space)
+        # 5800K is the legacy scan space every committed preset is calibrated
+        # in. Raw capture (IDENTITY) becomes the default only when the v4
+        # raw-space cal tables land; until then pass --colour-matrix identity.
+        self.colour_matrix = ColourMatrix.CCM_5800K
 
     @classmethod
     def from_connection(cls, conn: LeicaConnection) -> Camera:
