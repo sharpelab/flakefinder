@@ -103,6 +103,7 @@ class QuickScanWindow(QMainWindow):
         self._controls.lamp_changed.connect(self._scope.set_lamp_intensity)
         self._controls.objective_clicked.connect(self._scope.switch_objective)
         self._controls.autofocus_requested.connect(self._scope.autofocus)
+        self._controls.autofocus_requested.connect(self._canvas.go_to_live)
         self._controls.scan_requested.connect(self._on_scan_requested)
         self._controls.cancel_requested.connect(self._on_cancel)
         self._controls.preview_move_requested.connect(self._on_move_requested)
@@ -137,6 +138,12 @@ class QuickScanWindow(QMainWindow):
         frame_action.setToolTip("Center on current microscope viewport (F)")
         frame_action.triggered.connect(self._canvas.go_to_frame)
         toolbar.addAction(frame_action)
+
+        live_action = QAction("Go to Live", self)
+        live_action.setShortcut(QKeySequence("L"))
+        live_action.setToolTip("Zoom to fill view with live camera frame (L)")
+        live_action.triggered.connect(self._canvas.go_to_live)
+        toolbar.addAction(live_action)
 
         toolbar.addSeparator()
 

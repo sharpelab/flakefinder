@@ -181,6 +181,22 @@ class StageCanvas(QGraphicsView):
         self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
         self._update_grid()
 
+    def go_to_live(self):
+        """Zoom so the live camera frame fills the view (~5% padding)."""
+        if self._viewport_info is None:
+            return
+        vi = self._viewport_info
+        pad_w = vi.fov_w_um * 0.05
+        pad_h = vi.fov_h_um * 0.05
+        rect = QRectF(
+            vi.x_um - vi.fov_w_um / 2 - pad_w,
+            vi.y_um - vi.fov_h_um / 2 - pad_h,
+            vi.fov_w_um + 2 * pad_w,
+            vi.fov_h_um + 2 * pad_h,
+        )
+        self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+        self._update_grid()
+
     def set_viewport(self, info: ViewportInfo):
         """Update the microscope viewport rectangle."""
         self._viewport_info = info
