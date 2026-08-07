@@ -37,6 +37,7 @@ See `calibration/camera_probe_20260806/camera_pipeline_probe.json` + `/tmp/camer
 
 ## Scope Discipline
 - **NEVER commit without explicit user approval.** Always propose the commit and wait for "go"/"commit"/"sync". Premature commits ship suboptimal code — review catches issues that need fixing first.
+- **Commit approval ≠ push approval, and neither carries across commits.** Ask "commit/push/pull?" fresh each time; never bundle push+scope-pull into the commit command by reflex. Deploying a behavior change to the scope mid-campaign can silently break the next scan (e.g. a camera-default flip that invalidates every preset's cal space until tables catch up).
 - **Only do what was explicitly approved.** "go for X" means X only — do NOT batch in additional scripts/files without asking. Stop after each approved unit and check in.
 - **Every task needs its own approval cycle.** A "go" for task N does NOT carry to task N+1. Each `# Operator Task` continuation resets: propose → wait for go → implement → ask "commit/push/pull?" → wait for go → sync → write summary.
 
