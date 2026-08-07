@@ -396,25 +396,6 @@ class UCAPI_CCM(IntEnum):
     K6600 = 3
 
 
-_CCM_LABELS = {
-    UCAPI_CCM.IDENTITY: "identity",
-    UCAPI_CCM.K4500: "4500K",
-    UCAPI_CCM.K5800: "5800K",
-    UCAPI_CCM.K6600: "6600K",
-}
-
-
-def ccm_label(index: int | None) -> str:
-    """Human-readable CCM selector label, e.g. ``"2 (5800K)"``."""
-    if index is None:
-        return "unknown"
-    try:
-        name = _CCM_LABELS[UCAPI_CCM(index)]
-    except ValueError:
-        name = "?"
-    return f"{index} ({name})"
-
-
 class UCAPI_PIXEL_TYPE(IntEnum):
     """PROP_PIXEL_TYPE option values (ucapi.h 2023.3 PIXEL_TYPE enum).
 

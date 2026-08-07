@@ -22,6 +22,7 @@ from flakefinder.types import (
     AreaRectI,
     BBox,
     CameraMeta,
+    ColourMatrix,
     GainRGB,
     LightingMeta,
     MicroscopeMeta,
@@ -191,18 +192,19 @@ def parse_white_balance(s: str) -> GainRGB:
     return GainRGB(red=r, green=g, blue=b)
 
 
-def add_colour_temperature_arg(parser: argparse.ArgumentParser | argparse._ArgumentGroup) -> None:
-    """Add the shared --colour-temperature argument.
+def add_colour_matrix_arg(parser: argparse.ArgumentParser | argparse._ArgumentGroup) -> None:
+    """Add the shared --colour-matrix argument.
 
     None (the default) means keep the connection-time state — the camera
-    pins UCAPI_CCM.K5800 at init, so the colour space is known either way.
+    pins ColourMatrix.CCM_5800K at init, so the colour space is known
+    either way.
     """
     parser.add_argument(
-        "--colour-temperature",
-        type=int,
+        "--colour-matrix",
+        type=ColourMatrix,
+        choices=tuple(ColourMatrix),
         default=None,
-        metavar="IDX",
-        help="CCM selector index (0=identity, 2=5800K); default: keep connection default (5800K)",
+        help="camera colour-correction matrix mode; default: keep connection default (5800K)",
     )
 
 
@@ -612,7 +614,7 @@ def build_camera_meta(camera: Camera) -> CameraMeta:
         physical_pixel_x_um=physical_pixel_x_um,
         physical_pixel_y_um=physical_pixel_y_um,
         white_balance_bgr=[b, g, r],
-        colour_temperature=camera.colour_temperature,
+        colour_matrix=cm.value if (cm := camera.colour_matrix) is not None else None,
         gamma=camera.gamma,
         auto_brightness=camera.auto_brightness,
     )

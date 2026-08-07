@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import NamedTuple, Protocol, TypedDict
 
 import numpy as np
@@ -34,6 +35,22 @@ class Point3F(NamedTuple):
     x: float
     y: float
     z: float
+
+
+class ColourMatrix(StrEnum):
+    """Camera colour-correction matrix mode (K5C "colour temperature" selector).
+
+    IDENTITY (UserDefinedMatrix) is the identity to 0.6% — captures are raw
+    sensor channels, no mixing, and contrast is WB-independent. CCM_5800K is
+    the SDK default; all historical scans and cal tables live in that mixed
+    space. The SDK enum-index mapping lives at the camera boundary
+    (leica/camera.py); nothing above it speaks indices.
+    """
+
+    IDENTITY = "identity"
+    CCM_4500K = "4500K"
+    CCM_5800K = "5800K"
+    CCM_6600K = "6600K"
 
 
 class GainRGB(NamedTuple):
@@ -317,7 +334,7 @@ class CameraMeta(TypedDict):
     physical_pixel_x_um: float | None
     physical_pixel_y_um: float | None
     white_balance_bgr: list[float]
-    colour_temperature: int | None
+    colour_matrix: str | None
     gamma: float
     auto_brightness: bool
 

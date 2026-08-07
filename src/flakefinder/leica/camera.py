@@ -14,13 +14,22 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from flakefinder.types import GainRGB, Point2F, RGBImage
+from flakefinder.types import ColourMatrix, GainRGB, Point2F, RGBImage
 
 from .core import LeicaConnection, find_unit, get_interface_required
 from .enums import IID, UCAPI_CCM, UCAPI_IID, UCAPI_PROP, UCAPI_TID
 from .types import Image as SdkImage
 from .types import Unit
 from .units import Stage
+
+# App-level ColourMatrix <-> SDK enum index, translated only at this boundary.
+_COLOUR_MATRIX_TO_CCM: dict[ColourMatrix, UCAPI_CCM] = {
+    ColourMatrix.IDENTITY: UCAPI_CCM.IDENTITY,
+    ColourMatrix.CCM_4500K: UCAPI_CCM.K4500,
+    ColourMatrix.CCM_5800K: UCAPI_CCM.K5800,
+    ColourMatrix.CCM_6600K: UCAPI_CCM.K6600,
+}
+_CCM_TO_COLOUR_MATRIX: dict[UCAPI_CCM, ColourMatrix] = {v: k for k, v in _COLOUR_MATRIX_TO_CCM.items()}
 
 
 @dataclass
@@ -97,15 +106,15 @@ class Camera:
         to SDK defaults (2x2, 0.45, 100, R1.93/G1.00/B1.94).
         Exposure and gain are NOT reset by the SDK.
 
-        colour_temperature (CCM selector) is pinned explicitly so the
-        colour space is always known regardless of what LAS X or a prior
-        session left behind.
+        colour_matrix (CCM selector) is pinned explicitly so the colour
+        space is always known regardless of what LAS X or a prior session
+        left behind.
         """
         self.binning = 2  # 3x3 (SDK default: 1 / 2x2)
         self.gamma = 1.0  # linear (SDK default: 0.45)
         self.saturation = 100  # same as SDK, but explicit
         self.gain_rgb = (1.0, 1.0, 1.0)  # neutral (SDK default: R1.93/G1.00/B1.94)
-        self.colour_temperature = UCAPI_CCM.K5800  # SDK default CCM, but explicit
+        self.colour_matrix = ColourMatrix.CCM_5800K  # SDK default CCM, but explicit
 
     @classmethod
     def from_connection(cls, conn: LeicaConnection) -> Camera:
@@ -243,12 +252,15 @@ class Camera:
 
     @property
     def colour_temperature(self) -> int | None:
-        """Colour matrix (CCM) selection index, or None if unavailable.
+        """Raw CCM selection index (SDK enum), or None if unavailable.
 
         Selects the host-side colour correction matrix applied after white
         balance. K5C options (per driver logs): UserDefinedMatrix, 4500K,
         5800K, 6600K [Standard]; SDK default is 5800K (index 2). The CCM is
         what couples WB channel gains into a 3x3 mixing matrix.
+
+        SDK-level access for probe/calibration tooling — application code
+        should use ``colour_matrix`` instead.
         """
         prop = self._get_property(UCAPI_PROP.PROP_COLOUR_TEMPERATURE)
         return prop.GetIndex() if prop else None
@@ -258,6 +270,25 @@ class Camera:
         prop = self._get_property(UCAPI_PROP.PROP_COLOUR_TEMPERATURE)
         if prop:
             prop.SetIndex(int(index))
+
+    @property
+    def colour_matrix(self) -> ColourMatrix | None:
+        """Colour-correction matrix mode, or None if unavailable/unknown.
+
+        App-level view of ``colour_temperature`` — translates the SDK enum
+        index at this boundary (same pattern as gain_rgb/GainRGB).
+        """
+        index = self.colour_temperature
+        if index is None:
+            return None
+        try:
+            return _CCM_TO_COLOUR_MATRIX[UCAPI_CCM(index)]
+        except ValueError:
+            return None
+
+    @colour_matrix.setter
+    def colour_matrix(self, mode: ColourMatrix | str) -> None:
+        self.colour_temperature = _COLOUR_MATRIX_TO_CCM[ColourMatrix(mode)]
 
     @property
     def pixel_type(self) -> int | None:

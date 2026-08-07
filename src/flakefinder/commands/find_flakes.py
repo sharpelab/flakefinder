@@ -71,11 +71,10 @@ from flakefinder.commands import (
 from flakefinder.data_utils import add_stage_coords
 from flakefinder.flakes_api import get_auth
 from flakefinder.leica import Microscope
-from flakefinder.leica.enums import ccm_label
 from flakefinder.scan_utils import (
     CALIBRATION_DIR,
     PARFOCAL_Z_UM,
-    add_colour_temperature_arg,
+    add_colour_matrix_arg,
     build_revisit_json,
     get_git_version,
     parse_area_rect,
@@ -91,7 +90,7 @@ from flakefinder.segmentation import (
     process_frame,
     strip_geometry,
 )
-from flakefinder.types import AreaRect, GainRGB
+from flakefinder.types import AreaRect, ColourMatrix, GainRGB
 
 if TYPE_CHECKING:
     from flakefinder.segmentation import Detection
@@ -302,7 +301,7 @@ class _Preflight:
     chips_json_path: Path
     chip_filter: list[int] | None
     wb: GainRGB
-    colour_temperature: int | None
+    colour_matrix: ColourMatrix | None
     area: AreaRect
     preset_name: str
     overview_mag: str
@@ -422,7 +421,7 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         chips_json_path=chips_json_path,
         chip_filter=chip_filter,
         wb=wb,
-        colour_temperature=args.colour_temperature,
+        colour_matrix=args.colour_matrix,
         area=area,
         preset_name=preset_name,
         overview_mag=overview_mag,
@@ -548,7 +547,7 @@ Examples:
         default=None,
         help="White balance as B,G,R gains (default: from material preset)",
     )
-    add_colour_temperature_arg(parser)
+    add_colour_matrix_arg(parser)
     parser.add_argument(
         "--operator",
         type=str,
@@ -673,8 +672,8 @@ def _print_header(p: _Preflight) -> None:
     wb_str = f"{p.wb.blue},{p.wb.green},{p.wb.red}"
     wb_source = "preset" if args.white_balance is None else "CLI"
     print(f"White balance: {wb_str} (B,G,R) [{wb_source}]")
-    ct_source = "connection default" if p.colour_temperature is None else "CLI"
-    print(f"Colour matrix: {ccm_label(p.colour_temperature if p.colour_temperature is not None else 2)} [{ct_source}]")
+    cm_source = "connection default" if p.colour_matrix is None else "CLI"
+    print(f"Colour matrix: {p.colour_matrix or ColourMatrix.CCM_5800K} [{cm_source}]")
     if p.chip_filter:
         print(f"Chips:         {p.chip_filter}")
     if args.after is not None:
@@ -1134,7 +1133,7 @@ def _run_revisit_phase(
                 objective_mag=mag_label,
                 material=p.seg.material,
                 white_balance=p.wb,
-                colour_temperature=p.colour_temperature,
+                colour_matrix=p.colour_matrix,
                 quiet=True,
             )
             duration = time.perf_counter() - t_start
@@ -1187,7 +1186,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
             "focus_map_gain": p.focus_map_gain,
             "focus_map_exposure_ms": p.focus_map_exposure_ms,
             "white_balance": f"{p.wb.blue},{p.wb.green},{p.wb.red}",
-            "colour_temperature": p.colour_temperature,
+            "colour_matrix": p.colour_matrix.value if p.colour_matrix else None,
             "chips": args.chips,
             "after": args.after,
             "limit": args.limit,
@@ -1231,7 +1230,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
             area_rect=p.area,
             downsample=4,
             white_balance=p.wb,
-            colour_temperature=p.colour_temperature,
+            colour_matrix=p.colour_matrix,
             clean=True,
             quiet=quiet,
         ),
@@ -1344,7 +1343,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
                 af_settle=0.2 if args.debug_focus_map else 0,
                 move_to_best_z=args.debug_focus_map,
                 white_balance=p.wb,
-                colour_temperature=p.colour_temperature,
+                colour_matrix=p.colour_matrix,
                 output_dir=cd,
                 quiet=True,
             ),
@@ -1389,7 +1388,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
                 gain=p.chip_scan_gain,
                 exposure_ms=p.chip_scan_exposure_ms,
                 white_balance=p.wb,
-                colour_temperature=p.colour_temperature,
+                colour_matrix=p.colour_matrix,
                 clean=True,
                 quiet=True,
             ),
