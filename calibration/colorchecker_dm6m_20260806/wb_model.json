@@ -27,7 +27,7 @@
    3.045
   ]
  ],
- "validity": "requests in [1.0, ~2.5] verified exact (superposition to 0.002); caps somewhere in (2.51, 4.0] per 2.5x b4==b7 observation; floor clamp at 0 observed",
+ "validity": "requests in [1.0, 8.0] verified exact per-channel gains (Phase 2 idx0 cap check, colorchecker_phase2_20260806/stage1_analysis.json); floor clamp at 0 on output; apparent over-gain is the ~1.02-count black-level over-subtraction; M applies under colour_temperature idx2 only (idx0 decouples, M=I)",
  "scan_wb_effective_mult_rgb": [
   1.543,
   0.84,
