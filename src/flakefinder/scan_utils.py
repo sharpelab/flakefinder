@@ -196,7 +196,7 @@ def add_colour_matrix_arg(parser: argparse.ArgumentParser | argparse._ArgumentGr
     """Add the shared --colour-matrix argument.
 
     None (the default) means keep the connection-time state — the camera
-    pins ColourMatrix.CCM_5800K at init, so the colour space is known
+    pins ColourMatrix.IDENTITY at init, so the colour space is known
     either way.
     """
     parser.add_argument(
@@ -204,7 +204,7 @@ def add_colour_matrix_arg(parser: argparse.ArgumentParser | argparse._ArgumentGr
         type=ColourMatrix,
         choices=tuple(ColourMatrix),
         default=None,
-        help="camera colour-correction matrix mode; default: keep connection default (5800K)",
+        help="camera colour-correction matrix mode; default: keep connection default (identity)",
     )
 
 

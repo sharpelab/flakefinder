@@ -52,7 +52,7 @@ Camera hardware settings (`CameraMeta`):
 | `physical_pixel_x_um` | float | Physical pixel pitch X (µm) |
 | `physical_pixel_y_um` | float | Physical pixel pitch Y (µm) |
 | `white_balance_bgr` | [B,G,R] | White balance gains (blue, green, red) |
-| `colour_matrix` | str | Camera colour-correction matrix mode ("identity", "4500K", "5800K", "6600K"); pinned to "5800K" at connection unless overridden |
+| `colour_matrix` | str | Camera colour-correction matrix mode ("identity", "4500K", "5800K", "6600K"); pinned to "identity" at connection unless overridden ("5800K" = legacy scan space) |
 | `gamma` | float | Gamma correction value |
 
 ## `optics` Object
