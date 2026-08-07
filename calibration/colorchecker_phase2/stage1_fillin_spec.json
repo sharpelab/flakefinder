@@ -1,0 +1,21 @@
+{
+  "notes": "Stage 1 fill-in: M_idx2 G-column with sub-clamp steps (wbg2 floor-clamps B: eff 1-1.62 < 0). Same white #19 / 10x / session-1 baseline conditions.",
+  "defaults": {
+    "lamp": 100.0,
+    "exposure_ms": 0.5,
+    "gain": 2.0,
+    "white_balance": {"r": 1.0, "g": 1.0, "b": 1.0},
+    "binning": 3,
+    "gamma": 1.0,
+    "saturation": 100,
+    "colour_temperature": 2,
+    "frames": 3,
+    "warmup_frames": 1,
+    "settle_s": 0.2
+  },
+  "conditions": [
+    {"name": "base_idx2"},
+    {"name": "wbg13_idx2", "white_balance": {"r": 1.0, "g": 1.3, "b": 1.0}},
+    {"name": "wbg15_idx2", "white_balance": {"r": 1.0, "g": 1.5, "b": 1.0}}
+  ]
+}

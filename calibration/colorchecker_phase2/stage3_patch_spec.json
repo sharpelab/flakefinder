@@ -1,0 +1,45 @@
+{
+  "notes": "Stage 3 per-patch series (run once per patch, -o .../patch_<name>). Configs: scan (idx2 + scan WB), raw (idx0 unity), unity idx2, and M-cancellation WB trio under idx2 (wbg 1.3 not 2.0 -- wbg2 floor-clamps B on every target). Exposure ladder 0.2/0.5/2/8 ms; analysis drops clipped rungs (blooming rule: distrust all channels where any clips).",
+  "defaults": {
+    "lamp": 100.0,
+    "gain": 2.0,
+    "white_balance": {"r": 1.0, "g": 1.0, "b": 1.0},
+    "binning": 3,
+    "gamma": 1.0,
+    "saturation": 100,
+    "colour_temperature": 2,
+    "frames": 3,
+    "warmup_frames": 1,
+    "settle_s": 0.2
+  },
+  "conditions": [
+    {"name": "unity_idx2_e02", "exposure_ms": 0.2},
+    {"name": "unity_idx2_e05", "exposure_ms": 0.5},
+    {"name": "unity_idx2_e2", "exposure_ms": 2.0},
+    {"name": "unity_idx2_e8", "exposure_ms": 8.0},
+
+    {"name": "scanwb_idx2_e02", "exposure_ms": 0.2, "white_balance": {"r": 1.41, "g": 1.02, "b": 2.51}},
+    {"name": "scanwb_idx2_e05", "exposure_ms": 0.5, "white_balance": {"r": 1.41, "g": 1.02, "b": 2.51}},
+    {"name": "scanwb_idx2_e2", "exposure_ms": 2.0, "white_balance": {"r": 1.41, "g": 1.02, "b": 2.51}},
+    {"name": "scanwb_idx2_e8", "exposure_ms": 8.0, "white_balance": {"r": 1.41, "g": 1.02, "b": 2.51}},
+
+    {"name": "unity_idx0_e02", "exposure_ms": 0.2, "colour_temperature": 0},
+    {"name": "unity_idx0_e05", "exposure_ms": 0.5, "colour_temperature": 0},
+    {"name": "unity_idx0_e2", "exposure_ms": 2.0, "colour_temperature": 0},
+    {"name": "unity_idx0_e8", "exposure_ms": 8.0, "colour_temperature": 0},
+
+    {"name": "wbr2_idx2_e05", "exposure_ms": 0.5, "white_balance": {"r": 2.0, "g": 1.0, "b": 1.0}},
+    {"name": "wbr2_idx2_e2", "exposure_ms": 2.0, "white_balance": {"r": 2.0, "g": 1.0, "b": 1.0}},
+    {"name": "wbr2_idx2_e8", "exposure_ms": 8.0, "white_balance": {"r": 2.0, "g": 1.0, "b": 1.0}},
+
+    {"name": "wbg13_idx2_e05", "exposure_ms": 0.5, "white_balance": {"r": 1.0, "g": 1.3, "b": 1.0}},
+    {"name": "wbg13_idx2_e2", "exposure_ms": 2.0, "white_balance": {"r": 1.0, "g": 1.3, "b": 1.0}},
+    {"name": "wbg13_idx2_e8", "exposure_ms": 8.0, "white_balance": {"r": 1.0, "g": 1.3, "b": 1.0}},
+
+    {"name": "wbb2_idx2_e05", "exposure_ms": 0.5, "white_balance": {"r": 1.0, "g": 1.0, "b": 2.0}},
+    {"name": "wbb2_idx2_e2", "exposure_ms": 2.0, "white_balance": {"r": 1.0, "g": 1.0, "b": 2.0}},
+    {"name": "wbb2_idx2_e8", "exposure_ms": 8.0, "white_balance": {"r": 1.0, "g": 1.0, "b": 2.0}},
+
+    {"name": "drift_unity_idx2_e05", "exposure_ms": 0.5}
+  ]
+}

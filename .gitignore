@@ -78,3 +78,6 @@ results/*
 
 # calibration raw frames (bulk PNGs stay local/scope)
 calibration/*/*frames*/
+calibration/colorchecker_phase2_*/stage1/
+calibration/colorchecker_phase2_*/stage1_fillin/
+calibration/colorchecker_phase2_*/patch_*/
