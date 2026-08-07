@@ -8,6 +8,8 @@
 - Subtasks run locally → local code is already current after they push. Never `git pull` locally after a local subtask.
 - Only the **microscope** needs `git pull` after subtask pushes.
 - If microscope has local changes from previous version, `git stash && git pull` is fine.
+- If scope pull aborts on **untracked** files an incoming commit tracks (session scp'd them there earlier): compare `git hash-object` (scope) vs `git rev-parse master:path` (local); if identical, delete scope copies and re-pull. Scope ssh shell is cmd — use `del`, not `rm`.
+- Before ff-ing main-repo master, check it hasn't advanced past origin (scan session may commit locally). If so, rebase the subtask branch onto local `master`, not `origin/master`; the push then carries the session's commit too.
 
 ## Leica SDK Gotchas
 - **Don't call `GetObject()` on the same SDK interface twice.** Redundant `get_interface_required` calls can interfere with existing sessions. Delegate to the object that already owns the interface.
