@@ -426,6 +426,108 @@ def _update_annotations(ann_list, dots_artist, r_t, g_t):
     dots_artist.set_data(dg, dr)
 
 
+def _rms(x: np.ndarray) -> float:
+    return float(np.sqrt(np.mean(x**2)))
+
+
+class _CalOverlay:
+    """One calibration point-set on a panel: scatter(s) + per-point labels.
+
+    Owns the mechanics every cal set repeats: shifting points by the hand
+    offsets, keeping annotations glued to the points, and residuals of the
+    trusted points against the model curve for the rms readouts.  Points
+    start unplaced; the first update() positions them (each tab draws on
+    first show).
+
+    ok: boolean mask — ~ok points render hollow + faded on a second scatter
+    labelled ``sus_label``.  ``hollow=True`` renders the whole set that way.
+    An empty data array creates no artists (and no legend entry).
+    """
+
+    def __init__(
+        self,
+        ax,
+        data: np.ndarray,
+        labels: list[str],
+        *,
+        color: str,
+        marker: str,
+        size: float,
+        label: str,
+        ok: np.ndarray | None = None,
+        sus_label: str | None = None,
+        hollow: bool = False,
+        alpha: float | None = None,
+    ):
+        self.data = data
+        self.has_data = len(data) > 0
+        self.ok = np.ones(len(data), dtype=bool) if ok is None else ok
+        self.scat = None
+        self.scat_sus = None
+        self.anns: list = []
+        if not self.has_data:
+            return
+        common = {"marker": marker, "s": size, "zorder": 1}
+        if hollow:
+            self.scat = ax.scatter(
+                [],
+                [],
+                facecolors="none",
+                edgecolors=color,
+                linewidths=1.2,
+                alpha=0.55 if alpha is None else alpha,
+                label=label,
+                **common,
+            )
+        else:
+            self.scat = ax.scatter([], [], c=color, edgecolors="k", linewidths=0.7, alpha=alpha, label=label, **common)
+        if not self.ok.all():
+            self.scat_sus = ax.scatter(
+                [],
+                [],
+                facecolors="none",
+                edgecolors=color,
+                linewidths=1.2,
+                alpha=0.55,
+                label=sus_label,
+                **common,
+            )
+        for i, text in enumerate(labels):
+            self.anns.append(
+                ax.annotate(
+                    text,
+                    (0, 0),
+                    textcoords="offset points",
+                    xytext=(6, -6),
+                    fontsize=7,
+                    color=color,
+                    fontweight="bold",
+                    alpha=1.0 if (self.ok[i] and not hollow) else 0.55,
+                )
+            )
+
+    def update(self, r_off: float, g_off: float) -> None:
+        """Move points and labels to the current hand offsets."""
+        if self.scat is None:
+            return
+        r = self.data[:, 1] + r_off
+        g = self.data[:, 2] + g_off
+        self.scat.set_offsets(np.column_stack([g[self.ok], r[self.ok]]))
+        if self.scat_sus is not None:
+            self.scat_sus.set_offsets(np.column_stack([g[~self.ok], r[~self.ok]]))
+        for i, ann in enumerate(self.anns):
+            ann.xy = (g[i], r[i])
+
+    def residuals(
+        self, r_off: float, g_off: float, t_curve: np.ndarray, r_curve: np.ndarray, g_curve: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """(R, G) residuals of the trusted (ok) points vs the model curve."""
+        t = self.data[self.ok, 0]
+        r_res = self.data[self.ok, 1] + r_off - np.interp(t, t_curve, r_curve)
+        g_res = self.data[self.ok, 2] + g_off - np.interp(t, t_curve, g_curve)
+        return r_res, g_res
+
+
 # Axis positions (left, bottom, width, height)
 _PLOT_BOTTOM = 0.38
 _PLOT_HEIGHT = 0.48  # top at 0.86, below the two button rows
@@ -656,158 +758,62 @@ def main():
     (line_90,) = ax_90.plot(g90, r90, "k-", lw=1.5, label="Theory")
     ann_90, dots_90 = _make_annotations(ax_90, _HBN_LAYER_THICKNESS_NM, HBN_MAX_LAYERS)
 
-    cal_r = _CAL_DATA[:, 1] + init["r_off"]
-    cal_g = _CAL_DATA[:, 2] + init["g_off"]
-    scat_90 = ax_90.scatter(
-        cal_g,
-        cal_r,
-        c="tab:orange",
+    ov_50x = _CalOverlay(
+        ax_90,
+        _CAL_DATA,
+        [f"{row[0]:.0f}" for row in _CAL_DATA],
+        color="tab:orange",
         marker="o",
-        s=50,
-        zorder=1,
-        edgecolors="k",
-        linewidths=0.7,
+        size=50,
         label="AFM 90nm (50x, prev scope)",
     )
-    cal_ann_90 = []
-    for i, row in enumerate(_CAL_DATA):
-        a = ax_90.annotate(
-            f"{row[0]:.0f}",
-            (cal_g[i], cal_r[i]),
-            textcoords="offset points",
-            xytext=(6, -6),
-            fontsize=7,
-            color="tab:orange",
-            fontweight="bold",
-        )
-        cal_ann_90.append(a)
-
     # Toghrul AFM anchors (current scope, 10x) — split trusted vs suspect.
-    afm10_ok = _CAL_DATA_AFM_10X_20260805_OK
-    afm10_r = _CAL_DATA_AFM_10X_20260805[:, 1] + init["r_off"]
-    afm10_g = _CAL_DATA_AFM_10X_20260805[:, 2] + init["g_off"]
-    scat_afm10 = ax_90.scatter(
-        afm10_g[afm10_ok],
-        afm10_r[afm10_ok],
-        c="tab:blue",
+    ov_afm10 = _CalOverlay(
+        ax_90,
+        _CAL_DATA_AFM_10X_20260805,
+        [f"{row[0]:.1f}" for row in _CAL_DATA_AFM_10X_20260805],
+        color="tab:blue",
         marker="*",
-        s=90,
-        zorder=1,
-        edgecolors="k",
-        linewidths=0.7,
+        size=90,
         label="AFM 10x 2026-08-05 (Toghrul)",
+        ok=_CAL_DATA_AFM_10X_20260805_OK,
+        sus_label="↑ suspect (R low)",
     )
-    scat_afm10_sus = ax_90.scatter(
-        afm10_g[~afm10_ok],
-        afm10_r[~afm10_ok],
-        facecolors="none",
-        edgecolors="tab:blue",
-        marker="*",
-        s=90,
-        zorder=1,
-        linewidths=1.2,
-        alpha=0.55,
-        label="↑ suspect (R low)",
-    )
-    cal_ann_afm10 = []
-    for i, row in enumerate(_CAL_DATA_AFM_10X_20260805):
-        a = ax_90.annotate(
-            f"{row[0]:.1f}",
-            (afm10_g[i], afm10_r[i]),
-            textcoords="offset points",
-            xytext=(6, -6),
-            fontsize=7,
-            color="tab:blue",
-            fontweight="bold",
-            alpha=1.0 if afm10_ok[i] else 0.55,
-        )
-        cal_ann_afm10.append(a)
-
     # Round-2 Toghrul AFM anchors (scan 288, 2026-08-11) — the 55-85 nm band
     # round 1 lacked.  Past-fold points (627/928 nm AFM) are real measurements
     # whose R/G aliases back onto the model arc; rendered as X markers labeled
     # with true AFM nm, never in the rms.  99280 (region-mismatch suspect) is
     # hollow + faded like round-1's 98982.
-    r2_r = _CAL_DATA_HBN_10X_THICK_R2[:, 1] + init["r_off"]
-    r2_g = _CAL_DATA_HBN_10X_THICK_R2[:, 2] + init["g_off"]
-    scat_afm_r2 = ax_90.scatter(
-        r2_g,
-        r2_r,
-        c="tab:purple",
+    ov_r2 = _CalOverlay(
+        ax_90,
+        _CAL_DATA_HBN_10X_THICK_R2,
+        [f"{row[0]:.1f}" for row in _CAL_DATA_HBN_10X_THICK_R2],
+        color="tab:purple",
         marker="*",
-        s=110,
-        zorder=1,
-        edgecolors="k",
-        linewidths=0.7,
+        size=110,
         label="AFM 10x r2 2026-08-11 (Toghrul)",
     )
-    cal_ann_r2 = []
-    for i, row in enumerate(_CAL_DATA_HBN_10X_THICK_R2):
-        a = ax_90.annotate(
-            f"{row[0]:.1f}",
-            (r2_g[i], r2_r[i]),
-            textcoords="offset points",
-            xytext=(6, -6),
-            fontsize=7,
-            color="tab:purple",
-            fontweight="bold",
-        )
-        cal_ann_r2.append(a)
-
-    r2x_r = _CAL_DATA_HBN_10X_THICK_R2_EXCLUDED[:, 1] + init["r_off"]
-    r2x_g = _CAL_DATA_HBN_10X_THICK_R2_EXCLUDED[:, 2] + init["g_off"]
-    scat_afm_r2_excl = ax_90.scatter(
-        r2x_g,
-        r2x_r,
-        facecolors="none",
-        edgecolors="tab:purple",
+    ov_r2_excl = _CalOverlay(
+        ax_90,
+        _CAL_DATA_HBN_10X_THICK_R2_EXCLUDED,
+        [f"{row[0]:.0f}?" for row in _CAL_DATA_HBN_10X_THICK_R2_EXCLUDED],
+        color="tab:purple",
         marker="*",
-        s=110,
-        zorder=1,
-        linewidths=1.2,
-        alpha=0.55,
+        size=110,
         label="↑ excluded (99280, region mismatch)",
+        hollow=True,
     )
-    cal_ann_r2_excl = []
-    for i, row in enumerate(_CAL_DATA_HBN_10X_THICK_R2_EXCLUDED):
-        a = ax_90.annotate(
-            f"{row[0]:.0f}?",
-            (r2x_g[i], r2x_r[i]),
-            textcoords="offset points",
-            xytext=(6, -6),
-            fontsize=7,
-            color="tab:purple",
-            fontweight="bold",
-            alpha=0.55,
-        )
-        cal_ann_r2_excl.append(a)
-
-    r2p_r = _CAL_DATA_HBN_10X_THICK_R2_PASTFOLD[:, 1] + init["r_off"]
-    r2p_g = _CAL_DATA_HBN_10X_THICK_R2_PASTFOLD[:, 2] + init["g_off"]
-    scat_afm_r2_pf = ax_90.scatter(
-        r2p_g,
-        r2p_r,
-        c="tab:purple",
+    ov_r2_pf = _CalOverlay(
+        ax_90,
+        _CAL_DATA_HBN_10X_THICK_R2_PASTFOLD,
+        [f"{row[0]:.0f}nm!" for row in _CAL_DATA_HBN_10X_THICK_R2_PASTFOLD],
+        color="tab:purple",
         marker="X",
-        s=80,
-        zorder=1,
-        edgecolors="k",
-        linewidths=0.7,
-        alpha=0.85,
+        size=80,
         label="r2 past-fold (aliased)",
+        alpha=0.85,
     )
-    cal_ann_r2_pf = []
-    for i, row in enumerate(_CAL_DATA_HBN_10X_THICK_R2_PASTFOLD):
-        a = ax_90.annotate(
-            f"{row[0]:.0f}nm!",
-            (r2p_g[i], r2p_r[i]),
-            textcoords="offset points",
-            xytext=(6, -6),
-            fontsize=7,
-            color="tab:purple",
-            fontweight="bold",
-        )
-        cal_ann_r2_pf.append(a)
+    overlays_90 = [ov_50x, ov_afm10, ov_r2, ov_r2_excl, ov_r2_pf]
     rms_text_90 = ax_90.text(
         0.02,
         0.98,
@@ -824,35 +830,15 @@ def main():
     (line_285,) = ax_285.plot(g285, r285, "k-", lw=1.5, label="Theory")
     ann_285, dots_285 = _make_annotations(ax_285, _HBN_LAYER_THICKNESS_NM, HBN_MAX_LAYERS)
 
-    if len(_CAL_DATA_285) > 0:
-        cal285_r = _CAL_DATA_285[:, 1] + init["r_off"]
-        cal285_g = _CAL_DATA_285[:, 2] + init["g_off"]
-        scat_285 = ax_285.scatter(
-            cal285_g,
-            cal285_r,
-            c="tab:red",
-            marker="s",
-            s=50,
-            zorder=1,
-            edgecolors="k",
-            linewidths=0.7,
-            label="285nm empirical (prev scope)",
-        )
-        cal_ann_285 = []
-        for i, row in enumerate(_CAL_DATA_285):
-            a = ax_285.annotate(
-                f"~{row[0]:.0f}",
-                (cal285_g[i], cal285_r[i]),
-                textcoords="offset points",
-                xytext=(6, -6),
-                fontsize=7,
-                color="tab:red",
-                fontweight="bold",
-            )
-            cal_ann_285.append(a)
-    else:
-        scat_285 = None
-        cal_ann_285 = []
+    ov_285 = _CalOverlay(
+        ax_285,
+        _CAL_DATA_285,
+        [f"~{row[0]:.0f}" for row in _CAL_DATA_285],
+        color="tab:red",
+        marker="s",
+        size=50,
+        label="285nm empirical (prev scope)",
+    )
     rms_text_285 = ax_285.text(
         0.02,
         0.98,
@@ -879,105 +865,38 @@ def main():
         ax_gr, _GRAPHENE_LAYER_THICKNESS_NM, GRAPHENE_MAX_LAYERS, custom_labels=_gr_labels
     )
 
-    if len(_CAL_DATA_GRAPHENE) > 0:
-        cal_gr_r = _CAL_DATA_GRAPHENE[:, 1] + init["r_off_gr"]
-        cal_gr_g = _CAL_DATA_GRAPHENE[:, 2] + init["g_off_gr"]
-        scat_gr = ax_gr.scatter(
-            cal_gr_g,
-            cal_gr_r,
-            c="tab:green",
-            marker="D",
-            s=50,
-            zorder=1,
-            edgecolors="k",
-            linewidths=0.7,
-            label="Graphene empirical",
-        )
-        cal_ann_gr = []
-        for i, row in enumerate(_CAL_DATA_GRAPHENE):
-            n_layers = round(row[0] / _GRAPHENE_LAYER_THICKNESS_NM)
-            a = ax_gr.annotate(
-                f"{n_layers}L",
-                (cal_gr_g[i], cal_gr_r[i]),
-                textcoords="offset points",
-                xytext=(6, -6),
-                fontsize=7,
-                color="tab:green",
-                fontweight="bold",
-            )
-            cal_ann_gr.append(a)
-    else:
-        scat_gr = None
-        cal_ann_gr = []
-
-    # 10x graphite gate-flake overlay (split into two scatters: reliable vs R-clipped).
-    cal10_r = _CAL_DATA_GRAPHITE_10X[:, 1] + init["r_off_gr"]
-    cal10_g = _CAL_DATA_GRAPHITE_10X[:, 2] + init["g_off_gr"]
-    rel = _CAL_DATA_GRAPHITE_10X_R_RELIABLE
-    scat_gr_10x_ok = ax_gr.scatter(
-        cal10_g[rel],
-        cal10_r[rel],
-        c="tab:cyan",
+    ov_gr = _CalOverlay(
+        ax_gr,
+        _CAL_DATA_GRAPHENE,
+        [f"{round(row[0] / _GRAPHENE_LAYER_THICKNESS_NM)}L" for row in _CAL_DATA_GRAPHENE],
+        color="tab:green",
+        marker="D",
+        size=50,
+        label="Graphene empirical",
+    )
+    # 10x graphite gate-flake overlay — reliable vs R-clipped.
+    ov_gr_10x = _CalOverlay(
+        ax_gr,
+        _CAL_DATA_GRAPHITE_10X,
+        [f"{row[0]:.1f}" for row in _CAL_DATA_GRAPHITE_10X],
+        color="tab:cyan",
         marker="^",
-        s=55,
-        zorder=1,
-        edgecolors="k",
-        linewidths=0.7,
+        size=55,
         label="10x graphite (AFM)",
+        ok=_CAL_DATA_GRAPHITE_10X_R_RELIABLE,
+        sus_label="10x · R clipped",
     )
-    scat_gr_10x_clip = ax_gr.scatter(
-        cal10_g[~rel],
-        cal10_r[~rel],
-        facecolors="none",
-        edgecolors="tab:cyan",
-        marker="^",
-        s=55,
-        zorder=1,
-        linewidths=1.2,
-        alpha=0.55,
-        label="10x · R clipped",
-    )
-    cal_ann_gr_10x = []
-    for i, row in enumerate(_CAL_DATA_GRAPHITE_10X):
-        a = ax_gr.annotate(
-            f"{row[0]:.1f}",
-            (cal10_g[i], cal10_r[i]),
-            textcoords="offset points",
-            xytext=(6, -6),
-            fontsize=7,
-            color="tab:cyan",
-            fontweight="bold",
-            alpha=1.0 if rel[i] else 0.55,
-        )
-        cal_ann_gr_10x.append(a)
-
     # 10x thin-graphene overlay (1-4 layers).
-    cal10_gr_r = _CAL_DATA_GRAPHENE_10X[:, 1] + init["r_off_gr"]
-    cal10_gr_g = _CAL_DATA_GRAPHENE_10X[:, 2] + init["g_off_gr"]
-    scat_gr_10x_thin = ax_gr.scatter(
-        cal10_gr_g,
-        cal10_gr_r,
-        c="tab:olive",
+    ov_gr_thin = _CalOverlay(
+        ax_gr,
+        _CAL_DATA_GRAPHENE_10X,
+        [f"{round(row[0] / _GRAPHENE_LAYER_THICKNESS_NM)}L" for row in _CAL_DATA_GRAPHENE_10X],
+        color="tab:olive",
         marker="s",
-        s=55,
-        zorder=1,
-        edgecolors="k",
-        linewidths=0.7,
+        size=55,
         label="10x graphene 1-4L",
     )
-    cal_ann_gr_10x_thin = []
-    for i, row in enumerate(_CAL_DATA_GRAPHENE_10X):
-        n_layers_row = round(row[0] / _GRAPHENE_LAYER_THICKNESS_NM)
-        a = ax_gr.annotate(
-            f"{n_layers_row}L",
-            (cal10_gr_g[i], cal10_gr_r[i]),
-            textcoords="offset points",
-            xytext=(6, -6),
-            fontsize=7,
-            color="tab:olive",
-            fontweight="bold",
-        )
-        cal_ann_gr_10x_thin.append(a)
+    overlays_gr = [ov_gr, ov_gr_10x, ov_gr_thin]
     ax_gr.legend(fontsize=9, loc="lower right")
 
     # --- WSe₂ 300nm panel ---
@@ -997,35 +916,15 @@ def main():
         label_fmt="layers",
     )
 
-    if len(_CAL_DATA_WSE2) > 0:
-        cal_wse2_r = _CAL_DATA_WSE2[:, 1] + init["r_off_wse2"]
-        cal_wse2_g = _CAL_DATA_WSE2[:, 2] + init["g_off_wse2"]
-        scat_wse2 = ax_wse2.scatter(
-            cal_wse2_g,
-            cal_wse2_r,
-            c="tab:purple",
-            marker="^",
-            s=50,
-            zorder=1,
-            edgecolors="k",
-            linewidths=0.7,
-            label="WSe₂ empirical",
-        )
-        cal_ann_wse2 = []
-        for i, row in enumerate(_CAL_DATA_WSE2):
-            a = ax_wse2.annotate(
-                f"{round(row[0] / _WSE2_LAYER_THICKNESS_NM):.0f}L",
-                (cal_wse2_g[i], cal_wse2_r[i]),
-                textcoords="offset points",
-                xytext=(6, -6),
-                fontsize=7,
-                color="tab:purple",
-                fontweight="bold",
-            )
-            cal_ann_wse2.append(a)
-    else:
-        scat_wse2 = None
-        cal_ann_wse2 = []
+    ov_wse2 = _CalOverlay(
+        ax_wse2,
+        _CAL_DATA_WSE2,
+        [f"{round(row[0] / _WSE2_LAYER_THICKNESS_NM):.0f}L" for row in _CAL_DATA_WSE2],
+        color="tab:purple",
+        marker="^",
+        size=50,
+        label="WSe₂ empirical",
+    )
     ax_wse2.legend(fontsize=9, loc="lower right")
 
     # --- Tab buttons ---
@@ -1169,68 +1068,26 @@ def main():
 
     # --- Artist updates (main thread only) ---
     def _update_hbn_90_cal(r_off: float, g_off: float, t: np.ndarray, r9: np.ndarray, g9: np.ndarray):
-        """Move both 90nm-panel cal sets to the current offsets and refresh rms.
+        """Move the 90nm-panel cal sets to the current offsets and refresh rms.
 
         Uses the full (unclipped) curve so anchors past t_max don't
         get edge-extrapolated by np.interp.
         """
-        cal_r_s = _CAL_DATA[:, 1] + r_off
-        cal_g_s = _CAL_DATA[:, 2] + g_off
-        scat_90.set_offsets(np.column_stack([cal_g_s, cal_r_s]))
-        for i, ann in enumerate(cal_ann_90):
-            ann.xy = (cal_g_s[i], cal_r_s[i])
-        r_res = cal_r_s - np.interp(_CAL_DATA[:, 0], t, r9)
-        g_res = cal_g_s - np.interp(_CAL_DATA[:, 0], t, g9)
-
-        a_r_s = _CAL_DATA_AFM_10X_20260805[:, 1] + r_off
-        a_g_s = _CAL_DATA_AFM_10X_20260805[:, 2] + g_off
-        scat_afm10.set_offsets(np.column_stack([a_g_s[afm10_ok], a_r_s[afm10_ok]]))
-        scat_afm10_sus.set_offsets(np.column_stack([a_g_s[~afm10_ok], a_r_s[~afm10_ok]]))
-        for i, ann in enumerate(cal_ann_afm10):
-            ann.xy = (a_g_s[i], a_r_s[i])
-        t_ok = _CAL_DATA_AFM_10X_20260805[afm10_ok, 0]
-        a_r_res = a_r_s[afm10_ok] - np.interp(t_ok, t, r9)
-        a_g_res = a_g_s[afm10_ok] - np.interp(t_ok, t, g9)
-
-        r2_r_s = _CAL_DATA_HBN_10X_THICK_R2[:, 1] + r_off
-        r2_g_s = _CAL_DATA_HBN_10X_THICK_R2[:, 2] + g_off
-        scat_afm_r2.set_offsets(np.column_stack([r2_g_s, r2_r_s]))
-        for i, ann in enumerate(cal_ann_r2):
-            ann.xy = (r2_g_s[i], r2_r_s[i])
-        t_r2 = _CAL_DATA_HBN_10X_THICK_R2[:, 0]
-        r2_r_res = r2_r_s - np.interp(t_r2, t, r9)
-        r2_g_res = r2_g_s - np.interp(t_r2, t, g9)
-
-        r2x_r_s = _CAL_DATA_HBN_10X_THICK_R2_EXCLUDED[:, 1] + r_off
-        r2x_g_s = _CAL_DATA_HBN_10X_THICK_R2_EXCLUDED[:, 2] + g_off
-        scat_afm_r2_excl.set_offsets(np.column_stack([r2x_g_s, r2x_r_s]))
-        for i, ann in enumerate(cal_ann_r2_excl):
-            ann.xy = (r2x_g_s[i], r2x_r_s[i])
-
-        r2p_r_s = _CAL_DATA_HBN_10X_THICK_R2_PASTFOLD[:, 1] + r_off
-        r2p_g_s = _CAL_DATA_HBN_10X_THICK_R2_PASTFOLD[:, 2] + g_off
-        scat_afm_r2_pf.set_offsets(np.column_stack([r2p_g_s, r2p_r_s]))
-        for i, ann in enumerate(cal_ann_r2_pf):
-            ann.xy = (r2p_g_s[i], r2p_r_s[i])
-
-        rms_text_90.set_text(
-            f"prev 50x  R rms={np.sqrt(np.mean(r_res**2)):.3f}  G rms={np.sqrt(np.mean(g_res**2)):.3f}\n"
-            f"10x 08-05 R rms={np.sqrt(np.mean(a_r_res**2)):.3f}  G rms={np.sqrt(np.mean(a_g_res**2)):.3f}\n"
-            f"10x r2    R rms={np.sqrt(np.mean(r2_r_res**2)):.3f}  G rms={np.sqrt(np.mean(r2_g_res**2)):.3f}"
-        )
+        for ov in overlays_90:
+            ov.update(r_off, g_off)
+        lines = []
+        for name, ov in (("prev 50x", ov_50x), ("10x 08-05", ov_afm10), ("10x r2", ov_r2)):
+            r_res, g_res = ov.residuals(r_off, g_off, t, r9, g9)
+            lines.append(f"{name:<10}R rms={_rms(r_res):.3f}  G rms={_rms(g_res):.3f}")
+        rms_text_90.set_text("\n".join(lines))
 
     def _update_hbn_285_cal(r_off: float, g_off: float, t: np.ndarray, r2: np.ndarray, g2: np.ndarray):
         """Move the 285nm-panel cal set to the current offsets and refresh rms."""
-        if scat_285 is None:
+        if not ov_285.has_data:
             return
-        c285_r = _CAL_DATA_285[:, 1] + r_off
-        c285_g = _CAL_DATA_285[:, 2] + g_off
-        scat_285.set_offsets(np.column_stack([c285_g, c285_r]))
-        for i, ann in enumerate(cal_ann_285):
-            ann.xy = (c285_g[i], c285_r[i])
-        r_res_285 = c285_r - np.interp(_CAL_DATA_285[:, 0], t, r2)
-        g_res_285 = c285_g - np.interp(_CAL_DATA_285[:, 0], t, g2)
-        rms_text_285.set_text(f"R rms={np.sqrt(np.mean(r_res_285**2)):.3f}  G rms={np.sqrt(np.mean(g_res_285**2)):.3f}")
+        ov_285.update(r_off, g_off)
+        r_res, g_res = ov_285.residuals(r_off, g_off, t, r2, g2)
+        rms_text_285.set_text(f"R rms={_rms(r_res):.3f}  G rms={_rms(g_res):.3f}")
 
     def _draw_hbn(vals: _Vals, res: _TabResult):
         r9, g9, t = res.r90, res.g90, res.t_hbn
@@ -1253,35 +1110,15 @@ def main():
     def _draw_graphene(vals: _Vals, res: _TabResult):
         line_gr.set_data(res.g_gr, res.r_gr)
         _update_annotations(ann_gr, dots_gr, res.r_gr, res.g_gr)
-        if scat_gr is not None:
-            cgr_r = _CAL_DATA_GRAPHENE[:, 1] + vals.r_off_gr
-            cgr_g = _CAL_DATA_GRAPHENE[:, 2] + vals.g_off_gr
-            scat_gr.set_offsets(np.column_stack([cgr_g, cgr_r]))
-            for i, ann in enumerate(cal_ann_gr):
-                ann.xy = (cgr_g[i], cgr_r[i])
-        cal10_r_s = _CAL_DATA_GRAPHITE_10X[:, 1] + vals.r_off_gr
-        cal10_g_s = _CAL_DATA_GRAPHITE_10X[:, 2] + vals.g_off_gr
-        scat_gr_10x_ok.set_offsets(np.column_stack([cal10_g_s[rel], cal10_r_s[rel]]))
-        scat_gr_10x_clip.set_offsets(np.column_stack([cal10_g_s[~rel], cal10_r_s[~rel]]))
-        for i, ann in enumerate(cal_ann_gr_10x):
-            ann.xy = (cal10_g_s[i], cal10_r_s[i])
-        cal10_thin_r = _CAL_DATA_GRAPHENE_10X[:, 1] + vals.r_off_gr
-        cal10_thin_g = _CAL_DATA_GRAPHENE_10X[:, 2] + vals.g_off_gr
-        scat_gr_10x_thin.set_offsets(np.column_stack([cal10_thin_g, cal10_thin_r]))
-        for i, ann in enumerate(cal_ann_gr_10x_thin):
-            ann.xy = (cal10_thin_g[i], cal10_thin_r[i])
+        for ov in overlays_gr:
+            ov.update(vals.r_off_gr, vals.g_off_gr)
 
     def _draw_wse2(vals: _Vals, res: _TabResult):
         rw, gw = res.r_wse2, res.g_wse2
         line_wse2.set_data(gw[:WSE2_PLOT_LAYERS], rw[:WSE2_PLOT_LAYERS])
         ax_wse2.set_title(f"WSe₂ · {vals.oxide_wse2:.0f} nm SiO₂")
         _update_annotations(ann_wse2, dots_wse2, rw, gw)
-        if scat_wse2 is not None:
-            cwse2_r = _CAL_DATA_WSE2[:, 1] + vals.r_off_wse2
-            cwse2_g = _CAL_DATA_WSE2[:, 2] + vals.g_off_wse2
-            scat_wse2.set_offsets(np.column_stack([cwse2_g, cwse2_r]))
-            for i, ann in enumerate(cal_ann_wse2):
-                ann.xy = (cwse2_g[i], cwse2_r[i])
+        ov_wse2.update(vals.r_off_wse2, vals.g_off_wse2)
 
     def _draw_active(vals: _Vals, res: _TabResult):
         if vals.tab == "hbn":
