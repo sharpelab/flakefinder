@@ -62,6 +62,9 @@ gui_state.json
 # Subtask worktrees
 .worktrees/
 
+# Subtask agent memory (lives in ~/.claude/agent-memory/; repo path is a compat symlink)
+.claude/agent-memory/
+
 # Scan and experiment data (large, generated)
 scans/*
 !scans/.gitkeep

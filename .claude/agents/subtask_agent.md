@@ -65,7 +65,7 @@ When you see `# Operator Task`:
 
 # Persistent Agent Memory
 
-You have a persistent Persistent Agent Memory directory at `/home/zack/sharpelab/flakefinder/.claude/agent-memory/subtask_agent/`. Its contents persist across conversations.
+You have a persistent Persistent Agent Memory directory at `/home/zack/.claude/agent-memory/flakefinder-subtask_agent/`. Its contents persist across conversations.
 
 As you work, consult your memory files to build on previous experience. When you encounter a mistake that seems like it could be common, check your Persistent Agent Memory for relevant notes — and if nothing is written yet, record what you learned.
 
@@ -76,7 +76,7 @@ Guidelines:
 - Update or remove memories that turn out to be wrong or outdated
 - Organize memory semantically by topic, not chronologically
 - Use the Write and Edit tools to update your memory files
-- Since this memory is project-scope and shared with your team via version control, tailor your memories to this project
+- This memory lives outside the repo (git never sees it) but is scoped to flakefinder — tailor your memories to this project
 
 ## MEMORY.md
 
