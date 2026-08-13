@@ -197,11 +197,11 @@ visibility.
 Single tier-1 path for the unclipped gain-2.0 regime:
 
 - **Tier 1**: `cal_dist < 0.30` to the arc, projected thickness inside the
-  50–100 nm window, R ∈ [2.9, 4.3), G ∈ [2.7, 5.4), perim_ratio < 1.5,
-  aspect < 6, size ≥ 500 µm². The R/G box predates this table's arc, whose
-  G-peak (5.32) + 0.30 gate reaches past the box's G upper bound: on
-  run_20260804_1303, 25 of 575 otherwise-T1 detections (dedup) fall in
-  G ∈ [5.4, 5.65) and demote to tier 2 on the box alone.
+  50–100 nm window, R ∈ [2.9, 4.3), G ∈ [2.7, 5.65), perim_ratio < 1.5,
+  aspect < 6, size ≥ 500 µm². The R/G box is the 50–100 nm arc segment
+  extent (G-peak 5.32) ± the 0.30 cal gate — geometrically subsumed by
+  window + cal_dist, kept as a coarse independent sanity bound. The box
+  must be re-derived whenever the cal table moves.
 - **Tier 2**: `cal_dist < 0.60` + shape/size (includes out-of-window flakes
   that otherwise pass tier-1 gates).
 - Entropy gates disabled (99.0): band flakes have every pixel contrast
@@ -244,10 +244,10 @@ distances to the wrong calibration.
 
 | Run (gain) | detections (dedup) | T1 |
 |---|---|---|
-| run_20260804_1303 (2.0) | 9 408 | 550 |
+| run_20260804_1303 (2.0) | 9 408 | 575 |
 
 T1 thickness distribution (nearest-table-point projection, 10 nm bins):
-183 / 55 / 144 / 72 / 71 / 25 across the 50s / 60s / 70s / 80s / 90s /
+183 / 73 / 151 / 72 / 71 / 25 across the 50s / 60s / 70s / 80s / 90s /
 100 nm bands. Top ranks are large, low-cal_dist (< 0.10) flakes on the
 G-peak segment of the arc. Rerank outputs under
 `<run>/rerank/v4_zackfit/`.

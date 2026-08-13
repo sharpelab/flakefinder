@@ -872,7 +872,7 @@ class DetectorConfig:
             # Geometrically subsumed by window + cal_dist; kept as a coarse
             # independent sanity bound.
             tier1_g_min=2.7,
-            tier1_g_max=5.4,
+            tier1_g_max=5.65,
             tier1_r_max=4.3,
             tier1_r_min=2.9,
             tier1_entropy_max=99.0,  # disabled: entropy is identically 0.0 for band flakes
