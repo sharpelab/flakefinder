@@ -75,7 +75,8 @@ class _Illuminant(NamedTuple):
 # machine).  The pipeline_* entries are the full K5C output model from the
 # 2026-08-06 ColorChecker session: raw chain (Elijah lamp × per-objective
 # T²) mixed through CCM @ diag(hBN scan WB requests) — the whole optics +
-# camera chain, so leave the Trans toggle "off" with those.
+# camera chain, so the K5C presets pair them with transmission "off"
+# (adding T² on top would double-count the objective).
 _ILLUM_3200 = _blackbody(_IMX183_WAVELENGTHS, 3200.0)
 _ILLUM_ELIJAH = load_elijah_led(_IMX183_WAVELENGTHS)
 _PIPELINE = derive_pipeline(_IMX183_WAVELENGTHS)
@@ -135,6 +136,35 @@ _TRANSMISSIONS: dict[str, _Transmission] = {
         label="10x (T²)",
         factor=load_objective_transmission_10x(_IMX183_WAVELENGTHS) ** 2,
     ),
+}
+
+
+class _LightPreset(NamedTuple):
+    """One complete light-path configuration, selectable from the preset row.
+
+    A preset pins every light-path knob at once: illuminant, objective
+    transmission, glare floors, and (for K5C presets) the measured NA.
+    ``obj`` names the objective whose NA/glare floors apply; None for the
+    legacy raw-channel views."""
+
+    label: str
+    illum: str
+    trans: str
+    glare: bool
+    obj: str | None = None
+
+
+_LIGHT_PRESETS: dict[str, _LightPreset] = {
+    # Legacy raw-channel views (no CCM/WB mixing, no glare).
+    "3200K": _LightPreset("3200K", "halogen_3200K", "off", glare=False),
+    # Halogen × T²(10x) — the 2026-08-13 fit's operating point (default).
+    "3200K_T2": _LightPreset("3200K·T²", "halogen_3200K", "10x", glare=False),
+    "led": _LightPreset("LED", "elijah_led", "off", glare=False),
+    # Full K5C output model per objective: lamp × T², CCM @ WB mix, measured
+    # glare floors, measured NA.  T² already lives in the pipeline chain.
+    "k5c_10x": _LightPreset("K5C 10x", "pipeline_10x", "off", glare=True, obj="10x"),
+    "k5c_20x": _LightPreset("K5C 20x", "pipeline_20x", "off", glare=True, obj="20x"),
+    "k5c_50x": _LightPreset("K5C 50x", "pipeline_50x", "off", glare=True, obj="50x"),
 }
 
 n_sio2 = _interp_index(lamb, _SIO2_DATA)
@@ -398,9 +428,7 @@ def _update_annotations(ann_list, dots_artist, r_t, g_t):
 
 # Axis positions (left, bottom, width, height)
 _PLOT_BOTTOM = 0.38
-_PLOT_HEIGHT = 0.52
-_HBN_LEFT_POS = (0.06, _PLOT_BOTTOM, 0.42, _PLOT_HEIGHT)
-_HBN_RIGHT_POS = (0.55, _PLOT_BOTTOM, 0.42, _PLOT_HEIGHT)
+_PLOT_HEIGHT = 0.48  # top at 0.86, below the two button rows
 _SINGLE_POS = (0.08, _PLOT_BOTTOM, 0.86, _PLOT_HEIGHT)
 # Park hidden panels off-canvas so they can't intercept mouse grabs (and
 # silently eat clicks destined for sliders/buttons beneath them).
@@ -429,6 +457,7 @@ class _Vals:
     g_off_gr: float
     r_off_wse2: float
     g_off_wse2: float
+    t_max: float  # display-only: max plotted thickness (nm) on the hBN tabs
 
 
 _EMPTY_ARR = np.zeros(0, dtype=float)
@@ -447,10 +476,11 @@ class _TabResult(NamedTuple):
     has no such check and the shared default is safe since we never mutate.
     """
 
-    # hBN tab has two panels' worth of data
+    # hBN 90nm tab
     r90: np.ndarray = _EMPTY_ARR
     g90: np.ndarray = _EMPTY_ARR
     t_hbn: np.ndarray = _EMPTY_ARR
+    # hBN 285nm tab
     r285: np.ndarray = _EMPTY_ARR
     g285: np.ndarray = _EMPTY_ARR
     # Graphene
@@ -476,9 +506,8 @@ def _compute_for_tab(vals: _Vals, n_wse2_arr: np.ndarray) -> _TabResult:
     blue_lit = illum.blue_lit * trans_factor if illum.blue_lit is not None else None
     mix = illum.mix
     if vals.tab == "hbn":
-        hbn_n = complex(vals.n)
         r90, g90, t_hbn = compute_rg(
-            hbn_n,
+            complex(vals.n),
             vals.oxide,
             vals.na,
             max_layers=HBN_MAX_LAYERS,
@@ -488,8 +517,10 @@ def _compute_for_tab(vals: _Vals, n_wse2_arr: np.ndarray) -> _TabResult:
             mix=mix,
             glare_f=glare_f,
         )
-        r285, g285, _ = compute_rg(
-            hbn_n,
+        return _TabResult(r90=r90, g90=g90, t_hbn=t_hbn)
+    if vals.tab == "hbn285":
+        r285, g285, t_hbn = compute_rg(
+            complex(vals.n),
             vals.oxide_285,
             vals.na,
             max_layers=HBN_MAX_LAYERS,
@@ -499,7 +530,7 @@ def _compute_for_tab(vals: _Vals, n_wse2_arr: np.ndarray) -> _TabResult:
             mix=mix,
             glare_f=glare_f,
         )
-        return _TabResult(r90=r90, g90=g90, t_hbn=t_hbn, r285=r285, g285=g285)
+        return _TabResult(r285=r285, g285=g285, t_hbn=t_hbn)
     if vals.tab == "graphene":
         gr_n = vals.n_gr - 1j * vals.k
         rg, gg, tg = compute_rg(
@@ -557,16 +588,20 @@ def main():
         "g_off_gr": 0.0,
         "r_off_wse2": 0.0,
         "g_off_wse2": 0.0,
+        "t_max": 120.0,
     }
 
     n_wse2_arr = n_wse2(lamb)
 
     # --- Create all axes upfront ---
-    ax_90 = fig.add_axes(_HBN_LEFT_POS)
-    ax_285 = fig.add_axes(_HBN_RIGHT_POS)
+    ax_90 = fig.add_axes(_SINGLE_POS)
+    ax_285 = fig.add_axes(_SINGLE_POS)
     ax_gr = fig.add_axes(_SINGLE_POS)
     ax_wse2 = fig.add_axes(_SINGLE_POS)
 
+    # Light-path state.  Driven by the preset row; individual knobs (NA,
+    # Glare) stay adjustable and drop the selection to "custom" when touched.
+    active_preset: dict[str, str | None] = {"name": "3200K_T2"}
     active_illum = {"name": "halogen_3200K"}
     active_trans = {"name": "10x"}
     # Objective selector: presets illum/glare/NA to the measured values for
@@ -599,17 +634,20 @@ def main():
             g_off_gr=init["g_off_gr"],
             r_off_wse2=init["r_off_wse2"],
             g_off_wse2=init["g_off_wse2"],
+            t_max=init["t_max"],
         )
 
     init_vals_hbn = _init_vals("hbn")
+    init_vals_hbn285 = _init_vals("hbn285")
     init_vals_gr = _init_vals("graphene")
     init_vals_wse2 = _init_vals("wse2")
     init_hbn = _compute_for_tab(init_vals_hbn, n_wse2_arr)
+    init_hbn285 = _compute_for_tab(init_vals_hbn285, n_wse2_arr)
     init_gr = _compute_for_tab(init_vals_gr, n_wse2_arr)
     init_wse2 = _compute_for_tab(init_vals_wse2, n_wse2_arr)
 
     r90, g90 = init_hbn.r90, init_hbn.g90
-    r285, g285 = init_hbn.r285, init_hbn.g285
+    r285, g285 = init_hbn285.r285, init_hbn285.g285
     r_gr, g_gr = init_gr.r_gr, init_gr.g_gr
     r_wse2, g_wse2 = init_wse2.r_wse2, init_wse2.g_wse2
 
@@ -993,10 +1031,12 @@ def main():
     # --- Tab buttons ---
     active_tab = {"name": "hbn"}
 
-    ax_tab_hbn = fig.add_axes((0.06, 0.93, 0.08, 0.04))
-    ax_tab_gr = fig.add_axes((0.15, 0.93, 0.10, 0.04))
-    ax_tab_wse2 = fig.add_axes((0.26, 0.93, 0.08, 0.04))
+    ax_tab_hbn = fig.add_axes((0.05, 0.95, 0.055, 0.04))
+    ax_tab_hbn285 = fig.add_axes((0.11, 0.95, 0.075, 0.04))
+    ax_tab_gr = fig.add_axes((0.19, 0.95, 0.085, 0.04))
+    ax_tab_wse2 = fig.add_axes((0.28, 0.95, 0.055, 0.04))
     btn_hbn = Button(ax_tab_hbn, "hBN")
+    btn_hbn285 = Button(ax_tab_hbn285, "hBN 285")
     btn_gr = Button(ax_tab_gr, "Graphene")
     btn_wse2 = Button(ax_tab_wse2, "WSe₂")
 
@@ -1015,11 +1055,13 @@ def main():
         "g_off_gr": ("G offset (gr)", -1.0, 1.0, init["g_off_gr"]),
         "r_off_wse2": ("R offset (wse2)", -1.0, 1.5, init["r_off_wse2"]),
         "g_off_wse2": ("G offset (wse2)", -1.0, 1.0, init["g_off_wse2"]),
+        "t_max": ("t_max (nm)", 50, 1000, init["t_max"]),
     }
 
     # Which sliders each tab uses
     tab_sliders = {
-        "hbn": ["n", "oxide", "oxide_285", "na", "r_off", "g_off"],
+        "hbn": ["n", "oxide", "na", "r_off", "g_off", "t_max"],
+        "hbn285": ["n", "oxide_285", "na", "r_off", "g_off", "t_max"],
         "graphene": ["n_gr", "k", "oxide", "na", "r_off_gr", "g_off_gr"],
         "wse2": ["oxide_wse2", "na", "r_off_wse2", "g_off_wse2"],
     }
@@ -1029,7 +1071,7 @@ def main():
     for key, (label, vmin, vmax, vinit) in slider_defs.items():
         ax_s = fig.add_axes((0.10, 0.01, 0.80, 0.022))  # placeholder position
         ax_s.set_visible(False)
-        vstep = 0.01 if "offset" in label else None
+        vstep = 0.01 if "offset" in label else (10 if key == "t_max" else None)
         s = Slider(ax_s, label, vmin, vmax, valinit=vinit, valstep=vstep)
         all_sliders[key] = (ax_s, s)
 
@@ -1055,6 +1097,7 @@ def main():
             g_off_gr=_slider("g_off_gr").val,
             r_off_wse2=_slider("r_off_wse2").val,
             g_off_wse2=_slider("g_off_wse2").val,
+            t_max=_slider("t_max").val,
         )
 
     def _active_offsets(vals: _Vals) -> tuple[float, float]:
@@ -1067,7 +1110,9 @@ def main():
 
     def _compute_key(tab: str, vals: _Vals) -> tuple:
         if tab == "hbn":
-            return (vals.n, vals.oxide, vals.oxide_285, vals.na, vals.illum, vals.trans, vals.glare)
+            return (vals.n, vals.oxide, vals.na, vals.illum, vals.trans, vals.glare)
+        if tab == "hbn285":
+            return (vals.n, vals.oxide_285, vals.na, vals.illum, vals.trans, vals.glare)
         if tab == "graphene":
             return (vals.n_gr, vals.k, vals.oxide, vals.na, vals.illum, vals.trans, vals.glare)
         return (vals.oxide_wse2, vals.na, vals.illum, vals.trans, vals.glare)
@@ -1075,6 +1120,7 @@ def main():
     # --- Compute cache: last valid result per tab (keyed by inputs that affect it) ---
     cache: dict[str, tuple[tuple, _TabResult]] = {
         "hbn": (_compute_key("hbn", init_vals_hbn), init_hbn),
+        "hbn285": (_compute_key("hbn285", init_vals_hbn285), init_hbn285),
         "graphene": (_compute_key("graphene", init_vals_gr), init_gr),
         "wse2": (_compute_key("wse2", init_vals_wse2), init_wse2),
     }
@@ -1125,7 +1171,8 @@ def main():
     def _update_hbn_90_cal(r_off: float, g_off: float, t: np.ndarray, r9: np.ndarray, g9: np.ndarray):
         """Move both 90nm-panel cal sets to the current offsets and refresh rms.
 
-        Shared by _draw_hbn (full redraw) and _draw_offsets_only.
+        Uses the full (unclipped) curve so anchors past t_max don't
+        get edge-extrapolated by np.interp.
         """
         cal_r_s = _CAL_DATA[:, 1] + r_off
         cal_g_s = _CAL_DATA[:, 2] + g_off
@@ -1172,30 +1219,36 @@ def main():
             f"10x r2    R rms={np.sqrt(np.mean(r2_r_res**2)):.3f}  G rms={np.sqrt(np.mean(r2_g_res**2)):.3f}"
         )
 
+    def _update_hbn_285_cal(r_off: float, g_off: float, t: np.ndarray, r2: np.ndarray, g2: np.ndarray):
+        """Move the 285nm-panel cal set to the current offsets and refresh rms."""
+        if scat_285 is None:
+            return
+        c285_r = _CAL_DATA_285[:, 1] + r_off
+        c285_g = _CAL_DATA_285[:, 2] + g_off
+        scat_285.set_offsets(np.column_stack([c285_g, c285_r]))
+        for i, ann in enumerate(cal_ann_285):
+            ann.xy = (c285_g[i], c285_r[i])
+        r_res_285 = c285_r - np.interp(_CAL_DATA_285[:, 0], t, r2)
+        g_res_285 = c285_g - np.interp(_CAL_DATA_285[:, 0], t, g2)
+        rms_text_285.set_text(f"R rms={np.sqrt(np.mean(r_res_285**2)):.3f}  G rms={np.sqrt(np.mean(g_res_285**2)):.3f}")
+
     def _draw_hbn(vals: _Vals, res: _TabResult):
         r9, g9, t = res.r90, res.g90, res.t_hbn
-        r2, g2 = res.r285, res.g285
-
-        line_90.set_data(g9, r9)
-        _update_annotations(ann_90, dots_90, r9, g9)
+        # t_max clips the drawn curve/labels only; cal rms uses the full
+        # curve so anchors past the cutoff don't get edge-extrapolated.
+        m = t <= vals.t_max
+        line_90.set_data(g9[m], r9[m])
+        _update_annotations(ann_90, dots_90, r9[m], g9[m])
         ax_90.set_title(f"hBN · {vals.oxide:.0f} nm SiO₂")
-
         _update_hbn_90_cal(vals.r_off, vals.g_off, t, r9, g9)
 
-        line_285.set_data(g2, r2)
+    def _draw_hbn285(vals: _Vals, res: _TabResult):
+        r2, g2, t = res.r285, res.g285, res.t_hbn
+        m = t <= vals.t_max
+        line_285.set_data(g2[m], r2[m])
         ax_285.set_title(f"hBN · {vals.oxide_285:.0f} nm SiO₂")
-        _update_annotations(ann_285, dots_285, r2, g2)
-        if scat_285 is not None:
-            c285_r = _CAL_DATA_285[:, 1] + vals.r_off
-            c285_g = _CAL_DATA_285[:, 2] + vals.g_off
-            scat_285.set_offsets(np.column_stack([c285_g, c285_r]))
-            for i, ann in enumerate(cal_ann_285):
-                ann.xy = (c285_g[i], c285_r[i])
-            r_res_285 = c285_r - np.interp(_CAL_DATA_285[:, 0], t, r2)
-            g_res_285 = c285_g - np.interp(_CAL_DATA_285[:, 0], t, g2)
-            rms_text_285.set_text(
-                f"R rms={np.sqrt(np.mean(r_res_285**2)):.3f}  G rms={np.sqrt(np.mean(g_res_285**2)):.3f}"
-            )
+        _update_annotations(ann_285, dots_285, r2[m], g2[m])
+        _update_hbn_285_cal(vals.r_off, vals.g_off, t, r2, g2)
 
     def _draw_graphene(vals: _Vals, res: _TabResult):
         line_gr.set_data(res.g_gr, res.r_gr)
@@ -1233,54 +1286,17 @@ def main():
     def _draw_active(vals: _Vals, res: _TabResult):
         if vals.tab == "hbn":
             _draw_hbn(vals, res)
+        elif vals.tab == "hbn285":
+            _draw_hbn285(vals, res)
         elif vals.tab == "graphene":
             _draw_graphene(vals, res)
         elif vals.tab == "wse2":
             _draw_wse2(vals, res)
 
-    def _draw_offsets_only(vals: _Vals):
-        """Update only the offset-dependent artists on the active tab."""
-        if vals.tab == "hbn":
-            _, res = cache["hbn"]
-            _update_hbn_90_cal(vals.r_off, vals.g_off, res.t_hbn, res.r90, res.g90)
-            if scat_285 is not None:
-                c285_r = _CAL_DATA_285[:, 1] + vals.r_off
-                c285_g = _CAL_DATA_285[:, 2] + vals.g_off
-                scat_285.set_offsets(np.column_stack([c285_g, c285_r]))
-                for i, ann in enumerate(cal_ann_285):
-                    ann.xy = (c285_g[i], c285_r[i])
-                r_res_285 = c285_r - np.interp(_CAL_DATA_285[:, 0], res.t_hbn, res.r285)
-                g_res_285 = c285_g - np.interp(_CAL_DATA_285[:, 0], res.t_hbn, res.g285)
-                rms_text_285.set_text(
-                    f"R rms={np.sqrt(np.mean(r_res_285**2)):.3f}  G rms={np.sqrt(np.mean(g_res_285**2)):.3f}"
-                )
-        elif vals.tab == "graphene":
-            if scat_gr is not None:
-                cgr_r = _CAL_DATA_GRAPHENE[:, 1] + vals.r_off_gr
-                cgr_g = _CAL_DATA_GRAPHENE[:, 2] + vals.g_off_gr
-                scat_gr.set_offsets(np.column_stack([cgr_g, cgr_r]))
-                for i, ann in enumerate(cal_ann_gr):
-                    ann.xy = (cgr_g[i], cgr_r[i])
-            cal10_r_s = _CAL_DATA_GRAPHITE_10X[:, 1] + vals.r_off_gr
-            cal10_g_s = _CAL_DATA_GRAPHITE_10X[:, 2] + vals.g_off_gr
-            scat_gr_10x_ok.set_offsets(np.column_stack([cal10_g_s[rel], cal10_r_s[rel]]))
-            scat_gr_10x_clip.set_offsets(np.column_stack([cal10_g_s[~rel], cal10_r_s[~rel]]))
-            for i, ann in enumerate(cal_ann_gr_10x):
-                ann.xy = (cal10_g_s[i], cal10_r_s[i])
-            cal10_thin_r = _CAL_DATA_GRAPHENE_10X[:, 1] + vals.r_off_gr
-            cal10_thin_g = _CAL_DATA_GRAPHENE_10X[:, 2] + vals.g_off_gr
-            scat_gr_10x_thin.set_offsets(np.column_stack([cal10_thin_g, cal10_thin_r]))
-            for i, ann in enumerate(cal_ann_gr_10x_thin):
-                ann.xy = (cal10_thin_g[i], cal10_thin_r[i])
-        elif vals.tab == "wse2" and scat_wse2 is not None:
-            cwse2_r = _CAL_DATA_WSE2[:, 1] + vals.r_off_wse2
-            cwse2_g = _CAL_DATA_WSE2[:, 2] + vals.g_off_wse2
-            scat_wse2.set_offsets(np.column_stack([cwse2_g, cwse2_r]))
-            for i, ann in enumerate(cal_ann_wse2):
-                ann.xy = (cwse2_g[i], cwse2_r[i])
-
     # --- Main-thread timer: polls worker result, updates artists ---
-    last_drawn_offsets = {"r": init["r_off"], "g": init["g_off"], "tab": "hbn"}
+    # Display-only params (offsets, t_max) redraw from the cached compute
+    # result via _draw_active — no recompute, just artist updates.
+    last_drawn_view = {"r": init["r_off"], "g": init["g_off"], "t_max": init["t_max"], "tab": "hbn"}
 
     def _poll_result():
         with cond:
@@ -1296,25 +1312,28 @@ def main():
             if vals.tab == active_tab["name"]:
                 _draw_active(vals, res)
                 r_off, g_off = _active_offsets(vals)
-                last_drawn_offsets["r"] = r_off
-                last_drawn_offsets["g"] = g_off
-                last_drawn_offsets["tab"] = vals.tab
+                last_drawn_view["r"] = r_off
+                last_drawn_view["g"] = g_off
+                last_drawn_view["t_max"] = vals.t_max
+                last_drawn_view["tab"] = vals.tab
                 dirty = True
 
-        # Offset-only redraw: if offsets changed since last draw and current tab's
-        # compute is up-to-date, update the scatter/rms without recomputing.
+        # Display-only redraw: if offsets/t_max changed since last draw and the
+        # tab's compute is up-to-date, redraw from cache without recomputing.
         key = _compute_key(vals_now.tab, vals_now)
-        cached_key, _ = cache[vals_now.tab]
+        cached_key, cached_res = cache[vals_now.tab]
         r_off_now, g_off_now = _active_offsets(vals_now)
         if key == cached_key and (
-            r_off_now != last_drawn_offsets["r"]
-            or g_off_now != last_drawn_offsets["g"]
-            or last_drawn_offsets["tab"] != vals_now.tab
+            r_off_now != last_drawn_view["r"]
+            or g_off_now != last_drawn_view["g"]
+            or vals_now.t_max != last_drawn_view["t_max"]
+            or last_drawn_view["tab"] != vals_now.tab
         ):
-            _draw_offsets_only(vals_now)
-            last_drawn_offsets["r"] = r_off_now
-            last_drawn_offsets["g"] = g_off_now
-            last_drawn_offsets["tab"] = vals_now.tab
+            _draw_active(vals_now, cached_res)
+            last_drawn_view["r"] = r_off_now
+            last_drawn_view["g"] = g_off_now
+            last_drawn_view["t_max"] = vals_now.t_max
+            last_drawn_view["tab"] = vals_now.tab
             dirty = True
 
         if dirty:
@@ -1344,22 +1363,16 @@ def main():
             ax_s, _ = all_sliders[key]
             ax_s.set_position((0.10, 0.26 - i * 0.033, 0.80, 0.022))
 
+    tab_axes = {"hbn": ax_90, "hbn285": ax_285, "graphene": ax_gr, "wse2": ax_wse2}
+    tab_btn_axes = {"hbn": ax_tab_hbn, "hbn285": ax_tab_hbn285, "graphene": ax_tab_gr, "wse2": ax_tab_wse2}
+
     def show_tab(name):
         active_tab["name"] = name
-        is_hbn = name == "hbn"
-        is_gr = name == "graphene"
-        is_wse2 = name == "wse2"
-        ax_90.set_visible(is_hbn)
-        ax_285.set_visible(is_hbn)
-        ax_gr.set_visible(is_gr)
-        ax_wse2.set_visible(is_wse2)
-        ax_90.set_position(_HBN_LEFT_POS if is_hbn else _OFFSCREEN_POS)
-        ax_285.set_position(_HBN_RIGHT_POS if is_hbn else _OFFSCREEN_POS)
-        ax_gr.set_position(_SINGLE_POS if is_gr else _OFFSCREEN_POS)
-        ax_wse2.set_position(_SINGLE_POS if is_wse2 else _OFFSCREEN_POS)
-        ax_tab_hbn.set_facecolor("0.85" if is_hbn else "0.95")
-        ax_tab_gr.set_facecolor("0.85" if is_gr else "0.95")
-        ax_tab_wse2.set_facecolor("0.85" if is_wse2 else "0.95")
+        for tab, ax in tab_axes.items():
+            active = tab == name
+            ax.set_visible(active)
+            ax.set_position(_SINGLE_POS if active else _OFFSCREEN_POS)
+            tab_btn_axes[tab].set_facecolor("0.85" if active else "0.95")
         _layout_sliders(name)
 
         # Redraw from cache for the new tab, then request a fresh compute if stale.
@@ -1367,9 +1380,10 @@ def main():
         _, cached_res = cache[name]
         _draw_active(vals, cached_res)
         r_off, g_off = _active_offsets(vals)
-        last_drawn_offsets["r"] = r_off
-        last_drawn_offsets["g"] = g_off
-        last_drawn_offsets["tab"] = name
+        last_drawn_view["r"] = r_off
+        last_drawn_view["g"] = g_off
+        last_drawn_view["t_max"] = vals.t_max
+        last_drawn_view["tab"] = name
         _request_compute(vals)
         fig.canvas.draw_idle()
 
@@ -1377,87 +1391,92 @@ def main():
         s.on_changed(on_slider)
 
     btn_hbn.on_clicked(lambda _: show_tab("hbn"))
+    btn_hbn285.on_clicked(lambda _: show_tab("hbn285"))
     btn_gr.on_clicked(lambda _: show_tab("graphene"))
     btn_wse2.on_clicked(lambda _: show_tab("wse2"))
 
-    # Objective selector — presets measured illumination, glare, and NA for
-    # one objective in a single click.  Sliders stay draggable afterward.
-    ax_obj = fig.add_axes((0.35, 0.93, 0.075, 0.04))
-    btn_obj = Button(ax_obj, "Obj: off")
+    # --- Light-path preset row ---
+    # One button per named light path; the highlighted button is the active
+    # configuration.  Touching an individual light-path knob afterward (NA
+    # slider, Glare toggle) drops the selection to "custom" so the row always
+    # tells you whether you're looking at a named configuration or a
+    # hand-tuned one.
+    preset_btns: dict[str, Button] = {}
+    for i, (_pname, _preset) in enumerate(_LIGHT_PRESETS.items()):
+        ax_p = fig.add_axes((0.05 + i * 0.088, 0.905, 0.08, 0.04))
+        b = Button(ax_p, _preset.label)
+        b.label.set_fontsize(9)
+        preset_btns[_pname] = b
 
-    # Illuminant toggle — cycles through _ILLUMINANTS and re-renders the active tab.
-    ax_illum = fig.add_axes((0.435, 0.93, 0.15, 0.04))
-    btn_illum = Button(ax_illum, f"Illum: {_ILLUMINANTS[active_illum['name']].label}")
+    custom_text = fig.text(0.585, 0.92, "custom", color="tab:red", fontsize=9, fontweight="bold", visible=False)
 
-    # Glare toggle — deflates theory by 1/(1+f) with the selected objective's
-    # measured floors.  No-op until an objective is selected.
-    ax_glare = fig.add_axes((0.595, 0.93, 0.075, 0.04))
+    # Glare toggle — deflates theory with the active objective's measured
+    # floors.  No-op for the legacy presets (no objective selected).
+    ax_glare = fig.add_axes((0.65, 0.905, 0.08, 0.04))
     btn_glare = Button(ax_glare, "Glare: off")
+    btn_glare.label.set_fontsize(9)
 
-    def _refresh_toggle_labels():
-        btn_obj.label.set_text(f"Obj: {active_obj['name']}")
-        btn_illum.label.set_text(f"Illum: {_ILLUMINANTS[active_illum['name']].label}")
+    # Guards the NA/offset writes done by apply_preset itself from being
+    # mistaken for manual knob changes.
+    _suppress_custom = [False]
+
+    def _refresh_lightpath_ui():
+        sel = active_preset["name"]
+        for pname, btn in preset_btns.items():
+            btn.ax.set_facecolor("0.85" if pname == sel else "0.95")
+        custom_text.set_visible(sel is None)
         btn_glare.label.set_text(f"Glare: {_glare_name()}")
 
-    def toggle_illum(_event=None):
-        names = list(_ILLUMINANTS.keys())
-        active_illum["name"] = names[(names.index(active_illum["name"]) + 1) % len(names)]
-        _refresh_toggle_labels()
-        # Request a fresh compute for the active tab; the new illum name is in
-        # the cache key so the request will miss and dispatch.  Other tabs will
-        # recompute lazily on their next show.
-        _request_compute(_read_vals(active_tab["name"]))
-        fig.canvas.draw_idle()
+    def _mark_custom():
+        if active_preset["name"] is not None:
+            active_preset["name"] = None
+            _refresh_lightpath_ui()
 
-    btn_illum.on_clicked(toggle_illum)
-
-    def select_obj(_event=None):
-        names = ["off", *_GLARE_F.keys()]
-        active_obj["name"] = names[(names.index(active_obj["name"]) + 1) % len(names)]
-        obj = active_obj["name"]
-        if obj == "off":
-            glare_on["flag"] = False
-        else:
-            # Preset the measured physical inputs; hand offsets go to 0 so the
+    def apply_preset(pname: str):
+        preset = _LIGHT_PRESETS[pname]
+        active_preset["name"] = pname
+        active_illum["name"] = preset.illum
+        active_trans["name"] = preset.trans
+        active_obj["name"] = preset.obj or "off"
+        glare_on["flag"] = preset.glare
+        if preset.obj is not None:
+            # Measured physical inputs; hand offsets go to 0 so the
             # physical-only match is what's judged.  All still adjustable.
-            active_illum["name"] = f"pipeline_{obj}"
-            glare_on["flag"] = True
-            _slider("na").set_val(OBJECTIVE_NA[obj])
-            for key in ("r_off", "g_off", "r_off_gr", "g_off_gr", "r_off_wse2", "g_off_wse2"):
-                _slider(key).set_val(0.0)
-        _refresh_toggle_labels()
+            _suppress_custom[0] = True
+            try:
+                _slider("na").set_val(OBJECTIVE_NA[preset.obj])
+                for key in ("r_off", "g_off", "r_off_gr", "g_off_gr", "r_off_wse2", "g_off_wse2"):
+                    _slider(key).set_val(0.0)
+            finally:
+                _suppress_custom[0] = False
+        _refresh_lightpath_ui()
         _request_compute(_read_vals(active_tab["name"]))
         fig.canvas.draw_idle()
 
-    btn_obj.on_clicked(select_obj)
+    for _pname, _btn in preset_btns.items():
+        _btn.on_clicked(lambda _e, p=_pname: apply_preset(p))
+
+    def _na_changed(_val=None):
+        if not _suppress_custom[0]:
+            _mark_custom()
+
+    _slider("na").on_changed(_na_changed)
 
     def toggle_glare(_event=None):
         if active_obj["name"] not in _GLARE_F:
             return
         glare_on["flag"] = not glare_on["flag"]
-        _refresh_toggle_labels()
+        _mark_custom()
+        _refresh_lightpath_ui()
         _request_compute(_read_vals(active_tab["name"]))
         fig.canvas.draw_idle()
 
     btn_glare.on_clicked(toggle_glare)
 
-    # Objective transmission toggle — multiplies bandpass×illuminant by T(λ)².
-    # NB: the measured_* illuminants already include the full optics chain, so
-    # leave this "off" with those (it would double-count the objective).
-    ax_trans = fig.add_axes((0.68, 0.93, 0.115, 0.04))
-    btn_trans = Button(ax_trans, f"Trans: {_TRANSMISSIONS[active_trans['name']].label}")
-
-    def toggle_trans(_event=None):
-        names = list(_TRANSMISSIONS.keys())
-        active_trans["name"] = names[(names.index(active_trans["name"]) + 1) % len(names)]
-        btn_trans.label.set_text(f"Trans: {_TRANSMISSIONS[active_trans['name']].label}")
-        _request_compute(_read_vals(active_tab["name"]))
-        fig.canvas.draw_idle()
-
-    btn_trans.on_clicked(toggle_trans)
+    _refresh_lightpath_ui()
 
     # Export button — lives in the tab-button row so it's always reachable
-    ax_btn = fig.add_axes((0.88, 0.93, 0.10, 0.04))
+    ax_btn = fig.add_axes((0.88, 0.95, 0.10, 0.04))
     btn_export = Button(ax_btn, "Export all")
     export_path = Path("/tmp/hbn_contrast_params.json")
 
@@ -1472,7 +1491,7 @@ def main():
         # With lazy per-tab compute, non-active tabs can carry stale cache
         # entries.  Synchronously refresh any tab whose cached inputs don't
         # match the current sliders before we dump the file.
-        for tab_name in ("hbn", "graphene", "wse2"):
+        for tab_name in ("hbn", "hbn285", "graphene", "wse2"):
             tab_vals = _read_vals(tab_name)
             key = _compute_key(tab_name, tab_vals)
             cached_key, _ = cache[tab_name]
@@ -1503,6 +1522,7 @@ def main():
         wse2_cal = _sample_cal(wse2_res.r_wse2, wse2_res.g_wse2, wse2_res.t_wse2, r_off_wse2, g_off_wse2)
 
         params = {
+            "light_path": active_preset["name"] or "custom",
             "objective": active_obj["name"],
             "illuminant": active_illum["name"],
             "transmission": active_trans["name"],
