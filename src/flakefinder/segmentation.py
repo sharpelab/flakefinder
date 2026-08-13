@@ -144,21 +144,27 @@ GRAPHENE_THICK_90NM_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
 )
 
 # Theory-derived calibration for thick hBN (50-100 nm target band) on 90 nm
-# SiO₂. Generated headlessly (2026-08-06) from the transfer-matrix code path
-# the widget's "Export all" button uses (scripts/hbn_contrast_widget.py
-# compute_rg). n is fit to the 9 Toghrul AFM anchors from run_20260804_1354
-# (scripts/hbn_contrast.py _CAL_DATA_HBN_10X_THICK, flake 98982 excluded);
-# all other parameters pinned to the v2 values:
-#   n_hBN                  = 2.269 (constant, real; AFM-fit, NA fixed)
+# SiO₂. Generated (2026-08-13, fit_hbn_thick_anchors.py --export --table)
+# from the transfer-matrix code path the widget uses (hbn_contrast_widget
+# compute_rg). Parameters are Zack's widget fit against the combined
+# round-1 (scan 287) + round-2 (scan 288) Toghrul AFM anchor sets
+# (hbn_contrast.py _CAL_DATA_HBN_10X_THICK{,_R2}; 98982 and 99280
+# excluded), balancing the thin-band 50x points and the thick anchors:
+#   n_hBN                  = 2.165 (constant, real)
 #   t_oxide                = 90.0 nm
 #   NA                     = 0.25
 #   illuminant             = halogen_3200K
-#   objective transmission = off
-#   r_offset               = +0.54
-#   g_offset               = -0.20
+#   objective transmission = 10x T²
+#   glare                  = off
+#   r_offset               = +0.60
+#   g_offset               = -0.30
 #   convention             = camera space = model - offset
 #   hBN layer thickness    = 0.333 nm
 #   sampling               = 2 nm, 40 -> 110 nm
+# Known bias: re-predicts the round-2 anchors +11 ± 3 nm high (dt along
+# curve); accepted 2026-08-13 in favour of whole-dataset consistency.
+# Reads ≥ ~85 nm are RG-ambiguous with multi-hundred-nm flakes (past-fold
+# aliasing) — human shadow-check at review, per Zack.
 # The table deliberately extends past the 50-100 nm target band so
 # out-of-band flakes get honest thickness estimates instead of clamping to
 # the table endpoints; the band itself is enforced by the preset's
@@ -167,42 +173,42 @@ GRAPHENE_THICK_90NM_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
 # layers = round(t_nm / 0.333) — literally the hBN layer count.
 # See docs/hbn_thick_50_100_calibration.md.
 HBN_THICK_50_100_90NM_CAL_POINTS: tuple[CalPointRG, ...] = (
-    CalPointRG(layers=120, r=2.4228, g=4.2539),  # 40 nm
-    CalPointRG(layers=126, r=2.6067, g=4.3952),  # 42 nm
-    CalPointRG(layers=132, r=2.7771, g=4.5217),  # 44 nm
-    CalPointRG(layers=138, r=2.9342, g=4.6340),  # 46 nm
-    CalPointRG(layers=144, r=3.0783, g=4.7326),  # 48 nm
-    CalPointRG(layers=150, r=3.2098, g=4.8182),  # 50 nm
-    CalPointRG(layers=156, r=3.3292, g=4.8913),  # 52 nm
-    CalPointRG(layers=162, r=3.4369, g=4.9524),  # 54 nm
-    CalPointRG(layers=168, r=3.5334, g=5.0017),  # 56 nm
-    CalPointRG(layers=174, r=3.6193, g=5.0396),  # 58 nm
-    CalPointRG(layers=180, r=3.6948, g=5.0664),  # 60 nm
-    CalPointRG(layers=186, r=3.7604, g=5.0820),  # 62 nm
-    CalPointRG(layers=192, r=3.8166, g=5.0867),  # 64 nm
-    CalPointRG(layers=198, r=3.8635, g=5.0802),  # 66 nm
-    CalPointRG(layers=204, r=3.9015, g=5.0624),  # 68 nm
-    CalPointRG(layers=210, r=3.9309, g=5.0332),  # 70 nm
-    CalPointRG(layers=216, r=3.9518, g=4.9923),  # 72 nm
-    CalPointRG(layers=222, r=3.9644, g=4.9393),  # 74 nm
-    CalPointRG(layers=228, r=3.9690, g=4.8737),  # 76 nm
-    CalPointRG(layers=234, r=3.9655, g=4.7953),  # 78 nm
-    CalPointRG(layers=240, r=3.9541, g=4.7035),  # 80 nm
-    CalPointRG(layers=246, r=3.9349, g=4.5980),  # 82 nm
-    CalPointRG(layers=252, r=3.9077, g=4.4782),  # 84 nm
-    CalPointRG(layers=258, r=3.8725, g=4.3441),  # 86 nm
-    CalPointRG(layers=264, r=3.8290, g=4.1954),  # 88 nm
-    CalPointRG(layers=270, r=3.7770, g=4.0325),  # 90 nm
-    CalPointRG(layers=276, r=3.7161, g=3.8559),  # 92 nm
-    CalPointRG(layers=282, r=3.6462, g=3.6668),  # 94 nm
-    CalPointRG(layers=288, r=3.5667, g=3.4669),  # 96 nm
-    CalPointRG(layers=294, r=3.4774, g=3.2586),  # 98 nm
-    CalPointRG(layers=300, r=3.3778, g=3.0448),  # 100 nm
-    CalPointRG(layers=306, r=3.2677, g=2.8291),  # 102 nm
-    CalPointRG(layers=312, r=3.1469, g=2.6153),  # 104 nm
-    CalPointRG(layers=318, r=3.0150, g=2.4076),  # 106 nm
-    CalPointRG(layers=324, r=2.8721, g=2.2099),  # 108 nm
-    CalPointRG(layers=330, r=2.7180, g=2.0262),  # 110 nm
+    CalPointRG(layers=120, r=2.3938, g=4.3854),  # 40 nm
+    CalPointRG(layers=126, r=2.5796, g=4.5341),  # 42 nm
+    CalPointRG(layers=132, r=2.7522, g=4.6680),  # 44 nm
+    CalPointRG(layers=138, r=2.9118, g=4.7878),  # 46 nm
+    CalPointRG(layers=144, r=3.0587, g=4.8940),  # 48 nm
+    CalPointRG(layers=150, r=3.1932, g=4.9872),  # 50 nm
+    CalPointRG(layers=156, r=3.3157, g=5.0680),  # 52 nm
+    CalPointRG(layers=162, r=3.4266, g=5.1368),  # 54 nm
+    CalPointRG(layers=168, r=3.5263, g=5.1940),  # 56 nm
+    CalPointRG(layers=174, r=3.6154, g=5.2400),  # 58 nm
+    CalPointRG(layers=180, r=3.6942, g=5.2750),  # 60 nm
+    CalPointRG(layers=186, r=3.7631, g=5.2992),  # 62 nm
+    CalPointRG(layers=192, r=3.8225, g=5.3128),  # 64 nm
+    CalPointRG(layers=198, r=3.8727, g=5.3158),  # 66 nm
+    CalPointRG(layers=204, r=3.9139, g=5.3082),  # 68 nm
+    CalPointRG(layers=210, r=3.9464, g=5.2897),  # 70 nm
+    CalPointRG(layers=216, r=3.9704, g=5.2603),  # 72 nm
+    CalPointRG(layers=222, r=3.9861, g=5.2198),  # 74 nm
+    CalPointRG(layers=228, r=3.9935, g=5.1677),  # 76 nm
+    CalPointRG(layers=234, r=3.9928, g=5.1037),  # 78 nm
+    CalPointRG(layers=240, r=3.9839, g=5.0275),  # 80 nm
+    CalPointRG(layers=246, r=3.9670, g=4.9386),  # 82 nm
+    CalPointRG(layers=252, r=3.9419, g=4.8366),  # 84 nm
+    CalPointRG(layers=258, r=3.9085, g=4.7211),  # 86 nm
+    CalPointRG(layers=264, r=3.8667, g=4.5919),  # 88 nm
+    CalPointRG(layers=270, r=3.8163, g=4.4488),  # 90 nm
+    CalPointRG(layers=276, r=3.7570, g=4.2918),  # 92 nm
+    CalPointRG(layers=282, r=3.6885, g=4.1212),  # 94 nm
+    CalPointRG(layers=288, r=3.6106, g=3.9379),  # 96 nm
+    CalPointRG(layers=294, r=3.5227, g=3.7429),  # 98 nm
+    CalPointRG(layers=300, r=3.4247, g=3.5380),  # 100 nm
+    CalPointRG(layers=306, r=3.3162, g=3.3253),  # 102 nm
+    CalPointRG(layers=312, r=3.1969, g=3.1075),  # 104 nm
+    CalPointRG(layers=318, r=3.0666, g=2.8876),  # 106 nm
+    CalPointRG(layers=324, r=2.9251, g=2.6693),  # 108 nm
+    CalPointRG(layers=330, r=2.7724, g=2.4560),  # 110 nm
 )
 
 
