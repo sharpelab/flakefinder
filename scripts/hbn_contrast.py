@@ -575,6 +575,59 @@ _CAL_DATA_HBN_10X_THICK = np.array(
 # Mask for fitting: excludes 98982 (see docs/hbn_thick_50_100_calibration.md).
 _CAL_DATA_HBN_10X_THICK_FIT_OK = np.array([True, True, True, True, True, True, True, False, True])
 
+# Round-2 thick-hBN AFM anchors (90 nm SiO₂, 10x, gain 2.0, legacy 5800K
+# space, hBN WB 1.41/1.02/2.51).  AFM by Toghrul on the scan-288 favorites
+# (run_20260804_1303 upload "hbn_very_thick_1_10x_v3"), notebook 2026-08-11.
+# Thickness is the AFM-range midpoint; R/G are flake_mean_r/g from
+# downloads/flakes_scan288_afm/flakes_meta.json.  Covers the 55-85 nm band
+# round 1 lacked.  Format: [afm_midpoint_nm, R_contrast, G_contrast]
+_CAL_DATA_HBN_10X_THICK_R2 = np.array(
+    [
+        [55.5, 3.639, 5.207],  # flake 99228 (c1/f3), AFM 55-56
+        [55.5, 3.913, 5.262],  # flake 99307 (c5/f6), AFM 55-56
+        [56.5, 3.827, 5.186],  # flake 99232 (c1/f7), AFM 55-58
+        [59.5, 3.921, 5.052],  # flake 99334 (c6/f13), AFM 59-60
+        [66.0, 4.004, 5.030],  # flake 99234 (c1/f9), AFM 65-67
+        [69.5, 3.848, 4.900],  # flake 99242 (c1/f17), AFM 69-70
+        [82.0, 3.735, 3.853],  # flake 99285 (c4/f4), AFM 81-83 — fold region
+        # 99236 (c1/f11): concave profile 87-81-89 over a 9.5 µm span; 85.0
+        # is the span midpoint of the 81-89 extremes — treatment choice, see
+        # docs/hbn_thick_50_100_calibration.md.
+        [85.0, 3.894, 4.283],  # flake 99236 (c1/f11) — fold region
+    ]
+)
+
+# Interior-stability fit filter (fold_degeneracy erosion sweep, 2026-08-11):
+# anchors whose interior mean drifts > 0.25 in R or G between 5x5 and 13x13
+# erosion of the seg mask have no well-defined interior contrast — the DB
+# mean is edge/texture-dominated, so they are excluded from fitting:
+# 99234 (dR 0.51), 99285 (dR 0.86), 99236 (dR 0.42).  99242 is marginal
+# (dG 0.26) — trusted here, droppable via fit_hbn_thick_anchors
+# --drop-marginal.  Order matches _CAL_DATA_HBN_10X_THICK_R2 rows.
+_CAL_DATA_HBN_10X_THICK_R2_FIT_OK = np.array([True, True, True, True, False, True, False, False])
+_CAL_DATA_HBN_10X_THICK_R2_MARGINAL = np.array([False, False, False, False, False, True, False, False])
+
+# 99280 (c3/f19, v3 pred 77.9 nm): AFM 45-47 nm but the note says "bottom
+# blue part" — likely a different region of a multi-region flake was AFM'd.
+# Excluded from fitting; recheck pending with Toghrul.  Thickness column is
+# the (suspect) AFM midpoint.
+_CAL_DATA_HBN_10X_THICK_R2_EXCLUDED = np.array(
+    [
+        [46.0, 3.795, 4.829],  # flake 99280 (c3/f19)
+    ]
+)
+
+# Past-fold aliased points — real measurements whose AFM thickness lies far
+# beyond the model band (hundreds of nm), so their R/G lands back on the
+# model arc and any in-band projection is an alias.  Labeled display points,
+# never fit anchors.
+_CAL_DATA_HBN_10X_THICK_R2_PASTFOLD = np.array(
+    [
+        [627.0, 3.210, 3.205],  # flake 99227 (c1/f2), AFM 626-628
+        [928.5, 3.533, 3.469],  # flake 99226 (c1/f1), AFM 927-930
+    ]
+)
+
 # Graphene empirical calibration data (90nm SiO₂, 50x)
 # Layer-count assignments from optical contrast; not AFM-verified.
 # Format: [thickness_nm, R_contrast, G_contrast]

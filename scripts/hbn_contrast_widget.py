@@ -30,6 +30,9 @@ from hbn_contrast import (
     _CAL_DATA,
     _CAL_DATA_285,
     _CAL_DATA_GRAPHENE,
+    _CAL_DATA_HBN_10X_THICK_R2,
+    _CAL_DATA_HBN_10X_THICK_R2_EXCLUDED,
+    _CAL_DATA_HBN_10X_THICK_R2_PASTFOLD,
     _CAL_DATA_WSE2,
     _DEFAULT_NA_QUAD_NODES,
     _GRAPHENE_LAYER_THICKNESS_NM,
@@ -138,6 +141,8 @@ n_sio2 = _interp_index(lamb, _SIO2_DATA)
 n_si = _interp_index(lamb, _SI_DATA)
 
 LABEL_LAYERS = [5, 10, 15, 20, 30, 45, 60, 90, 120, 150, 200, 250, 300]
+# Past-fold extension: label every ~50 nm out to 500, then every 100 nm.
+LABEL_LAYERS += [round(t / 0.333) for t in (150, 200, 250, 300, 350, 400, 450, 500, 600, 700, 800, 900, 1000)]
 
 # 10x line-fit measurements on graphite gate flakes (four AFM-cut regions, 2026-04-29).
 # Background line-fit RGB = (64, 69, 91); contrast = (I_flake - I_bg) / I_bg per channel.
@@ -193,7 +198,7 @@ _CAL_DATA_AFM_10X_20260805 = np.array(
 _CAL_DATA_AFM_10X_20260805_OK = np.array([True, True, True, True, True, True, True, False, True])
 
 # Per-material max compute layers (plot + cache extent)
-HBN_MAX_LAYERS = 300
+HBN_MAX_LAYERS = 3000  # ~1000 nm — far past the G-fold, for alias inspection
 GRAPHENE_MAX_LAYERS = 60
 WSE2_MAX_LAYERS = 15
 WSE2_PLOT_LAYERS = 10  # label + line extent on the WSe₂ panel
@@ -530,10 +535,13 @@ def _compute_for_tab(vals: _Vals, n_wse2_arr: np.ndarray) -> _TabResult:
 def main():
     fig = plt.figure(figsize=(15, 8))
 
-    # hBN defaults: 2026-08-06 fit against the Toghrul 10x AFM anchors
-    # (45-58 nm, current scope) with the prev-scope 50x set overlaid.
+    # hBN defaults: Zack's 2026-08-13 widget fit (halogen 3200K + 10x T²,
+    # glare off, NA 0.25) — balances the thin-band 50x points and the
+    # round-1 + round-2 thick anchors.  The anchors-only least-squares
+    # alternative (n=2.354, offsets +1.03/+0.18) was rejected: it wrecks
+    # the 0-15 nm region.
     init = {
-        "n": 2.111,
+        "n": 2.165,
         # Graphite/graphene constant-n approximation (Bruna & Borini APL 2009,
         # Blake et al. APL 2007).  Real graphite is dispersive — n drops ~0.4
         # from 700→400 nm — so single (n,k) is a fit compromise across visible.
@@ -560,7 +568,7 @@ def main():
     ax_wse2 = fig.add_axes(_SINGLE_POS)
 
     active_illum = {"name": "halogen_3200K"}
-    active_trans = {"name": "off"}
+    active_trans = {"name": "10x"}
     # Objective selector: presets illum/glare/NA to the measured values for
     # one objective (sliders stay draggable afterward).  Glare is a separate
     # on/off toggle so its effect can be A/B'd while keeping measured illum.
@@ -676,6 +684,92 @@ def main():
             alpha=1.0 if afm10_ok[i] else 0.55,
         )
         cal_ann_afm10.append(a)
+
+    # Round-2 Toghrul AFM anchors (scan 288, 2026-08-11) — the 55-85 nm band
+    # round 1 lacked.  Past-fold points (627/928 nm AFM) are real measurements
+    # whose R/G aliases back onto the model arc; rendered as X markers labeled
+    # with true AFM nm, never in the rms.  99280 (region-mismatch suspect) is
+    # hollow + faded like round-1's 98982.
+    r2_r = _CAL_DATA_HBN_10X_THICK_R2[:, 1] + init["r_off"]
+    r2_g = _CAL_DATA_HBN_10X_THICK_R2[:, 2] + init["g_off"]
+    scat_afm_r2 = ax_90.scatter(
+        r2_g,
+        r2_r,
+        c="tab:purple",
+        marker="*",
+        s=110,
+        zorder=1,
+        edgecolors="k",
+        linewidths=0.7,
+        label="AFM 10x r2 2026-08-11 (Toghrul)",
+    )
+    cal_ann_r2 = []
+    for i, row in enumerate(_CAL_DATA_HBN_10X_THICK_R2):
+        a = ax_90.annotate(
+            f"{row[0]:.1f}",
+            (r2_g[i], r2_r[i]),
+            textcoords="offset points",
+            xytext=(6, -6),
+            fontsize=7,
+            color="tab:purple",
+            fontweight="bold",
+        )
+        cal_ann_r2.append(a)
+
+    r2x_r = _CAL_DATA_HBN_10X_THICK_R2_EXCLUDED[:, 1] + init["r_off"]
+    r2x_g = _CAL_DATA_HBN_10X_THICK_R2_EXCLUDED[:, 2] + init["g_off"]
+    scat_afm_r2_excl = ax_90.scatter(
+        r2x_g,
+        r2x_r,
+        facecolors="none",
+        edgecolors="tab:purple",
+        marker="*",
+        s=110,
+        zorder=1,
+        linewidths=1.2,
+        alpha=0.55,
+        label="↑ excluded (99280, region mismatch)",
+    )
+    cal_ann_r2_excl = []
+    for i, row in enumerate(_CAL_DATA_HBN_10X_THICK_R2_EXCLUDED):
+        a = ax_90.annotate(
+            f"{row[0]:.0f}?",
+            (r2x_g[i], r2x_r[i]),
+            textcoords="offset points",
+            xytext=(6, -6),
+            fontsize=7,
+            color="tab:purple",
+            fontweight="bold",
+            alpha=0.55,
+        )
+        cal_ann_r2_excl.append(a)
+
+    r2p_r = _CAL_DATA_HBN_10X_THICK_R2_PASTFOLD[:, 1] + init["r_off"]
+    r2p_g = _CAL_DATA_HBN_10X_THICK_R2_PASTFOLD[:, 2] + init["g_off"]
+    scat_afm_r2_pf = ax_90.scatter(
+        r2p_g,
+        r2p_r,
+        c="tab:purple",
+        marker="X",
+        s=80,
+        zorder=1,
+        edgecolors="k",
+        linewidths=0.7,
+        alpha=0.85,
+        label="r2 past-fold (aliased)",
+    )
+    cal_ann_r2_pf = []
+    for i, row in enumerate(_CAL_DATA_HBN_10X_THICK_R2_PASTFOLD):
+        a = ax_90.annotate(
+            f"{row[0]:.0f}nm!",
+            (r2p_g[i], r2p_r[i]),
+            textcoords="offset points",
+            xytext=(6, -6),
+            fontsize=7,
+            color="tab:purple",
+            fontweight="bold",
+        )
+        cal_ann_r2_pf.append(a)
     rms_text_90 = ax_90.text(
         0.02,
         0.98,
@@ -1051,9 +1145,31 @@ def main():
         a_r_res = a_r_s[afm10_ok] - np.interp(t_ok, t, r9)
         a_g_res = a_g_s[afm10_ok] - np.interp(t_ok, t, g9)
 
+        r2_r_s = _CAL_DATA_HBN_10X_THICK_R2[:, 1] + r_off
+        r2_g_s = _CAL_DATA_HBN_10X_THICK_R2[:, 2] + g_off
+        scat_afm_r2.set_offsets(np.column_stack([r2_g_s, r2_r_s]))
+        for i, ann in enumerate(cal_ann_r2):
+            ann.xy = (r2_g_s[i], r2_r_s[i])
+        t_r2 = _CAL_DATA_HBN_10X_THICK_R2[:, 0]
+        r2_r_res = r2_r_s - np.interp(t_r2, t, r9)
+        r2_g_res = r2_g_s - np.interp(t_r2, t, g9)
+
+        r2x_r_s = _CAL_DATA_HBN_10X_THICK_R2_EXCLUDED[:, 1] + r_off
+        r2x_g_s = _CAL_DATA_HBN_10X_THICK_R2_EXCLUDED[:, 2] + g_off
+        scat_afm_r2_excl.set_offsets(np.column_stack([r2x_g_s, r2x_r_s]))
+        for i, ann in enumerate(cal_ann_r2_excl):
+            ann.xy = (r2x_g_s[i], r2x_r_s[i])
+
+        r2p_r_s = _CAL_DATA_HBN_10X_THICK_R2_PASTFOLD[:, 1] + r_off
+        r2p_g_s = _CAL_DATA_HBN_10X_THICK_R2_PASTFOLD[:, 2] + g_off
+        scat_afm_r2_pf.set_offsets(np.column_stack([r2p_g_s, r2p_r_s]))
+        for i, ann in enumerate(cal_ann_r2_pf):
+            ann.xy = (r2p_g_s[i], r2p_r_s[i])
+
         rms_text_90.set_text(
             f"prev 50x  R rms={np.sqrt(np.mean(r_res**2)):.3f}  G rms={np.sqrt(np.mean(g_res**2)):.3f}\n"
-            f"10x 08-05 R rms={np.sqrt(np.mean(a_r_res**2)):.3f}  G rms={np.sqrt(np.mean(a_g_res**2)):.3f}"
+            f"10x 08-05 R rms={np.sqrt(np.mean(a_r_res**2)):.3f}  G rms={np.sqrt(np.mean(a_g_res**2)):.3f}\n"
+            f"10x r2    R rms={np.sqrt(np.mean(r2_r_res**2)):.3f}  G rms={np.sqrt(np.mean(r2_g_res**2)):.3f}"
         )
 
     def _draw_hbn(vals: _Vals, res: _TabResult):
