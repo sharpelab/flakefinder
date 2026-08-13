@@ -76,3 +76,35 @@ Script is functional but fit is poor due to missing NA integration. Two paths fo
 2. **Empirical scaling** — fit R/G scale factors on 90nm data, apply to 285nm prediction. Pragmatic but less principled.
 
 Aaron and Zack are actively discussing — pick up from here next session.
+
+## Bare-substrate spectral test (2026-08-07)
+
+Measuring bare oxide levels vs the transfer-matrix model, in identity-CCM space:
+
+- **Observable**: rho_c = V_oxide,c / V_white,c, compared only as a *shape* (rho/rho_G).
+  Absolute scale is meaningless — the ColorChecker white is Lambertian, the chip is a
+  mirror. Exposure and gain cancel exactly in the shape.
+- **ROI must match the fingerprint's.** `colorchecker_analyze.roi_stats` uses a central
+  300 px box. Vignetting is strongly channel dependent (10x corner factors R 1.18 /
+  G 1.11 / B 1.03), so a full-frame level biases rho_B/rho_G by ~4%.
+- **The system is triangular**: d(rho_R/rho_G)/d(lambda_B) = 0 exactly, so R/G pins the
+  oxide thickness and B/G then pins lambda_B. Do not assume the nominal oxide — 1 nm of
+  oxide mimics ~3.3 nm of lambda_B and otherwise dominates everything.
+- **Raw white per objective**: 10x has a direct identity (idx0) measurement in
+  ccm_models.json. Others need M^-1 @ the 5800K fingerprint; validated at 10x to 0.12%
+  (G/R) and 1.1% (G/B). NOTE `derive_pipeline().fingerprint_raw` is the *model's* own
+  lamp x T^2 integral, NOT a CCM-inverted measurement — its channel ratios are ~19% off
+  in G. Don't mistake one for the other.
+- **Frame selection**: segmentation only writes a JSON for frames WITH detections, so
+  "absent from every seg dir" is the bare-frame filter. Zero-detection frames sit
+  preferentially at the chip periphery — filter on dark fraction or you inherit a real
+  ~0.4% B/G bias. A median stack does NOT protect against that; it's bias, not variance.
+- **Uniformity metrics need block averaging.** Per-pixel noise is 2.5-3.5% of the level
+  at 0.25 ms / gain 4, which swamps percent-scale contamination; and an 8-bit median
+  quantizes the level to whole counts (1.5%). Use block means + a local (not global)
+  background, and a mean rather than a median for the level.
+- **Off-axis fields**: revisit images are flake-centred (contamination confined to
+  r<200 px at 20x, r<300 px at 50x). Fitting a smooth even polynomial outside a mask and
+  evaluating at the centre recovers the on-axis level without the flat-field — validated
+  against the known 10x truth to 0.1% (B/G) and 0.2-0.5% (R/G). Odd orders fit to zero
+  because vignetting is even, so order 2==3 and 4==5; a useful sanity check.

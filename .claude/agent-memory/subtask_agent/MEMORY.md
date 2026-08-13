@@ -10,6 +10,12 @@
 - If microscope has local changes from previous version, `git stash && git pull` is fine.
 - If scope pull aborts on **untracked** files an incoming commit tracks (session scp'd them there earlier): compare `git hash-object` (scope) vs `git rev-parse master:path` (local); if identical, delete scope copies and re-pull. Scope ssh shell is cmd — use `del`, not `rm`.
 - Before ff-ing main-repo master, check it hasn't advanced past origin (scan session may commit locally). If so, rebase the subtask branch onto local `master`, not `origin/master`; the push then carries the session's commit too.
+- When a sibling subtask lands on local master mid-flight with your work still uncommitted: `git stash && git rebase master && git stash pop` — auto-merge handles it if your edits avoid their regions. Re-check master right before ff; it can move more than once per session.
+
+## hbn_contrast_widget (2026-08-13 refactor)
+- Light path = preset row (`_LIGHT_PRESETS`: 3200K, 3200K·T², LED, K5C 10x/20x/50x) + auto-"custom" on manual NA/Glare changes. Trans/Illum/Obj cycle buttons are gone; `_TRANSMISSIONS`/`_ILLUMINANTS`/`_GLARE_F` dicts remain module-level.
+- External importers of the widget module: test_hbn_contrast, fit_hbn_thick_anchors, deccm_*, graphene_pipeline_effects (symbols: compute_rg, _ILLUMINANTS, _TRANSMISSIONS, _GLARE_F, _IMX183_*_LIT, cal arrays). Renaming any of these or export-JSON keys needs a heads-up to dependents — coordinate, no silent renames.
+- Display-only params (offsets, t_max) are excluded from `_compute_key` and redraw from cache via `_draw_active`; compute params invalidate the cache. Keep new sliders on the right side of that split.
 
 ## Leica SDK Gotchas
 - **Don't call `GetObject()` on the same SDK interface twice.** Redundant `get_interface_required` calls can interfere with existing sessions. Delegate to the object that already owns the interface.
@@ -34,6 +40,12 @@ See `calibration/camera_probe_20260806/camera_pipeline_probe.json` + `/tmp/camer
 - `scope.light_on()` / `scope.light_off()` — shutter + lamp combined
 - `scope.switch_objective_pos(pos)` / `switch_objective_mag("20x")` — handles z-speed maxing internally
 - `wait_all(handles)` — module-level function in `units.py`
+
+## Land vs Sync Vocabulary (2026-08-07, from Zack)
+
+- **"land" = commit + rebase + ff onto LOCAL master only.** No push, no scope pull.
+- **"sync" = push origin + scope pull.** Separate instruction, separate approval.
+- Corollary: ff-ing local master is safe even when it's ahead of origin; carried commits only ship when a "sync" is actually ordered.
 
 ## Scope Discipline
 - **NEVER commit without explicit user approval.** Always propose the commit and wait for "go"/"commit"/"sync". Premature commits ship suboptimal code — review catches issues that need fixing first.
@@ -183,6 +195,15 @@ See [quick_scan.md](quick_scan.md) for full context. PySide6 stage viewer at `sr
   Upload runs fine locally (.env auth); revisit images attach by (frame, det_id, mag)
   match, so old-rank revisit PNGs carry over automatically.
 
+## Identity-CCM Migration (2026-08-07)
+
+Authoritative doc: `docs/hbn_medium_v2_handoff.md` — read it before touching colour-space/preset migration. Session-level gotchas:
+- **Mixed-space 2D metrics do covert 3-channel work** (CCM mixes B into R/G). Never scalar-scale gates across colour spaces: normal-to-curve distance compresses ~0.38x while arc length compresses 0.86x. Re-derive gates from labeled data in the target space.
+- **Per-detection saturation check, not model-based**: 69% of "good" dets had partially clipped B pixels well below the nominal mean-contrast ceiling. Check `px >= 254` in the det region before trusting any channel stat (blooming rule: other channels suspect too).
+- `run-viewer` discovers runs by `checkpoint.json` presence; a symlink package (chip_N/seg -> alt seg dir + scan_10x + minimal checkpoint.json) makes any seg browsable.
+- `crop_mosaic.py --where "(chip, frame, det_id) in [...]"` selects arbitrary det sets (ns has chip/frame/det_id); always add IDs to labels (`{frame}#{det_id}`) so Zack can reference crops.
+- `deccm_frames.transform_flatfield` is analysis-only: it transforms correction FACTORS as if they were a signal (~0.5% rms). Real fix at cutover = capture fresh identity-space flatfields.
+
 ## Flakes Website (2026-08-06)
 
 - **Re-uploads create NEW scans** (`upload --name <distinct>`): the same physical run can
@@ -192,3 +213,32 @@ See [quick_scan.md](quick_scan.md) for full context. PySide6 stage viewer at `sr
 - Note updates: `PUT /api/flake/<id>/note` with `{"note": "..."}` (endpoint not in
   flakes_api.py; found in the viewer JS bundle). `""` clears. api_get("flakes",
   {"scan_id": N}) returns notes/favorites for verification.
+
+## hBN Thick Calibration (2026-08-13, v4)
+
+- `scripts/fit_hbn_thick_anchors.py` scores model configs and widget exports against
+  the AFM anchor rounds (`--export`, `--fit-export`, `--table` emits the seg cal table).
+  `scripts/compare_run_contrast.py` = between-scan drift check (stage-coord matching).
+- **A fit's loss must include everything the operator eyeballs.** An anchors-only
+  least-squares "won" on residuals but wrecked the thin-band overlay Zack was also
+  judging — rejected. Conversely, the widget rms lines ARE the operator's loss:
+  points shown solid get fitted to, so display filtering is a fit decision.
+- **Re-derive dependent gates when a cal table moves.** The thick preset's tier-1 R/G
+  box is arc extent ± cal gate; the v4 table's higher G-peak silently demoted 25 T1
+  until tier1_g_max was re-derived. Doc now records the rule.
+- Past-fold aliasing (600-930nm reads ~100nm in R/G) is handled by policy (human
+  shadow check + Toghrul screening), not by the cal. B doesn't separate it in
+  measured data.
+- crop_mosaic `--where`: `frame` is the STRING "frame_0199", not an int.
+- Zack ruled the fold_degeneracy interior-stability filter unusable for anchor
+  selection (discards the whole new band); masks recorded in hbn_contrast.py, unapplied.
+
+## Scope Discipline on Analysis Tasks (2026-08-07)
+
+- **Answer the fit the task asks for; don't co-develop side considerations it mentions
+  in passing.** The bare-substrate task named a glare cross-check in one clause; I built
+  it into a co-equal deliverable with its own tables. Zack: "I never thought the glare
+  mattered it was always something you invented and then wasted time on. the task was
+  about fitting something." A clause is a caveat to note in one line, not a workstream.
+- Corollary: when a degeneracy exists, state it in a sentence and move on unless the
+  operator asks. Spend the effort on the number being fitted.
