@@ -219,6 +219,48 @@ def derive_pipeline(lamb: np.ndarray = _IMX183_WAVELENGTHS) -> PipelineModel:
     )
 
 
+_BLANK_REFS_RAW = _CAL_DIR / "blank_refs_raw_20260813.json"
+
+
+def derive_blank_ref_tilt(model: PipelineModel, lamb: np.ndarray = _IMX183_WAVELENGTHS) -> np.ndarray:
+    """Common-path correction ε(λ) anchored on the golden blank-chip refs.
+
+    The pipeline chains above (lamp × T²_obj) miss the 2026-08-13 golden
+    blank-chip raw ratios (blank_refs_raw_20260813.json) by a large,
+    objective-INDEPENDENT offset — the error lives in the common path.  This
+    solves a smooth 2-parameter tilt on the lamp trace so that
+    lamp·ε × T²_10x × R_SiO₂(90 nm, NA 0.25) reproduces the measured raw 10x
+    ratios exactly, and returns ε on `lamb`.  ε lumps everything common-path:
+    filter-cube R·T (double pass), collector optics, tube lens, and
+    sister-scope lamp-trace error — the blank data cannot attribute among
+    them.  Fit at 10x, it transfers to 5x/20x/50x raw ratios within
+    0.003–0.025 with no further freedom (2.5x is the outlier, +0.10 in R/G —
+    its ColorChecker fingerprint is suspect, not the blank data).
+
+    NOT applied inside derive_pipeline: ε is held out of the production
+    chains (decision 2026-08-14 — negligible effect on contrast-arc shape;
+    it matters for absolute backgrounds and cross-objective consistency).
+    Callers that want the corrected chain multiply it in themselves:
+    ``chain_spd * derive_blank_ref_tilt(model, lamb)``.
+
+    Caveat: anchored through the 90 nm SiO₂ transfer-matrix reflectance, so
+    oxide-thickness error aliases into ε.  A bare-Si blank capture would
+    decouple them.  See docs/blank_refs_20260813.md.
+    """
+    from hbn_contrast import reflectance
+
+    refs = json.loads(_BLANK_REFS_RAW.read_text())
+    r0_10x = reflectance(lamb, None, 0, 90.0, na=OBJECTIVE_NA["10x"])
+    tilted = _solve_tilt(
+        model.lamp_spd,
+        lamb,
+        1.0 / refs["10x"]["rg"],
+        1.0 / refs["10x"]["bg"],
+        chain=model.objectives["10x"].transmission_sq_rel * r0_10x,
+    )
+    return tilted / model.lamp_spd
+
+
 def _print_summary(model: PipelineModel) -> None:
     print(f"K5C pipeline model — {_SESSION_DIR.name}")
     print()

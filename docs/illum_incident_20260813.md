@@ -105,5 +105,6 @@ but the specific mechanism was not identified.
 - `calibration/illum_units_probe_20260813.json` — full AHM unit-tree
   snapshot (probe: `scripts/experiments/probe_illum_units.py`)
 - `calibration/blank_refs_20260813.json`, `calibration/blank_refs_raw_20260813.json`
+  — analysis and validation: [blank_refs_20260813.md](blank_refs_20260813.md)
 - `experiments/restore_illum_20260813/` (scope + local, uncommitted) —
   element-sweep frames and results (`scripts/experiments/restore_illum_state.py`)
