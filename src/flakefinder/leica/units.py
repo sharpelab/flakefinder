@@ -664,13 +664,16 @@ class Lamp:
         return f"Lamp({self._name}, intensity={self.intensity}/{self._max})"
 
 
-class Aperture:
-    """Aperture diaphragm control (IL aperture on DM6M).
+class ControlUnit:
+    """Generic integer-position control unit (turrets, diaphragms, switches).
+
+    Thin BasicControlValue wrapper for units whose whole state is one small
+    integer: IL/DIC turrets, field diaphragms, TL/IL lamp switch, tube ports.
 
     Usage:
-        aperture = Aperture.from_connection(conn)
-        aperture.value = aperture.max_value  # fully open (default)
-        print(f"Aperture: {aperture.value}/{aperture.max_value}")
+        turret = ControlUnit.from_connection(conn, TID.MICROSCOPE_IL_TURRET)
+        print(f"{turret.name}: {turret.value}/{turret.max_value}")
+        turret.value = 2
     """
 
     def __init__(self, unit: Unit):
@@ -679,6 +682,62 @@ class Aperture:
         self._bcv: BasicControlValue = get_interface_required(unit, IID.IID_BASIC_CONTROL_VALUE)
         self._min = self._bcv.MinControlValue()
         self._max = self._bcv.MaxControlValue()
+
+    @classmethod
+    def from_connection(cls, conn: LeicaConnection, tid: TID) -> ControlUnit:
+        """Create a ControlUnit from a LeicaConnection.
+
+        Args:
+            conn: Active LeicaConnection.
+            tid: Unit type ID to look up.
+
+        Returns:
+            ControlUnit instance.
+
+        Raises:
+            LookupError: If the unit is not found.
+        """
+        unit = find_unit(conn.root, tid)
+        if unit is None:
+            raise LookupError(f"Unit not found: {tid.name}")
+        return cls(unit)
+
+    @property
+    def name(self) -> str:
+        """Unit name from SDK."""
+        return self._name
+
+    @property
+    def value(self) -> int:
+        """Current control value."""
+        return self._bcv.GetControlValue()
+
+    @value.setter
+    def value(self, v: int) -> None:
+        self._bcv.SetControlValue(v)
+
+    @property
+    def min_value(self) -> int:
+        """Minimum control value."""
+        return self._min
+
+    @property
+    def max_value(self) -> int:
+        """Maximum control value."""
+        return self._max
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({self._name}, {self.value}/{self._max})"
+
+
+class Aperture(ControlUnit):
+    """Aperture diaphragm control (IL aperture on DM6M).
+
+    Usage:
+        aperture = Aperture.from_connection(conn)
+        aperture.value = aperture.max_value  # fully open (default)
+        print(f"Aperture: {aperture.value}/{aperture.max_value}")
+    """
 
     @classmethod
     def from_connection(cls, conn: LeicaConnection, tid: TID = TID.MICROSCOPE_IL_APERTURE_DIAPHRAGM) -> Aperture:
@@ -699,36 +758,9 @@ class Aperture:
             raise LookupError(f"Aperture unit not found: {tid.name}")
         return cls(unit)
 
-    @property
-    def name(self) -> str:
-        """Aperture name from SDK."""
-        return self._name
-
-    @property
-    def value(self) -> int:
-        """Current aperture value."""
-        return self._bcv.GetControlValue()
-
-    @value.setter
-    def value(self, v: int) -> None:
-        self._bcv.SetControlValue(v)
-
-    @property
-    def min_value(self) -> int:
-        """Minimum aperture value."""
-        return self._min
-
-    @property
-    def max_value(self) -> int:
-        """Maximum aperture value."""
-        return self._max
-
     def fully_open(self) -> None:
         """Set aperture to maximum (fully open)."""
         self.value = self._max
-
-    def __repr__(self) -> str:
-        return f"Aperture({self._name}, {self.value}/{self._max})"
 
 
 class Nosepiece:

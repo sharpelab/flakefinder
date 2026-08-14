@@ -75,6 +75,7 @@ from flakefinder.scan_utils import (
     CALIBRATION_DIR,
     PARFOCAL_Z_UM,
     add_colour_matrix_arg,
+    build_lighting_meta,
     build_revisit_json,
     get_git_version,
     parse_area_rect,
@@ -732,6 +733,22 @@ def _resolve_chip_indices(p: _Preflight) -> list[int]:
     return chip_indices
 
 
+def _format_illumination(lighting: dict) -> str:
+    """Compact one-line illumination summary for console/pipeline.log."""
+    return (
+        f"IL turret {lighting['il_turret_pos']}/{lighting['il_turret_max']}, "
+        f"IL FD {lighting['il_field_diaphragm']}/{lighting['il_field_diaphragm_max']}, "
+        f"IL AP {lighting['aperture_value']}/{lighting['aperture_max_value']}, "
+        f"DIC {lighting['dic_turret_pos']}/{lighting['dic_turret_max']}, "
+        f"TL/IL switch {lighting['tl_il_lamp_switch']}, "
+        f"tube port {lighting['tube_port']}/{lighting['tube_port_max']}, "
+        f"method {lighting['contrasting_method']}, "
+        f"TL FD {lighting['tl_field_diaphragm']}/{lighting['tl_field_diaphragm_max']}, "
+        f"TL AP {lighting['tl_aperture_diaphragm']}/{lighting['tl_aperture_diaphragm_max']}, "
+        f"TL shutter {'open' if lighting['tl_shutter_open'] else 'closed'}"
+    )
+
+
 def _print_focus_map_summary(chip_idx: int, plane_path: Path) -> None:
     """Print [chip N] focus_map summary line from exported plane JSON."""
     with _always_console():
@@ -1164,11 +1181,17 @@ def run(scope: Microscope, p: _Preflight) -> int:
     quiet = args.quiet
     run_dir = p.run_dir
 
+    # Illumination-path snapshot at pipeline start (lamp/shutter state here
+    # is pre-light_on; per-scan scan_meta.json records the lit state).
+    lighting = build_lighting_meta(scope)
+
     with _always_console():
         print(f"[run] {run_dir}/")
+        print(f"[illum] {_format_illumination(dict(lighting))}")
 
     step_timing: dict[str, float] = {}
     run_meta: dict = {
+        "illumination": dict(lighting),
         "operator": args.operator,
         "name": args.name,
         "step_timing": step_timing,

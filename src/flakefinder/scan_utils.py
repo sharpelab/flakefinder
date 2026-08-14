@@ -16,7 +16,7 @@ from scipy.interpolate import UnivariateSpline
 
 from flakefinder.leica.camera import Camera
 from flakefinder.leica.microscope import Microscope
-from flakefinder.leica.units import Aperture, Lamp, Nosepiece, Shutter
+from flakefinder.leica.units import Nosepiece
 from flakefinder.types import (
     AreaRect,
     AreaRectI,
@@ -196,7 +196,8 @@ def add_colour_matrix_arg(parser: argparse.ArgumentParser | argparse._ArgumentGr
     """Add the shared --colour-matrix argument.
 
     None (the default) means keep the connection-time state — the camera
-    pins ColourMatrix.IDENTITY at init, so the colour space is known
+    pins ColourMatrix.CCM_5800K at init (the legacy scan space every
+    committed preset is calibrated in), so the colour space is known
     either way.
     """
     parser.add_argument(
@@ -570,21 +571,46 @@ def compute_planar_scan_plan(
 # ============================================================================
 
 
-def build_lighting_meta(
-    *,
-    lamp: Lamp | None = None,
-    shutter: Shutter | None = None,
-    aperture: Aperture | None = None,
-) -> LightingMeta:
-    """Build lighting metadata dict from hardware objects."""
+def build_lighting_meta(scope: Microscope) -> LightingMeta:
+    """Build the full illumination-path snapshot from live hardware.
+
+    Reads every illumination unit the DM6M exposes (lamp, shutters,
+    diaphragms, turrets, lamp switch, tube port, contrasting method)
+    so that scans with identical camera settings but different light
+    paths are distinguishable from metadata alone.
+    """
+    lamp = scope.lamp
+    shutter = scope.shutter
+    aperture = scope.aperture
+    il_turret = scope.il_turret
+    il_fd = scope.il_field_diaphragm
+    dic_turret = scope.dic_turret
+    tl_fd = scope.tl_field_diaphragm
+    tl_ap = scope.tl_aperture_diaphragm
+    ports = scope.ports
     return LightingMeta(
-        lamp_name=lamp.name if lamp else None,
-        lamp_intensity=lamp.intensity if lamp else None,
-        lamp_max_intensity=lamp.max_intensity if lamp else None,
-        shutter_name=shutter.name if shutter else None,
-        shutter_open=shutter.is_open if shutter else None,
-        aperture_value=aperture.value if aperture else None,
-        aperture_max_value=aperture.max_value if aperture else None,
+        lamp_name=lamp.name,
+        lamp_intensity=lamp.intensity,
+        lamp_max_intensity=lamp.max_intensity,
+        shutter_name=shutter.name,
+        shutter_open=shutter.is_open,
+        aperture_value=aperture.value,
+        aperture_max_value=aperture.max_value,
+        il_turret_pos=il_turret.value,
+        il_turret_max=il_turret.max_value,
+        il_field_diaphragm=il_fd.value,
+        il_field_diaphragm_max=il_fd.max_value,
+        dic_turret_pos=dic_turret.value,
+        dic_turret_max=dic_turret.max_value,
+        tl_il_lamp_switch=scope.tl_il_lamp_switch.value,
+        tl_shutter_open=scope.tl_shutter.is_open,
+        tl_field_diaphragm=tl_fd.value,
+        tl_field_diaphragm_max=tl_fd.max_value,
+        tl_aperture_diaphragm=tl_ap.value,
+        tl_aperture_diaphragm_max=tl_ap.max_value,
+        tube_port=ports.value,
+        tube_port_max=ports.max_value,
+        contrasting_method=scope.contrasting_method,
     )
 
 
@@ -670,5 +696,5 @@ def build_microscope_meta(scope: Microscope) -> MicroscopeMeta:
     return MicroscopeMeta(
         camera=build_camera_meta(scope.camera),
         optics=build_optics_meta(nosepiece=scope.nosepiece, camera=scope.camera),
-        lighting=build_lighting_meta(lamp=scope.lamp, shutter=scope.shutter, aperture=scope.aperture),
+        lighting=build_lighting_meta(scope),
     )

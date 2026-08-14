@@ -351,7 +351,12 @@ class OpticsMeta(TypedDict):
 
 
 class LightingMeta(TypedDict):
-    """Lighting metadata block for scan output."""
+    """Lighting metadata block for scan output.
+
+    Full illumination-path snapshot: two visually different scans with
+    identical camera settings must be distinguishable from this block
+    alone. Positional values are raw SDK control values.
+    """
 
     lamp_name: str | None
     lamp_intensity: float | None
@@ -360,6 +365,21 @@ class LightingMeta(TypedDict):
     shutter_open: bool | None
     aperture_value: int | None
     aperture_max_value: int | None
+    il_turret_pos: int | None
+    il_turret_max: int | None
+    il_field_diaphragm: int | None
+    il_field_diaphragm_max: int | None
+    dic_turret_pos: int | None
+    dic_turret_max: int | None
+    tl_il_lamp_switch: int | None
+    tl_shutter_open: bool | None
+    tl_field_diaphragm: int | None
+    tl_field_diaphragm_max: int | None
+    tl_aperture_diaphragm: int | None
+    tl_aperture_diaphragm_max: int | None
+    tube_port: int | None
+    tube_port_max: int | None
+    contrasting_method: int | None
 
 
 class MicroscopeMeta(TypedDict):

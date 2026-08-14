@@ -4,11 +4,14 @@ Consolidates hardware access behind a single context manager, eliminating
 per-script boilerplate for connection, subsystem lookup, and UCAPI registration.
 """
 
+import contextlib
+
 from flakefinder.types import MicroscopeDescription, Point3F
 
 from .camera import Camera
-from .core import LeicaConnection
-from .units import Aperture, Lamp, Nosepiece, Shutter, Stage, ZDrive
+from .core import LeicaConnection, get_interface
+from .enums import IID, TID
+from .units import Aperture, ControlUnit, Lamp, Nosepiece, Shutter, Stage, ZDrive
 
 
 class Microscope:
@@ -38,6 +41,14 @@ class Microscope:
         self._shutter: Shutter | None = None
         self._lamp: Lamp | None = None
         self._aperture: Aperture | None = None
+        self._il_turret: ControlUnit | None = None
+        self._il_field_diaphragm: ControlUnit | None = None
+        self._dic_turret: ControlUnit | None = None
+        self._tl_il_lamp_switch: ControlUnit | None = None
+        self._tl_shutter: Shutter | None = None
+        self._tl_field_diaphragm: ControlUnit | None = None
+        self._tl_aperture_diaphragm: ControlUnit | None = None
+        self._ports: ControlUnit | None = None
         self._camera: Camera | None = None
         self._camera_initialized = False
         self._context = None  # Lazy acquisition context
@@ -53,6 +64,14 @@ class Microscope:
             self._shutter = Shutter.from_connection(self._conn)
             self._lamp = Lamp.from_connection(self._conn)
             self._aperture = Aperture.from_connection(self._conn)
+            self._il_turret = ControlUnit.from_connection(self._conn, TID.MICROSCOPE_IL_TURRET)
+            self._il_field_diaphragm = ControlUnit.from_connection(self._conn, TID.MICROSCOPE_IL_FIELD_DIAPHRAGM)
+            self._dic_turret = ControlUnit.from_connection(self._conn, TID.MICROSCOPE_DIC_TURRET)
+            self._tl_il_lamp_switch = ControlUnit.from_connection(self._conn, TID.MICROSCOPE_TL_IL_LAMP_SWITCH)
+            self._tl_shutter = Shutter.from_connection(self._conn, TID.MICROSCOPE_TL_SHUTTER)
+            self._tl_field_diaphragm = ControlUnit.from_connection(self._conn, TID.MICROSCOPE_TL_FIELD_DIAPHRAGM)
+            self._tl_aperture_diaphragm = ControlUnit.from_connection(self._conn, TID.MICROSCOPE_TL_APERTURE_DIAPHRAGM)
+            self._ports = ControlUnit.from_connection(self._conn, TID.MICROSCOPE_PORTS)
         except Exception:
             self._conn.disconnect()
             raise
@@ -125,6 +144,81 @@ class Microscope:
         if self._aperture is None:
             raise RuntimeError("Not connected")
         return self._aperture
+
+    @property
+    def il_turret(self) -> ControlUnit:
+        """IL turret (reflector / filter cube, 4 positions on DM6M)."""
+        if self._il_turret is None:
+            raise RuntimeError("Not connected")
+        return self._il_turret
+
+    @property
+    def il_field_diaphragm(self) -> ControlUnit:
+        """IL field diaphragm."""
+        if self._il_field_diaphragm is None:
+            raise RuntimeError("Not connected")
+        return self._il_field_diaphragm
+
+    @property
+    def dic_turret(self) -> ControlUnit:
+        """DIC prism turret."""
+        if self._dic_turret is None:
+            raise RuntimeError("Not connected")
+        return self._dic_turret
+
+    @property
+    def tl_il_lamp_switch(self) -> ControlUnit:
+        """TL/IL lamp switch (which light path the lamp output feeds)."""
+        if self._tl_il_lamp_switch is None:
+            raise RuntimeError("Not connected")
+        return self._tl_il_lamp_switch
+
+    @property
+    def tl_shutter(self) -> Shutter:
+        """TL (transmitted light) shutter."""
+        if self._tl_shutter is None:
+            raise RuntimeError("Not connected")
+        return self._tl_shutter
+
+    @property
+    def tl_field_diaphragm(self) -> ControlUnit:
+        """TL field diaphragm."""
+        if self._tl_field_diaphragm is None:
+            raise RuntimeError("Not connected")
+        return self._tl_field_diaphragm
+
+    @property
+    def tl_aperture_diaphragm(self) -> ControlUnit:
+        """TL aperture diaphragm."""
+        if self._tl_aperture_diaphragm is None:
+            raise RuntimeError("Not connected")
+        return self._tl_aperture_diaphragm
+
+    @property
+    def ports(self) -> ControlUnit:
+        """Tube ports (eyepiece/camera beam splitter; manual coded unit)."""
+        if self._ports is None:
+            raise RuntimeError("Not connected")
+        return self._ports
+
+    @property
+    def contrasting_method(self) -> int | None:
+        """Current contrasting-method id from the microscope root, or None.
+
+        The DM6M driver exposes no method names or supported list — the
+        raw id is recorded so illumination-mode changes are visible in
+        scan metadata.
+        """
+        iface = get_interface(self.conn.root, IID.IID_MICROSCOPE_CONTRASTING_METHODS)
+        if iface is None:
+            return None
+        # .NET wrapper casing unverified for this interface — accept both.
+        for name in ("GetContrastingMethod", "getContrastingMethod"):
+            fn = getattr(iface, name, None)
+            if fn is not None:
+                with contextlib.suppress(Exception):
+                    return int(fn())
+        return None
 
     # --- Camera (lazy init) ---
 
