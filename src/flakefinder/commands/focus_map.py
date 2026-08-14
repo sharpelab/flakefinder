@@ -565,6 +565,7 @@ def run(
             if not quiet:
                 print(f"Objective: already at {scope.objective_mag}x")
 
+    scope.pin_illumination()
     scope.light_on()
 
     if not quiet:

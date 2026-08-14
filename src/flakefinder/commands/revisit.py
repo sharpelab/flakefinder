@@ -338,6 +338,7 @@ def run(
             vprint(f"Capture: gain={gain:g}, exposure={exposure_ms:g}ms [material {material}]")
 
     # Lighting and camera
+    scope.pin_illumination()
     scope.light_on()
     camera = scope.camera
     camera.trigger_mode = 0  # CONTINUOUS

@@ -252,6 +252,7 @@ def run(
     actual_speed_mm = scan_speed_mm  # Will be set before scan
 
     # Lighting and camera
+    scope.pin_illumination()
     scope.light_on()
     camera = scope.camera
     acquisition = scope.acquisition

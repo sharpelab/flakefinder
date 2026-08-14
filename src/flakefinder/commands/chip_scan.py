@@ -667,6 +667,7 @@ def run(
                 print(f"Objective: already at {scope.objective_mag}x")
 
     # Lighting
+    scope.pin_illumination()
     scope.light_on()
 
     # Camera

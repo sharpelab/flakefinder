@@ -5,6 +5,7 @@ per-script boilerplate for connection, subsystem lookup, and UCAPI registration.
 """
 
 import contextlib
+import time
 
 from flakefinder.types import MicroscopeDescription, Point3F
 
@@ -12,6 +13,21 @@ from .camera import Camera
 from .core import LeicaConnection, get_interface
 from .enums import IID, TID
 from .units import Aperture, ControlUnit, Lamp, Nosepiece, Shutter, Stage, ZDrive
+
+# Canonical IL-BF illumination state for scans. Hardware-validated
+# 2026-08-13: SetContrastingMethod(200) restores this state (turret, FD)
+# from IL-DF in one call, and it reproduces the calibrated background
+# target (bg R/G~=1.00, B/G~=2.07 at 10x scan settings on bare 90nm SiO2).
+CONTRASTING_METHOD_IL_BF = 200  # "IL-BF" in the LAS X contrasting-methods panel
+IL_FIELD_DIAPHRAGM_PIN = 5  # circle 2; circles 1-3 all overfill the camera FOV
+TUBE_PORT_CAMERA = 1  # manual knob: 1 = camera, 2 = eyepiece
+# Positions the IL-BF method write is expected to land the motorized
+# elements in — verified after pinning.
+IL_BF_EXPECTED_STATE = {
+    "IL turret": 2,
+    "DIC turret": 4,
+    "TL/IL lamp switch": 1,
+}
 
 
 class Microscope:
@@ -219,6 +235,79 @@ class Microscope:
                 with contextlib.suppress(Exception):
                     return int(fn())
         return None
+
+    def set_contrasting_method(self, method_id: int) -> None:
+        """Set the contrasting method (e.g. IL-BF) on the microscope root.
+
+        The method write drives the IL turret, DIC turret, TL/IL lamp
+        switch, and shutters as a group per the stand's method definitions.
+
+        Raises:
+            RuntimeError: If the interface or setter is unavailable.
+        """
+        iface = get_interface(self.conn.root, IID.IID_MICROSCOPE_CONTRASTING_METHODS)
+        if iface is None:
+            raise RuntimeError("ContrastingMethods interface not available")
+        for name in ("SetContrastingMethod", "setContrastingMethod"):
+            fn = getattr(iface, name, None)
+            if fn is not None:
+                fn(int(method_id))
+                return
+        raise RuntimeError("SetContrastingMethod not found on ContrastingMethods interface")
+
+    def pin_illumination(self, verify_timeout_s: float = 5.0) -> None:
+        """Enforce the canonical IL-BF illumination state for scans.
+
+        Pins the contrasting method (which places the IL turret, DIC
+        turret, and TL/IL lamp switch as a group), opens the IL aperture
+        fully, and sets the IL field diaphragm. Asserts manual state it
+        cannot control (tube port must feed the camera) and verifies the
+        motorized elements landed in the expected IL-BF positions.
+
+        Args:
+            verify_timeout_s: How long to poll for the post-pin state
+                (turret moves may settle after the method write returns).
+
+        Raises:
+            RuntimeError: If the tube port is on eyepiece, or the
+                illumination path does not reach the expected IL-BF
+                state within the timeout.
+        """
+        if self.ports.value != TUBE_PORT_CAMERA:
+            raise RuntimeError(
+                f"Tube port is on eyepiece ({self.ports.value}) — flip the tube knob to camera before scanning"
+            )
+
+        if self.contrasting_method != CONTRASTING_METHOD_IL_BF:
+            self.set_contrasting_method(CONTRASTING_METHOD_IL_BF)
+
+        self.aperture.fully_open()
+        self.il_field_diaphragm.value = IL_FIELD_DIAPHRAGM_PIN
+
+        def _mismatches() -> list[str]:
+            actual = {
+                "IL turret": self.il_turret.value,
+                "DIC turret": self.dic_turret.value,
+                "TL/IL lamp switch": self.tl_il_lamp_switch.value,
+            }
+            out = [f"{k}: {actual[k]} != {v}" for k, v in IL_BF_EXPECTED_STATE.items() if actual[k] != v]
+            method = self.contrasting_method
+            if method != CONTRASTING_METHOD_IL_BF:
+                out.append(f"contrasting method: {method} != {CONTRASTING_METHOD_IL_BF}")
+            if self.il_field_diaphragm.value != IL_FIELD_DIAPHRAGM_PIN:
+                out.append(f"IL field diaphragm: {self.il_field_diaphragm.value} != {IL_FIELD_DIAPHRAGM_PIN}")
+            if self.aperture.value != self.aperture.max_value:
+                out.append(f"IL aperture: {self.aperture.value} != {self.aperture.max_value}")
+            return out
+
+        deadline = time.monotonic() + verify_timeout_s
+        while True:
+            problems = _mismatches()
+            if not problems:
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Illumination pin failed: " + "; ".join(problems))
+            time.sleep(0.2)
 
     # --- Camera (lazy init) ---
 
