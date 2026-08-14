@@ -44,6 +44,7 @@ import contextlib
 import json
 import sys
 import time
+from collections.abc import Callable
 from concurrent.futures import (
     CancelledError,
     Future,
@@ -83,10 +84,16 @@ from flakefinder.scan_utils import (
     validate_area_rect,
 )
 from flakefinder.segmentation import (
+    BGCheckResult,
+    BGRatios,
     CaptureSettings,
     DetectorConfig,
     FrameResult,
     dedup_detections,
+    evaluate_bg_check,
+    measure_bg_frame_modes,
+    measure_bg_images,
+    measure_bg_stitch,
     natural_sort_key,
     process_frame,
     strip_geometry,
@@ -318,6 +325,8 @@ class _Preflight:
     seg: SegConfig
     upload: bool
     substrate: str
+    detector_cfg: DetectorConfig  # material preset (bg references, WB, substrate)
+    bg_check_active: bool  # False when CLI WB differs from the material preset WB
     args: argparse.Namespace  # raw CLI args for forwarding
 
 
@@ -438,6 +447,8 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         seg=seg,
         upload=do_upload,
         substrate=substrate,
+        detector_cfg=material_cfg,
+        bg_check_active=wb == material_cfg.white_balance,
         args=args,
     )
 
@@ -798,6 +809,78 @@ def _print_chip_summary(chip_idx: int, plane_path: Path, scan_dir: Path) -> None
 
 
 # ============================================================================
+# Background sanity check (docs/illum_sanity_check_plan.md)
+# ============================================================================
+
+
+def _mag_to_float(mag: str) -> float:
+    """'10x' → 10.0"""
+    return float(mag.lower().rstrip("x"))
+
+
+def _run_bg_check(
+    label: str,
+    key: str,
+    mag: float,
+    measure: Callable[[], BGRatios | None],
+    p: _Preflight,
+    scope: Microscope,
+    run_dir: Path,
+    run_meta: dict,
+) -> None:
+    """Evaluate one background sanity-check layer and act on the verdict.
+
+    Catches illumination-path changes the SDK cannot see (manual sliders/
+    filters at the stand) by comparing measured substrate background mode
+    ratios against golden blank-chip references. Outcome is always recorded
+    in run metadata; ok → pipeline.log line, warn → loud console warning,
+    abort → park the microscope and exit before further hardware work.
+    """
+    result: BGCheckResult | None = None
+    skip_reason: str | None = None
+    if not p.bg_check_active:
+        skip_reason = "custom white balance (no reference)"
+    else:
+        ref = p.detector_cfg.bg_reference.get(mag)
+        if ref is None:
+            skip_reason = f"no bg reference for {p.seg.material} at {mag:g}x"
+        else:
+            ratios = measure()
+            if ratios is None:
+                skip_reason = "no background measurement available"
+            else:
+                result = evaluate_bg_check(ratios, ref)
+
+    checks = run_meta.setdefault("bg_check", {})
+    if result is None:
+        checks[key] = {"verdict": "skipped", "reason": skip_reason}
+        _write_run_meta(run_dir, run_meta)
+        print(f"[bg {label}] skipped: {skip_reason}")
+        return
+
+    checks[key] = dict(result._asdict())
+    _write_run_meta(run_dir, run_meta)
+    line = f"R/G {result.rg:.3f} (Δ{result.delta_rg:+.3f}), B/G {result.bg:.3f} (Δ{result.delta_bg:+.3f})"
+    if result.verdict == "ok":
+        print(f"[bg {label}] {line} OK")
+    elif result.verdict == "warn":
+        with _always_console():
+            print(f"[bg {label}] ⚠️  BACKGROUND WARN: {line} — check the illumination path")
+    else:
+        with _always_console():
+            print(f"[bg {label}] \U0001f6d1 BACKGROUND DEVIANT: {line}")
+            print(
+                f"[bg {label}] Substrate colour is outside the abort band for "
+                f"{p.seg.material} at {mag:g}x — the illumination path has likely "
+                "been changed at the stand (manual slider/filter, invisible to the SDK)."
+            )
+            print(f"[bg {label}] See docs/illum_sanity_check_plan.md. Parking and aborting.")
+            park_microscope(scope)
+            print("[parked]")
+        sys.exit(1)
+
+
+# ============================================================================
 # Background segmentation
 # ============================================================================
 
@@ -889,17 +972,21 @@ def _run_chip_seg(
     jobs: int,
     revisit_mags: list[float],
     revisit_top: int | None,
+    bg_check_active: bool = True,
 ) -> _SegResult:
     """Run segmentation for one chip in-process. Called in background thread."""
     start = time.perf_counter()
     try:
-        # Read pixel size from scan metadata
+        # Read pixel size + objective mag from scan metadata
         pixel_size = 0.36  # fallback for 20x bin3
+        objective_mag: float | None = None
         scan_meta_path = job.scan_dir / "scan_meta.json"
         if scan_meta_path.exists():
             with open(scan_meta_path) as f:
                 sm = json.load(f)
             pixel_size = sm.get("optics", {}).get("sample_pixel_x_um", pixel_size)
+            mag = sm.get("optics", {}).get("objective_mag")
+            objective_mag = float(mag) if mag is not None else None
 
         # Discover frames
         frames = sorted(job.scan_dir.glob("frame_*.jpg"), key=natural_sort_key)
@@ -974,6 +1061,30 @@ def _run_chip_seg(
             if bg is not None:
                 bg_mode_by_frame[fp.stem] = list(bg)
 
+        # Background monitor: per-chip median mode ratios vs golden reference
+        # (catches mid-run illumination drift; see docs/illum_sanity_check_plan.md)
+        bg_marker = ""
+        ratios = measure_bg_frame_modes(bg_mode_by_frame)
+        bg_check: dict = {"verdict": "skipped"}
+        if ratios is not None:
+            bg_check["rg"] = round(ratios.rg, 4)
+            bg_check["bg"] = round(ratios.bg, 4)
+        ref = config.bg_reference.get(objective_mag) if objective_mag is not None else None
+        if ratios is None:
+            bg_check["reason"] = "no background modes"
+        elif not bg_check_active:
+            bg_check["reason"] = "custom white balance (no reference)"
+        elif ref is None:
+            bg_check["reason"] = f"no bg reference for {material} at {objective_mag:g}x"
+        else:
+            res = evaluate_bg_check(ratios, ref)
+            bg_check = dict(res._asdict())
+            if res.verdict != "ok":
+                tag = "DEVIANT" if res.verdict == "abort" else "WARN"
+                bg_marker = (
+                    f", ⚠️ bg R/G {res.rg:.3f} (Δ{res.delta_rg:+.3f}) B/G {res.bg:.3f} (Δ{res.delta_bg:+.3f}) {tag}"
+                )
+
         seg_elapsed = time.perf_counter() - start
 
         summary_data = {
@@ -1000,6 +1111,7 @@ def _run_chip_seg(
                 "tier_3": tier_counts[3],
             },
             "bg_mode_by_frame": bg_mode_by_frame,
+            "bg_check": bg_check,
             "detections_by_frame": all_detections,
         }
 
@@ -1025,6 +1137,7 @@ def _run_chip_seg(
         )
         if revisit_str:
             summary_str += f", {revisit_str}"
+        summary_str += bg_marker
 
         return _SegResult(success=True, duration=seg_elapsed, summary=summary_str, error="")
 
@@ -1308,6 +1421,18 @@ def run(scope: Microscope, p: _Preflight) -> int:
             chips_data = json.load(f)
         print(f"[detect] {len(chips_data.get('chips', []))} chips")
 
+    # Background sanity check on the stitched overview (earliest abort point)
+    _run_bg_check(
+        "overview",
+        "overview",
+        _mag_to_float(p.overview_mag),
+        lambda: measure_bg_stitch(p.stitch_path, chips_data.get("chips", [])),
+        p,
+        scope,
+        run_dir,
+        run_meta,
+    )
+
     # ----------------------------------------------------------------
     # Step 4: Switch to chip scan objective
     # ----------------------------------------------------------------
@@ -1397,6 +1522,19 @@ def run(scope: Microscope, p: _Preflight) -> int:
         # Summary: focus_map (after analyze exports plane)
         _print_focus_map_summary(chip_idx, plane_path)
 
+        # Background gate: focus-map best-AF images vs golden reference
+        fm_images_dir = chip_dir / f"focus_map_chip{chip_idx}_images"
+        _run_bg_check(
+            f"chip {chip_idx}",
+            f"chip_{chip_idx}",
+            _mag_to_float(p.chip_scan_mag),
+            lambda d=fm_images_dir: measure_bg_images(sorted(d.glob("*.jpg"))),
+            p,
+            scope,
+            run_dir,
+            run_meta,
+        )
+
         # Step 5c: Chip scan
         duration, _ = run_in_process(
             f"Chip {chip_idx} - {p.chip_scan_mag} Scan",
@@ -1435,6 +1573,7 @@ def run(scope: Microscope, p: _Preflight) -> int:
                 p.seg.jobs,
                 p.seg.revisit_mags,
                 p.seg.revisit_top,
+                p.bg_check_active,
             )
             future.add_done_callback(lambda f, ci=chip_idx: _on_seg_done(f, ci))
             seg_futures.append((job, future))

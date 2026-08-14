@@ -9,7 +9,7 @@ find_flakes.py.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -68,6 +68,68 @@ class BGModeRGB(NamedTuple):
     red: float
     green: float
     blue: float
+
+
+class BGReference(NamedTuple):
+    """Expected background mode ratios for one (WB preset × objective).
+
+    Anchored to golden blank-chip references measured on the validated
+    light path (calibration/blank_refs_20260813.json). See
+    docs/illum_sanity_check_plan.md.
+    """
+
+    rg: float  # R/G
+    bg: float  # B/G
+
+
+class BGRatios(NamedTuple):
+    """Measured background mode ratios (R/G, B/G)."""
+
+    rg: float
+    bg: float
+
+
+class BGCheckResult(NamedTuple):
+    """Outcome of comparing measured background ratios against a reference."""
+
+    rg: float
+    bg: float
+    ref_rg: float
+    ref_bg: float
+    delta_rg: float
+    delta_bg: float
+    verdict: str  # "ok" | "warn" | "abort"
+
+
+# Background sanity-check bands (|Δ| of measured ratio vs reference).
+# Warn clears observed good-path chip-to-chip substrate wobble (up to
+# Δ 0.065 R/G / 0.16 B/G across the 8/04-8/11 run history); abort sits
+# well inside incident-scale deviation (Δ ~0.19 R/G / ~0.40 B/G).
+BG_WARN_DELTA_RG = 0.08
+BG_WARN_DELTA_BG = 0.20
+BG_ABORT_DELTA_RG = 0.12
+BG_ABORT_DELTA_BG = 0.30
+
+
+def evaluate_bg_check(ratios: BGRatios, ref: BGReference) -> BGCheckResult:
+    """Compare measured background ratios against a golden reference."""
+    delta_rg = ratios.rg - ref.rg
+    delta_bg = ratios.bg - ref.bg
+    if abs(delta_rg) > BG_ABORT_DELTA_RG or abs(delta_bg) > BG_ABORT_DELTA_BG:
+        verdict = "abort"
+    elif abs(delta_rg) > BG_WARN_DELTA_RG or abs(delta_bg) > BG_WARN_DELTA_BG:
+        verdict = "warn"
+    else:
+        verdict = "ok"
+    return BGCheckResult(
+        rg=round(ratios.rg, 4),
+        bg=round(ratios.bg, 4),
+        ref_rg=ref.rg,
+        ref_bg=ref.bg,
+        delta_rg=round(delta_rg, 4),
+        delta_bg=round(delta_bg, 4),
+        verdict=verdict,
+    )
 
 
 # AFM-verified hBN calibration data on 90nm SiO₂ (50x, Leica DM6M).
@@ -592,6 +654,16 @@ class Substrate(str, Enum):
     SI_300NM = "300nm"
 
 
+# Golden background references for WB (2.51,1.02,1.41) on 90 nm SiO₂,
+# from calibration/blank_refs_20260813.json (stage 1 for 10x, stage 3
+# objective sweep for the rest). B/G is NA-dependent, hence per-objective.
+_BG_REF_DEFAULT_WB_90NM: dict[float, BGReference] = {
+    2.5: BGReference(rg=1.0333, bg=2.1153),
+    5.0: BGReference(rg=1.0717, bg=2.0656),
+    10.0: BGReference(rg=1.0117, bg=2.0319),
+    20.0: BGReference(rg=1.0318, bg=1.9027),
+}
+
 # Shared defaults for WSe₂ monolayer presets. Per-substrate variants splat these
 # in and override `substrate` + `cal_reference_points`.
 _WSE2_MONOLAYER_BASE: dict = {
@@ -699,6 +771,14 @@ class DetectorConfig:
     # gain/exposure CLI flags win over material entries.
     revisit_capture: dict[float, CaptureSettings] = field(default_factory=dict, kw_only=True)
 
+    # -- Background sanity check (docs/illum_sanity_check_plan.md) --
+    # Expected background mode ratios keyed by objective mag (e.g. 10.0),
+    # valid only for this preset's white balance on this preset's substrate.
+    # Mags without an entry are not checked — an anchor must never be
+    # borrowed across magnifications (B/G is NA-dependent) or substrates
+    # (background colour is set by oxide interference).
+    bg_reference: dict[float, BGReference] = field(default_factory=dict, kw_only=True)
+
     def cal_projection(self, r: float, g: float, b: float) -> CalProjection:
         """Project a contrast triple onto this config's calibration data."""
         raise NotImplementedError
@@ -766,6 +846,7 @@ class DetectorConfig:
             medium_max_nm=24.0,
             non_match_label="non-hBN",
             white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
+            bg_reference=dict(_BG_REF_DEFAULT_WB_90NM),
             score_fn=_score_hbn_medium,
             tier1_perim_ratio=1.50,
             tier1_cal_dist=0.15,
@@ -806,6 +887,7 @@ class DetectorConfig:
             medium_max_nm=38.0,
             non_match_label="non-hBN",
             white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
+            bg_reference=dict(_BG_REF_DEFAULT_WB_90NM),
             score_fn=_score_hbn_thick,
             tier1_perim_ratio=1.50,
             tier1_cal_dist=0.30,
@@ -861,6 +943,7 @@ class DetectorConfig:
             cal_dist_possible=0.60,
             non_match_label="non-hBN",
             white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
+            bg_reference=dict(_BG_REF_DEFAULT_WB_90NM),
             chip_scan_gain=2.0,
             chip_scan_exposure_ms=0.25,
             revisit_capture={50.0: CaptureSettings(gain=1.0, exposure_ms=1.0)},
@@ -959,6 +1042,7 @@ class DetectorConfig:
             cal_dist_possible=0.15,
             non_match_label="non-graphene",
             white_balance=GainRGB(red=1.41, green=1.02, blue=2.51),
+            bg_reference=dict(_BG_REF_DEFAULT_WB_90NM),
             score_fn=_score_graphene,
             tier1_perim_ratio=1.50,
             tier1_cal_dist=0.06,
@@ -1003,6 +1087,7 @@ class DetectorConfig:
             cal_dist_possible=0.25,
             non_match_label="non-graphene",
             white_balance=GainRGB(red=1.4, green=1.0, blue=1.7),
+            bg_reference={10.0: BGReference(rg=1.0799, bg=1.1375)},
             score_fn=_score_graphene,
             tier1_perim_ratio=1.50,
             tier1_cal_dist=0.06,
@@ -1256,6 +1341,78 @@ def histogram_mode(image: np.ndarray, channel: int | None = None) -> float:
     hist[:20] = 0
     hist[230:] = 0
     return float(np.argmax(hist))
+
+
+def _refined_mode(data: np.ndarray) -> float:
+    """Histogram mode refined to the mean of values within ±5 counts.
+
+    Matches the golden blank-reference extraction; plain argmax quantizes
+    background ratios by ~0.01 at scan brightness.
+    """
+    hist, _ = np.histogram(data, bins=256, range=(0, 256))
+    hist[:20] = 0
+    hist[230:] = 0
+    mode = int(np.argmax(hist))
+    sel = data[(data >= mode - 5) & (data <= mode + 5)]
+    return float(sel.mean()) if sel.size else float(mode)
+
+
+def refined_bg_mode(image_bgr: np.ndarray, mask: np.ndarray | None = None) -> BGModeRGB:
+    """Per-channel refined background mode of a BGR image (optionally masked)."""
+    b, g, r = (
+        _refined_mode(image_bgr[:, :, c][mask] if mask is not None else image_bgr[:, :, c].ravel()) for c in range(3)
+    )
+    return BGModeRGB(red=r, green=g, blue=b)
+
+
+def _ratios_from_mode(mode: BGModeRGB) -> BGRatios | None:
+    if mode.green <= 0:
+        return None
+    return BGRatios(rg=mode.red / mode.green, bg=mode.blue / mode.green)
+
+
+def measure_bg_stitch(stitch_path: Path, chips: list[dict]) -> BGRatios | None:
+    """Background ratios over the union of chip bboxes in a stitched overview."""
+    img = cv2.imread(str(stitch_path))
+    if img is None or not chips:
+        return None
+    mask = np.zeros(img.shape[:2], dtype=bool)
+    for chip in chips:
+        x, y, w, h = chip["bbox_px"]
+        mask[y : y + h, x : x + w] = True
+    if not mask.any():
+        return None
+    return _ratios_from_mode(refined_bg_mode(img, mask))
+
+
+def measure_bg_images(image_paths: Sequence[Path]) -> BGRatios | None:
+    """Median refined-mode background ratios across images (focus-map best-AF frames)."""
+    ratios = []
+    for path in image_paths:
+        img = cv2.imread(str(path))
+        if img is None:
+            continue
+        r = _ratios_from_mode(refined_bg_mode(img))
+        if r is not None:
+            ratios.append(r)
+    if not ratios:
+        return None
+    return BGRatios(
+        rg=float(np.median([r.rg for r in ratios])),
+        bg=float(np.median([r.bg for r in ratios])),
+    )
+
+
+def measure_bg_frame_modes(bg_mode_by_frame: dict[str, Sequence[float]]) -> BGRatios | None:
+    """Median background ratios from seg per-frame [R, G, B] modes."""
+    rgs, bgs = [], []
+    for r, g, b in bg_mode_by_frame.values():
+        if g > 0:
+            rgs.append(r / g)
+            bgs.append(b / g)
+    if not rgs:
+        return None
+    return BGRatios(rg=float(np.median(rgs)), bg=float(np.median(bgs)))
 
 
 def compute_dark_frac(image: np.ndarray, threshold: float = 30.0) -> float:
