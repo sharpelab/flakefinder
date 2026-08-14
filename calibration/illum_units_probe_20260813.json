@@ -1,0 +1,1081 @@
+{
+  "units": [
+    {
+      "path": "root",
+      "name": "DM6M-Z",
+      "type_ids": [
+        "0x1000",
+        "0x10DE"
+      ],
+      "type_names": [
+        "MICROSCOPE",
+        "0x10DE"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_MICROSCOPE_RESERVED1",
+        "0x800D",
+        "IID_MICROSCOPE_CONTRASTING_METHODS",
+        "IID_MICROSCOPE_CONTRASTING_METHODS_UPDATE",
+        "IID_PROPERTIES",
+        "0x0900",
+        "0x1001",
+        "IID_MICROSCOPE_SHEARING",
+        "IID_MICROSCOPE_IL_SHEARING",
+        "0x8005",
+        "0x800E",
+        "IID_MICROSCOPE_REFLECTION",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": false,
+      "properties": [
+        {
+          "id": 256,
+          "value": null
+        }
+      ],
+      "contrasting_methods": {
+        "current": 200,
+        "current_name": null,
+        "supported": [],
+        "all": []
+      }
+    },
+    {
+      "path": "root/0",
+      "name": "MANUAL-TUBE",
+      "type_ids": [
+        "0x1031",
+        "0x1001",
+        "0x1033"
+      ],
+      "type_names": [
+        "MICROSCOPE_PORTS",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_MANUAL_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_PROPERTIES"
+      ],
+      "illumination": true,
+      "control": {
+        "value": 1,
+        "min": 1,
+        "max": 2
+      },
+      "properties": [
+        {
+          "id": 5376,
+          "value": null
+        }
+      ]
+    },
+    {
+      "path": "root/1",
+      "name": "IL AXIS",
+      "type_ids": [
+        "0x1007",
+        "0x1023",
+        "0x1001"
+      ],
+      "type_names": [
+        "MICROSCOPE_IL_AXIS",
+        "MICROSCOPE_INCIDENT_LIGHT_UNIT",
+        "MICROSCOPE_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": false
+    },
+    {
+      "path": "root/1/0",
+      "name": "ILTurret IL-TURRET(4-POS)",
+      "type_ids": [
+        "0x1008",
+        "0x1001",
+        "0x1002",
+        "0x1022",
+        "0x1023"
+      ],
+      "type_names": [
+        "MICROSCOPE_IL_TURRET",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_MOTORIZED_UNIT",
+        "MICROSCOPE_TURRET",
+        "MICROSCOPE_INCIDENT_LIGHT_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_PROPERTIES",
+        "IID_MICROSCOPE_CONTRASTING_METHODS_LOOKAHEAD",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": true,
+      "control": {
+        "value": 2,
+        "min": 1,
+        "max": 4
+      },
+      "properties": [
+        {
+          "id": 4352,
+          "value": null
+        }
+      ]
+    },
+    {
+      "path": "root/1/1",
+      "name": "IL FieldDiaphragm IL-FIELDDIAPH",
+      "type_ids": [
+        "0x102F",
+        "0x100A",
+        "0x1001",
+        "0x1002",
+        "0x1023"
+      ],
+      "type_names": [
+        "MICROSCOPE_IL_FIELD_DIAPHRAGM",
+        "MICROSCOPE_FIELD_DIAPHRAGM",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_MOTORIZED_UNIT",
+        "MICROSCOPE_INCIDENT_LIGHT_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_PROPERTIES",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": true,
+      "control": {
+        "value": 5,
+        "min": 1,
+        "max": 6
+      },
+      "properties": [
+        {
+          "id": 4881,
+          "value": null
+        }
+      ]
+    },
+    {
+      "path": "root/1/2",
+      "name": "IL ApertureDiaphragm IL-APERDIAPH",
+      "type_ids": [
+        "0x102E",
+        "0x1009",
+        "0x1001",
+        "0x1002",
+        "0x1023"
+      ],
+      "type_names": [
+        "MICROSCOPE_IL_APERTURE_DIAPHRAGM",
+        "MICROSCOPE_APERTURE_DIAPHRAGM",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_MOTORIZED_UNIT",
+        "MICROSCOPE_INCIDENT_LIGHT_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": true,
+      "control": {
+        "value": 11,
+        "min": 1,
+        "max": 11
+      }
+    },
+    {
+      "path": "root/1/3",
+      "name": "ILShutter LAMP",
+      "type_ids": [
+        "0x1026",
+        "0x1001",
+        "0x1002",
+        "0x1023"
+      ],
+      "type_names": [
+        "MICROSCOPE_IL_SHUTTER",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_MOTORIZED_UNIT",
+        "MICROSCOPE_INCIDENT_LIGHT_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": true,
+      "control": {
+        "value": 0,
+        "min": 0,
+        "max": 1
+      }
+    },
+    {
+      "path": "root/2",
+      "name": "DICTurret DIC-TURRET",
+      "type_ids": [
+        "0x1014",
+        "0x1022",
+        "0x1023",
+        "0x1002",
+        "0x1001"
+      ],
+      "type_names": [
+        "MICROSCOPE_DIC_TURRET",
+        "MICROSCOPE_TURRET",
+        "MICROSCOPE_INCIDENT_LIGHT_UNIT",
+        "MICROSCOPE_MOTORIZED_UNIT",
+        "MICROSCOPE_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_BASIC_CONTROL_VALUE_SPECIAL",
+        "IID_PROPERTIES",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": true,
+      "control": {
+        "value": 4,
+        "min": 1,
+        "max": 4
+      },
+      "properties": [
+        {
+          "id": 4864,
+          "value": null
+        }
+      ]
+    },
+    {
+      "path": "root/3",
+      "name": "Nosepiece NOSEPIECE(6-POS)",
+      "type_ids": [
+        "0x1004",
+        "0x1001",
+        "0x1002",
+        "0x1022"
+      ],
+      "type_names": [
+        "MICROSCOPE_NOSEPIECE",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_MOTORIZED_UNIT",
+        "MICROSCOPE_TURRET"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_PROPERTIES",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": true,
+      "control": {
+        "value": 1,
+        "min": 1,
+        "max": 6
+      },
+      "properties": [
+        {
+          "id": 4096,
+          "value": null
+        },
+        {
+          "id": 4114,
+          "value": "DRY"
+        },
+        {
+          "id": 4115,
+          "value": 1
+        },
+        {
+          "id": 4123,
+          "value": 1
+        },
+        {
+          "id": 4126,
+          "value": 0
+        }
+      ]
+    },
+    {
+      "path": "root/4",
+      "name": "ZDrive Z-DRIVE",
+      "type_ids": [
+        "0x1005",
+        "0x101C",
+        "0x1001",
+        "0x1002"
+      ],
+      "type_names": [
+        "MICROSCOPE_ZDRIVE",
+        "MICROSCOPE_Z_UNIT",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_MOTORIZED_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_DELTA_CONTROL_VALUE",
+        "IID_HALT_CONTROL_VALUE",
+        "IID_DIRECTED_CONTROL_VALUE_ASYNC",
+        "IID_AUTO_CALIBRATION",
+        "IID_BASIC_CONTROL_STATE",
+        "IID_DEFINED_CONTROL_VALUES",
+        "IID_BASIC_CONTROL_VALUE_ASYNC",
+        "IID_MICROSCOPE_RESERVED0",
+        "IID_BASIC_CONTROL_VALUE_VELOCITY",
+        "IID_DIRECTED_CONTROL_VALUE_ASYNC_VELOCITY",
+        "IID_LIMIT_SWITCHES",
+        "IID_BASIC_CONTROL_VALUE_TIMING",
+        "IID_BASIC_CONTROL_VALUE_HYSTERESIS_CORRECTED",
+        "IID_BASIC_CONTROL_VALUE_ACCELERATION",
+        "IID_PROPERTIES",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": false,
+      "control": {
+        "value": 6494666,
+        "min": 0,
+        "max": 6799210
+      },
+      "defined_values": [
+        {
+          "id": 4097,
+          "value": null
+        },
+        {
+          "id": 4098,
+          "value": null
+        }
+      ],
+      "properties": [
+        {
+          "id": 5632,
+          "value": null
+        }
+      ]
+    },
+    {
+      "path": "root/5",
+      "name": "STAGE",
+      "type_ids": [
+        "0x1010",
+        "0x1002",
+        "0x1001"
+      ],
+      "type_names": [
+        "MICROSCOPE_STAGE",
+        "MICROSCOPE_MOTORIZED_UNIT",
+        "MICROSCOPE_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_DEFINED_CONTROL_VALUES",
+        "IID_AUTO_CALIBRATION",
+        "IID_PROPERTIES",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": false,
+      "defined_values": [
+        {
+          "id": 4352,
+          "value": null
+        },
+        {
+          "id": 4353,
+          "value": null
+        },
+        {
+          "id": 4354,
+          "value": null
+        },
+        {
+          "id": 4355,
+          "value": null
+        },
+        {
+          "id": 4356,
+          "value": null
+        }
+      ],
+      "properties": [
+        {
+          "id": 5696,
+          "value": null
+        }
+      ]
+    },
+    {
+      "path": "root/5/0",
+      "name": "X-UNIT X-AXIS",
+      "type_ids": [
+        "0x101A",
+        "0x1001",
+        "0x1002"
+      ],
+      "type_names": [
+        "MICROSCOPE_X_UNIT",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_MOTORIZED_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_DELTA_CONTROL_VALUE",
+        "IID_LIMIT_CONTROL_VALUE",
+        "IID_HALT_CONTROL_VALUE",
+        "IID_DIRECTED_CONTROL_VALUE_ASYNC",
+        "IID_AUTO_CALIBRATION",
+        "IID_BASIC_CONTROL_STATE",
+        "IID_BASIC_CONTROL_VALUE_ASYNC",
+        "IID_BASIC_CONTROL_VALUE_VELOCITY",
+        "IID_DIRECTED_CONTROL_VALUE_ASYNC_VELOCITY",
+        "IID_BASIC_CONTROL_VALUE_ACCELERATION",
+        "IID_PROPERTIES",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": false,
+      "control": {
+        "value": 0,
+        "min": 0,
+        "max": 9745405
+      },
+      "properties": [
+        {
+          "id": 4135,
+          "value": 1.999995
+        },
+        {
+          "id": 4163,
+          "value": false
+        }
+      ]
+    },
+    {
+      "path": "root/5/1",
+      "name": "Y-UNIT Y-AXIS",
+      "type_ids": [
+        "0x101B",
+        "0x1001",
+        "0x1002"
+      ],
+      "type_names": [
+        "MICROSCOPE_Y_UNIT",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_MOTORIZED_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_DELTA_CONTROL_VALUE",
+        "IID_LIMIT_CONTROL_VALUE",
+        "IID_HALT_CONTROL_VALUE",
+        "IID_DIRECTED_CONTROL_VALUE_ASYNC",
+        "IID_AUTO_CALIBRATION",
+        "IID_BASIC_CONTROL_STATE",
+        "IID_BASIC_CONTROL_VALUE_ASYNC",
+        "IID_BASIC_CONTROL_VALUE_VELOCITY",
+        "IID_DIRECTED_CONTROL_VALUE_ASYNC_VELOCITY",
+        "IID_BASIC_CONTROL_VALUE_ACCELERATION",
+        "IID_PROPERTIES",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": false,
+      "control": {
+        "value": 561102,
+        "min": 0,
+        "max": 8714428
+      },
+      "properties": [
+        {
+          "id": 4135,
+          "value": 1.999995
+        },
+        {
+          "id": 4163,
+          "value": false
+        }
+      ]
+    },
+    {
+      "path": "root/6",
+      "name": "Lamp LAMP",
+      "type_ids": [
+        "0x1017",
+        "0x1001",
+        "0x1002"
+      ],
+      "type_names": [
+        "MICROSCOPE_LAMP",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_MOTORIZED_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": true,
+      "control": {
+        "value": 0,
+        "min": 0,
+        "max": 255
+      }
+    },
+    {
+      "path": "root/6/0",
+      "name": "TLILLampSwitch",
+      "type_ids": [
+        "0x1018",
+        "0x1001",
+        "0x1002"
+      ],
+      "type_names": [
+        "MICROSCOPE_TL_IL_LAMP_SWITCH",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_MOTORIZED_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_BASIC_CONTROL_VALUE_SPECIAL",
+        "IID_PROPERTIES",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": true,
+      "control": {
+        "value": 1,
+        "min": 0,
+        "max": 1
+      },
+      "properties": [
+        {
+          "id": 5217,
+          "value": null,
+          "index": 2
+        }
+      ]
+    },
+    {
+      "path": "root/7",
+      "name": "TL AXIS",
+      "type_ids": [
+        "0x1006",
+        "0x1024",
+        "0x1001"
+      ],
+      "type_names": [
+        "MICROSCOPE_TL_AXIS",
+        "MICROSCOPE_TRANSMITTED_LIGHT_UNIT",
+        "MICROSCOPE_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO"
+      ],
+      "illumination": false
+    },
+    {
+      "path": "root/7/0",
+      "name": "TL FieldDiaphragm TL-FIELDDIAPH",
+      "type_ids": [
+        "0x102D",
+        "0x100A",
+        "0x1001",
+        "0x1002",
+        "0x1024"
+      ],
+      "type_names": [
+        "MICROSCOPE_TL_FIELD_DIAPHRAGM",
+        "MICROSCOPE_FIELD_DIAPHRAGM",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_MOTORIZED_UNIT",
+        "MICROSCOPE_TRANSMITTED_LIGHT_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": true,
+      "control": {
+        "value": 32,
+        "min": 1,
+        "max": 38
+      }
+    },
+    {
+      "path": "root/7/1",
+      "name": "TL ApertureDiaphragm TL-APERDIAPH",
+      "type_ids": [
+        "0x102C",
+        "0x1009",
+        "0x1001",
+        "0x1002",
+        "0x1024"
+      ],
+      "type_names": [
+        "MICROSCOPE_TL_APERTURE_DIAPHRAGM",
+        "MICROSCOPE_APERTURE_DIAPHRAGM",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_MOTORIZED_UNIT",
+        "MICROSCOPE_TRANSMITTED_LIGHT_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": true,
+      "control": {
+        "value": 1,
+        "min": 1,
+        "max": 33
+      }
+    },
+    {
+      "path": "root/7/2",
+      "name": "TLShutter LAMP",
+      "type_ids": [
+        "0x1025",
+        "0x1001",
+        "0x1002",
+        "0x1024"
+      ],
+      "type_names": [
+        "MICROSCOPE_TL_SHUTTER",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_MOTORIZED_UNIT",
+        "MICROSCOPE_TRANSMITTED_LIGHT_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": true,
+      "control": {
+        "value": 0,
+        "min": 0,
+        "max": 1
+      }
+    },
+    {
+      "path": "root/8",
+      "name": "FKey FUNCTION-KEYS(10-PROG)",
+      "type_ids": [
+        "0x100E"
+      ],
+      "type_names": [
+        "MICROSCOPE_FUNCTION_KEYS"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_PROPERTIES"
+      ],
+      "illumination": false,
+      "properties": [
+        {
+          "id": 5120,
+          "value": null
+        }
+      ]
+    },
+    {
+      "path": "root/9",
+      "name": "MEMORY",
+      "type_ids": [
+        "0x103C",
+        "0x103D"
+      ],
+      "type_names": [
+        "MICROSCOPE_MEMORY_FUNCTION_UNIT",
+        "MICROSCOPE_VIRTUAL_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_MICROSCOPE_MEMORY",
+        "IID_PROPERTIES",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": false,
+      "properties": [
+        {
+          "id": 5184,
+          "value": null
+        }
+      ]
+    },
+    {
+      "path": "root/10",
+      "name": "SEQUENCER",
+      "type_ids": [
+        "0x1069",
+        "0x1001"
+      ],
+      "type_names": [
+        "MICROSCOPE_SEQUENCER",
+        "MICROSCOPE_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_PROPERTIES",
+        "IID_MICROSCOPE_SEQUENCER_CONTROL",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": false,
+      "properties": [
+        {
+          "id": 5921,
+          "value": null,
+          "index": 0
+        },
+        {
+          "id": 5927,
+          "value": null
+        },
+        {
+          "id": 5922,
+          "value": 0
+        },
+        {
+          "id": 5923,
+          "value": null,
+          "index": 0
+        },
+        {
+          "id": 5924,
+          "value": 0
+        },
+        {
+          "id": 5925,
+          "value": 0
+        },
+        {
+          "id": 5926,
+          "value": 0
+        },
+        {
+          "id": 5936,
+          "value": 0.1
+        }
+      ]
+    },
+    {
+      "path": "root/10/0",
+      "name": "TIMESTAMPS",
+      "type_ids": [
+        "0x1086",
+        "0x1001",
+        "0x103D"
+      ],
+      "type_names": [
+        "MICROSCOPE_SEQUENCER_TIMESTAMPS",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_VIRTUAL_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_MICROSCOPE_SEQUENCER_TIMESTAMPS",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": false
+    },
+    {
+      "path": "root/10/1",
+      "name": "REALTIME-TIMESTAMPS",
+      "type_ids": [
+        "0x10AA",
+        "0x1001",
+        "0x103D"
+      ],
+      "type_names": [
+        "MICROSCOPE_SEQUENCER_REALTIME_TIMESTAMPS",
+        "MICROSCOPE_UNIT",
+        "MICROSCOPE_VIRTUAL_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": false
+    },
+    {
+      "path": "root/11",
+      "name": "CAMERA-INTERFACE",
+      "type_ids": [
+        "0x1087",
+        "0x1001"
+      ],
+      "type_names": [
+        "MICROSCOPE_CAMERA_INTERFACE",
+        "MICROSCOPE_UNIT"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_BASIC_CONTROL_VALUE",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": false,
+      "control": {
+        "value": 0,
+        "min": 0,
+        "max": 1
+      }
+    },
+    {
+      "path": "root/12",
+      "name": "BGAPI CAMERA MODULE",
+      "type_ids": [
+        "0x4000"
+      ],
+      "type_names": [
+        "0x4000"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_DYNAMIC_UNITS",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": false
+    },
+    {
+      "path": "root/12/0",
+      "name": "K5C",
+      "type_ids": [
+        "0x4001"
+      ],
+      "type_names": [
+        "0x4001"
+      ],
+      "interfaces": [
+        "IID_DRIVER_INFO",
+        "IID_INIT_STATE",
+        "0x4000",
+        "0x4002",
+        "IID_PROPERTIES",
+        "0x8005",
+        "0x4005",
+        "0x4004",
+        "0x40F1",
+        "0x4001",
+        "IID_EVENT_SOURCE"
+      ],
+      "illumination": false,
+      "properties": [
+        {
+          "id": 16384,
+          "value": "700008591829"
+        },
+        {
+          "id": 16386,
+          "value": null,
+          "index": 0
+        },
+        {
+          "id": 16399,
+          "value": 0.002
+        },
+        {
+          "id": 16401,
+          "value": 0.0
+        },
+        {
+          "id": 16402,
+          "value": 0.0
+        },
+        {
+          "id": 16403,
+          "value": 0.0
+        },
+        {
+          "id": 16404,
+          "value": 0.0
+        },
+        {
+          "id": 16424,
+          "value": false
+        },
+        {
+          "id": 16425,
+          "value": false
+        },
+        {
+          "id": 16423,
+          "value": 1
+        },
+        {
+          "id": 16494,
+          "value": false
+        },
+        {
+          "id": 16410,
+          "value": null,
+          "index": 1
+        },
+        {
+          "id": 16413,
+          "value": null,
+          "index": 0
+        },
+        {
+          "id": 16414,
+          "value": null,
+          "index": 0
+        },
+        {
+          "id": 16397,
+          "value": null,
+          "index": 1
+        },
+        {
+          "id": 16417,
+          "value": 0.45
+        },
+        {
+          "id": 16427,
+          "value": 2
+        },
+        {
+          "id": 16405,
+          "value": false
+        },
+        {
+          "id": 16389,
+          "value": 2.40234375e-06
+        },
+        {
+          "id": 16390,
+          "value": 2.40234375e-06
+        },
+        {
+          "id": 16387,
+          "value": 5472
+        },
+        {
+          "id": 16388,
+          "value": 3648
+        },
+        {
+          "id": 16395,
+          "value": 4.8046875e-06
+        },
+        {
+          "id": 16396,
+          "value": 4.8046875e-06
+        },
+        {
+          "id": 16406,
+          "value": 125.0
+        },
+        {
+          "id": 16409,
+          "value": 100
+        },
+        {
+          "id": 16391,
+          "value": 2736
+        },
+        {
+          "id": 16392,
+          "value": 1824
+        },
+        {
+          "id": 16415,
+          "value": "LeicaMicrosystems.HardwareModel.IntRect"
+        },
+        {
+          "id": 16462,
+          "value": null,
+          "index": 2
+        },
+        {
+          "id": 16448,
+          "value": null
+        },
+        {
+          "id": 16398,
+          "value": null,
+          "index": 1
+        },
+        {
+          "id": 16501,
+          "value": null
+        },
+        {
+          "id": 16452,
+          "value": 0.083
+        },
+        {
+          "id": 16447,
+          "value": true
+        },
+        {
+          "id": 16446,
+          "value": 0.074
+        },
+        {
+          "id": 16408,
+          "value": false
+        },
+        {
+          "id": 16407,
+          "value": "LeicaMicrosystems.HardwareModel.IntRect"
+        },
+        {
+          "id": 16491,
+          "value": 0.001
+        },
+        {
+          "id": 16492,
+          "value": 0.05
+        },
+        {
+          "id": 16474,
+          "value": null,
+          "index": 0
+        },
+        {
+          "id": 16487,
+          "value": null,
+          "index": 2
+        },
+        {
+          "id": 16488,
+          "value": null,
+          "index": 2
+        },
+        {
+          "id": 16489,
+          "value": "USB3"
+        },
+        {
+          "id": 16490,
+          "value": "USB3"
+        },
+        {
+          "id": 16493,
+          "value": 0.0
+        },
+        {
+          "id": 16497,
+          "value": false
+        },
+        {
+          "id": 16498,
+          "value": null,
+          "index": 1
+        }
+      ]
+    }
+  ]
+}
