@@ -30,6 +30,7 @@ from PIL import Image as PILImage
 from PIL import ImageDraw
 
 from flakefinder.flakes_api import BASE_URL, get_auth
+from flakefinder.scan_utils import get_git_version
 from flakefinder.segmentation import Detection, dedup_detections
 
 
@@ -353,18 +354,54 @@ def _get_scan_time(run_dir: Path) -> float:
 
 
 def _build_comment(checkpoint: dict) -> str:
-    """Build scan comment string from checkpoint metadata."""
-    cp_args = checkpoint.get("args", {})
+    """Build the human-readable scan comment from checkpoint metadata.
+
+    Only the operator's own words go here — the comment is editable on the
+    server. Machine-recorded provenance belongs in :func:`_build_meta`.
+    """
     parts = []
     if cp_name := checkpoint.get("name", ""):
         parts.append(cp_name)
-    if preset := cp_args.get("preset", ""):
-        parts.append(f"preset={preset}")
-    if mag := cp_args.get("chip_scan_mag", ""):
-        parts.append(f"scan_mag={mag}")
     if cp_notes := checkpoint.get("notes", ""):
         parts.append(cp_notes)
     return " | ".join(parts) or "FlakeFinder upload"
+
+
+# Checkpoint args worth recording as provenance. Excludes run-shaping
+# arguments (chips/after/limit/seg_jobs) that say nothing about the result.
+_META_ARG_KEYS = (
+    "git_version",
+    "preset",
+    "area_rect",
+    "initial_z",
+    "overview_mag",
+    "chip_scan_mag",
+    "scan_speed",
+    "chip_scan_gain",
+    "chip_scan_exposure_ms",
+    "focus_map_gain",
+    "focus_map_exposure_ms",
+    "white_balance",
+    "colour_matrix",
+    "material",
+    "flatfield",
+)
+
+
+def _build_meta(checkpoint: dict) -> dict:
+    """Build the read-only provenance dict recorded against the scan.
+
+    ``git_version`` is the revision that ran the scan, taken from the
+    checkpoint; ``upload_git_version`` is the revision running this upload,
+    which differs whenever a run is uploaded from a different machine or
+    after a later pull. Keys absent from older checkpoints are omitted.
+    """
+    cp_args = checkpoint.get("args", {})
+    meta = {key: cp_args[key] for key in _META_ARG_KEYS if cp_args.get(key) is not None}
+    if operator := checkpoint.get("operator", ""):
+        meta["operator"] = operator
+    meta["upload_git_version"] = get_git_version()
+    return meta
 
 
 def _build_flake_payload(
@@ -698,6 +735,7 @@ def run(
                 "time": int(scan_time),
                 "source": "flakefinder",
                 "comment": comment,
+                "meta": _build_meta(checkpoint),
             },
             timeout=30,
         )
