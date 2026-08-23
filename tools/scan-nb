@@ -4,7 +4,7 @@
 # ///
 """Append a timestamped entry to a scan notebook.
 
-Finds "Scan Notebook - <slug>.md" in ~/Documents/Primer/Sharpelab/.
+Finds "Scan Notebook - <slug>.md" in ~/Documents/Primer/Sharpelab/Scan Notebooks/.
 Auto-prepends **MM-DD HH:MM** timestamp. Appends before <!-- end-of-log --> sentinel.
 
 Usage:
@@ -34,8 +34,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-NB_DIR = Path.home() / "Documents" / "Primer" / "Sharpelab"
-ATTACH_DIR = NB_DIR / "attachments"
+VAULT_DIR = Path.home() / "Documents" / "Primer" / "Sharpelab"
+NB_DIR = VAULT_DIR / "Scan Notebooks"
+ATTACH_DIR = VAULT_DIR / "attachments"
 SENTINEL = "<!-- end-of-log -->"
 
 TEMPLATE = """\
