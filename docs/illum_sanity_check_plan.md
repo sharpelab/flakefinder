@@ -17,7 +17,20 @@ work.** Refined background mode over the union of detected chip bboxes
 magnification. Earliest detection point: a deviant light path is caught
 before any focus map or chip scan runs.
 
-**B. Chip gate — after each chip's focus map, before its chip scan.**
+**B. Chip gate — DISABLED.**
+Median refined-mode ratios across the focus map's saved best-AF images,
+one per sample point. Contour points sample the chip *perimeter* and
+several land off the chip, returning near-black frames (median RGB
+~15/15/18). On run_20260826_1158 chip 3, four of five contour points
+were dark, so the median was taken over darkness and B/G collapsed to
+0.32 against a 2.03 reference — while the on-chip frames from the same
+focus map read 0.914 R/G / 2.207 B/G, matching that chip's scan frames
+(0.929 / 2.232). The failure is independent of the light path and shows
+up on known-good pre-incident runs. Removed from the pipeline and from
+`check_bg.py`; reinstating it means rejecting dark/off-chip frames
+before taking the median, then re-deriving bands.
+
+**B (historical spec) — after each chip's focus map, before its chip scan.**
 Median refined-mode ratios across the focus map's saved best-AF images
 (one per sample point; the median is robust to a partially covered
 point). Basis: bg ratios are gain/exposure-invariant (measured ≤0.005
@@ -44,8 +57,8 @@ material×magnification has no reference.
 
 Bands (|Δ| of measured ratio vs reference, `segmentation.py`):
 
-- **warn**: |ΔR/G| > 0.08 or |ΔB/G| > 0.20
-- **deviant**: |ΔR/G| > 0.12 or |ΔB/G| > 0.30
+- **warn**: |ΔR/G| > 0.16 or |ΔB/G| > 0.29
+- **deviant**: |ΔR/G| > 0.17 or |ΔB/G| > 0.30
 
 The warn band clears observed good-path chip-to-chip substrate wobble
 (worst measured good chip: Δ −0.065/+0.16 on the monitor, −0.082/+0.19
@@ -138,9 +151,17 @@ yet in hand at the scope).
 record ratios; (2) re-measure one of Elijah's 8/13 chips — doubles as
 the incident's outstanding substrate-vs-light discriminator.
 
-Known defect: the per-chip gate measures every focus-map image, i.e.
-the whole defocused Z sweep, where this design specifies the single
-best-AF frame. Replaying 2026-08-19..21 runs, that layer reports B/G
-0.3-1.2 against a 2.03 reference on chips whose seg monitor reads a
-normal 2.1 — the gate's numbers are not trustworthy until it reads one
-focused frame.
+Bands are derived from `check_bg.py` replayed over every 2026-08 run.
+The golden refs are blank-chip; working chips carry flakes and tape
+residue that bias the background mode, so every real run sits offset
+from the refs in the same direction — pre-incident runs on a known-good
+path included. The bands clear that standing offset:
+
+| layer | normal max R/G / B/G | 8/13 incident min R/G / B/G |
+|---|---|---|
+| overview 2.5x | 0.155 / 0.212 | 0.234 / 0.310 |
+| seg monitor | 0.127 / 0.277 | 0.172 / 0.379 |
+
+Under warn 0.16/0.29 and deviant 0.17/0.30: 118 normal measurements all
+OK, and all 6 incident measurements flag deviant — the overview layer
+included, so the earliest layer catches it.

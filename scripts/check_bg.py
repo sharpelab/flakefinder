@@ -1,8 +1,14 @@
 """Offline background sanity-check audit over completed runs.
 
-Replays the bg-check layers (overview gate, per-chip focus-map gate, seg
-monitor) against on-disk run artifacts — no hardware. Used to validate the
-check against historical runs and for post-hoc auditing.
+Replays the live bg-check layers (overview gate, per-chip seg monitor)
+against on-disk run artifacts — no hardware. Used to validate the check
+against historical runs and for post-hoc auditing.
+
+The focus-map chip gate is not replayed: its contour sample points often land
+off the chip and return near-black frames, so the median across sample points
+is taken over darkness and B/G collapses (error up to 1.73, five times the
+incident it existed to catch). It is disabled in the pipeline — see
+docs/illum_sanity_check_plan.md.
 
 Usage:
     uv run python scripts/check_bg.py scans/run_20260807_1630
@@ -21,7 +27,6 @@ from flakefinder.segmentation import (
     DetectorConfig,
     evaluate_bg_check,
     measure_bg_frame_modes,
-    measure_bg_images,
     measure_bg_stitch,
 )
 
@@ -89,13 +94,6 @@ def check_run(run_dir: Path, material_override: str | None) -> None:
                 m = json.load(f).get("optics", {}).get("objective_mag")
             if m is not None:
                 scan_mag = float(m)
-
-        # Focus-map gate
-        images = sorted((chip_dir / f"focus_map_chip{chip}_images").glob("*.jpg"))
-        if images:
-            _print_check(run_dir.name, f"chip {chip} gate", scan_mag, config, material, measure_bg_images(images))
-        else:
-            print(f"{run_dir.name:22} {f'chip {chip} gate':18} — no focus-map images")
 
         # Seg monitor
         summary_path = chip_dir / "seg" / "summary.json"

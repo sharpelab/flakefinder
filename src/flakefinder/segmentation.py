@@ -98,25 +98,39 @@ class BGCheckResult(NamedTuple):
     ref_bg: float
     delta_rg: float
     delta_bg: float
-    verdict: str  # "ok" | "warn" | "abort"
+    verdict: str  # "ok" | "warn" | "deviant"
 
 
 # Background sanity-check bands (|Δ| of measured ratio vs reference).
-# Warn clears observed good-path chip-to-chip substrate wobble (up to
-# Δ 0.065 R/G / 0.16 B/G across the 8/04-8/11 run history); abort sits
-# well inside incident-scale deviation (Δ ~0.19 R/G / ~0.40 B/G).
-BG_WARN_DELTA_RG = 0.08
-BG_WARN_DELTA_BG = 0.20
-BG_ABORT_DELTA_RG = 0.12
-BG_ABORT_DELTA_BG = 0.30
+#
+# The golden references are measured on a BLANK 90 nm chip, but working chips
+# carry flakes and tape residue that bias the background mode. Every real run
+# therefore sits offset from the references in the same direction (R/G low,
+# B/G high) — including pre-incident runs on a known-good light path. The bands
+# must clear that standing offset, not just measurement noise.
+#
+# Derived from scripts/check_bg.py replayed over every 2026-08 run (see
+# docs/illum_sanity_check_plan.md). Across the two live layers:
+#
+#   layer     normal max R/G / B/G   8/13 incident min R/G / B/G
+#   overview      0.155 / 0.212            0.234 / 0.310
+#   monitor       0.127 / 0.277            0.172 / 0.379
+#
+# Bands sit in the gap between the worst normal chip and the mildest incident
+# chip: nothing in the recorded history warns, and both layers still flag the
+# incident on both channels.
+BG_WARN_DELTA_RG = 0.16
+BG_WARN_DELTA_BG = 0.29
+BG_DEVIANT_DELTA_RG = 0.17
+BG_DEVIANT_DELTA_BG = 0.30
 
 
 def evaluate_bg_check(ratios: BGRatios, ref: BGReference) -> BGCheckResult:
     """Compare measured background ratios against a golden reference."""
     delta_rg = ratios.rg - ref.rg
     delta_bg = ratios.bg - ref.bg
-    if abs(delta_rg) > BG_ABORT_DELTA_RG or abs(delta_bg) > BG_ABORT_DELTA_BG:
-        verdict = "abort"
+    if abs(delta_rg) > BG_DEVIANT_DELTA_RG or abs(delta_bg) > BG_DEVIANT_DELTA_BG:
+        verdict = "deviant"
     elif abs(delta_rg) > BG_WARN_DELTA_RG or abs(delta_bg) > BG_WARN_DELTA_BG:
         verdict = "warn"
     else:

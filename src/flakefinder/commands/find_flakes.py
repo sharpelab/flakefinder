@@ -92,7 +92,6 @@ from flakefinder.segmentation import (
     dedup_detections,
     evaluate_bg_check,
     measure_bg_frame_modes,
-    measure_bg_images,
     measure_bg_stitch,
     natural_sort_key,
     process_frame,
@@ -1079,7 +1078,7 @@ def _run_chip_seg(
             res = evaluate_bg_check(ratios, ref)
             bg_check = dict(res._asdict())
             if res.verdict != "ok":
-                tag = "DEVIANT" if res.verdict == "abort" else "WARN"
+                tag = "DEVIANT" if res.verdict == "deviant" else "WARN"
                 bg_marker = (
                     f", ⚠️ bg R/G {res.rg:.3f} (Δ{res.delta_rg:+.3f}) B/G {res.bg:.3f} (Δ{res.delta_bg:+.3f}) {tag}"
                 )
@@ -1519,18 +1518,6 @@ def run(scope: Microscope, p: _Preflight) -> int:
 
         # Summary: focus_map (after analyze exports plane)
         _print_focus_map_summary(chip_idx, plane_path)
-
-        # Background gate: focus-map best-AF images vs golden reference
-        fm_images_dir = chip_dir / f"focus_map_chip{chip_idx}_images"
-        _run_bg_check(
-            f"chip {chip_idx}",
-            f"chip_{chip_idx}",
-            _mag_to_float(p.chip_scan_mag),
-            lambda d=fm_images_dir: measure_bg_images(sorted(d.glob("*.jpg"))),
-            p,
-            run_dir,
-            run_meta,
-        )
 
         # Step 5c: Chip scan
         duration, _ = run_in_process(
