@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import NamedTuple, TypedDict
@@ -1132,6 +1132,36 @@ class DetectorConfig:
             cal_reference_points=(CalPoint(layers=1, r=-0.40, g=+0.11, b=+0.07),),
         )
 
+    # Tier-1 cal_dist for the LOOSE variants. The stock 0.06 gate rejects
+    # multilayer flakes whose (R, G) sits just outside the calibration set —
+    # e.g. the 4-layer flake on scan 309 chip 1263 at cal_dist 0.0656, which
+    # passed every other tier-1 gate. Measured effect of 0.06 -> 0.08:
+    # graphene run_20260826_1158 tier 1 251 -> 357 (+42%), graphite
+    # run_20260825_1222 tier 1 404 -> 476 (+18%). Nothing leaves tier 3.
+    # Graphene's promoted tail runs into high-entropy tape residue past
+    # ~rank 20; graphite's top 20 is clean (no detection above entropy 3.0).
+    LOOSE_TIER1_CAL_DIST = 0.08
+
+    @classmethod
+    def graphene_thin_90nm_loose(cls) -> RGPointDetectorConfig:
+        """Graphene 1-5L on 90nm SiO₂ with a widened tier-1 cal_dist gate."""
+        base = cls.graphene_thin_90nm()
+        return replace(
+            base,
+            name=f"{base.name} (loose)",
+            tier1_cal_dist=cls.LOOSE_TIER1_CAL_DIST,
+        )
+
+    @classmethod
+    def graphene_thick_90nm_loose(cls) -> CurveDetectorConfig:
+        """Graphite 5-10nm on 90nm SiO₂ with a widened tier-1 cal_dist gate."""
+        base = cls.graphene_thick_90nm()
+        return replace(
+            base,
+            name=f"{base.name} (loose)",
+            tier1_cal_dist=cls.LOOSE_TIER1_CAL_DIST,
+        )
+
     @classmethod
     def _presets(cls) -> dict[str, Callable[[], DetectorConfig]]:
         return {
@@ -1141,7 +1171,9 @@ class DetectorConfig:
             "hbn_thick_50_100_90nm": cls.hbn_thick_50_100_90nm,
             "hbn_medium_285nm": cls.hbn_medium_285nm,
             "graphene_thin_90nm": cls.graphene_thin_90nm,
+            "graphene_thin_90nm_loose": cls.graphene_thin_90nm_loose,
             "graphene_thick_90nm": cls.graphene_thick_90nm,
+            "graphene_thick_90nm_loose": cls.graphene_thick_90nm_loose,
             "wse2_monolayer_285nm": cls.wse2_monolayer_285nm,
             "wse2_monolayer_300nm": cls.wse2_monolayer_300nm,
         }
