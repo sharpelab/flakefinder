@@ -32,6 +32,8 @@ All commands are registered as pyproject.toml entry points and invokable via `sl
 | `scripts/process_chip_scan.py` | Chip scan analysis pipeline (rsync + analyze_chip_scan) |
 | `scripts/download_flakes.py` | Download flake images + metadata from flakes.sharpelab.science |
 | `scripts/check_bg.py` | Offline background sanity-check audit (replays illum bg-check layers over run dirs) |
+| `scripts/flake_density.py` | Flake yield per mm² of chip area, joined from the flakes server (or seg summaries via `--counts seg`); `--by user/material/week`, `--plot`, `--plot-tiers` |
+| `scripts/explain_tier.py` | Explain why detections missed tier 1, replaying the preset's gates over a chip's seg summary |
 | `scripts/hbn_contrast.py` | Transfer matrix hBN contrast model (CLI: `--oxide`, `--na`, `--n-hbn`, `--r-offset`, `--g-offset`, `--fit`) |
 | `scripts/hbn_contrast_widget.py` | Interactive R/G contrast explorer with sliders (n, oxide×2, NA, offsets). Export button → `/tmp/hbn_contrast_params.json` |
 
