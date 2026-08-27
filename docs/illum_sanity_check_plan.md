@@ -14,7 +14,7 @@ the expected pair for the active (WB preset × objective × substrate):
 **A. Overview gate — after stitch + chip detection, before any per-chip
 work.** Refined background mode over the union of detected chip bboxes
 (`bbox_px`) in the stitched overview, compared at the overview
-magnification. Earliest abort point: a deviant light path is caught
+magnification. Earliest detection point: a deviant light path is caught
 before any focus map or chip scan runs.
 
 **B. Chip gate — after each chip's focus map, before its chip scan.**
@@ -32,8 +32,9 @@ line when a chip leaves the warn band. Catches mid-run drift; costs
 nothing.
 
 Verdicts: within warn band → proceed silently (ratios recorded); beyond
-warn band → loud console/pipeline.log warning; beyond abort band (gates
-only — the monitor runs post-scan) → park the microscope and abort the
+warn band → loud console/pipeline.log warning; beyond deviant band →
+a loud console/pipeline.log warning naming the band. The check never
+halts a run; operators decide what to do with the
 run. Every measurement is recorded (`bg_check` in `checkpoint.json` /
 `seg/summary.json`) regardless of verdict. Checks are skipped, with the
 reason recorded, when the run uses a custom CLI white balance or the
@@ -44,12 +45,12 @@ material×magnification has no reference.
 Bands (|Δ| of measured ratio vs reference, `segmentation.py`):
 
 - **warn**: |ΔR/G| > 0.08 or |ΔB/G| > 0.20
-- **abort**: |ΔR/G| > 0.12 or |ΔB/G| > 0.30
+- **deviant**: |ΔR/G| > 0.12 or |ΔB/G| > 0.30
 
 The warn band clears observed good-path chip-to-chip substrate wobble
 (worst measured good chip: Δ −0.065/+0.16 on the monitor, −0.082/+0.19
 on the gate — run 290 chip 1, which can still trip a marginal warn);
-the abort band sits well inside incident-scale deviation
+the deviant band sits well inside incident-scale deviation
 (Δ −0.19…−0.24 R/G, +0.34…+0.44 B/G across layers).
 
 Anchors (`DetectorConfig.bg_reference`, keyed by objective mag; values
@@ -79,8 +80,8 @@ Missing calibration data).
   `measure_bg_images`, `measure_bg_frame_modes`. Per-preset anchors in
   `DetectorConfig.bg_reference`.
 - `find_flakes.py`: overview gate after Detect Chips; chip gate after
-  each focus-map analyze step; the abort path parks via
-  `park_microscope` and exits. All outcomes land under `bg_check` in
+  each focus-map analyze step. Every layer is reporting-only.
+  All outcomes land under `bg_check` in
   `checkpoint.json`.
 - Seg monitor: `_run_chip_seg` writes `bg_check` into
   `seg/summary.json` and appends a warn/deviant marker to the seg
@@ -96,13 +97,13 @@ graphene_thin_90nm at 2.5x/10x:
 
 | Layer | Run 290 (good) | Run 296 (deviant) |
 |---|---|---|
-| overview 2.5x | 0.972 / 2.127 → OK | 0.789 / 2.474 → ABORT |
-| chip 0 gate | 0.976 / 2.051 → OK | 0.800 / 2.376 → ABORT |
-| chip 0 monitor | 1.000 / 2.069 → OK | 0.821 / 2.429 → ABORT |
-| chip 1 gate | 0.929 / 2.223 → WARN | 0.797 / 2.375 → ABORT |
-| chip 1 monitor | 0.947 / 2.193 → OK | 0.818 / 2.473 → ABORT |
+| overview 2.5x | 0.972 / 2.127 → OK | 0.789 / 2.474 → DEVIANT |
+| chip 0 gate | 0.976 / 2.051 → OK | 0.800 / 2.376 → DEVIANT |
+| chip 0 monitor | 1.000 / 2.069 → OK | 0.821 / 2.429 → DEVIANT |
+| chip 1 gate | 0.929 / 2.223 → WARN | 0.797 / 2.375 → DEVIANT |
+| chip 1 monitor | 0.947 / 2.193 → OK | 0.818 / 2.473 → DEVIANT |
 
-The deviant run trips abort on every layer. The good run passes
+The deviant run trips the deviant band on every layer. The good run passes
 everywhere except a marginal warn on chip 1's gate — that chip's
 substrate reads off-baseline against all 8/04–8/11 history, which is
 exactly the substrate-vs-light ambiguity the warn tier exists to
@@ -133,8 +134,13 @@ yet in hand at the scope).
 
 ## At-scope validation (pending)
 
-After sync: (1) rerun a freshly scanned known-good chip — gates must
-pass and record ratios; (2) re-measure one of Elijah's 8/13 chips —
-doubles as the incident's outstanding substrate-vs-light discriminator;
-(3) synthetic trip test: temporarily tighten bands and confirm the
-abort path parks the microscope cleanly.
+(1) rerun a freshly scanned known-good chip — gates must pass and
+record ratios; (2) re-measure one of Elijah's 8/13 chips — doubles as
+the incident's outstanding substrate-vs-light discriminator.
+
+Known defect: the per-chip gate measures every focus-map image, i.e.
+the whole defocused Z sweep, where this design specifies the single
+best-AF frame. Replaying 2026-08-19..21 runs, that layer reports B/G
+0.3-1.2 against a 2.03 reference on chips whose seg monitor reads a
+normal 2.1 — the gate's numbers are not trustworthy until it reads one
+focused frame.

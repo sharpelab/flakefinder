@@ -824,7 +824,6 @@ def _run_bg_check(
     mag: float,
     measure: Callable[[], BGRatios | None],
     p: _Preflight,
-    scope: Microscope,
     run_dir: Path,
     run_meta: dict,
 ) -> None:
@@ -832,9 +831,12 @@ def _run_bg_check(
 
     Catches illumination-path changes the SDK cannot see (manual sliders/
     filters at the stand) by comparing measured substrate background mode
-    ratios against golden blank-chip references. Outcome is always recorded
+    ratios against golden blank-chip references.
+
+    Reporting only — the check never halts a run. Outcome is always recorded
     in run metadata; ok → pipeline.log line, warn → loud console warning,
-    abort → park the microscope and exit before further hardware work.
+    deviant → loud console warning naming the band. Operators decide what to
+    do with the run.
     """
     result: BGCheckResult | None = None
     skip_reason: str | None = None
@@ -870,14 +872,11 @@ def _run_bg_check(
         with _always_console():
             print(f"[bg {label}] \U0001f6d1 BACKGROUND DEVIANT: {line}")
             print(
-                f"[bg {label}] Substrate colour is outside the abort band for "
-                f"{p.seg.material} at {mag:g}x — the illumination path has likely "
+                f"[bg {label}] Substrate colour is outside the deviant band for "
+                f"{p.seg.material} at {mag:g}x — the illumination path may have "
                 "been changed at the stand (manual slider/filter, invisible to the SDK)."
             )
-            print(f"[bg {label}] See docs/illum_sanity_check_plan.md. Parking and aborting.")
-            park_microscope(scope)
-            print("[parked]")
-        sys.exit(1)
+            print(f"[bg {label}] See docs/illum_sanity_check_plan.md. Continuing.")
 
 
 # ============================================================================
@@ -1421,14 +1420,13 @@ def run(scope: Microscope, p: _Preflight) -> int:
             chips_data = json.load(f)
         print(f"[detect] {len(chips_data.get('chips', []))} chips")
 
-    # Background sanity check on the stitched overview (earliest abort point)
+    # Background sanity check on the stitched overview (reporting only)
     _run_bg_check(
         "overview",
         "overview",
         _mag_to_float(p.overview_mag),
         lambda: measure_bg_stitch(p.stitch_path, chips_data.get("chips", [])),
         p,
-        scope,
         run_dir,
         run_meta,
     )
@@ -1530,7 +1528,6 @@ def run(scope: Microscope, p: _Preflight) -> int:
             _mag_to_float(p.chip_scan_mag),
             lambda d=fm_images_dir: measure_bg_images(sorted(d.glob("*.jpg"))),
             p,
-            scope,
             run_dir,
             run_meta,
         )
