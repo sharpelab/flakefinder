@@ -1,0 +1,105 @@
+{
+  "format": "correction_factors",
+  "objective_mag": 10.0,
+  "binning": 3,
+  "lamp_pct": 100,
+  "exposure_s": 0.0005,
+  "gain": 4.0,
+  "white_balance_rgb": [
+    1.22,
+    1.21,
+    1.32
+  ],
+  "gamma": 1.0,
+  "colour_matrix": "identity",
+  "frame_size_px": [
+    1824,
+    1216
+  ],
+  "z_um": 24721.3,
+  "positions_um": [
+    [
+      26608.8,
+      36923.1
+    ],
+    [
+      31951.6,
+      36923.1
+    ],
+    [
+      37294.4,
+      36923.1
+    ],
+    [
+      42637.2,
+      36923.1
+    ],
+    [
+      26608.8,
+      43415.2
+    ],
+    [
+      31951.6,
+      43415.2
+    ],
+    [
+      37294.4,
+      43415.2
+    ],
+    [
+      42637.2,
+      43415.2
+    ],
+    [
+      26608.8,
+      49907.2
+    ],
+    [
+      31951.6,
+      49907.2
+    ],
+    [
+      37294.4,
+      49907.2
+    ],
+    [
+      42637.2,
+      49907.2
+    ]
+  ],
+  "num_positions": 12,
+  "num_frames_kept": 6,
+  "source": {
+    "type": "chips_meta",
+    "chips_meta_path": "scans/overview_20260831_stitch_chips.json",
+    "chip_index": 0
+  },
+  "mean_bgr": [
+    206.73,
+    208.99,
+    210.11
+  ],
+  "reference_wb_bgr": [
+    1.011,
+    1.0,
+    0.995
+  ],
+  "flatfield_stats": {
+    "shape": [
+      1216,
+      1824,
+      3
+    ],
+    "raw_mean": 208.6,
+    "center_brightness": 226.0,
+    "corner_brightness": 183.5,
+    "vignetting_pct": 18.8,
+    "correction_mean": 1.004,
+    "correction_range": [
+      0.896,
+      1.228
+    ]
+  },
+  "captured_at": "2026-08-31T20:21:02.760995",
+  "notes": null
+}

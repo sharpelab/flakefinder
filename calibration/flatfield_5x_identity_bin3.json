@@ -1,0 +1,103 @@
+{
+  "format": "correction_factors",
+  "objective_mag": 5.0,
+  "binning": 3,
+  "lamp_pct": 100,
+  "exposure_s": 0.0005,
+  "gain": 4.0,
+  "white_balance_rgb": [
+    1.18,
+    1.16,
+    1.24
+  ],
+  "gamma": 1.0,
+  "colour_matrix": "identity",
+  "frame_size_px": [
+    1824,
+    1216
+  ],
+  "z_um": 24724.0,
+  "positions_um": [
+    [
+      36505.0,
+      38307.0
+    ],
+    [
+      42524.0,
+      42781.0
+    ],
+    [
+      30889.0,
+      33879.0
+    ],
+    [
+      33691.0,
+      43715.0
+    ],
+    [
+      38038.0,
+      42550.0
+    ],
+    [
+      32088.0,
+      38111.0
+    ],
+    [
+      35017.0,
+      34432.0
+    ],
+    [
+      42040.0,
+      38976.0
+    ],
+    [
+      34175.0,
+      40544.0
+    ],
+    [
+      39145.0,
+      39783.0
+    ],
+    [
+      32780.0,
+      35620.0
+    ],
+    [
+      40321.0,
+      41893.0
+    ]
+  ],
+  "num_positions": 12,
+  "num_frames_kept": 12,
+  "source": {
+    "type": "manual"
+  },
+  "mean_bgr": [
+    197.4,
+    196.99,
+    198.5
+  ],
+  "reference_wb_bgr": [
+    0.998,
+    1.0,
+    0.992
+  ],
+  "flatfield_stats": {
+    "shape": [
+      1216,
+      1824,
+      3
+    ],
+    "raw_mean": 197.6,
+    "center_brightness": 210.5,
+    "corner_brightness": 179.1,
+    "vignetting_pct": 14.9,
+    "correction_mean": 0.999,
+    "correction_range": [
+      0.896,
+      1.197
+    ]
+  },
+  "captured_at": "2026-08-31T22:56:24.047090",
+  "notes": null
+}
