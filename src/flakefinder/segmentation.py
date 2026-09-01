@@ -1169,8 +1169,8 @@ class DetectorConfig:
         from (GUI or CLI); the capture WB is a quantization/headroom knob
         only (identity contrast is WB-independent, verified 2026-08-31 to
         ±0.004).
-        Revisit at 50x: 1.0 ms / gain 4.0 (legacy FC default 2 ms clips
-        catastrophically in identity space on 285).
+        Revisit at 50x: 1.75 ms / gain 1.0, one step under the G clipping
+        knee at 2.0 (2026-09-01, flake 111500).
         Shape gates stay at the strict 90nm values: opening them
         (perim 4.0, circ 0) floods tier 1 with ~1000 chip-wide film blobs
         whose means sit at 1L-like contrast (2026-08-31 t78/t60 eval).
@@ -1199,7 +1199,7 @@ class DetectorConfig:
             non_match_label="non-graphene",
             white_balance=GainRGB(red=1.91, green=1.87, blue=2.07),
             colour_matrix=ColourMatrix.IDENTITY,
-            revisit_capture={50.0: CaptureSettings(gain=4.0, exposure_ms=1.0)},
+            revisit_capture={50.0: CaptureSettings(gain=1.0, exposure_ms=1.75)},
             score_fn=_score_graphene,
             tier1_perim_ratio=1.50,
             tier1_cal_dist=0.04,
