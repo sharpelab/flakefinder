@@ -41,7 +41,7 @@ from PIL import Image
 
 from flakefinder.data_utils import compute_frame_size_um, require_microscope_description
 from flakefinder.leica import Microscope, wait_all
-from flakefinder.scan_utils import parse_white_balance
+from flakefinder.scan_utils import add_colour_matrix_arg, parse_white_balance
 
 
 def generate_chip_grid(
@@ -153,6 +153,7 @@ def main() -> int:
     parser.add_argument("--lamp", type=float, default=100, help="Lamp intensity (0-100%%)")
     parser.add_argument("--binning", type=int, default=2, choices=[0, 1, 2], help="Binning level (0=1x1, 1=2x2, 2=3x3)")
     parser.add_argument("--gamma", type=float, default=1.0)
+    add_colour_matrix_arg(parser)
     parser.add_argument("--settle", type=float, default=0.1)
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress per-capture output")
     parser.add_argument("--dry-run", action="store_true", help="Print positions and exit without capturing")
@@ -207,6 +208,8 @@ def main() -> int:
         camera.gain = args.gain
         camera.gain_rgb = args.white_balance
         camera.gamma = args.gamma
+        if args.colour_matrix is not None:
+            camera.colour_matrix = args.colour_matrix
 
         for i, (x, y) in enumerate(positions):
             wait_all(list(scope.stage.move_to_async(x, y)))
@@ -313,6 +316,7 @@ def main() -> int:
             args.white_balance.blue,
         ],
         "gamma": args.gamma,
+        "colour_matrix": str(args.colour_matrix) if args.colour_matrix is not None else None,
         "frame_size_px": [int(raw_flatfield.shape[1]), int(raw_flatfield.shape[0])],
         "z_um": z_um,
         "positions_um": [[round(x, 1), round(y, 1)] for x, y in positions],
