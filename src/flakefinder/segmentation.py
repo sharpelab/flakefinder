@@ -219,6 +219,28 @@ GRAPHENE_THICK_90NM_CAL_POINTS: tuple[tuple[float, float, float], ...] = (
     (-0.8229, -0.3706, 10.0),
 )
 
+# Graphene 1-10L on 285 nm SiO₂, identity CCM, raw sensor contrast space.
+# 1-5L: empirical anchors measured on Jordan's wafer (2850 Å ± 0.5% spec),
+# 10x identity, flatfielded — Scan Notebook 2026-08-31 (condition-independence
+# verified to ±0.004 across WB/exposure). 6-10L: transfer-matrix extrapolation
+# through the anchors via scripts/fit_graphene_285_anchors.py:
+# n=2.143-1.611j, oxide=285.0, NA=0.25, r_off=+0.008, g_off=+0.010,
+# rms=0.0082 (oxide ±0.5% moves the fit by less than the rms).
+# Raw-space contrast is ~0.4x the legacy 5800K-CCM scale — gates on the
+# preset are scaled accordingly, do not compare against 90nm gate values.
+GRAPHENE_1_10L_285NM_CAL_POINTS: tuple[CalPointRG, ...] = (
+    CalPointRG(layers=1, r=-0.0590, g=-0.0920),
+    CalPointRG(layers=2, r=-0.1380, g=-0.1990),
+    CalPointRG(layers=3, r=-0.1710, g=-0.2530),
+    CalPointRG(layers=4, r=-0.2210, g=-0.3220),
+    CalPointRG(layers=5, r=-0.2620, g=-0.3770),
+    CalPointRG(layers=6, r=-0.3037, g=-0.4329),
+    CalPointRG(layers=7, r=-0.3396, g=-0.4788),
+    CalPointRG(layers=8, r=-0.3723, g=-0.5191),
+    CalPointRG(layers=9, r=-0.4020, g=-0.5541),
+    CalPointRG(layers=10, r=-0.4288, g=-0.5843),
+)
+
 # Theory-derived calibration for thick hBN (50-100 nm target band) on 90 nm
 # SiO₂. Generated (2026-08-13, fit_hbn_thick_anchors.py --export --table)
 # from the transfer-matrix code path the widget uses (hbn_contrast_widget
@@ -1122,6 +1144,73 @@ class DetectorConfig:
         )
 
     @classmethod
+    def graphene_1_10l_285nm(cls) -> RGPointDetectorConfig:
+        """Graphene/graphite 1-10L on 285nm SiO₂, identity CCM (raw space).
+
+        First identity-CCM production preset. Cal: empirical 1-5L anchors +
+        model-extrapolated 6-10L (GRAPHENE_1_10L_285NM_CAL_POINTS; see
+        scripts/fit_graphene_285_anchors.py). Contrast in raw sensor space
+        is ~0.4x the legacy 5800K scale, so every contrast-space gate here
+        is scaled down relative to graphene_thin_90nm; inter-layer spacing
+        runs 0.133 (1-2L) down to 0.040 (9-10L). B is clean in identity
+        space but NOT gated: on 285 nm the oxide fringe makes B bg
+        hyper-sensitive to sample-side oxide gradients, so B contrast vs
+        the frame-global bg mode carries local-bg structure the flatfield
+        cannot remove (measured -0.11 B shift on the verified 1L anchor,
+        2026-08-31) — br_ratio is disabled until seg has local bg.
+        Scans MUST run --colour-matrix identity; the
+        capture WB is a quantization/headroom knob only (identity contrast
+        is WB-independent, verified 2026-08-31 to ±0.004).
+        Revisit at 50x: 1.0 ms / gain 4.0 (legacy FC default 2 ms clips
+        catastrophically in identity space on 285).
+        Shape gates stay at the strict 90nm values: opening them
+        (perim 4.0, circ 0) floods tier 1 with ~1000 chip-wide film blobs
+        whose means sit at 1L-like contrast (2026-08-31 t78/t60 eval).
+        Known v0 limitation: large ragged 1L/2L sheets — including the
+        verified anchor sheet — segment as merged giants (perim 2.6-3.6)
+        and cap at tier 3; compact 1L/2L tier-1 detections at 10x are
+        mostly non-reproducible noise. Reliable tier 1 starts at ~3L.
+        Thin-sheet capture needs seg/subseg work (fringe/film splitting),
+        not looser gates.
+        """
+        return RGPointDetectorConfig(
+            name="Graphene 1-10L",
+            substrate=Substrate.SI_285NM,
+            contrast_mode=ContrastMode.BELOW,
+            contrast_offset=4.0,
+            min_size_um2=400.0,
+            edge_margin_px=50,
+            morph_kernel_size=5,
+            entropy_threshold=0.4,
+            subseg_min_std=0.02,
+            subseg_min_range=0.03,
+            cal_reference_points=GRAPHENE_1_10L_285NM_CAL_POINTS,
+            layer_spacing_nm=0.335,
+            cal_dist_match=0.05,
+            cal_dist_possible=0.10,
+            non_match_label="non-graphene",
+            white_balance=GainRGB(red=1.91, green=1.87, blue=2.07),
+            revisit_capture={50.0: CaptureSettings(gain=4.0, exposure_ms=1.0)},
+            score_fn=_score_graphene,
+            tier1_perim_ratio=1.50,
+            tier1_cal_dist=0.04,
+            tier1_g_min=-99.0,
+            tier1_g_max=-0.04,
+            tier1_r_max=-0.02,
+            tier1_r_min=-0.55,
+            tier1_entropy_max=3.7,
+            tier1_min_size_um2=350.0,
+            tier1_br_ratio_max=99.0,
+            tier1_aspect_ratio=7.0,
+            tier1_solidity_min=0.2,
+            tier1_circularity_min=0.1,
+            tier1_grad_energy_max=99.0,
+            tier2_perim_ratio=1.50,
+            tier2_cal_dist=0.08,
+            tier2_entropy_max=4.65,
+        )
+
+    @classmethod
     def wse2_monolayer_285nm(cls) -> PointDetectorConfig:
         """WSe₂ monolayer detection preset on 285nm SiO₂.
 
@@ -1188,6 +1277,7 @@ class DetectorConfig:
             "graphene_thin_90nm_loose": cls.graphene_thin_90nm_loose,
             "graphene_thick_90nm": cls.graphene_thick_90nm,
             "graphene_thick_90nm_loose": cls.graphene_thick_90nm_loose,
+            "graphene_1_10l_285nm": cls.graphene_1_10l_285nm,
             "wse2_monolayer_285nm": cls.wse2_monolayer_285nm,
             "wse2_monolayer_300nm": cls.wse2_monolayer_300nm,
         }
