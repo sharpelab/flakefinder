@@ -21,8 +21,8 @@ from PIL import Image, ImageColor, ImageDraw, ImageFont
 from scipy.signal import savgol_filter
 
 from flakefinder.data_utils import load_scan_meta
-from flakefinder.scan_utils import CALIBRATION_DIR, apply_flatfield, parse_area_rect
-from flakefinder.types import AreaRect, AreaRectI, Point2I, ScanLineMeta, ScanMeta
+from flakefinder.scan_utils import apply_flatfield, calibration_flatfield_path, parse_area_rect
+from flakefinder.types import AreaRect, AreaRectI, ColourMatrix, Point2I, ScanLineMeta, ScanMeta
 
 
 @dataclass
@@ -569,10 +569,12 @@ def run(
             print("Flatfield: disabled (--no-flatfield)")
     else:
         if not flatfield_path:
-            # Auto-load based on objective and binning
+            # Auto-load based on objective, binning, and capture colour space
             obj_mag = optics["objective_mag"]
             binning = meta["camera"]["binning"]
-            flatfield_path = CALIBRATION_DIR / f"flatfield_{obj_mag}x_bin{binning}.npy"
+            cm_value = meta["camera"].get("colour_matrix")
+            cm = ColourMatrix(cm_value) if cm_value is not None else None
+            flatfield_path = calibration_flatfield_path(f"{obj_mag}x", cm, binning=binning)
 
         if not flatfield_path.exists():
             raise ValueError(

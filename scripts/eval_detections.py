@@ -2,11 +2,11 @@
 
 Usage:
     python scripts/eval_detections.py downloads/flakes_scan129/ \
-        --flatfield calibration/flatfield_20x_bin3.npy \
+        --flatfield calibration/flatfield_20x_5800K_bin3.npy \
         -o /tmp/eval_output/
 
     python scripts/eval_detections.py downloads/flakes_scan129/ \
-        --flatfield calibration/flatfield_20x_bin3.npy \
+        --flatfield calibration/flatfield_20x_5800K_bin3.npy \
         --contrast-offset 15 --min-size 1000 \
         -o /tmp/eval_output/
 """

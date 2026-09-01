@@ -54,6 +54,7 @@ from concurrent.futures import (
 )
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, TypedDict
 
@@ -73,11 +74,11 @@ from flakefinder.data_utils import add_stage_coords
 from flakefinder.flakes_api import get_auth
 from flakefinder.leica import Microscope
 from flakefinder.scan_utils import (
-    CALIBRATION_DIR,
     PARFOCAL_Z_UM,
     add_colour_matrix_arg,
     build_lighting_meta,
     build_revisit_json,
+    calibration_flatfield_path,
     get_git_version,
     parse_area_rect,
     parse_white_balance,
@@ -298,6 +299,15 @@ class SegConfig:
     revisit_top: int | None  # cap on T1 detections for revisit (None = all T1)
 
 
+class SettingSource(StrEnum):
+    """Where a resolved capture setting came from (shown in the run header)."""
+
+    CLI = "CLI"
+    MATERIAL = "material"
+    PRESET = "preset"
+    CONNECTION_DEFAULT = "connection default"
+
+
 @dataclass
 class _Preflight:
     """Validated pipeline configuration from _plan()."""
@@ -308,16 +318,17 @@ class _Preflight:
     chips_json_path: Path
     chip_filter: list[int] | None
     wb: GainRGB
-    colour_matrix: ColourMatrix | None
+    colour_matrix: ColourMatrix | None  # None = connection default (CCM_5800K)
+    colour_matrix_source: SettingSource
     area: AreaRect
     preset_name: str
     overview_mag: str
     chip_scan_mag: str
     scan_speed: float
     chip_scan_gain: float
-    chip_scan_gain_source: str  # "CLI" | "material" | "preset"
+    chip_scan_gain_source: SettingSource
     chip_scan_exposure_ms: float
-    chip_scan_exposure_source: str  # "CLI" | "material" | "preset"
+    chip_scan_exposure_source: SettingSource
     revisit_capture: dict[float, CaptureSettings]  # material overrides by mag
     focus_map_gain: float
     focus_map_exposure_ms: float
@@ -329,9 +340,13 @@ class _Preflight:
     args: argparse.Namespace  # raw CLI args for forwarding
 
 
-def _resolve_flatfield(chip_scan_mag: str) -> Path | None:
-    """Auto-detect flatfield file for a chip scan magnification."""
-    path = CALIBRATION_DIR / f"flatfield_{chip_scan_mag}_bin3.npy"
+def _resolve_flatfield(chip_scan_mag: str, colour_matrix: ColourMatrix | None) -> Path | None:
+    """Auto-detect flatfield for a chip scan magnification + capture colour space.
+
+    Never falls back to a different colour space's flatfield: a missing
+    file resolves to None (segment without flatfield correction).
+    """
+    path = calibration_flatfield_path(chip_scan_mag, colour_matrix)
     return path if path.exists() else None
 
 
@@ -384,23 +399,32 @@ def _plan(args: argparse.Namespace) -> _Preflight:
 
     # Chip-scan camera settings: CLI flag > material preset > ScanPreset.
     if args.chip_scan_gain is not None:
-        chip_scan_gain, chip_scan_gain_source = args.chip_scan_gain, "CLI"
+        chip_scan_gain, chip_scan_gain_source = args.chip_scan_gain, SettingSource.CLI
     elif material_cfg.chip_scan_gain is not None:
-        chip_scan_gain, chip_scan_gain_source = material_cfg.chip_scan_gain, "material"
+        chip_scan_gain, chip_scan_gain_source = material_cfg.chip_scan_gain, SettingSource.MATERIAL
     else:
-        chip_scan_gain, chip_scan_gain_source = preset["chip_scan_gain"], "preset"
+        chip_scan_gain, chip_scan_gain_source = preset["chip_scan_gain"], SettingSource.PRESET
     if args.chip_scan_exposure_ms is not None:
-        chip_scan_exposure_ms, chip_scan_exposure_source = args.chip_scan_exposure_ms, "CLI"
+        chip_scan_exposure_ms, chip_scan_exposure_source = args.chip_scan_exposure_ms, SettingSource.CLI
     elif material_cfg.chip_scan_exposure_ms is not None:
-        chip_scan_exposure_ms, chip_scan_exposure_source = material_cfg.chip_scan_exposure_ms, "material"
+        chip_scan_exposure_ms, chip_scan_exposure_source = material_cfg.chip_scan_exposure_ms, SettingSource.MATERIAL
     else:
-        chip_scan_exposure_ms, chip_scan_exposure_source = preset["chip_scan_exposure_ms"], "preset"
+        chip_scan_exposure_ms, chip_scan_exposure_source = preset["chip_scan_exposure_ms"], SettingSource.PRESET
+
+    # Capture colour space: CLI flag > material preset > connection default
+    # (CCM_5800K, pinned at camera init). Also selects the flatfield variant.
+    if args.colour_matrix is not None:
+        colour_matrix, colour_matrix_source = args.colour_matrix, SettingSource.CLI
+    elif material_cfg.colour_matrix is not None:
+        colour_matrix, colour_matrix_source = material_cfg.colour_matrix, SettingSource.MATERIAL
+    else:
+        colour_matrix, colour_matrix_source = None, SettingSource.CONNECTION_DEFAULT
 
     # Segmentation config
     if args.flatfield:
         flatfield = Path(args.flatfield)
     else:
-        flatfield = _resolve_flatfield(chip_scan_mag)
+        flatfield = _resolve_flatfield(chip_scan_mag, colour_matrix)
 
     revisit_mags = []
     if args.revisit_mags:
@@ -430,7 +454,8 @@ def _plan(args: argparse.Namespace) -> _Preflight:
         chips_json_path=chips_json_path,
         chip_filter=chip_filter,
         wb=wb,
-        colour_matrix=args.colour_matrix,
+        colour_matrix=colour_matrix,
+        colour_matrix_source=colour_matrix_source,
         area=area,
         preset_name=preset_name,
         overview_mag=overview_mag,
@@ -615,7 +640,7 @@ Examples:
         "--flatfield",
         type=str,
         default=None,
-        help="Flatfield .npy file (default: auto-detect from calibration/flatfield_{mag}_bin3.npy)",
+        help="Flatfield .npy file (default: auto-detect from calibration/flatfield_{mag}_{colour_matrix}_bin3.npy)",
     )
     seg_group.add_argument(
         "--material",
@@ -683,8 +708,7 @@ def _print_header(p: _Preflight) -> None:
     wb_str = f"{p.wb.blue},{p.wb.green},{p.wb.red}"
     wb_source = "preset" if args.white_balance is None else "CLI"
     print(f"White balance: {wb_str} (B,G,R) [{wb_source}]")
-    cm_source = "connection default" if p.colour_matrix is None else "CLI"
-    print(f"Colour matrix: {p.colour_matrix or ColourMatrix.CCM_5800K} [{cm_source}]")
+    print(f"Colour matrix: {p.colour_matrix or ColourMatrix.CCM_5800K} [{p.colour_matrix_source}]")
     if p.chip_filter:
         print(f"Chips:         {p.chip_filter}")
     if args.after is not None:

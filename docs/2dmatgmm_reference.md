@@ -146,7 +146,7 @@ camera.gain_red   = white_balance[2]  # index 2 = Red
 
 ### FlakeFinder Comparison
 
-FlakeFinder uses the hBN WB values `(R=1.41, G=1.02, B=2.51)` stored in RGB order in `calibration/flatfield_*_bin3.json`. This produces a brown/warm substrate appearance on 90nm SiO2. The graphene/WSe2 profile's lower blue gain `(B=1.7)` would produce a more neutral/blue-shifted substrate tone.
+FlakeFinder uses the hBN WB values `(R=1.41, G=1.02, B=2.51)` stored in RGB order in `calibration/flatfield_*_5800K_bin3.json`. This produces a brown/warm substrate appearance on 90nm SiO2. The graphene/WSe2 profile's lower blue gain `(B=1.7)` would produce a more neutral/blue-shifted substrate tone.
 
 ### Material Profiles on Microscope PC
 

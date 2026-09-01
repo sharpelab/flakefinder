@@ -23,7 +23,7 @@ from scipy import ndimage
 from scipy.spatial import KDTree
 
 from flakefinder.scan_utils import apply_flatfield
-from flakefinder.types import ContrastRGB, GainRGB, PixelPolygon, Point2F, XYWHRect
+from flakefinder.types import ColourMatrix, ContrastRGB, GainRGB, PixelPolygon, Point2F, XYWHRect
 
 # ============================================================================
 # Detection types
@@ -798,6 +798,11 @@ class DetectorConfig:
     tier1_thickness_window_nm: tuple[float, float] | None = field(default=None, kw_only=True)
 
     # -- Per-material capture settings --
+    # Capture colour space the calibration lives in. None = connection
+    # default (CCM_5800K, the legacy space all older cal tables live in).
+    # Resolution order in find_flakes: CLI flag > material > connection
+    # default; also selects the calibration flatfield variant on auto-resolve.
+    colour_matrix: ColourMatrix | None = field(default=None, kw_only=True)
     # Chip-scan camera settings. None = use the ScanPreset value; resolution
     # order in find_flakes is CLI flag > material > ScanPreset.
     chip_scan_gain: float | None = field(default=None, kw_only=True)
@@ -1158,9 +1163,12 @@ class DetectorConfig:
         the frame-global bg mode carries local-bg structure the flatfield
         cannot remove (measured -0.11 B shift on the verified 1L anchor,
         2026-08-31) — br_ratio is disabled until seg has local bg.
-        Scans MUST run --colour-matrix identity; the
-        capture WB is a quantization/headroom knob only (identity contrast
-        is WB-independent, verified 2026-08-31 to ±0.004).
+        Scans MUST capture in identity space — the preset pins
+        colour_matrix=IDENTITY, so find_flakes captures identity and
+        auto-resolves the identity flatfield wherever the run is launched
+        from (GUI or CLI); the capture WB is a quantization/headroom knob
+        only (identity contrast is WB-independent, verified 2026-08-31 to
+        ±0.004).
         Revisit at 50x: 1.0 ms / gain 4.0 (legacy FC default 2 ms clips
         catastrophically in identity space on 285).
         Shape gates stay at the strict 90nm values: opening them
@@ -1190,6 +1198,7 @@ class DetectorConfig:
             cal_dist_possible=0.10,
             non_match_label="non-graphene",
             white_balance=GainRGB(red=1.91, green=1.87, blue=2.07),
+            colour_matrix=ColourMatrix.IDENTITY,
             revisit_capture={50.0: CaptureSettings(gain=4.0, exposure_ms=1.0)},
             score_fn=_score_graphene,
             tier1_perim_ratio=1.50,

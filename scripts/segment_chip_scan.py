@@ -5,7 +5,7 @@ Usage:
         -o /tmp/seg_run1843 -j 16
 
 Flatfield is auto-detected from scan_meta.json objective magnification
-(e.g. 10x -> calibration/flatfield_10x_bin3.npy). Override with --flatfield.
+(e.g. 10x -> calibration/flatfield_10x_{colour_matrix}_bin3.npy). Override with --flatfield.
 """
 
 import argparse
@@ -89,12 +89,15 @@ def run(
     if not quiet:
         print(f"pixel_size: {pixel_size} µm/px ({mag or '?'}x, from scan_meta.json)")
 
-    # Auto-detect flatfield from objective magnification
+    # Auto-detect flatfield from objective magnification + capture colour space
     if flatfield is None and mag is not None:
-        from flakefinder.scan_utils import CALIBRATION_DIR
+        from flakefinder.scan_utils import calibration_flatfield_path
+        from flakefinder.types import ColourMatrix
 
         mag_str = f"{mag}x" if not str(mag).endswith("x") else str(mag)
-        candidate = CALIBRATION_DIR / f"flatfield_{mag_str}_bin3.npy"
+        cm_value = scan_meta.get("camera", {}).get("colour_matrix")
+        cm = ColourMatrix(cm_value) if cm_value is not None else None
+        candidate = calibration_flatfield_path(mag_str, cm)
         if candidate.exists():
             flatfield = candidate
             if not quiet:

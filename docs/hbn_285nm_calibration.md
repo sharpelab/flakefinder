@@ -151,7 +151,7 @@ was completely invisible at offset=15 and is now the highest-confidence T1.
 
 - **Run**: `scans/run_20260226_1657/`
 - **Key frame**: `chip_0/scan_10x/frame_0371.jpg` — dense with real hBN flakes
-- **Flatfield**: `calibration/flatfield_10x_bin3.npy`
+- **Flatfield**: `calibration/flatfield_10x_5800K_bin3.npy`
 - **pixel_size_um**: 0.720703125
 - **Symlinked into worktree** at `.worktrees/hbn_detector/scans/run_20260226_1657/`
 

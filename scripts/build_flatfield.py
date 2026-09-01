@@ -5,13 +5,13 @@ consistency and uniformity, builds median flatfield from good frames.
 
 To recalibrate all objectives, run once per objective with AF beforehand:
     sls autofocus --objective-mag X --x CX --y CY --z Z_REF -q
-    sls build-flatfield --objective-mag X --chips-meta ... --chip N -o calibration/flatfield_Xx_bin3.npy
+    sls build-flatfield --objective-mag X --chips-meta ... --chip N -o calibration/flatfield_Xx_5800K_bin3.npy
 
 Usage:
     # Auto-generate grid from chip bbox (Z from current position)
     uv run python scripts/build_flatfield.py --objective-mag 2.5 \
         --chips-meta scans/overview_5x_stitch_chips.json \
-        --chip 1 -o calibration/flatfield_2.5x_bin3.npy
+        --chip 1 -o calibration/flatfield_2.5x_5800K_bin3.npy
 
     # Explicit Z
     uv run python scripts/build_flatfield.py --objective-mag 2.5 \
@@ -26,7 +26,7 @@ Usage:
     # Manual positions
     uv run python scripts/build_flatfield.py --objective-mag 2.5 \
         --positions "57000,8000 60000,13000" \
-        -o calibration/flatfield_2.5x_bin3.npy
+        -o calibration/flatfield_2.5x_5800K_bin3.npy
 """
 
 import argparse

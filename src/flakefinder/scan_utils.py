@@ -275,6 +275,22 @@ def parse_area_rect_i(s: str) -> AreaRectI:
 # ============================================================================
 
 
+def calibration_flatfield_path(mag: str, colour_matrix: ColourMatrix | None, binning: int = 3) -> Path:
+    """Canonical calibration flatfield path for a magnification and colour space.
+
+    Flatfields are per-colour-space: ``flatfield_{mag}_{cm}_bin{n}.npy``
+    (e.g. ``flatfield_10x_5800K_bin3.npy``). None means the connection
+    default (CCM_5800K).
+
+    Args:
+        mag: Objective magnification label, e.g. "10x".
+        colour_matrix: Capture colour space; None = connection default.
+        binning: Camera binning factor.
+    """
+    cm = colour_matrix if colour_matrix is not None else ColourMatrix.CCM_5800K
+    return CALIBRATION_DIR / f"flatfield_{mag}_{cm.value}_bin{binning}.npy"
+
+
 def apply_flatfield(image: np.ndarray, flatfield: np.ndarray) -> np.ndarray:
     """Apply flatfield correction by multiplying with pre-computed correction factors.
 

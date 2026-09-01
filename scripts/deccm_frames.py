@@ -17,7 +17,7 @@ an identity-mode capture would deliver.
 Usage:
     uv run python scripts/deccm_frames.py scans/run_X/chip_5/scan_10x -o scans/run_X_deccm/chip_5/scan_10x
     uv run python scripts/deccm_frames.py --control ...   # M = identity: JPEG-loss control
-    uv run python scripts/deccm_frames.py --flatfield calibration/flatfield_10x_bin3.npy -o OUT ...
+    uv run python scripts/deccm_frames.py --flatfield calibration/flatfield_10x_5800K_bin3.npy -o OUT ...
 """
 
 from __future__ import annotations
