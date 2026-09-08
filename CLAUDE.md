@@ -36,6 +36,10 @@ All commands are registered as pyproject.toml entry points and invokable via `sl
 | `scripts/explain_tier.py` | Explain why detections missed tier 1, replaying the preset's gates over a chip's seg summary |
 | `scripts/hbn_contrast.py` | Transfer matrix hBN contrast model (CLI: `--oxide`, `--na`, `--n-hbn`, `--r-offset`, `--g-offset`, `--fit`) |
 | `scripts/hbn_contrast_widget.py` | Interactive R/G contrast explorer with sliders (n, oxide×2, NA, offsets). Export button → `/tmp/hbn_contrast_params.json` |
+| `scripts/bg_residue_audit.py` | Substrate-background audit per run: per-chip R/G and B/G vs the golden blank, within-frame colour structure, locus-offset regression against background |
+| `scripts/film_model.py` | Effective-film model: substrate background (R/G, B/G) and graphene contrast per objective vs effective oxide thickness, scan space; CLI sweeps and fits one Δd to measured background shifts |
+| `scripts/revisit_measure.py` | Measure 20x/50x revisit captures (background modes, central flake contrast per channel) and join to the 10x seg metrics → CSV |
+| `scripts/revisit_analysis.py` | From that CSV: cross-objective film-model test, 50x layer classification of revisited detections vs the 10x class, thickness-controlled locus-offset test per chip |
 
 Hardware characterization experiments (SDK probes, Z-tracking tests, speed sweeps) are in `scripts/experiments/`.
 
