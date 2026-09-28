@@ -763,7 +763,7 @@ def _focus_and_capture_impl(
     z_start = min(z_start, z_axis.max_um)
     z_end = max(z_end, z_axis.min_um)
 
-    # Position at z_start at full speed, then set scan speed
+    # Positioning runs at the caller's speed; the scan speed applies only to the sweep
     z_axis.move_to_corrected(z_start)
     t_positioned = time.perf_counter()
 

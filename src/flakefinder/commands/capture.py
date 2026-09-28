@@ -99,6 +99,7 @@ def main() -> int:
         # Move Z if specified (skip when --focus, since focus_and_capture handles z_center)
         if args.z is not None and not args.focus:
             print(f"Moving Z to {args.z:.1f} µm...")
+            scope.z.set_velocity_um_s(scope.z.max_velocity_um_s)
             scope.z.move_to(args.z)
             print(f"Z at {scope.z.position_um:.1f} µm")
 

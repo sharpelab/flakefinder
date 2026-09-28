@@ -309,6 +309,21 @@ class Microscope:
                 raise RuntimeError("Illumination pin failed: " + "; ".join(problems))
             time.sleep(0.2)
 
+    def pin_motion_speeds(self) -> dict[str, float]:
+        """Set X, Y and Z velocities to their maxima.
+
+        Velocities persist in the stand across connections, and a blocking
+        Z move at an autofocus scan speed outlasts the SDK command timeout.
+
+        Returns:
+            Velocities found on entry, in µm/s, keyed by axis name.
+        """
+        axes = {"X": self.stage.x, "Y": self.stage.y, "Z": self.z}
+        inherited = {name: axis.velocity_um_s for name, axis in axes.items()}
+        for axis in axes.values():
+            axis.set_velocity_native(axis.max_velocity_native)
+        return inherited
+
     # --- Camera (lazy init) ---
 
     def _init_camera(self) -> None:

@@ -222,6 +222,7 @@ def run(
     if initial_z is not None:
         current_z = z.position_um
         print(f"Moving Z: {current_z:.1f} -> {initial_z:.1f} µm...")
+        z.set_velocity_um_s(z.max_velocity_um_s)
         z.move_to_corrected(initial_z)
         print(f"Z at {z.position_um:.1f} µm")
 

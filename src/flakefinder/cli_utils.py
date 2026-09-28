@@ -80,6 +80,7 @@ def park_microscope(scope: Microscope) -> None:
 
     # 1. Z to safe position first
     z_target = 24690.0
+    scope.z.set_velocity_um_s(scope.z.max_velocity_um_s)
     scope.z.move_to(z_target)
     print(f"  Z -> {scope.z.position_um:.0f} um [ok]")
 
@@ -94,6 +95,8 @@ def park_microscope(scope: Microscope) -> None:
     print(f"  Objective -> {scope.objective_mag}x [ok]")
 
     # 3. XY to origin
+    for axis in (scope.stage.x, scope.stage.y):
+        axis.set_velocity_um_s(axis.max_velocity_um_s)
     hx, hy = scope.stage.move_to_async(0.0, 0.0)
     wait_all([hx, hy])
     print(f"  X -> {scope.stage.x.position_um:.0f} um [ok]")

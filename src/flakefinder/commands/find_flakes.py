@@ -1319,10 +1319,12 @@ def run(scope: Microscope, p: _Preflight) -> int:
     # Illumination-path snapshot at pipeline start (lamp/shutter state here
     # is pre-light_on; per-scan scan_meta.json records the lit state).
     lighting = build_lighting_meta(scope)
+    inherited_speeds = scope.pin_motion_speeds()
 
     with _always_console():
         print(f"[run] {run_dir}/")
         print(f"[illum] {_format_illumination(dict(lighting))}")
+        print("[motion] inherited " + ", ".join(f"{k} {v:.0f}" for k, v in inherited_speeds.items()) + " µm/s")
 
     step_timing: dict[str, float] = {}
     run_meta: dict = {

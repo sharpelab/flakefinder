@@ -200,6 +200,7 @@ def main() -> int:
         print(f"Building flatfield from {len(positions)} positions at Z={z_um:.1f} µm ({z_source})")
 
         scope.light_on(args.lamp)
+        scope.z.set_velocity_um_s(scope.z.max_velocity_um_s)
         scope.z.move_to(z_um)
 
         camera = scope.camera
